@@ -1,22 +1,23 @@
-# scheduled-delivery
+# delivery-kit
 
 Local scheduled Git delivery with one isolated gate per integrated tree, exact-commit CI monitoring and deployment of the already-gated artifacts. The tool owns mechanisms; each client owns its repository, configuration, queues, locks, state, credentials and schedule.
 
 ## Structure
 
-- `bin/scheduled-delivery`: explicit configuration/state entry point.
+- `bin/delivery-kit`: explicit configuration/state entry point.
 - `examples/`: project configuration and a thin pinned-snapshot runner adapter.
 - `libexec/`: the Bash scheduler, batch preparation, gate, deployment, event outbox and optional Codex triage adapter.
 - `scripts/check.sh`: isolated offline verification with fake Git, Docker, deployment, GitHub and native-protocol responses.
+- `scripts/package.sh`: deterministic release archive and source identity from a pinned commit.
 - `scripts/export.sh`: exports one committed source revision to a new local snapshot directory.
 - `tests/`: mechanism and adapter contract tests. Consumers test only their own configuration and integration.
 
-The repository has no publication, installation daemon or registry dependency. It uses the existing Bash scheduling mechanism. It creates no additional timer.
+Releases are versioned source archives with no installation daemon or registry dependency. The tool uses the existing Bash scheduling mechanism and creates no additional timer.
 
 ## Explicit project contract
 
 ```bash
-/path/to/snapshot/bin/scheduled-delivery \
+/path/to/snapshot/bin/delivery-kit \
   --config /absolute/path/to/project/bus.conf \
   --state-dir /absolute/path/to/project/bus-state \
   --revision EXACT_COMMIT_SHA run
@@ -65,3 +66,37 @@ bash scripts/check.sh
 ```
 
 Verification requires Docker and a locally available `node:24.21.0` image. It starts only below one-minute load 24, uses at most four CPUs, mounts source read-only, copies it to container scratch, disables network and exposes no host socket or credential stores. Tests use fake commands and protocol fixtures only. No project gate, push, deployment, live queue operation or coordinator input runs.
+
+## Versions, licensing and releases
+
+`VERSION` identifies the cohesive CLI, configuration contract and helper source release.
+The first public release is `0.0.1`. Compatible fixes increment the patch version;
+additive public features increment the minor version. Before `1.0.0`, incompatible
+CLI, configuration or state contract changes increment the minor version and require
+explicit compatibility notes. From `1.0.0`, incompatible changes increment the major
+version. Never publish an incompatible patch. Consumers adopt an explicit reviewed
+version and commit independently of library publication and their delivery schedules.
+
+Helper code is MIT-licensed under `LICENSE`. This licence does not cover consumer
+art assets or game values.
+
+The release owner reviews and pushes the release commit to `main`, then verifies
+that every required CI workflow has completed successfully for that exact commit.
+Only then create and push the immutable `vVERSION` tag at that same commit. Never
+move a published tag. Generate release files from the pinned commit:
+
+```bash
+bash scripts/package.sh EXACT_COMMIT_SHA /new/absolute/release/directory
+```
+
+The directory contains `delivery-kit-VERSION.tar.gz`, `SOURCE_COMMIT` and
+`SHA256SUMS`. The archive has one `delivery-kit-VERSION/` root containing the CLI,
+mechanisms, examples, verification scripts, tests, README, version, licence and
+`SOURCE_COMMIT`. Git metadata and local state are excluded. Archive bytes derive
+only from committed contents, permissions and commit time, with sorted entries,
+fixed ownership and no gzip timestamp. Dirty worktree files are excluded.
+
+Publish those three files together on the versioned GitHub release. Release notes
+state the version, exact source commit, compatibility changes and completed checks.
+Verify downloaded checksums and source identity before adopting a snapshot. Release
+publication never starts or modifies consumer runners, queues, timers or deployments.

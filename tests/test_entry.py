@@ -35,7 +35,7 @@ GATE_STEPS=()
 ''')
 
     def call(self, *args):
-        return subprocess.run(['bash', str(ROOT / 'bin/scheduled-delivery'),
+        return subprocess.run(['bash', str(ROOT / 'bin/delivery-kit'),
                                '--config', str(self.conf), '--state-dir', str(self.state), *args],
                               capture_output=True, text=True, timeout=3)
 
@@ -75,7 +75,7 @@ GATE_STEPS=()
         subprocess.run(command, check=True, capture_output=True)
         self.assertEqual((snapshot / 'SOURCE_COMMIT').read_text().strip(), revision)
         self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
-        command = ['bash', str(snapshot / 'bin/scheduled-delivery'), '--config', str(self.conf),
+        command = ['bash', str(snapshot / 'bin/delivery-kit'), '--config', str(self.conf),
                    '--state-dir', str(self.state), '--revision', revision, 'check-config']
         self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
         command[-2] = '0' * 40
@@ -91,6 +91,8 @@ GATE_STEPS=()
         art = '00000000-0000-0000-0000-000000000002'
         gameplay = '00000000-0000-0000-0000-000000000003'
         library = '00000000-0000-0000-0000-000000000004'
+        delivery = '00000000-0000-0000-0000-000000000005'
+        held = '00000000-0000-0000-0000-000000000006'
         mapping = self.root / 'map.json'
         mapping.write_text(json.dumps({'codex': {'tech': coordinator, 'art': art, 'gameplay': gameplay}}))
         targets = self.root / 'targets.json'
@@ -98,7 +100,9 @@ GATE_STEPS=()
                                       'host_coordinator_thread_id': coordinator,
                                       'host_project_root': '/unread/project',
                                       'targets': [{'role': 'art-kit', 'ownership': 'active', 'thread_id': library},
-                                                  {'role': 'game-kit', 'ownership': 'active', 'thread_id': library}]}))
+                                                  {'role': 'game-kit', 'ownership': 'active', 'thread_id': library},
+                                                  {'role': 'delivery-kit', 'ownership': 'active', 'thread_id': delivery},
+                                                  {'role': 'delivery-kit', 'ownership': 'held', 'thread_id': held}]}))
         mechanism = self.root / 'mechanism'
         mechanism.mkdir()
         (mechanism / 'unblock.py').write_text('import json,sys; print(json.dumps(sys.argv[1:]))\n')
@@ -109,6 +113,8 @@ GATE_STEPS=()
         result = subprocess.run(['bash', '-c', command], env=env, capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.count(library), 1)
+        self.assertEqual(result.stdout.count(delivery), 1)
+        self.assertNotIn(held, result.stdout)
         self.assertIn(art, result.stdout)
         self.assertIn(gameplay, result.stdout)
         payload = json.loads(targets.read_text())
@@ -116,4 +122,5 @@ GATE_STEPS=()
         targets.write_text(json.dumps(payload))
         result = subprocess.run(['bash', '-c', command], env=env, capture_output=True, text=True, timeout=3)
         self.assertNotIn(library, result.stdout)
+        self.assertNotIn(delivery, result.stdout)
         self.assertIn(gameplay, result.stdout)

@@ -1,0 +1,16 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare verification image
+        run: docker pull node:24.21.0
+      - name: Isolated offline checks and package validation
+        run: bash scripts/check.sh

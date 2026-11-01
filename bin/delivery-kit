@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 usage() {
-  echo 'usage: scheduled-delivery --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]' >&2
+  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]' >&2
 }
 CONF=
 STATE=

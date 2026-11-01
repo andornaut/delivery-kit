@@ -5,7 +5,7 @@ PROJECT=$(cd "$(dirname "$0")" && pwd)
 # Set these two literal values when adopting an approved exported source snapshot.
 TOOL=/absolute/path/to/pinned-snapshot
 REVISION=REPLACE_WITH_REVIEWED_COMMIT
-exec "$TOOL/bin/scheduled-delivery" \
+exec "$TOOL/bin/delivery-kit" \
   --config "$PROJECT/bus.conf" \
   --state-dir "$PROJECT" \
   --revision "$REVISION" run

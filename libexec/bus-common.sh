@@ -164,7 +164,7 @@ try:
     if host_matches and isinstance(config.get("targets"), list):
         for target in config["targets"]:
             if (not isinstance(target, dict) or target.get("ownership") != "active"
-                    or target.get("role") not in ("art-kit", "game-kit")):
+                    or target.get("role") not in ("art-kit", "delivery-kit", "game-kit")):
                 continue
             try:
                 peer = str(uuid.UUID(target["thread_id"]))
