@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -54,6 +55,31 @@ GATE_STEPS=()
     def test_manual_and_unpinned_snapshot_commands_are_rejected(self):
         self.assertEqual(self.call('depart').returncode, 2)
         self.assertEqual(self.call('--revision', 'a' * 40, 'check-config').returncode, 2)
+
+    def test_exported_snapshot_enforces_its_exact_revision_and_refuses_overwrite(self):
+        source = self.root / 'source'
+        source.mkdir()
+        for name in ['bin', 'libexec', 'scripts']:
+            shutil.copytree(ROOT / name, source / name)
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(source), *args], text=True).strip()
+        git('init', '-q', '-b', 'main')
+        git('add', '--', 'bin', 'libexec', 'scripts')
+        env = os.environ | {'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
+                            'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
+        subprocess.run(['git', '-C', str(source), '-c', 'core.hooksPath=/dev/null',
+                        'commit', '-q', '--no-verify', '-m', 'Fixture'], env=env, check=True)
+        revision = git('rev-parse', 'HEAD')
+        snapshot = self.root / 'snapshot'
+        command = ['bash', str(source / 'scripts/export.sh'), revision, str(snapshot)]
+        subprocess.run(command, check=True, capture_output=True)
+        self.assertEqual((snapshot / 'SOURCE_COMMIT').read_text().strip(), revision)
+        self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+        command = ['bash', str(snapshot / 'bin/scheduled-delivery'), '--config', str(self.conf),
+                   '--state-dir', str(self.state), '--revision', revision, 'check-config']
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
+        command[-2] = '0' * 40
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
 
     def test_resource_caps_are_validated_without_starting_services(self):
         with self.conf.open('a') as stream:
