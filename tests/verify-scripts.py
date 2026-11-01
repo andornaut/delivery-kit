@@ -203,8 +203,9 @@ sys.exit(1)
 CONF.write_text(CONF.read_text()+'REPORT_PROJECT=Fixture\nREPORT_THREAD=fixture-only\n')
 (BUS/'bus-queue').write_text('bus/queued\n')
 CONF.write_text(CONF.read_text()+'LOAD_LIMIT=0\n')
-stub('date', '''import sys
-if sys.argv[1:]==['+%s']:print('1000')
+stub('date', '''import os,pathlib,sys
+p=pathlib.Path(os.environ['CALLS']+'.sleeps')
+if sys.argv[1:]==['+%s']:print(1000+(int(p.read_text()) if p.exists() else 0))
 elif '-d' in sys.argv:print('19 59')
 else:print('fixture departure')
 ''')

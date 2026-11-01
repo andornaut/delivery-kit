@@ -20,21 +20,32 @@ blocked() {
   fi
 }
 depart() {
-  local branches=() stamp status push_before
-  export BUS_ATTEMPT=${BUS_SCHEDULED_AT:-$(date +%s)}
-  bus_unblock_tick "$BUS_ATTEMPT"
+  local branches=() stamp status push_before BUS_ATTEMPT BUS_REQUEST_RECORD=
+  export BUS_REQUEST_RECORD
+  local attempt_time
+  attempt_time=${BUS_SCHEDULED_AT:-$(date +%s)}
+  export BUS_ATTEMPT=${BUS_REQUEST_ID:+request-$BUS_REQUEST_ID}
+  BUS_ATTEMPT=${BUS_ATTEMPT:-$attempt_time}
+  if [ -z "${BUS_REQUEST_ID:-}" ]; then bus_unblock_tick "$BUS_ATTEMPT"; fi
   push_before=$(cat "$BUS_DIR/last-push.sha" 2>/dev/null || true)
-  stamp=$(date -d "@$BUS_ATTEMPT" '+%Y-%m-%d %H:%M %Z')
+  stamp=$(date -d "@$attempt_time" '+%Y-%m-%d %H:%M %Z')
   {
     flock 8
+    if [ -n "${BUS_REQUEST_ID:-}" ]; then
+      python3 "$S/request.py" "$BUS_DIR" "$REPO" validate "$BUS_REQUEST_ID" || return 1
+    fi
     mapfile -t branches < <(grep -v '^\s*$' "$Q" | awk '!seen[$0]++')
-    if (( ${#branches[@]} )); then
-      bus_report_scheduled_tick "$(bus_latest_scheduled_slot "$BUS_ATTEMPT")" 'queued work is being checked; attempt and outcome reports follow separately.'
-      bus_event attempt "$BUS_ATTEMPT" "$stamp scheduled attempt: ${branches[*]}; push not started; deployment not started."
-    elif [ -s "$BUS_DIR/deploy-pending" ]; then
-      bus_report_scheduled_tick "$(bus_latest_scheduled_slot "$BUS_ATTEMPT")" 'deployment retry is being checked; its outcome is reported separately.'
+    if [ -n "${BUS_REQUEST_ID:-}" ]; then
+      bus_event attempt "$BUS_ATTEMPT" "$stamp user-authorized one-off request $BUS_REQUEST_ID: ${branches[*]}; push not started; deployment not started."
     else
-      bus_report_scheduled_tick "$(bus_latest_scheduled_slot "$BUS_ATTEMPT")" 'queue empty; no new batch is queued.'
+      if (( ${#branches[@]} )); then
+        bus_report_scheduled_tick "$(bus_latest_scheduled_slot "$BUS_ATTEMPT")" 'queued work is being checked; attempt and outcome reports follow separately.'
+        bus_event attempt "$BUS_ATTEMPT" "$stamp scheduled attempt: ${branches[*]}; push not started; deployment not started."
+      elif [ -s "$BUS_DIR/deploy-pending" ]; then
+        bus_report_scheduled_tick "$(bus_latest_scheduled_slot "$BUS_ATTEMPT")" 'deployment retry is being checked; its outcome is reported separately.'
+      else
+        bus_report_scheduled_tick "$(bus_latest_scheduled_slot "$BUS_ATTEMPT")" 'queue empty; no new batch is queued.'
+      fi
     fi
     fetch_base || { blocked fetch 'remote fetch failed'; return 1; }
     if ! ci_not_red "${branches[@]}"; then blocked CI 'previous CI red or repair approval invalid'; return 1; fi
@@ -48,9 +59,17 @@ depart() {
   if ! load_ok; then echo "$stamp bus: load at or above $LOAD_LIMIT; queue retained"; blocked load "load at or above $LOAD_LIMIT; queue retained"; return 1; fi
   {
     flock 8
+    if [ -n "${BUS_REQUEST_ID:-}" ]; then
+      python3 "$S/request.py" "$BUS_DIR" "$REPO" validate "$BUS_REQUEST_ID" || return 1
+    fi
     mapfile -t branches < <(grep -v '^\s*$' "$Q" | awk '!seen[$0]++')
     fetch_base || { blocked fetch 'remote fetch failed'; return 1; }
     if ! ci_not_red "${branches[@]}"; then blocked CI 'previous CI red or repair approval invalid'; return 1; fi
+    if [ -n "${BUS_REQUEST_ID:-}" ]; then
+      python3 "$S/request.py" "$BUS_DIR" "$REPO" validate "$BUS_REQUEST_ID" || return 1
+      # Pin integration inputs while validation and queue consumption share this lock.
+      export BUS_REQUEST_RECORD="$BUS_DIR/requests/$BUS_REQUEST_ID.json"
+    fi
     : >"$Q"
   } 8>"$Q.lock"
   if (( ${#branches[@]} == 0 )); then echo "$stamp bus: nothing waiting"; return 0; fi

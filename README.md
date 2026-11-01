@@ -100,3 +100,47 @@ Publish those three files together on the versioned GitHub release. Release note
 state the version, exact source commit, compatibility changes and completed checks.
 Verify downloaded checksums and source identity before adopting a snapshot. Release
 publication never starts or modifies consumer runners, queues, timers or deployments.
+
+## User-authorized one-off requests (0.1.0)
+
+After explicit operator authorization, capture the current nonempty queue:
+
+```bash
+/path/to/snapshot/bin/delivery-kit \
+  --config /absolute/path/to/project/bus.conf \
+  --state-dir /absolute/path/to/project/bus-state \
+  --revision EXACT_COMMIT_SHA request-once --request-id SAFE_ID
+```
+
+IDs are 1-64 ASCII letters, digits, underscores or hyphens, beginning with a
+letter or digit. Repeating an ID returns its existing JSON receipt without
+capturing new work or executing again. The queue lock protects the deduplicated,
+ordered branch names and exact commit tips captured in `requests/ID.json`.
+An empty queue is refused. This command records a request only; it never calls
+the departure flow or starts a runner.
+
+The existing resident loop checks requests at most five seconds apart when idle.
+It retains `loop.lock` and serializes scheduled and requested departures through
+`active-departure`, using the same gate, CI checks, push and deployment mechanism.
+A due scheduled slot takes priority. A request does not shift hourly deadlines;
+slots missed during active work are not replayed. A scheduled departure may
+consume the captured queue first, in which case the request is rejected.
+
+Queue names and tips are validated at both queue reads, including after deployment
+retry and load checks. Final validation and queue consumption hold the same queue
+lock; integration uses captured commit IDs even if a branch later advances.
+A changed queue or tip is terminal `rejected` and leaves the queue unchanged.
+Receipts transition from `pending` to `started`, then `finished` with
+`departure_exit`, or `rejected`. On resident-loop recovery, `started` becomes
+`interrupted`. A started request ID is never executed again, including after failure or interruption.
+Queue work retained by existing preflight failures remains eligible at the next
+normal scheduled slot; this API does not suspend or retry that queue.
+After reviewing retained state and explicitly requeueing appropriate work,
+use a new ID for a retry. Receipts remain in place for audit and deduplication.
+
+One-off event IDs use `request-ID`, with a separate wall-clock timestamp. They do
+not emit a scheduled tick or hourly coordinator input. `finished` means the
+departure function returned, not that asynchronous CI or deployment succeeded.
+Consult exact-commit CI status, deployment pointers and normal event reports.
+Publication or recording a request does not adopt a new snapshot: the consumer
+owner performs the normal idle cutover to the 0.1.0 resident loop first.

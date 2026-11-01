@@ -18,10 +18,23 @@ fi
 name=batch-$(date +%s)
 W=$BUS_DIR/$name
 git -C "$REPO" worktree add -q -b "$name" "$W" "$BASE" || exit 1
+pinned_tip() {
+  python3 - "$BUS_REQUEST_RECORD" "$1" <<'PYTIP'
+import json
+import sys
+with open(sys.argv[1]) as stream:
+    entries = dict(json.load(stream)['entries'])
+print(entries[sys.argv[2]])
+PYTIP
+}
 picked=()
 for branch in "$@"; do
-  base=$(git -C "$REPO" merge-base "$branch" "$BASE") || continue
-  if git -C "$W" cherry-pick "$base..$branch" >/dev/null 2>&1; then
+  subject=$branch
+  if [ -n "${BUS_REQUEST_RECORD:-}" ]; then
+    subject=$(pinned_tip "$branch") || exit 1
+  fi
+  base=$(git -C "$REPO" merge-base "$subject" "$BASE") || continue
+  if git -C "$W" cherry-pick "$base..$subject" >/dev/null 2>&1; then
     picked+=("$branch")
   else
     files=$(git -C "$W" diff --name-only --diff-filter=U | tr '\n' ' ')
@@ -54,7 +67,15 @@ if (( status == 0 )); then
   if (( keep == 0 )); then git -C "$REPO" branch -D "$name" >/dev/null; fi
   for branch in "${picked[@]}"; do
     echo "landed $branch"
-    [[ $branch == bus/* ]] && git -C "$REPO" branch -D "$branch" >/dev/null
+    if [[ $branch == bus/* ]]; then
+      if [ -n "${BUS_REQUEST_RECORD:-}" ]; then
+        tip=$(pinned_tip "$branch") || exit 1
+        current=$(git -C "$REPO" rev-parse "refs/heads/$branch") || continue
+        # Retain a branch advanced after queue capture, even after its pinned work lands.
+        [ "$current" = "$tip" ] || continue
+      fi
+      git -C "$REPO" branch -D "$branch" >/dev/null
+    fi
   done
   if (( keep != 0 )); then echo "kept deployment worktree $W"; fi
 else
