@@ -179,7 +179,7 @@ echo $(( $(cat "$FIXTURE/clock") + {duration} )) > "$FIXTURE/clock"
                     common.unlink()
                 common.write_text((ROOT / 'libexec/bus-common.sh').read_text() + '\nbus_report_scheduled_tick() { date +%s >> "$FIXTURE/ticks"; }\n')
                 (self.root / 'ticks').write_text('')
-                loop_calls = self.root / 'loop-calls' 
+                loop_calls = self.root / 'loop-calls'
                 loop_calls.write_text('')
                 env = self.env | {'PATH': str(tools) + ':' + self.env['PATH'], 'STOP_AT': str(start + 140),
                                   'TZ': 'UTC'}

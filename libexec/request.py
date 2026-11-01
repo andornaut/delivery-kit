@@ -11,6 +11,12 @@ import sys
 state, repo, action, *args = sys.argv[1:]
 root = Path(state) / 'requests'
 root.mkdir(exist_ok=True)
+# Persist the requests directory entry before acknowledging any captured receipt.
+parent_descriptor = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(parent_descriptor)
+finally:
+    os.close(parent_descriptor)
 
 
 def write(path, record):
