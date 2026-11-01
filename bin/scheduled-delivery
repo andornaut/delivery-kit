@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Caller-supplied configuration and state stay separate from the pinned mechanism snapshot.
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+usage() {
+  echo 'usage: scheduled-delivery --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]' >&2
+}
+CONF=
+STATE=
+REVISION=
+while (( $# )); do
+  case "$1" in
+    --config|--state-dir|--revision)
+      (( $# >= 2 )) || { usage; exit 2; }
+      case "$1" in --config) CONF=$2 ;; --state-dir) STATE=$2 ;; --revision) REVISION=$2 ;; esac
+      shift 2 ;;
+    *) break ;;
+  esac
+done
+[[ $CONF == /* && -r $CONF && $STATE == /* && -d $STATE ]] || { usage; exit 2; }
+if [[ -n $REVISION ]]; then
+  [[ $REVISION =~ ^[0-9a-f]{40}$ && -f $ROOT/SOURCE_COMMIT ]] || { echo 'delivery: exact source snapshot required' >&2; exit 2; }
+  [[ $(cat "$ROOT/SOURCE_COMMIT") == "$REVISION" ]] || { echo 'delivery: source revision mismatch' >&2; exit 2; }
+fi
+export BUS_CONF=$CONF BUS_STATE_DIR=$STATE
+command=${1:-}
+(( $# )) && shift
+case "$command" in
+  run) (( $# == 0 )) || { usage; exit 2; }; exec bash "$ROOT/libexec/runner.sh" ;;
+  check-config)
+    (( $# == 0 )) || { usage; exit 2; }
+    S=$ROOT/libexec
+    . "$S/bus-common.sh"
+    printf 'delivery: configuration accepted\n'
+    ;;
+  resource-report) (( $# == 0 )) || { usage; exit 2; }; exec bash "$ROOT/libexec/resource-report.sh" ;;
+  scheduled-once) exec bash "$ROOT/libexec/scheduled-once.sh" "$@" ;;
+  *) usage; exit 2 ;;
+esac
