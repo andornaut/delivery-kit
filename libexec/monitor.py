@@ -79,21 +79,31 @@ def history_refs(client, recipient, cursor=None):
     if cursor is not None:
         params['cursor'] = cursor
     result = {'status': 'unavailable', 'complete': False, 'cursor': cursor,
-              'nextCursor': None, 'question_refs': [], 'user_reply_refs': []}
+              'nextCursor': None, 'question_refs': [], 'user_reply_refs': [],
+              'reason_code': 'metadata_unavailable', 'category': 'metadata'}
     try:
-        from unblock import NATIVE_ITEM_TYPES, question_item
+        from unblock import NATIVE_ITEM_TYPES, RpcError, question_item
         page = client.call('thread/items/list', params)
         if not isinstance(page, dict) or not isinstance(page.get('data'), list):
+            result.update(reason_code='malformed_page', category='page')
             return result
         next_cursor = page.get('nextCursor')
         if next_cursor is not None and (not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor):
+            result.update(reason_code='invalid_cursor', category='pagination')
             return result
+        result['nextCursor'] = next_cursor
         for entry in page['data']:
             if not isinstance(entry, dict) or not isinstance(entry.get('turnId'), str) or not entry['turnId']:
+                result.update(reason_code='malformed_row', category='row')
                 return result
             item = entry.get('item')
             if (not isinstance(item, dict) or not isinstance(item.get('id'), str)
-                    or not item['id'] or item.get('type') not in NATIVE_ITEM_TYPES):
+                    or not item['id'] or not isinstance(item.get('type'), str)):
+                result.update(reason_code='malformed_item', category='item')
+                return result
+            if item['type'] not in NATIVE_ITEM_TYPES:
+                category = 'context_compaction' if item['type'] == 'contextCompaction' else 'unknown_item'
+                result.update(reason_code='unsupported_item_type', category=category)
                 return result
             reference = {'turn_id': entry['turnId'], 'item_id': item['id']}
             if question_item(item):
@@ -101,12 +111,24 @@ def history_refs(client, recipient, cursor=None):
                 result['question_refs'].append(reference)
             elif item['type'] == 'userMessage':
                 result['user_reply_refs'].append(reference)
-        result['nextCursor'] = next_cursor
         result['complete'] = not (next_cursor is not None or page.get('truncated') or page.get('hasMore'))
         result['status'] = 'complete' if result['complete'] else 'partial'
+        if page.get('truncated') or page.get('hasMore'):
+            result.update(reason_code='incomplete_page', category='pagination')
+        elif next_cursor is not None:
+            result.update(reason_code='more_history', category='pagination')
+        else:
+            result.update(reason_code='complete', category='history')
         return result
+    except json.JSONDecodeError:
+        result.update(reason_code='json_parse_failure', category='json')
+    except RpcError:
+        result.update(reason_code='native_rpc_failure', category='native_rpc')
+    except (OSError, TimeoutError):
+        result.update(reason_code='transport_failure', category='transport')
     except Exception:
-        return result
+        result.update(reason_code='metadata_failure', category='metadata')
+    return result
 
 
 def capture(client, state_dir, recipients, slot=None, history_cursor=None):

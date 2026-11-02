@@ -223,7 +223,7 @@ unknown native item shapes still defer delivery. Native agent messages may omit
 `questions`, whose schema default is null. Nonempty questions require attestation;
 clear local state alone does not resolve them.
 
-The existing hourly cadence captures complete queue entries from every page before
+The configured scheduled monitoring cadence captures complete queue entries from every page before
 checking recipient questions or deciding whether to send a reminder. Each immutable
 `STATE/unblock/snapshots/SNAPSHOT_UUID.json` contains `queues`, keyed by exact
 recipient UUID, preserving each original `id`, `clientUserMessageId` and `input`.
@@ -351,3 +351,66 @@ actionable deferral while the scheduler continues. Pure-Python request and CI
 scripts retain their existing interpreter selection. Library verification uses
 isolated fake transports and does not probe a live native service or install a
 dependency.
+
+
+## 0.4.0 monitor cadence and routing
+
+`MONITOR_ROUTE_FILE` selects an absolute shared coordinator-managed JSON route.
+It is an ordinary user-owned file, normally mode `0600`, managed by the owning
+coordinator using confirmed identities. The library reads it without inferring
+ownership or modifying any registry. A held route may explicitly have no owner:
+
+```json
+{
+  "version": 1,
+  "harness": "codex",
+  "host_project_root": "/absolute/path/to/host-project",
+  "state": "held",
+  "monitor_thread_id": null,
+  "targets": []
+}
+```
+
+An active route requires a canonical monitor UUID distinct from every target UUID
+and a nonempty list of active target UUIDs. The configured project root must be
+absolute; no current-working-directory host match is inferred. Each target has `thread_id` and `ownership` (`active` or `held`).
+Repeated identical targets are deduplicated; conflicting ownership, malformed
+identities or unsupported schema defer monitoring. Held targets receive no native
+input. Only the project whose canonical `REPO` matches `host_project_root`
+dispatches. Nonhosts and held routes intentionally skip native monitoring. The
+monitor UUID becomes the guarded coordinator; active target UUIDs are its peers.
+Host state remains in `STATE/unblock/`, including recipient-specific decisions.
+A route does not grant permission to clear any recipient's pending question.
+
+When the route variable is declared, all release-driven native triage is
+suppressed, including direct calls from departures and scheduled reports.
+`REPORT_THREAD` remains the release-event recipient. `DEPARTURES`, release gates,
+queues, state and reporting remain unchanged. Leaving `MONITOR_ROUTE_FILE` unset
+retains the 0.3 release-driven compatibility behaviour. An explicitly empty or
+invalid route does not fall back to legacy triage.
+
+`MONITOR_MINUTES='20 50'` selects wall-clock monitoring minutes in `BUS_TIMEZONE`.
+These are also the default when a route is declared and minutes are unset. An
+explicitly empty value or anything other than literal minute values `0` through
+`59` defers monitoring. This cadence is independent of release minutes. The
+existing runner's 60-second observer checks monitor slots even during an active
+release gate and when scheduled release-tick reporting is disabled. There is no
+additional runner, timer or loop.
+
+Observer startup records the current time and does not immediately dispatch or
+replay prior slots. Later observations dispatch only a configured minute within
+its current 60-second window; older missed slots are skipped. Epoch slot IDs
+retain helper deduplication and distinguish repeated wall-clock minutes during a
+DST fold. The existing native interpreter, socket, snapshot, acknowledgement and
+question guards remain mandatory. Routed monitoring uses the route rather than
+legacy game-role metadata and `CODEX_SHARED_ROLES`.
+
+Snapshot `history` diagnostics include safe `reason_code` and `category` values.
+Malformed pages, rows and items, unsupported item types, transport failures,
+native RPC failures, JSON parse failures and incomplete pages are distinguished
+without raw exception text or native bodies. Unsupported context compaction is
+reported as `context_compaction` and remains rejected. Valid pagination remains
+`partial` with `nextCursor`; safe references read before a malformed row remain
+available but are not a completeness claim. These diagnostics require no extra
+native requests. Queue capture and explicit acknowledgement remain available even
+when history metadata is unavailable.

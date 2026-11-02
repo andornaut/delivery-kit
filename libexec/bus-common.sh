@@ -19,6 +19,9 @@ CI_POLL_SECONDS=${CI_POLL_SECONDS:-60}
 CI_TIMEOUT_SECONDS=${CI_TIMEOUT_SECONDS:-1800}
 CI_REQUIRED_NAMES=${CI_REQUIRED_NAMES:-'AI attributions|Lint|Test'}
 CODEX_PYTHON=${CODEX_PYTHON-/usr/bin/python3}
+if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then
+  MONITOR_MINUTES=${MONITOR_MINUTES-'20 50'}
+fi
 case "$DEPLOY_MODE" in wrangler|none) ;; *) echo "bus: invalid DEPLOY_MODE" >&2; exit 2 ;; esac
 if [[ ! $CPUS =~ ^[1-4]$ || ! $MAX_WORKERS =~ ^[1-4]$ ]]; then
   echo "bus: CPUS and MAX_WORKERS must be integers from 1 through 4" >&2
@@ -135,10 +138,27 @@ codex_python_ready() {
   fi
 }
 
-# Native hourly triage shares the existing departure/observer tick and helper deduplication.
+bus_native_unblock() {
+  local slot=$1 coordinator=$2 result peer status=0
+  shift 2
+  local peer_args=()
+  for peer in "$@"; do peer_args+=(--peer "$peer"); done
+  result=$("$CODEX_PYTHON" "$S/unblock.py" --coordinator "$coordinator" \
+    "${peer_args[@]}" --slot "$slot" --control-socket "$CODEX_CONTROL_SOCKET" \
+    --state-dir "$BUS_DIR/unblock" 2>/dev/null) || status=$?
+  if [ -n "$result" ]; then
+    printf 'bus: scheduled monitor %s: %s\n' "$slot" "$result"
+  else
+    printf 'bus: scheduled monitor %s unavailable (exit %s); no delivery claimed\n' "$slot" "$status" >&2
+  fi
+  return 0
+}
+
+# Compatibility triage remains release-driven only while no route is declared.
 bus_unblock_tick() {
-  local slot peers_text result peer status=0
-  local peers=() peer_args=()
+  declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1 && return 0
+  local slot peers_text
+  local peers=()
   slot=$(bus_latest_scheduled_slot "$1")
   if [ -z "$REPORT_THREAD" ] || [ ! -r "$S/unblock.py" ]; then
     echo "bus: hourly unblock $slot unavailable: coordinator or helper missing" >&2
@@ -160,16 +180,48 @@ bus_unblock_tick() {
     return 0
   fi
   mapfile -t peers <<<"$peers_text"
-  for peer in "${peers[@]}"; do peer_args+=(--peer "$peer"); done
-  result=$("$CODEX_PYTHON" "$S/unblock.py" --coordinator "$REPORT_THREAD" \
-    "${peer_args[@]}" --slot "$slot" --control-socket "$CODEX_CONTROL_SOCKET" \
-    --state-dir "$BUS_DIR/unblock" 2>/dev/null) || status=$?
-  if [ -n "$result" ]; then
-    printf 'bus: hourly unblock %s: %s\n' "$slot" "$result"
-  else
-    printf 'bus: hourly unblock %s unavailable (exit %s); no delivery claimed\n' "$slot" "$status" >&2
+  bus_native_unblock "$slot" "$REPORT_THREAD" "${peers[@]}"
+
+}
+
+monitor_minutes_ready() {
+  local pattern='^[[:space:]]*([0-9]|[0-5][0-9])([[:space:]]+([0-9]|[0-5][0-9]))*[[:space:]]*$'
+  if [[ ! $MONITOR_MINUTES =~ $pattern ]]; then
+    echo 'bus: MONITOR_MINUTES must be a nonempty literal list of wall-clock minutes from 0 through 59' >&2
+    return 1
   fi
-  return 0
+}
+
+# The existing observer dispatches only a current monitor minute, never missed slots.
+bus_monitor_due_ticks() {
+  declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1 || return 0
+  local after=$1 now=$2 slot minute allowed=0 selected route_text coordinator
+  local route=()
+  monitor_minutes_ready || return 0
+  slot=$((now - now % 60))
+  (( slot > after && slot <= now )) || return 0
+  minute=$(TZ="${BUS_TIMEZONE:-America/Toronto}" date -d "@$slot" '+%-M')
+  for selected in $MONITOR_MINUTES; do
+    if (( 10#$selected == 10#$minute )); then allowed=1; fi
+  done
+  (( allowed )) || return 0
+  if [[ $MONITOR_ROUTE_FILE != /* ]]; then
+    echo 'bus: monitor deferred: MONITOR_ROUTE_FILE must be an absolute route path' >&2
+    return 0
+  fi
+  codex_python_ready || return 0
+  if ! route_text=$("$CODEX_PYTHON" "$S/codex_adapter.py" --monitor-route "$MONITOR_ROUTE_FILE" "$REPO"); then
+    echo 'bus: monitor deferred: MONITOR_ROUTE_FILE is unavailable or invalid; its owner must verify identities and ownership' >&2
+    return 0
+  fi
+  if [ -z "$route_text" ]; then return 0; fi
+  if [[ ${CODEX_CONTROL_SOCKET:-} != /* || ! -r $S/unblock.py ]]; then
+    echo 'bus: monitor deferred: provide CODEX_CONTROL_SOCKET and the installed unblock helper' >&2
+    return 0
+  fi
+  mapfile -t route <<<"$route_text"
+  coordinator=${route[0]}
+  bus_native_unblock "$slot" "$coordinator" "${route[@]:1}"
 }
 
 # Optional slot reports share the existing event outbox and its per-kind/key deduplication.

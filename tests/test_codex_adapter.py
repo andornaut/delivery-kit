@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
 
-from codex_adapter import resolve_peers
+from codex_adapter import resolve_peers, resolve_route
 
 
 class AdapterTests(unittest.TestCase):
@@ -43,3 +43,14 @@ class AdapterTests(unittest.TestCase):
                 mapping.write_text(json.dumps({'codex': roles}))
                 with self.assertRaises(ValueError):
                     resolve()
+
+    def test_monitor_route_rejects_relative_project_root_even_while_held(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            route = root / 'route.json'
+            route.write_text(json.dumps({'version': 1, 'harness': 'codex',
+                                         'host_project_root': str(root), 'state': 'held',
+                                         'monitor_thread_id': None, 'targets': []}))
+            with self.assertRaises(ValueError):
+                resolve_route(str(route), '.')
+            self.assertEqual(resolve_route(str(route), str(root)), {'status': 'held'})

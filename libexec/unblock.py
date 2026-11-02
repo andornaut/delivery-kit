@@ -244,7 +244,7 @@ def target(client, state_dir, coordinator):
 def reminder(slot, queues, snapshot_path):
     inventory = "\n".join(f"{thread}: {','.join(ids) if ids else 'none'}" for thread, ids in queues.items())
     return (
-        f"Hourly unblock review, scheduled slot {slot}. Review recent Art, Gameplay and Tech activity "
+        f"Scheduled monitoring review, slot {slot}. Review recent Art, Gameplay and Tech activity "
         "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies "
         "and dependency unblockers. Use native live steering only for confirmed unblockers. Remove an "
         "original only after confirmed delivery or reconciliation. Preserve unanswered questions and "

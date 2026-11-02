@@ -118,6 +118,35 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn('private native', json.dumps(older))
         self.assertEqual(older['queues'][TECH], [entry('one'), entry('two')])
 
+    def test_history_failure_diagnostics_preserve_safe_prefix_without_private_bodies(self):
+        prefix = {'turnId': 'known-turn', 'item': {'id': 'known-reply', 'type': 'userMessage', 'content': 'PRIVATE_BODY'}}
+        def page_client(page):
+            client = NativeFixture()
+            original = client.call
+            def call(method, params):
+                if method == 'thread/items/list':
+                    if isinstance(page, Exception):
+                        raise page
+                    return page
+                return original(method, params)
+            client.call = call
+            return client
+        malformed = monitor.history_refs(page_client({'data': [prefix, {'item': {'text': 'PRIVATE_BODY'}}]}), TECH)
+        self.assertEqual(malformed['reason_code'], 'malformed_row')
+        self.assertEqual(malformed['user_reply_refs'], [{'turn_id': 'known-turn', 'item_id': 'known-reply'}])
+        unknown = monitor.history_refs(page_client({'data': [prefix, {'turnId': 'unknown-turn', 'item': {'id': 'unknown', 'type': 'PRIVATE_TYPE'}}], 'nextCursor': 'older'}), TECH)
+        self.assertEqual(unknown['category'], 'unknown_item')
+        self.assertEqual(unknown['status'], 'unavailable')
+        self.assertEqual(unknown['nextCursor'], 'older')
+        compacted = monitor.history_refs(page_client({'data': [{'turnId': 'compact-turn', 'item': {'id': 'compact', 'type': 'contextCompaction'}}]}), TECH)
+        self.assertEqual(compacted['category'], 'context_compaction')
+        failed = monitor.history_refs(page_client(TimeoutError('PRIVATE_TRANSPORT_BODY')), TECH)
+        self.assertEqual(failed['reason_code'], 'transport_failure')
+        self.assertNotIn('PRIVATE_', json.dumps([malformed, unknown, compacted, failed]))
+        snap = monitor.capture(page_client(TimeoutError('PRIVATE_TRANSPORT_BODY')), self.state, [TECH])
+        self.assertFalse(snap['errors'])
+        self.assertEqual(snap['queues'][TECH], [entry('one'), entry('two')])
+
     def test_explicit_ack_deletes_exact_id_even_with_pending_recipient(self):
         (self.state / 'decisions').mkdir()
         monitor.persist(self.state / 'decisions' / (TECH + '.json'), {'thread_id': TECH, 'state': 'pending'})

@@ -18,6 +18,7 @@ reporter=$!
   previous=$(date +%s)
   while true; do
     now=$(date +%s)
+    bus_monitor_due_ticks "$previous" "$now"
     bus_report_due_ticks "$previous" "$now"
     previous=$now
     bus_dispatch
