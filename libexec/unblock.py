@@ -101,13 +101,16 @@ def persist(path, state):
         os.close(descriptor)
 
 
-def decision_clear(state_dir):
-    # Only the coordinator owns this marker. Missing or unknown state is not clearance.
+def decision_clear(state_dir, recipient):
+    # Clearance belongs to exactly one canonical thread UUID, never to another recipient.
     try:
-        marker = json.loads((state_dir / "pending-user-decision.json").read_text())
-    except (OSError, ValueError):
+        if str(uuid.UUID(recipient)) != recipient:
+            return False
+        marker = json.loads((state_dir / "decisions" / f"{recipient}.json").read_text())
+    except (OSError, ValueError, TypeError, AttributeError):
         return False
-    return isinstance(marker, dict) and marker.get("state") == "clear"
+    return (isinstance(marker, dict) and marker.get("thread_id") == recipient
+            and marker.get("state") == "clear")
 
 
 def queue_ids(client, thread):
@@ -207,9 +210,9 @@ def reminder(slot, queues):
 
 
 def reconcile(client, path, coordinator, peers, slot):
-    if not decision_clear(path.parent):
+    if not decision_clear(path.parent, coordinator):
         state = {"status": "deferred", "slot": slot,
-                 "reason": "explicit user-decision clearance missing or pending"}
+                 "reason": "recipient-bound user-decision clearance missing, invalid or pending"}
         persist(path, state)
         return state
     queues = {thread: queue_ids(client, thread) for thread in dict.fromkeys([coordinator, *peers])}
@@ -222,8 +225,8 @@ def reconcile(client, path, coordinator, peers, slot):
             state.update(status="deferred", reason=reason)
             persist(path, state)
             return state
-        if not decision_clear(path.parent):
-            state.update(status="deferred", reason="explicit user-decision clearance missing or pending")
+        if not decision_clear(path.parent, coordinator):
+            state.update(status="deferred", reason="recipient-bound user-decision clearance missing, invalid or pending")
             persist(path, state)
             return state
         method = selected["method"]
@@ -274,9 +277,9 @@ def run(state_dir, control_socket, coordinator, peers, slot):
             return {"status": "deduplicated", "previousStatus": state["status"]}
         client = None
         try:
-            if not decision_clear(state_dir):
+            if not decision_clear(state_dir, coordinator):
                 state = {"status": "deferred", "slot": slot,
-                         "reason": "explicit user-decision clearance missing or pending"}
+                         "reason": "recipient-bound user-decision clearance missing, invalid or pending"}
                 persist(path, state)
                 return state
             if not control_socket_available(control_socket):

@@ -17,6 +17,11 @@ subject = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(subject)
 
 
+TECH = "00000000-0000-0000-0000-000000000001"
+ART = "00000000-0000-0000-0000-000000000002"
+GAMEPLAY = "00000000-0000-0000-0000-000000000003"
+
+
 class Fixture:
     def __init__(self, status=None, turn=None, outcomes=None):
         self.status = status or {"type": "active", "activeFlags": []}
@@ -53,16 +58,21 @@ class UnblockTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
         self.path = Path(self.scratch.name) / "slot.json"
-        subject.persist(self.path.parent / "pending-user-decision.json", {"state": "clear"})
+        (self.path.parent / "decisions").mkdir()
+        self.decision = self.path.parent / "decisions" / f"{TECH}.json"
+        subject.persist(self.decision, {"thread_id": TECH, "state": "clear"})
+        # Legacy evidence is neither consulted nor modified by recipient guards.
+        self.legacy = self.path.parent / "pending-user-decision.json"
+        subject.persist(self.legacy, {"state": "pending"})
 
     def reconcile(self, client):
-        return subject.reconcile(client, self.path, "tech", ["art", "gameplay"], 100)
+        return subject.reconcile(client, self.path, TECH, [ART, GAMEPLAY], 100)
 
     def test_active_reminder_reads_all_peer_queue_pages_and_retains_only_ids(self):
         client = Fixture()
         result = self.reconcile(client)
         self.assertEqual(result["status"], "accepted")
-        self.assertEqual(result["queues"], {role: ["queue-one", "queue-two"] for role in ["tech", "art", "gameplay"]})
+        self.assertEqual(result["queues"], {role: ["queue-one", "queue-two"] for role in [TECH, ART, GAMEPLAY]})
         method, params = client.mutations()[0]
         self.assertEqual(method, "turn/steer")
         self.assertEqual(params["expectedTurnId"], "turn-one")
@@ -127,30 +137,48 @@ class UnblockTests(unittest.TestCase):
     def test_prior_accepted_or_interrupted_send_is_deduplicated_without_connecting(self):
         for status in ["accepted", "sending"]:
             with self.subTest(status=status):
-                path = Path(self.scratch.name) / "tech-100.json"
+                path = Path(self.scratch.name) / f"{TECH}-100.json"
                 subject.persist(path, {"status": status})
                 with patch.object(subject, "connect") as connect:
-                    result = subject.run(Path(self.scratch.name), Path("/fixture/control.sock"), "tech", [], 100)
+                    result = subject.run(Path(self.scratch.name), Path("/fixture/control.sock"), TECH, [], 100)
                 self.assertEqual(result["status"], "deduplicated")
                 self.assertEqual(result["previousStatus"], "ambiguous" if status == "sending" else status)
                 connect.assert_not_called()
 
-    def test_missing_malformed_and_pending_marker_fail_closed_without_connecting(self):
-        marker = self.path.parent / "pending-user-decision.json"
-        for index, content in enumerate([None, "not json", "[]", '{"state":"pending"}', '{}']):
+    def test_missing_malformed_mismatched_and_unknown_recipient_records_fail_closed(self):
+        contents = [None, "not json", "[]", '{}',
+                    json.dumps({"thread_id": TECH, "state": "pending"}),
+                    json.dumps({"thread_id": ART, "state": "clear"}),
+                    json.dumps({"thread_id": TECH, "state": "unknown"})]
+        for index, content in enumerate(contents):
             with self.subTest(content=content):
-                # A separate scratch directory represents each independent slot installation.
                 directory = self.path.parent / str(index)
-                directory.mkdir()
+                (directory / 'decisions').mkdir(parents=True)
                 if content is not None:
-                    (directory / marker.name).write_text(content)
+                    (directory / 'decisions' / f'{TECH}.json').write_text(content)
+                subject.persist(directory / 'pending-user-decision.json', {'state': 'clear'})
                 with patch.object(subject, "connect") as connect:
-                    result = subject.run(directory, Path("/fixture/control.sock"), "tech", [], 100)
+                    result = subject.run(directory, Path("/fixture/control.sock"), TECH, [], 100)
                 self.assertEqual(result["status"], "deferred")
                 connect.assert_not_called()
+                self.assertEqual(json.loads((directory / 'pending-user-decision.json').read_text()), {'state': 'clear'})
+
+    def test_art_pending_does_not_block_tech_clear_or_modify_legacy_evidence(self):
+        art_record = self.path.parent / 'decisions' / f'{ART}.json'
+        subject.persist(art_record, {'thread_id': ART, 'state': 'pending'})
+        before = {path: path.read_bytes() for path in (self.decision, art_record, self.legacy)}
+        client = Fixture()
+        self.assertEqual(self.reconcile(client)['status'], 'accepted')
+        self.assertEqual(client.mutations()[0][1]['threadId'], TECH)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+
+    def test_non_uuid_recipient_is_never_clear(self):
+        self.assertFalse(subject.decision_clear(self.path.parent, '../other'))
+        self.assertFalse(subject.decision_clear(self.path.parent, 'tech'))
 
     def test_explicit_pending_marker_overrides_empty_active_flags(self):
-        subject.persist(self.path.parent / "pending-user-decision.json", {"state": "pending"})
+        subject.persist(self.decision, {"thread_id": TECH, "state": "pending"})
         client = Fixture()
         self.assertEqual(self.reconcile(client)["status"], "deferred")
         self.assertEqual(client.calls, [])
@@ -161,7 +189,7 @@ class UnblockTests(unittest.TestCase):
         def call(method, params):
             result = original(method, params)
             if method == "thread/turns/list":
-                subject.persist(self.path.parent / "pending-user-decision.json", {"state": "pending"})
+                subject.persist(self.decision, {"thread_id": TECH, "state": "pending"})
             return result
         client.call = call
         self.assertEqual(self.reconcile(client)["status"], "deferred")
@@ -226,7 +254,7 @@ class UnblockTests(unittest.TestCase):
         regular.touch()
         for socket_path in (None, Path('relative.sock'), regular, regular.parent / 'missing.sock'):
             with self.subTest(path=socket_path), patch.object(subject, 'connect') as connect:
-                result = subject.run(self.path.parent, socket_path, 'tech', [], 100)
+                result = subject.run(self.path.parent, socket_path, TECH, [], 100)
                 self.assertEqual(result['status'], 'deferred')
                 self.assertIn('CODEX_CONTROL_SOCKET', result['reason'])
                 connect.assert_not_called()
@@ -236,7 +264,7 @@ class UnblockTests(unittest.TestCase):
         fixture = Fixture()
         with patch.object(subject, 'control_socket_available', return_value=True), \
                 patch.object(subject, 'connect', return_value=fixture) as connect:
-            result = subject.run(self.path.parent, path, 'tech', [], 100)
+            result = subject.run(self.path.parent, path, TECH, [], 100)
         self.assertEqual(result['status'], 'accepted')
         self.assertEqual(connect.call_args.args[1], path)
         fixture.connection.close.assert_called_once()
@@ -249,7 +277,7 @@ class UnblockTests(unittest.TestCase):
             json.dumps({"id": 1, "result": {"data": []}}),
         ]
         client = subject.Client(connection, time.monotonic() + 25)
-        self.assertEqual(client.call("thread/queue/list", {"threadId": "tech"}), {"data": []})
+        self.assertEqual(client.call("thread/queue/list", {"threadId": TECH}), {"data": []})
         self.assertEqual(connection.send.call_count, 1)
 
 
