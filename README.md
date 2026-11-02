@@ -282,14 +282,15 @@ delete per ID per invocation, preserving prior attempts. Already absent IDs are
 `confirmed_absent`, without claiming delivery or semantic handling beyond the
 owner's explicit acknowledgement.
 
-Monitor health is separate from reminder acceptance. Two distinct slots with an
-unchanged unacknowledged ID set or repeated deferral produce
+Monitor health is separate from reminder acceptance. An unacknowledged queue ID with the same payload
+and client message ID observed in two distinct slots, or repeated deferral, produces
 `monitor_status: failed`, an actionable reason and nonzero CLI status. Same-slot
 retries do not increment counters. Unchanged inventory already accepted as a
 reminder is not sent again. Health records in `STATE/unblock/health/` retain the
 latest snapshot and counters. The existing event outbox emits one actionable
-failure per unresolved episode, rather than a fresh event every hour; progress or
-a changed problem permits a new episode. Owners inspect the full local snapshot,
+failure per unresolved episode. New arrivals or changes to other items do not
+restart the episode while any failure persists; a new episode requires full
+resolution of the previous failure. Owners inspect the full local snapshot,
 classify/reconcile work and explicitly acknowledge handled IDs. No additional
 runner, schedule, timer or automatic queue deletion is introduced.
 
@@ -320,3 +321,15 @@ the new snapshot ID. The new deletion attempt invalidates the older retention
 before processing, including if deletion subsequently fails, while retaining its
 history. Native queue editing must remain quiescent during either kind of
 acknowledgement. This consistency requirement does not imply an atomic API.
+
+
+### 0.3.1 backlog persistence
+
+Backlog age is tracked separately for each recipient and queue ID, bound to its
+payload and client message ID. New arrivals cannot reset an older pending item's
+age. A changed payload or explicit matching retention resets only that item;
+confirmed removal drops its age. If a recipient's inventory fails, its prior ages
+are preserved without increment until a successful observation. Same-slot retries
+do not increment an unchanged item's age. `backlog_slots` reports the maximum
+current item age. Older health records without per-item history begin with the
+first actual observation; aggregate counters do not manufacture item history.

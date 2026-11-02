@@ -243,6 +243,60 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(monitor.acknowledge(self.client, self.state, TECH, fresh['snapshot_id'], ['one'], 'handled')[0]['state'], 'deleted')
         self.assertEqual(self.client.queues[TECH], [entry('new-work')])
 
+    def test_persistent_item_ages_through_arrivals_errors_edits_and_retention(self):
+        def snapshot(identities):
+            self.client.queues[TECH] = [entry(identity) for identity in identities]
+            return monitor.capture(self.client, self.state, [TECH])
+        def ages():
+            health = json.loads((self.state / 'health' / (TECH + '.json')).read_text())
+            return {identity: item['age'] for identity, item in health['backlog_items'][TECH].items()}
+        outcome = {'status': 'unchanged'}
+        with patch.object(monitor, 'health_event') as event:
+            first = snapshot(['A'])
+            monitor.record_health(self.state, TECH, 100, first, outcome)
+            monitor.record_health(self.state, TECH, 100, first, outcome)
+            self.assertEqual(ages(), {'A': 1})
+            second = snapshot(['A', 'B'])
+            result = monitor.record_health(self.state, TECH, 200, second, outcome)
+            self.assertEqual(result['monitor_status'], 'failed')
+            self.assertEqual(ages(), {'A': 2, 'B': 1})
+            third = snapshot(['A', 'B', 'C'])
+            monitor.record_health(self.state, TECH, 300, third, outcome)
+            monitor.record_health(self.state, TECH, 300, third, outcome)
+            self.assertEqual(ages(), {'A': 3, 'B': 2, 'C': 1})
+            self.assertEqual(event.call_count, 1)
+            unknown = copy.deepcopy(third)
+            unknown['queues'] = {}
+            unknown['errors'] = {TECH: 'inventory unavailable'}
+            monitor.record_health(self.state, TECH, 400, unknown, outcome)
+            self.assertEqual(ages(), {'A': 3, 'B': 2, 'C': 1})
+            self.client.queues[TECH][1]['input'] = []
+            changed = monitor.capture(self.client, self.state, [TECH])
+            monitor.record_health(self.state, TECH, 400, changed, outcome)
+            self.assertEqual(ages(), {'A': 4, 'B': 1, 'C': 2})
+            monitor.acknowledge(self.client, self.state, TECH, changed['snapshot_id'], ['B'], 'retained', 'planned work')
+            monitor.record_health(self.state, TECH, 400, changed, outcome)
+            self.assertEqual(ages(), {'A': 4, 'C': 2})
+            self.assertEqual(event.call_count, 1)
+            removed = snapshot(['C'])
+            monitor.record_health(self.state, TECH, 500, removed, outcome)
+            self.assertEqual(ages(), {'C': 3})
+            self.assertEqual(event.call_count, 1)
+            same_slot_new = snapshot(['C', 'D'])
+            monitor.record_health(self.state, TECH, 500, same_slot_new, outcome)
+            self.assertEqual(ages(), {'C': 3, 'D': 1})
+            self.client.queues[TECH][0]['input'] = []
+            same_slot_edit = monitor.capture(self.client, self.state, [TECH])
+            resolved = monitor.record_health(self.state, TECH, 500, same_slot_edit, outcome)
+            self.assertEqual(ages(), {'C': 1, 'D': 1})
+            self.assertEqual(resolved['monitor_status'], 'ok')
+            self.assertEqual(event.call_count, 1)
+        # Legacy aggregate counters cannot establish a queue item's past age.
+        path = self.state / 'health' / (ART + '.json')
+        monitor.persist(path, {'seen_slots': [100, 200], 'backlog_slots': 99})
+        legacy = monitor.record_health(self.state, ART, 300, first, outcome)
+        self.assertEqual(legacy['backlog_slots'], 1)
+
     def test_health_failure_is_nonzero_even_after_reminder_acceptance(self):
         state = {'status': 'accepted', 'monitor_status': 'failed', 'monitor_reason': 'owner reconciliation required'}
         output = io.StringIO()

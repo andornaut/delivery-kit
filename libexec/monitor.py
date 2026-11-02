@@ -188,25 +188,29 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
     path = state_dir / 'health' / (recipient + '.json')
     record = json.loads(path.read_text()) if path.exists() else {'seen_slots': []}
     queues, retained = unacknowledged(state_dir, snapshot)
-    signature = digest({thread: sorted(entry['id'] for entry in entries)
-                        for thread, entries in sorted(queues.items())})
+    previous_items = record.get('backlog_items', {})
+    items = {thread: entries for thread, entries in previous_items.items()
+             if thread in snapshot['errors']}
+    for thread, entries in queues.items():
+        items[thread] = {}
+        for entry in entries:
+            identity = entry['id']
+            signature = payload_signature(entry)
+            previous = previous_items.get(thread, {}).get(identity, {})
+            slots = (list(previous.get('slots', []))
+                     if previous.get('payload_signature') == signature else [])
+            if slot not in slots:
+                slots.append(slot)
+            items[thread][identity] = {'payload_signature': signature, 'slots': slots, 'age': len(slots)}
+    record['backlog_items'] = items
+    record['backlog_slots'] = max((item['age'] for entries in items.values()
+                                   for item in entries.values()), default=0)
     status = outcome.get('previousStatus', outcome['status'])
     deferred = (status in ('deferred', 'blocked') or bool(snapshot['errors'])
                 or any(history['status'] == 'unavailable' for history in snapshot.get('history', {}).values()))
-    problem_signature = digest([signature, deferred, outcome.get('reason') if deferred else None])
-    new_slot = slot not in record['seen_slots']
-    if problem_signature != record.get('problem_signature'):
-        record.update(problem_signature=problem_signature, episode_first_slot=slot, reported=False)
-    if new_slot:
+    if slot not in record['seen_slots']:
         record['seen_slots'].append(slot)
-        backlog = any(queues.values())
-        record['backlog_slots'] = (record.get('backlog_slots', 0) + 1
-                                   if backlog and signature == record.get('id_signature')
-                                   else int(backlog))
         record['deferral_slots'] = record.get('deferral_slots', 0) + 1 if deferred else 0
-        record['id_signature'] = signature
-    if not any(queues.values()):
-        record['backlog_slots'] = 0
     if not deferred:
         record['deferral_slots'] = 0
     if outcome['status'] == 'accepted':
@@ -219,8 +223,17 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
     if failed:
         health['monitor_reason'] = 'owner must inspect snapshot, reconcile queued work or recipient clearance, and explicitly acknowledge handled IDs'
     record.update(health, last_delivery_status=outcome['status'])
-    if failed and not record['reported']:
-        health_event(state_dir, recipient, record['episode_first_slot'], snapshot['snapshot_id'], problem_signature)
+    if not failed:
+        record['reported'] = False
+        record.pop('problem_signature', None)
+        record.pop('episode_first_slot', None)
+    elif not record.get('reported', False):
+        problem_signature = digest({'items': {thread: sorted(identity for identity, item in entries.items()
+                                                                    if item['age'] >= 2)
+                                             for thread, entries in items.items()},
+                                    'deferred': record.get('deferral_slots', 0) >= 2})
+        record.update(problem_signature=problem_signature, episode_first_slot=slot)
+        health_event(state_dir, recipient, slot, snapshot['snapshot_id'], problem_signature)
         record['reported'] = True
     persist(path, record)
     return health
