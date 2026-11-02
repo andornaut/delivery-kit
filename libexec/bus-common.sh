@@ -6,7 +6,7 @@ if [ ! -r "$CONF" ]; then
 fi
 . "$CONF"
 for key in MAIN REMOTE GH_SLUG DEPARTURES DEPLOY_SKIP_RE NODE_IMAGE CONTAINER_PREFIX CPUS \
-  MAX_WORKERS LOAD_LIMIT GATE_INSTALL GATE_STEPS; do
+  MAX_WORKERS LOAD_LIMIT GATE_INSTALL GATE_STEPS DEPLOY_MODE; do
   if ! declare -p "$key" >/dev/null 2>&1; then
     echo "bus: $CONF does not set $key" >&2
     exit 2
@@ -15,11 +15,10 @@ done
 REPO=${REPO:?configuration must set REPO}
 BUS_DIR=${BUS_STATE_DIR:?BUS_STATE_DIR must name the project state directory}
 export BUS_CONF BUS_STATE_DIR
-DEPLOY_MODE=${DEPLOY_MODE:-workers-builds}
 CI_POLL_SECONDS=${CI_POLL_SECONDS:-60}
 CI_TIMEOUT_SECONDS=${CI_TIMEOUT_SECONDS:-1800}
 CI_REQUIRED_NAMES=${CI_REQUIRED_NAMES:-'AI attributions|Lint|Test'}
-case "$DEPLOY_MODE" in workers-builds|wrangler|none) ;; *) echo "bus: invalid DEPLOY_MODE" >&2; exit 2 ;; esac
+case "$DEPLOY_MODE" in wrangler|none) ;; *) echo "bus: invalid DEPLOY_MODE" >&2; exit 2 ;; esac
 if (( CPUS > 4 || MAX_WORKERS > 4 )); then
   echo "bus: CPUS and MAX_WORKERS must not exceed 4" >&2
   exit 2
@@ -101,13 +100,13 @@ repair_tree_matches() {
   [ "$(git -C "$work" rev-parse 'HEAD^{tree}')" = "$(git -C "$REPO" rev-parse "$tip^{tree}")" ]
 }
 start_ci() {
-  local sha=$1 needed=${2:-1}
+  local sha=$1
   [ -n "$REMOTE" ] && [ -n "$GH_SLUG" ] || return 0
   mkdir -p "$BUS_DIR/ci"
   # Close inherited queue/merge/loop locks and pipes in the detached monitor.
   (
     exec 5>&- 6>&- 7>&- 8>&- 9>&-
-    nohup bash "$S/ci-watch.sh" "$sha" "$needed" </dev/null >>"$BUS_DIR/ci/$sha.log" 2>&1 &
+    nohup bash "$S/ci-watch.sh" "$sha" </dev/null >>"$BUS_DIR/ci/$sha.log" 2>&1 &
   )
 }
 # Event writes are local and small; delivery never inherits bus locks or output pipes.

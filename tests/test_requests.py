@@ -49,6 +49,7 @@ MAX_WORKERS=4
 LOAD_LIMIT=1000000
 GATE_INSTALL=
 GATE_STEPS=()
+DEPLOY_MODE=none
 ''')
         self.env['BUS_CONF'] = str(conf)
         self.calls = self.root / 'calls'
@@ -232,3 +233,34 @@ cat "$1/value" > "$FIXTURE/integrated"
         self.assertEqual(json.loads(result.stdout)['state'], 'pending')
         result = subprocess.run(command + ['empty'], capture_output=True, text=True, timeout=3)
         self.assertNotEqual(result.returncode, 0)
+
+    def test_missing_ref_is_reported_while_valid_work_still_integrates(self):
+        self.git('checkout', '-q', 'bus/feature')
+        (self.repo / 'value').write_text('valid work')
+        self.git('add', 'value')
+        self.git('-c', 'core.hooksPath=/dev/null', 'commit', '--no-verify', '-qm', 'feature')
+        self.git('checkout', '-q', 'main')
+        (self.mechanisms / 'batch.sh').write_text((ROOT / 'libexec/batch.sh').read_text())
+        common = self.mechanisms / 'bus-common.sh'
+        common.unlink()
+        common.write_text((ROOT / 'libexec/bus-common.sh').read_text() + '''
+bus_event() { printf '%s\\n' "$@" >> "$FIXTURE/reports"; }
+''')
+        (self.mechanisms / 'merge.sh').write_text('''#!/bin/bash
+cat "$1/value" > "$FIXTURE/integrated"
+printf '%s\\n' "$BUS_CANDIDATES" > "$FIXTURE/candidates"
+''')
+        result = subprocess.run(['bash', str(self.mechanisms / 'batch.sh'),
+                                 'bus/missing', 'bus/feature'], env=self.env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / 'integrated').read_text(), 'valid work')
+        self.assertEqual((self.root / 'candidates').read_text().strip(), 'bus/feature')
+        report = (self.root / 'reports').read_text()
+        self.assertIn('resolution-bus/missing', report)
+        self.assertIn('merge-base', report)
+        self.assertIn('bus/missing', result.stdout)
+        self.assertIn('exit 128', report)
+        # The invalid input was skipped, while the valid branch completed normal cleanup.
+        self.assertNotEqual(subprocess.run(['git', '-C', str(self.repo), 'show-ref', '--verify',
+                                           'refs/heads/bus/feature'], capture_output=True).returncode, 0)

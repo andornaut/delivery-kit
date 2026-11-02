@@ -8,9 +8,9 @@ mkdir -p "$BUS_DIR/ci"
 exec 6>"$BUS_DIR/ci/$sha.lock"
 flock -n 6 || exit 0
 bus_event ci_pending "$sha" "CI monitoring pending/running for pushed $sha; completion not confirmed; deployment tracked separately."
-python3 - "$GH_SLUG" "$sha" "$BUS_DIR/ci" "$CI_POLL_SECONDS" "$CI_TIMEOUT_SECONDS" "$DEPLOY_MODE" "${2:-1}" "$CI_REQUIRED_NAMES" <<'PY'
+python3 - "$GH_SLUG" "$sha" "$BUS_DIR/ci" "$CI_POLL_SECONDS" "$CI_TIMEOUT_SECONDS" "$CI_REQUIRED_NAMES" <<'PY'
 import json,pathlib,shutil,subprocess,sys,time,urllib.request
-slug,sha,directory,poll,timeout,mode,needed,required=sys.argv[1:]
+slug,sha,directory,poll,timeout,required=sys.argv[1:]
 required_names=set(required.split('|'))
 root=pathlib.Path(directory); status=root/(sha+'.status'); summary=root/(sha+'.json')
 def state(value):
@@ -41,8 +41,7 @@ while time.monotonic()<deadline:
   # The test workflow exists in both games. Require it so a partially registered list is not green.
   names={c['name'] for c in rows}
   if rows and required_names <= names and all(c['status']=='completed' for c in rows):
-   if mode!='workers-builds' or needed!='1' or any(c['name'].startswith('Workers Builds:') for c in rows):
-    state('success');sys.exit(0)
+   state('success');sys.exit(0)
  except Exception as error:
   print(time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),type(error).__name__,str(error),flush=True)
  time.sleep(int(poll))

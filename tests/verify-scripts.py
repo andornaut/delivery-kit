@@ -133,6 +133,17 @@ assert not (BUS/'deploy-pending').exists()
 assert (BUS/'last-deploy.sha').read_text().strip()==SHA
 calls=LOG.read_text();assert calls.count('docker ')==2 and calls.count('"push"')==1
 print('PASS gated build SHA, push once, deploy retry without tests/build/push')
+# Explicit none mode disables deployment without staging or touching retained assets.
+original = CONF.read_text()
+CONF.write_text(original + 'DEPLOY_MODE=none\n')
+previous_calls = LOG.read_text()
+previous_deploy = (BUS/'last-deploy.sha').read_bytes()
+run('post-push.sh', ('--stage', str(WORK), 'batch-fixture', SHA, '1'))
+assert LOG.read_text() == previous_calls and not (BUS/'deploy-pending').exists()
+assert (BUS/'last-deploy.sha').read_bytes() == previous_deploy
+CONF.write_text(original)
+print('PASS explicit none mode leaves deployment state and commands untouched')
+
 
 # A failed install/gate never pushes or stages deployment.
 LOG.write_text('');REMOTE.write_text(BASE)
@@ -246,23 +257,32 @@ SITE=ROOT/'site';SITE.mkdir()
 class Response(io.StringIO):
  def __enter__(self):return self
  def __exit__(self,*args):pass
-def urlopen(*args,**kwargs):return Response(os.environ['CHECK_PAYLOAD'])
+def urlopen(request,**kwargs):
+ assert '/commits/'+os.environ['EXPECTED_CI_SHA']+'/check-runs?' in request.full_url
+ return Response(os.environ['CHECK_PAYLOAD'])
 urllib.request.urlopen=urlopen
 ''')
 CI_SHA='c'*40
 payload={'check_runs':[{'id':1,'name':'Test','status':'completed','conclusion':'success'}]}
-ci_extra={'PYTHONPATH':str(SITE),'CHECK_PAYLOAD':json.dumps(payload),'CI_POLL_SECONDS':'0','CI_TIMEOUT_SECONDS':'1'}
+ci_extra={'EXPECTED_CI_SHA':CI_SHA,'PYTHONPATH':str(SITE),'CHECK_PAYLOAD':json.dumps(payload),'CI_POLL_SECONDS':'0','CI_TIMEOUT_SECONDS':'1'}
 # Configuration supplies defaults via shell environment.
-run('ci-watch.sh',(CI_SHA,'1'),ci_extra)
+run('ci-watch.sh',(CI_SHA,),ci_extra)
 assert (BUS/'ci'/f'{CI_SHA}.status').read_text().strip()=='success'
 payload['check_runs'][0]['conclusion']='failure'
-run('ci-watch.sh',('d'*40,'1'),ci_extra|{'CHECK_PAYLOAD':json.dumps(payload)},expected=1)
+run('ci-watch.sh',('d'*40,),ci_extra|{'EXPECTED_CI_SHA':'d'*40,'CHECK_PAYLOAD':json.dumps(payload)},expected=1)
 assert (BUS/'ci'/('d'*40+'.status')).read_text().strip()=='failure'
+payload['check_runs'][0]['conclusion']='success'
+payload['check_runs'].append({'id':2,'name':'Unrelated workflow','status':'completed','conclusion':'failure'})
+run('ci-watch.sh',('f'*40,),ci_extra|{'EXPECTED_CI_SHA':'f'*40,'CHECK_PAYLOAD':json.dumps(payload)},expected=1)
+assert (BUS/'ci'/('f'*40+'.status')).read_text().strip()=='failure'
+payload['check_runs'][1].update(status='in_progress', conclusion=None)
+run('ci-watch.sh',('9'*40,),ci_extra|{'EXPECTED_CI_SHA':'9'*40,'CHECK_PAYLOAD':json.dumps(payload)},expected=2)
+assert (BUS/'ci'/('9'*40+'.status')).read_text().strip()=='timeout'
 print('PASS background CI success/failure metadata states')
 # CI monitors cannot retain the scheduled runner's lock descriptors.
 original=CONF.read_text();CONF.write_text(original+'GH_SLUG=fixture/project\n')
-background_env=ci_extra|{'CI_TIMEOUT_SECONDS':'2','CI_POLL_SECONDS':'1','CHECK_PAYLOAD':json.dumps({'check_runs':[{'id':1,'name':'Test','status':'in_progress','conclusion':None}]})}
-launch='S='+str(SOURCE)+'; . \"$S/bus-common.sh\"; exec 5>\"$BUS_DIR/runner.lock\"; flock 5; exec 9>\"$BUS_DIR/merge.lock\"; flock 9; start_ci '+('e'*40)+' 1'
+background_env=ci_extra|{'EXPECTED_CI_SHA':'e'*40,'CI_TIMEOUT_SECONDS':'2','CI_POLL_SECONDS':'1','CHECK_PAYLOAD':json.dumps({'check_runs':[{'id':1,'name':'Test','status':'in_progress','conclusion':None}]})}
+launch='S='+str(SOURCE)+'; . \"$S/bus-common.sh\"; exec 5>\"$BUS_DIR/runner.lock\"; flock 5; exec 9>\"$BUS_DIR/merge.lock\"; flock 9; start_ci '+('e'*40)
 result=subprocess.run(['bash','-c',launch],env=env|background_env,text=True,capture_output=True,timeout=3)
 assert result.returncode==0
 for name in ['runner.lock','merge.lock']:

@@ -23,11 +23,13 @@ Releases are versioned source archives with no installation daemon or registry d
   --revision EXACT_COMMIT_SHA run
 ```
 
+`--help` and `help` print usage without configuration or state.
+
 Both paths must be absolute and the state directory must already exist. Configuration is trusted Bash, not untrusted input. `REPO`, branch/remote, GitHub slug, departure minutes, container image, resource limits, installation and ordered gate commands are explicit project values. `examples/project.conf` lists the required fields. `check-config` loads and validates configuration without Git/network/container/native activity. `resource-report` prints reporting-only resource information. `scheduled-once` preserves the existing due-slot window and duplicate-slot receipts; it is not a manual departure command.
 
 The gate mounts the scratch project checkout writable and the project state directory's `npm-cache` writable. Dependencies are installed with the configured command; all gate steps then run without network. The configured CPU and worker caps cannot exceed four. The gate compares Git-status file fingerprints before and after checking and stamps the exact build commit. Configuration and cache remain project-owned. Never place secret values in configuration: use the operator's existing authentication and credential references.
 
-The default supported deployment adapter invokes the project's existing Wrangler executable/configuration against retained gated `dist/`, with the exact source SHA as its label. A failed deployment keeps its pointer and artifacts for a later configured departure. The CI monitor requires the configured names for the exact pushed commit. Red CI blocks later pushes unless the existing narrowly scoped one-shot repair approval protocol is satisfied.
+`DEPLOY_MODE` must explicitly be `wrangler` or `none`. The Wrangler adapter invokes the project's existing Wrangler executable/configuration against retained gated `dist/`, with the exact source SHA as its label. A failed deployment keeps its pointer and artifacts for a later configured departure. The CI monitor requires the configured names for the exact pushed commit. Red CI blocks later pushes unless the existing narrowly scoped one-shot repair approval protocol is satisfied.
 
 ## State and optional coordinator adapters
 
@@ -144,3 +146,24 @@ departure function returned, not that asynchronous CI or deployment succeeded.
 Consult exact-commit CI status, deployment pointers and normal event reports.
 Publication or recording a request does not adopt a new snapshot: the consumer
 owner performs the normal idle cutover to the 0.1.0 resident loop first.
+
+
+## 0.2.0 compatibility
+
+This pre-1.0 minor release removes the `workers-builds` deployment adapter and its
+implicit default. Every configuration must explicitly set `DEPLOY_MODE=wrangler`
+or `DEPLOY_MODE=none`; missing, empty and removed values fail configuration
+validation before runtime activity. Both game consumers already explicitly use
+`wrangler`, so their configuration needs no change. `none` continues to disable
+deployment. Exact-commit `SKIP_GATE` behaviour, one-off requests, state files,
+locks and reporting are preserved.
+
+CI monitoring checks the exact pushed commit and requires configured check names
+and completion of every registered check, including unrelated workflows. It no
+longer waits for a special Workers Builds check. Internal monitor callers now
+pass only the source SHA; deployment scope remains a separate batch decision.
+
+Batch history-resolution failures report the skipped branch, `merge-base`
+operation, exit status and Git diagnostic. Valid branches in the same batch
+continue through integration and the existing gate. Inspect and requeue skipped
+work after fixing its reference or history.

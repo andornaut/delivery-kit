@@ -33,7 +33,15 @@ for branch in "$@"; do
   if [ -n "${BUS_REQUEST_RECORD:-}" ]; then
     subject=$(pinned_tip "$branch") || exit 1
   fi
-  base=$(git -C "$REPO" merge-base "$subject" "$BASE") || continue
+  if base=$(git -C "$REPO" merge-base "$subject" "$BASE" 2>&1); then
+    :
+  else
+    resolution_status=$?
+    failure=${base:-Git returned no diagnostic (no common ancestor)}
+    echo "SKIPPED $branch (merge-base against $BASE failed, exit $resolution_status: $failure)"
+    bus_event "resolution-$branch" "${BUS_ATTEMPT:-$name}" "History resolution failed for $branch: merge-base against $BASE, exit $resolution_status: $failure; branch skipped; no push yet; inspect history and requeue skipped branch."
+    continue
+  fi
   if git -C "$W" cherry-pick "$base..$subject" >/dev/null 2>&1; then
     picked+=("$branch")
   else

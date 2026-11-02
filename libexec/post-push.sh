@@ -67,8 +67,6 @@ case "${1:-}" in
       printf '%s\n' "$sha" >"$BUS_DIR/last-deploy-skipped.sha"
       bus_event deploy_skipped "$sha" "Deployment skipped for pushed $sha: documentation/art-source exclusions; CI pending until verified."
       echo "deploy skipped: entire batch matches documentation/art-source exclusions"
-    elif [ "$DEPLOY_MODE" = workers-builds ]; then
-      echo "deployment delegated to Workers Builds for $sha"
     elif [ "$DEPLOY_MODE" = none ]; then
       echo "deployment disabled for $sha"
     else

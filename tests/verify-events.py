@@ -70,7 +70,7 @@ assert len(blocked)==1 and blocked[0]['kind']=='blocked-full-gate'
 # The subprocess path closes inherited flock descriptors even while delivery blocks.
 common='S='+str(source)+'; . "$S/bus-common.sh"; exec 5>"$BUS_DIR/runner.lock"; flock 5; bus_event attempt lockcheck "attempt pending"'
 config=root/'bus.conf';repo=root/'repo';bus=repo/'.claude/bus';bus.mkdir(parents=True)
-config.write_text('REPO='+str(repo)+'\nMAIN=main\nREMOTE=\nGH_SLUG=\nDEPARTURES="00"\nDEPLOY_SKIP_RE=\nNODE_IMAGE=unused\nCONTAINER_PREFIX=test\nCPUS=4\nMAX_WORKERS=4\nLOAD_LIMIT=24\nGATE_INSTALL=\nGATE_STEPS=()\n')
+config.write_text('REPO='+str(repo)+'\nMAIN=main\nREMOTE=\nGH_SLUG=\nDEPARTURES="00"\nDEPLOY_SKIP_RE=\nNODE_IMAGE=unused\nCONTAINER_PREFIX=test\nCPUS=4\nMAX_WORKERS=4\nLOAD_LIMIT=24\nGATE_INSTALL=\nGATE_STEPS=()\nDEPLOY_MODE=none\n')
 subprocess.run(['bash','-c',common],env=env|{'BUS_CONF':str(config),'BUS_STATE_DIR':str(bus)},capture_output=True,timeout=3,check=True)
 import fcntl
 with (bus/'runner.lock').open('a') as lock:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)

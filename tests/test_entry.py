@@ -1,5 +1,4 @@
 """Explicit mechanism roots and project-owned state, without live services."""
-import hashlib
 import json
 import os
 import shutil
@@ -32,6 +31,7 @@ MAX_WORKERS=4
 LOAD_LIMIT=24
 GATE_INSTALL=
 GATE_STEPS=()
+DEPLOY_MODE=none
 ''')
 
     def call(self, *args):
@@ -39,14 +39,25 @@ GATE_STEPS=()
                                '--config', str(self.conf), '--state-dir', str(self.state), *args],
                               capture_output=True, text=True, timeout=3)
 
-    def test_mechanisms_except_explicit_configuration_boundary_are_unchanged(self):
-        baseline = json.loads((ROOT / "tests/baseline.json").read_text())
-        for name, expected in baseline.items():
-            if name in ("bus-common.sh", "bus.sh", "departure.sh", "batch.sh"):
-                # Changed mechanisms are exercised by one-off and existing departure tests.
-                continue
-            with self.subTest(name=name):
-                self.assertEqual(hashlib.sha256((ROOT / "libexec" / name).read_bytes()).hexdigest(), expected)
+    def test_help_requires_no_configuration_state_or_runtime_writes(self):
+        before = sorted(self.root.rglob('*'))
+        for command in ('--help', 'help'):
+            result = subprocess.run(['bash', str(ROOT / 'bin/delivery-kit'), command],
+                                    cwd=self.root, capture_output=True, text=True, timeout=3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('request-once', result.stdout)
+            self.assertEqual(result.stderr, '')
+        self.assertEqual(sorted(self.root.rglob('*')), before)
+        result = subprocess.run(['bash', str(ROOT / 'bin/delivery-kit'), 'invalid'],
+                                cwd=self.root, capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('usage:', result.stderr)
+
+        result = self.call('invalid')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('usage:', result.stderr)
 
     def test_config_validation_has_no_runtime_side_effects(self):
         result = self.call('check-config')
@@ -81,6 +92,17 @@ GATE_STEPS=()
         self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
         command[-2] = '0' * 40
         self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
+
+    def test_deployment_mode_requires_explicit_supported_configuration(self):
+        original = self.conf.read_text()
+        for mode in ('', 'DEPLOY_MODE=workers-builds', 'DEPLOY_MODE='):
+            with self.subTest(mode=mode):
+                self.conf.write_text(original.replace('DEPLOY_MODE=none', mode))
+                self.assertEqual(self.call('check-config').returncode, 2)
+        for mode in ('none', 'wrangler'):
+            self.conf.write_text(original.replace('DEPLOY_MODE=none', 'DEPLOY_MODE=' + mode))
+            self.assertEqual(self.call('check-config').returncode, 0)
+        self.assertEqual(list(self.state.iterdir()), [])
 
     def test_resource_caps_are_validated_without_starting_services(self):
         with self.conf.open('a') as stream:

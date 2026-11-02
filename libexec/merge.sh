@@ -118,7 +118,7 @@ fi
 date +%s >"$STAMP"
 printf '%s\n' "$sha" >"$STAMP.sha"
 bus_event push "$sha" "$(date '+%Y-%m-%d %H:%M %Z') departed exact pushed SHA $sha: ${BUS_CANDIDATES:-scheduled batch}; full gate passed; CI pending; deployment pending."
-start_ci "$sha" "$needed"
+start_ci "$sha"
 git -C "$W" log --oneline -1
 echo merged
 # A failed deployment still leaves a successfully pushed commit. Its pending pointer keeps
