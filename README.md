@@ -35,7 +35,14 @@ The gate mounts the scratch project checkout writable and the project state dire
 
 `--state-dir` preserves the existing filenames: `bus-queue`, queue/merge/runner/loop locks, `active-departure`, scratch batches, gate logs, CI/deployment state, event outbox and retained retry artifacts. Moving mechanisms does not move or rewrite any of these files.
 
-`REPORT_PROJECT` and `REPORT_THREAD` select the existing Codex event sink. `SESSION_MAP_FILE` explicitly selects project role metadata; `SHARED_TARGETS_FILE` optionally selects host-scoped shared-library targets. The resolver preserves coordinator matching, distinct role identities, active ownership, host path matching and deduplication. Missing or invalid metadata defers triage. The guarded Codex adapter is unchanged: local decision clearance and native question history must both permit input; interrupted, ambiguous or unknown states defer. Its existing local control socket and queue delivery routes are unchanged. No live native connection is made by verification.
+`REPORT_PROJECT` and `REPORT_THREAD` select the existing Codex event sink. `CODEX_CONTROL_SOCKET` supplies the absolute nonsecret local Codex control socket
+path. Missing, relative, unavailable or non-socket paths defer optional triage
+without native delivery or blocking departures; there is no home-directory default.
+`SESSION_MAP_FILE` explicitly selects project role metadata; `SHARED_TARGETS_FILE` optionally selects host-scoped shared-library targets. `CODEX_SHARED_ROLES` supplies space-separated allowed shared role names. Set
+`CODEX_SHARED_ROLES="art-kit delivery-kit game-kit"` for the game host; an empty
+list selects no shared roles. Leaving the variable unset defers optional triage
+until the caller explicitly chooses its allowed roles. Nonhosts may leave `SHARED_TARGETS_FILE` empty.
+The optional `codex_adapter.py` resolver preserves coordinator matching, distinct role identities, active ownership, host path matching and deduplication. Missing or invalid metadata defers triage. The guarded Codex adapter is unchanged: local decision clearance and native question history must both permit input; interrupted, ambiguous or unknown states defer. Its existing local control socket and queue delivery routes are unchanged. No live native connection is made by verification.
 
 The optional Codex triage adapter retains the three-role game metadata schema and its coordinator reminder wording. That schema is an adapter contract, not a repository identifier. Other applications may omit reporting/triage rather than supplying fake identities.
 
@@ -154,7 +161,9 @@ This pre-1.0 minor release removes the `workers-builds` deployment adapter and i
 implicit default. Every configuration must explicitly set `DEPLOY_MODE=wrangler`
 or `DEPLOY_MODE=none`; missing, empty and removed values fail configuration
 validation before runtime activity. Both game consumers already explicitly use
-`wrangler`, so their configuration needs no change. `none` continues to disable
+`wrangler`, so their deployment-mode configuration needs no change. Their tech
+owners must explicitly configure `CODEX_CONTROL_SOCKET` before optional Codex
+triage resumes, and configure `CODEX_SHARED_ROLES` on the shared-library host. `none` continues to disable
 deployment. Exact-commit `SKIP_GATE` behaviour, one-off requests, state files,
 locks and reporting are preserved.
 

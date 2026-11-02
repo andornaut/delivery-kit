@@ -136,53 +136,24 @@ bus_unblock_tick() {
     echo "bus: hourly unblock $slot unavailable: coordinator or helper missing" >&2
     return 0
   fi
-  if ! peers_text=$(/usr/bin/python3 - "${SESSION_MAP_FILE:-}" "$REPORT_THREAD" "${SHARED_TARGETS_FILE:-}" "$REPO" <<'PYMAP'
-import json
-from pathlib import Path
-import sys
-import uuid
-
-try:
-    roles = json.loads(Path(sys.argv[1]).read_text())["codex"]
-    coordinator = str(uuid.UUID(sys.argv[2]))
-    if str(uuid.UUID(roles["tech"])) != coordinator:
-        raise ValueError("coordinator mismatch")
-    peers = [str(uuid.UUID(roles[role])) for role in ("art", "gameplay")]
-    if len(set([coordinator, *peers])) != 3:
-        raise ValueError("roles must be distinct")
-except (OSError, ValueError, TypeError, KeyError):
-    raise SystemExit(1)
-try:
-    config = json.loads(Path(sys.argv[3]).read_text())
-    host_matches = (
-        type(config.get("version")) is int and config["version"] == 1
-        and config.get("harness") == "codex"
-        and str(uuid.UUID(config["host_coordinator_thread_id"])) == coordinator
-        and Path(config["host_project_root"]).resolve() == Path(sys.argv[4]).resolve()
-    )
-    if host_matches and isinstance(config.get("targets"), list):
-        for target in config["targets"]:
-            if (not isinstance(target, dict) or target.get("ownership") != "active"
-                    or target.get("role") not in ("art-kit", "delivery-kit", "game-kit")):
-                continue
-            try:
-                peer = str(uuid.UUID(target["thread_id"]))
-            except (ValueError, TypeError, KeyError, AttributeError):
-                continue
-            if peer != coordinator and peer not in peers:
-                peers.append(peer)
-except (OSError, ValueError, TypeError, KeyError, AttributeError):
-    pass
-print("\n".join(peers))
-PYMAP
-  ); then
+  if [[ ${CODEX_CONTROL_SOCKET:-} != /* ]]; then
+    echo "bus: hourly unblock $slot deferred: set CODEX_CONTROL_SOCKET to an absolute Codex control socket path" >&2
+    return 0
+  fi
+  if ! declare -p CODEX_SHARED_ROLES >/dev/null 2>&1; then
+    echo "bus: hourly unblock $slot deferred: set CODEX_SHARED_ROLES to allowed shared roles (or explicitly empty for a nonhost)" >&2
+    return 0
+  fi
+  if ! peers_text=$(/usr/bin/python3 "$S/codex_adapter.py" \
+    "${SESSION_MAP_FILE:-}" "$REPORT_THREAD" "${SHARED_TARGETS_FILE:-}" \
+    "$REPO" "${CODEX_SHARED_ROLES:-}"); then
     echo "bus: hourly unblock $slot unavailable: project session map invalid" >&2
     return 0
   fi
   mapfile -t peers <<<"$peers_text"
   for peer in "${peers[@]}"; do peer_args+=(--peer "$peer"); done
   result=$(/usr/bin/python3 "$S/unblock.py" --coordinator "$REPORT_THREAD" \
-    "${peer_args[@]}" --slot "$slot" \
+    "${peer_args[@]}" --slot "$slot" --control-socket "$CODEX_CONTROL_SOCKET" \
     --state-dir "$BUS_DIR/unblock" 2>/dev/null) || status=$?
   if [ -n "$result" ]; then
     printf 'bus: hourly unblock %s: %s\n' "$slot" "$result"

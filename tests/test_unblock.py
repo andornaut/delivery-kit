@@ -8,6 +8,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 import importlib.util
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
 
 spec = importlib.util.spec_from_file_location("hourly_unblock", Path(__file__).resolve().parents[1] / "libexec/unblock.py")
 subject = importlib.util.module_from_spec(spec)
@@ -127,7 +130,7 @@ class UnblockTests(unittest.TestCase):
                 path = Path(self.scratch.name) / "tech-100.json"
                 subject.persist(path, {"status": status})
                 with patch.object(subject, "connect") as connect:
-                    result = subject.run(Path(self.scratch.name), "tech", [], 100)
+                    result = subject.run(Path(self.scratch.name), Path("/fixture/control.sock"), "tech", [], 100)
                 self.assertEqual(result["status"], "deduplicated")
                 self.assertEqual(result["previousStatus"], "ambiguous" if status == "sending" else status)
                 connect.assert_not_called()
@@ -142,7 +145,7 @@ class UnblockTests(unittest.TestCase):
                 if content is not None:
                     (directory / marker.name).write_text(content)
                 with patch.object(subject, "connect") as connect:
-                    result = subject.run(directory, "tech", [], 100)
+                    result = subject.run(directory, Path("/fixture/control.sock"), "tech", [], 100)
                 self.assertEqual(result["status"], "deferred")
                 connect.assert_not_called()
 
@@ -217,6 +220,26 @@ class UnblockTests(unittest.TestCase):
         client.call = call
         self.assertEqual(self.reconcile(client)["status"], "deferred")
         self.assertEqual(client.mutations(), [])
+
+    def test_unavailable_socket_defers_without_native_connection(self):
+        regular = Path(self.scratch.name) / 'regular-file'
+        regular.touch()
+        for socket_path in (None, Path('relative.sock'), regular, regular.parent / 'missing.sock'):
+            with self.subTest(path=socket_path), patch.object(subject, 'connect') as connect:
+                result = subject.run(self.path.parent, socket_path, 'tech', [], 100)
+                self.assertEqual(result['status'], 'deferred')
+                self.assertIn('CODEX_CONTROL_SOCKET', result['reason'])
+                connect.assert_not_called()
+
+    def test_explicit_socket_is_forwarded_to_mock_transport_with_guards_intact(self):
+        path = Path('/fixture/explicit-control.sock')
+        fixture = Fixture()
+        with patch.object(subject, 'control_socket_available', return_value=True), \
+                patch.object(subject, 'connect', return_value=fixture) as connect:
+            result = subject.run(self.path.parent, path, 'tech', [], 100)
+        self.assertEqual(result['status'], 'accepted')
+        self.assertEqual(connect.call_args.args[1], path)
+        fixture.connection.close.assert_called_once()
 
     def test_rpc_ignores_notifications_and_server_questions_without_answering_them(self):
         connection = Mock()

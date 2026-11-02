@@ -119,6 +119,26 @@ DEPLOY_MODE=none
                     self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(list(self.state.iterdir()), [])
 
+    def test_missing_adapter_configuration_defers_without_native_helper_call(self):
+        original = self.conf.read_text()
+        mechanism = self.root / 'mechanism'
+        mechanism.mkdir()
+        marker = self.root / 'unexpected-native-call'
+        (mechanism / 'unblock.py').write_text(f'from pathlib import Path; Path({str(marker)!r}).touch()\n')
+        command = (f'unset CODEX_CONTROL_SOCKET CODEX_SHARED_ROLES; S="{ROOT / "libexec"}"; '
+                   f'. "$S/bus-common.sh"; S="{mechanism}"; bus_unblock_tick 1793556000')
+        for configuration, missing in (("CODEX_SHARED_ROLES=''\n", 'CODEX_CONTROL_SOCKET'),
+                                       ('CODEX_CONTROL_SOCKET=/fixture/control.sock\n', 'CODEX_SHARED_ROLES')):
+            with self.subTest(missing=missing):
+                self.conf.write_text(original + 'REPORT_THREAD=fixture\n' + configuration)
+                result = subprocess.run(['bash', '-c', command],
+                                        env=os.environ | {'BUS_CONF': str(self.conf), 'BUS_STATE_DIR': str(self.state)},
+                                        capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(missing, result.stderr)
+                self.assertFalse(marker.exists())
+                self.assertEqual(list(self.state.iterdir()), [])
+
     def test_host_matching_library_targets_are_deduplicated(self):
         coordinator = '00000000-0000-0000-0000-000000000001'
         art = '00000000-0000-0000-0000-000000000002'
@@ -138,8 +158,10 @@ DEPLOY_MODE=none
                                                   {'role': 'delivery-kit', 'ownership': 'held', 'thread_id': held}]}))
         mechanism = self.root / 'mechanism'
         mechanism.mkdir()
+        shutil.copyfile(ROOT / 'libexec/codex_adapter.py', mechanism / 'codex_adapter.py')
         (mechanism / 'unblock.py').write_text('import json,sys; print(json.dumps(sys.argv[1:]))\n')
         with self.conf.open('a') as stream:
+            stream.write('CODEX_CONTROL_SOCKET=/fixture/control.sock\nCODEX_SHARED_ROLES="art-kit delivery-kit game-kit"\n')
             stream.write(f'REPORT_THREAD={coordinator}\nSESSION_MAP_FILE="{mapping}"\nSHARED_TARGETS_FILE="{targets}"\n')
         command = f'S="{ROOT / "libexec"}"; . "$S/bus-common.sh"; S="{mechanism}"; bus_unblock_tick 1793556000'
         env = os.environ | {'BUS_CONF': str(self.conf), 'BUS_STATE_DIR': str(self.state)}

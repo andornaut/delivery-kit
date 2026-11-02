@@ -11,7 +11,7 @@ import socket
 import time
 import uuid
 
-CONTROL_SOCKET = Path.home() / ".codex/app-server-control/app-server-control.sock"
+from codex_adapter import control_socket_available
 
 
 class CapabilityError(Exception):
@@ -59,7 +59,7 @@ class Client:
             return message["result"]
 
 
-def connect(deadline):
+def connect(deadline, control_socket):
     try:
         import websocket
     except ModuleNotFoundError as error:
@@ -68,7 +68,7 @@ def connect(deadline):
     transport = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     transport.settimeout(min(5, max(0, deadline - time.monotonic())))
     try:
-        transport.connect(str(CONTROL_SOCKET))
+        transport.connect(str(control_socket))
         connection = websocket.create_connection("ws://localhost/", socket=transport, timeout=5)
     except Exception:
         transport.close()
@@ -258,7 +258,7 @@ def reconcile(client, path, coordinator, peers, slot):
     raise AssertionError("bounded attempt exhausted")
 
 
-def run(state_dir, coordinator, peers, slot):
+def run(state_dir, control_socket, coordinator, peers, slot):
     state_dir.mkdir(parents=True, exist_ok=True)
     path = state_dir / f"{coordinator}-{slot}.json"
     with (state_dir / "unblock.lock").open("a") as lock:
@@ -279,7 +279,9 @@ def run(state_dir, coordinator, peers, slot):
                          "reason": "explicit user-decision clearance missing or pending"}
                 persist(path, state)
                 return state
-            client = connect(time.monotonic() + 25)
+            if not control_socket_available(control_socket):
+                return {"status": "deferred", "reason": "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path"}
+            client = connect(time.monotonic() + 25, control_socket)
             return reconcile(client, path, coordinator, peers, slot)
         except Exception as error:
             # Never log queue contents, native error messages, or transport data.
@@ -303,8 +305,9 @@ def main():
     parser.add_argument("--peer", type=uuid.UUID, action="append", default=[])
     parser.add_argument("--slot", type=int, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--control-socket", type=Path)
     args = parser.parse_args()
-    state = run(args.state_dir, str(args.coordinator), [str(peer) for peer in args.peer], args.slot)
+    state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot)
     # Status only. Persisted queue IDs stay local for coordinator reconciliation.
     print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason") if key in state}))
     return 0 if state["status"] in ("accepted", "deduplicated", "busy") else 1
