@@ -19,8 +19,8 @@ CI_POLL_SECONDS=${CI_POLL_SECONDS:-60}
 CI_TIMEOUT_SECONDS=${CI_TIMEOUT_SECONDS:-1800}
 CI_REQUIRED_NAMES=${CI_REQUIRED_NAMES:-'AI attributions|Lint|Test'}
 case "$DEPLOY_MODE" in wrangler|none) ;; *) echo "bus: invalid DEPLOY_MODE" >&2; exit 2 ;; esac
-if (( CPUS > 4 || MAX_WORKERS > 4 )); then
-  echo "bus: CPUS and MAX_WORKERS must not exceed 4" >&2
+if [[ ! $CPUS =~ ^[1-4]$ || ! $MAX_WORKERS =~ ^[1-4]$ ]]; then
+  echo "bus: CPUS and MAX_WORKERS must be integers from 1 through 4" >&2
   exit 2
 fi
 if [ -n "$REMOTE" ]; then BASE=$REMOTE/$MAIN; else BASE=refs/heads/$MAIN; fi

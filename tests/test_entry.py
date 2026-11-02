@@ -104,10 +104,20 @@ DEPLOY_MODE=none
             self.assertEqual(self.call('check-config').returncode, 0)
         self.assertEqual(list(self.state.iterdir()), [])
 
-    def test_resource_caps_are_validated_without_starting_services(self):
-        with self.conf.open('a') as stream:
-            stream.write('CPUS=5\n')
-        self.assertEqual(self.call('check-config').returncode, 2)
+    def test_resource_caps_require_positive_bounded_integers_without_runtime_activity(self):
+        original = self.conf.read_text()
+        for key in ('CPUS', 'MAX_WORKERS'):
+            for value in ('0', '-1', '5', '1.5', 'invalid', '2+2', '', '04'):
+                with self.subTest(key=key, value=value):
+                    self.conf.write_text(original.replace(key + '=4', key + "='" + value + "'"))
+                    result = self.call('check-config')
+                    self.assertEqual(result.returncode, 2, result.stderr)
+            for value in ('1', '4'):
+                with self.subTest(key=key, value=value):
+                    self.conf.write_text(original.replace(key + '=4', key + '=' + value))
+                    result = self.call('check-config')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(self.state.iterdir()), [])
 
     def test_host_matching_library_targets_are_deduplicated(self):
         coordinator = '00000000-0000-0000-0000-000000000001'
