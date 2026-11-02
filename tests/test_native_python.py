@@ -74,7 +74,11 @@ class Transport:
 socket.socket=lambda *args,**kwargs: Transport()
 class Connection:
  def settimeout(self,*args): pass
- def send(self,message): self.message=json.loads(message)
+ def send(self,message):
+  self.message=json.loads(message)
+  if os.environ.get('RPC_CALLS'):
+   with open(os.environ['RPC_CALLS'],'a') as stream:
+    stream.write(json.dumps({'method':self.message['method'],'thread_id':self.message.get('params',{}).get('threadId')})+'\\n')
  def recv(self):
   method=self.message['method']; params=self.message.get('params',{})
   if method=='thread/queue/list':
@@ -132,6 +136,47 @@ else:
         self.assertEqual(self.wrapper_log.read_text().splitlines(), ['selected'] * 3)
         self.assertEqual([row['script'] for row in self.calls()], ['monitor.py', 'monitor.py', 'codex_adapter.py', 'unblock.py'])
         self.assertTrue(all(row['executable'] == '/usr/bin/python3' for row in self.calls()))
+
+    def test_routed_observer_uses_monitor_clearance_and_persistent_slot_deduplication(self):
+        monitor = '00000000-0000-0000-0000-000000000004'
+        route = self.root / 'monitor-route.json'
+        route.write_text(json.dumps({'version': 1, 'harness': 'codex',
+                                     'host_project_root': str(self.root), 'state': 'active',
+                                     'monitor_thread_id': monitor,
+                                     'targets': [{'thread_id': TECH, 'ownership': 'active'},
+                                                 {'thread_id': GAMEPLAY, 'ownership': 'active'}]}))
+        self.conf.write_text(self.original + f'MONITOR_ROUTE_FILE={route}\n')
+        rpc_log = self.root / 'rpc-calls'
+        self.env['RPC_CALLS'] = str(rpc_log)
+        twenty = int(subprocess.check_output(['date', '-d', '2026-11-02T14:20:00-05:00', '+%s'], text=True))
+        fifty = twenty + 1800
+        def observe(slot):
+            command = f'S="{ROOT / "libexec"}"; . "$S/bus-common.sh"; bus_monitor_due_ticks {slot-1} {slot+15}'
+            return subprocess.run(['/bin/bash', '-c', command], env=self.env | {
+                'BUS_CONF': str(self.conf), 'BUS_STATE_DIR': str(self.state)},
+                capture_output=True, text=True, timeout=5)
+        first = observe(twenty)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_receipt = json.loads((self.state / 'unblock' / f'{monitor}-{twenty}.json').read_text())
+        self.assertEqual(first_receipt['status'], 'deferred')
+        queues = json.loads(Path(first_receipt['snapshot_path']).read_text())['queues']
+        self.assertEqual(set(queues), {monitor, TECH, GAMEPLAY})
+        self.assertEqual(queues[TECH][0]['input'][0]['text'], 'PRIVATE_QUEUE_PAYLOAD')
+        calls = [json.loads(line) for line in rpc_log.read_text().splitlines()]
+        self.assertFalse(any(row['method'].startswith('turn/') for row in calls))
+        decision = self.state / 'unblock' / 'decisions' / (monitor + '.json')
+        decision.write_text(json.dumps({'thread_id': monitor, 'state': 'clear'}))
+        next_slot = observe(fifty)
+        self.assertEqual(next_slot.returncode, 0, next_slot.stderr)
+        self.assertIn('accepted', next_slot.stdout)
+        duplicate = observe(fifty)
+        self.assertIn('deduplicated', duplicate.stdout)
+        mutations = [row for row in (json.loads(line) for line in rpc_log.read_text().splitlines())
+                     if row['method'].startswith('turn/')]
+        self.assertEqual(mutations, [{'method': 'turn/steer', 'thread_id': monitor}])
+        receipt = json.loads((self.state / 'unblock' / f'{monitor}-{fifty}.json').read_text())
+        self.assertEqual(receipt['status'], 'accepted')
+        self.assertNotIn('PRIVATE_QUEUE_PAYLOAD', first.stdout + next_slot.stdout + duplicate.stdout)
 
     def test_invalid_declared_interpreter_never_falls_back_or_breaks_nonnative_config(self):
         nonexecutable = self.root / 'not-executable'
