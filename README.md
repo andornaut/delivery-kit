@@ -162,8 +162,11 @@ implicit default. Every configuration must explicitly set `DEPLOY_MODE=wrangler`
 or `DEPLOY_MODE=none`; missing, empty and removed values fail configuration
 validation before runtime activity. Both game consumers already explicitly use
 `wrangler`, so their deployment-mode configuration needs no change. Their tech
-owners must explicitly configure `CODEX_CONTROL_SOCKET` before optional Codex
-triage resumes, and configure `CODEX_SHARED_ROLES` on the shared-library host. `none` continues to disable
+owners must explicitly declare both `CODEX_CONTROL_SOCKET` and
+`CODEX_SHARED_ROLES` for every triage-enabled consumer before optional Codex
+triage resumes. Nonhosts set `CODEX_SHARED_ROLES=''` and
+`SHARED_TARGETS_FILE=''`, preserving art/gameplay peers without shared-library
+targets. `none` continues to disable
 deployment. Exact-commit `SKIP_GATE` behaviour, one-off requests, state files,
 locks and reporting are preserved.
 
