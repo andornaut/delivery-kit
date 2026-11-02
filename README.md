@@ -42,7 +42,10 @@ without native delivery or blocking departures; there is no home-directory defau
 `CODEX_SHARED_ROLES="art-kit delivery-kit game-kit"` for the game host; an empty
 list selects no shared roles. Leaving the variable unset defers optional triage
 until the caller explicitly chooses its allowed roles. Nonhosts may leave `SHARED_TARGETS_FILE` empty.
-The optional `codex_adapter.py` resolver preserves coordinator matching, distinct role identities, active ownership, host path matching and deduplication. Missing or invalid metadata defers triage. The guarded Codex adapter is unchanged: local decision clearance and native question history must both permit input; interrupted, ambiguous or unknown states defer. Its existing local control socket and queue delivery routes are unchanged. No live native connection is made by verification.
+The optional `codex_adapter.py` resolver preserves coordinator matching, distinct role identities, active ownership, host path matching and deduplication. Missing or invalid metadata defers triage. The guarded Codex adapter requires recipient-bound local decision clearance and
+native question history to permit input; interrupted, ambiguous or unknown states
+defer. Queue inventory and explicit acknowledgements operate independently of
+reminder delivery. No live native connection is made by verification.
 
 The optional Codex triage adapter retains the three-role game metadata schema and its coordinator reminder wording. That schema is an adapter contract, not a repository identifier. Other applications may omit reporting/triage rather than supplying fake identities.
 
@@ -179,3 +182,141 @@ Batch history-resolution failures report the skipped branch, `merge-base`
 operation, exit status and Git diagnostic. Valid branches in the same batch
 continue through integration and the existing gate. Inspect and requeue skipped
 work after fixing its reference or history.
+
+
+## 0.3.0 monitoring and recipient clearance
+
+This pre-1.0 minor release changes the optional monitor clearance contract.
+`STATE` below means the configured `--state-dir`. Each recipient's owner maintains
+`STATE/unblock/decisions/THREAD_UUID.json`:
+
+```json
+{
+  "thread_id": "00000000-0000-0000-0000-000000000001",
+  "state": "clear",
+  "resolutions": [
+    {
+      "question_turn_id": "question-turn-id",
+      "question_item_id": "question-item-id",
+      "answer_turn_id": "answer-turn-id",
+      "answer_item_id": "answer-item-id"
+    }
+  ]
+}
+```
+
+Use `pending` while that recipient awaits a user decision. Omit `resolutions` or
+use an empty list when no historical question needs an explicit answer attestation.
+Missing, malformed, mismatched or unknown records defer reminder delivery.
+The legacy `pending-user-decision.json` is neither read nor modified. One
+recipient's pending state cannot block or clear another. Peer clearance is not
+consulted merely to inventory that peer's queue.
+
+A resolution is the owner's explicit attestation of an actual answer, never a
+classification inferred from text. For the current turn, the monitor verifies the
+exact question item and an exact native `userMessage` answer item on the same
+recipient, using complete paginated history. Within one turn, the answer must
+follow the question in native ascending order. Older unrelated resolutions remain
+syntax-checked without fetching their old turns. Only the exact resolved question
+is exempted; another question, pending native active flags, incomplete history or
+unknown native item shapes still defer delivery. Native agent messages may omit
+`questions`, whose schema default is null. Nonempty questions require attestation;
+clear local state alone does not resolve them.
+
+The existing hourly cadence captures complete queue entries from every page before
+checking recipient questions or deciding whether to send a reminder. Each immutable
+`STATE/unblock/snapshots/SNAPSHOT_UUID.json` contains `queues`, keyed by exact
+recipient UUID, preserving each original `id`, `clientUserMessageId` and `input`.
+Files are local and readable; private payloads are never included in events or
+stdout. Snapshot files use owner-only permissions. An incomplete queue read is
+reported in `errors`, not treated as an empty queue.
+
+Obtain a snapshot independently of question clearance:
+
+```bash
+/path/to/snapshot/bin/delivery-kit \
+  --config /absolute/path/to/project/bus.conf \
+  --state-dir /absolute/path/to/project/bus-state \
+  --revision EXACT_COMMIT_SHA monitor-snapshot --recipient THREAD_UUID
+```
+
+Stdout identifies the snapshot path, ID, queue IDs and safe history metadata.
+`history[THREAD_UUID]` contains `status`, `complete`, `cursor`, `nextCursor`,
+`question_refs` (`turn_id`, `item_id`, `kind`: `rendered_prompt` or `question_tool`)
+and `user_reply_refs` (`turn_id`, `item_id`). Native conversation bodies are not
+stored. This is one bounded recent metadata page across that recipient's turns;
+`partial` or `unavailable` is explicit. To inspect an older reference page, repeat
+`monitor-snapshot --recipient THREAD_UUID --history-cursor NEXT_CURSOR`. Each
+invocation also captures the full queue again. IDs expose references only; they do
+not establish that a reply answers a question.
+
+After actual reconciliation, the owner explicitly acknowledges exact queued IDs:
+
+```bash
+/path/to/snapshot/bin/delivery-kit \
+  --config /absolute/path/to/project/bus.conf \
+  --state-dir /absolute/path/to/project/bus-state \
+  --revision EXACT_COMMIT_SHA monitor-ack --recipient THREAD_UUID \
+  --snapshot SNAPSHOT_UUID --queue-id QUEUED_ID --disposition handled
+```
+
+Repeat `--queue-id` for additional IDs; `superseded` also authorizes deletion.
+No automated semantic classification or arbitrary delivery JSON is accepted as
+proof. Independent work remains preserved unless explicitly retained without
+deletion or later acknowledged as handled/superseded; there is no blanket
+exclusion. An accepted reminder is not an acknowledgement. Explicit acknowledgement remains available during pending user
+questions and never steers/starts a turn or resolves/cancels a prompt.
+
+Before deleting, acknowledgement validates the recipient, snapshot and ID, then
+re-lists and compares the exact `input` and `clientUserMessageId` under the same ID.
+Changed payloads are preserved. There is no native compare-and-swap API: the
+comparison and deletion are sequential, not atomic. Concurrent queue editing is
+unsupported during acknowledgement. Only the explicitly acknowledged ID is deleted.
+
+Durable per-ID operations in `STATE/unblock/acks/` record disposition, attempts and
+outcome history before mutation. `deleted: true` records deletion; `false` requires
+an absence-confirming re-list or records `not_deleted`. Missing responses are
+`ambiguous`, with one read-only absence check and no automatic mutation retry.
+A fresh explicit invocation may retry after a fresh exact comparison, at most one
+delete per ID per invocation, preserving prior attempts. Already absent IDs are
+`confirmed_absent`, without claiming delivery or semantic handling beyond the
+owner's explicit acknowledgement.
+
+Monitor health is separate from reminder acceptance. Two distinct slots with an
+unchanged unacknowledged ID set or repeated deferral produce
+`monitor_status: failed`, an actionable reason and nonzero CLI status. Same-slot
+retries do not increment counters. Unchanged inventory already accepted as a
+reminder is not sent again. Health records in `STATE/unblock/health/` retain the
+latest snapshot and counters. The existing event outbox emits one actionable
+failure per unresolved episode, rather than a fresh event every hour; progress or
+a changed problem permits a new episode. Owners inspect the full local snapshot,
+classify/reconcile work and explicitly acknowledge handled IDs. No additional
+runner, schedule, timer or automatic queue deletion is introduced.
+
+
+To preserve planned independent work without treating it as a stuck backlog:
+
+```bash
+/path/to/snapshot/bin/delivery-kit \
+  --config /absolute/path/to/project/bus.conf \
+  --state-dir /absolute/path/to/project/bus-state \
+  --revision EXACT_COMMIT_SHA monitor-ack --recipient THREAD_UUID \
+  --snapshot SNAPSHOT_UUID --queue-id QUEUED_ID --disposition retained \
+  --reason "Independent work awaiting its owner"
+```
+
+`retained` requires a nonempty reason, exact snapshot/recipient/ID binding,
+and a fresh unchanged-payload comparison. It performs no native deletion or turn
+mutation. Durable local `STATE/unblock/retentions/` receipts preserve the reason,
+identity, payload binding and history. Full snapshots still retain every original
+entry. Only entries matching an active retention's exact input and client message
+ID are excluded from backlog health and repeated-reminder inventory. Changed
+payloads invalidate that match; unrelated unacknowledged entries still count.
+No automatic expiry or keyword classification applies.
+
+For later handling, capture a fresh snapshot and explicitly acknowledge `handled`
+or `superseded`. A per-snapshot acknowledgement's disposition is immutable, so use
+the new snapshot ID. The new deletion attempt invalidates the older retention
+before processing, including if deletion subsequently fails, while retaining its
+history. Native queue editing must remain quiescent during either kind of
+acknowledgement. This consistency requirement does not imply an atomic API.

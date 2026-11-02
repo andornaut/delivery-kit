@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 usage() {
-  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]|request-once --request-id SAFE_ID'
+  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]|request-once --request-id SAFE_ID|monitor-snapshot --recipient UUID|monitor-ack --recipient UUID --snapshot UUID --queue-id ID --disposition handled|superseded|retained [--reason REASON]'
 }
 if (( $# == 1 )) && [[ $1 == --help || $1 == help ]]; then
   usage
@@ -43,6 +43,14 @@ case "$command" in
     S=$ROOT/libexec
     . "$S/bus-common.sh"
     exec python3 "$S/request.py" "$BUS_DIR" "$REPO" capture "$2"
+    ;;
+  monitor-snapshot|monitor-ack)
+    S=$ROOT/libexec
+    . "$S/bus-common.sh"
+    action=snapshot
+    [[ $command == monitor-ack ]] && action=ack
+    exec python3 "$S/monitor.py" "$action" --state-dir "$BUS_DIR/unblock" \
+      --control-socket "${CODEX_CONTROL_SOCKET:-}" "$@"
     ;;
   scheduled-once) exec bash "$ROOT/libexec/scheduled-once.sh" "$@" ;;
   *) usage >&2; exit 2 ;;

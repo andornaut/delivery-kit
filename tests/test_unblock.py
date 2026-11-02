@@ -34,8 +34,8 @@ class Fixture:
         self.calls.append((method, params))
         if method == "thread/queue/list":
             if params.get("cursor"):
-                return {"data": [{"id": "queue-two", "input": ["private user content"]}]}
-            return {"data": [{"id": "queue-one", "input": ["private user content"]}], "nextCursor": "next"}
+                return {"data": [{"id": "queue-two", "clientUserMessageId": "user-two", "input": ["private user content"]}]}
+            return {"data": [{"id": "queue-one", "clientUserMessageId": "user-one", "input": ["private user content"]}], "nextCursor": "next"}
         if method == "thread/read":
             return {"thread": {"status": self.status, "canAcceptDirectInput": True}}
         if method == "thread/turns/list":
@@ -134,16 +134,19 @@ class UnblockTests(unittest.TestCase):
         client.call = call
         self.assertEqual(self.reconcile(client)["status"], "accepted")
 
-    def test_prior_accepted_or_interrupted_send_is_deduplicated_without_connecting(self):
+    def test_prior_accepted_or_interrupted_send_still_snapshots_without_resending(self):
         for status in ["accepted", "sending"]:
             with self.subTest(status=status):
                 path = Path(self.scratch.name) / f"{TECH}-100.json"
                 subject.persist(path, {"status": status})
-                with patch.object(subject, "connect") as connect:
+                fixture = Fixture()
+                with patch.object(subject, 'control_socket_available', return_value=True), \
+                        patch.object(subject, "connect", return_value=fixture):
                     result = subject.run(Path(self.scratch.name), Path("/fixture/control.sock"), TECH, [], 100)
                 self.assertEqual(result["status"], "deduplicated")
                 self.assertEqual(result["previousStatus"], "ambiguous" if status == "sending" else status)
-                connect.assert_not_called()
+                self.assertEqual(fixture.mutations(), [])
+                self.assertTrue(Path(result['snapshot_path']).is_file())
 
     def test_missing_malformed_mismatched_and_unknown_recipient_records_fail_closed(self):
         contents = [None, "not json", "[]", '{}',
@@ -157,10 +160,13 @@ class UnblockTests(unittest.TestCase):
                 if content is not None:
                     (directory / 'decisions' / f'{TECH}.json').write_text(content)
                 subject.persist(directory / 'pending-user-decision.json', {'state': 'clear'})
-                with patch.object(subject, "connect") as connect:
+                fixture = Fixture()
+                with patch.object(subject, 'control_socket_available', return_value=True), \
+                        patch.object(subject, "connect", return_value=fixture):
                     result = subject.run(directory, Path("/fixture/control.sock"), TECH, [], 100)
                 self.assertEqual(result["status"], "deferred")
-                connect.assert_not_called()
+                self.assertEqual(fixture.mutations(), [])
+                self.assertIn(TECH, json.loads(Path(result['snapshot_path']).read_text())['queues'])
                 self.assertEqual(json.loads((directory / 'pending-user-decision.json').read_text()), {'state': 'clear'})
 
     def test_art_pending_does_not_block_tech_clear_or_modify_legacy_evidence(self):
@@ -181,7 +187,7 @@ class UnblockTests(unittest.TestCase):
         subject.persist(self.decision, {"thread_id": TECH, "state": "pending"})
         client = Fixture()
         self.assertEqual(self.reconcile(client)["status"], "deferred")
-        self.assertEqual(client.calls, [])
+        self.assertEqual(client.mutations(), [])
 
     def test_marker_is_rechecked_after_metadata_before_native_mutation(self):
         client = Fixture()
@@ -216,7 +222,6 @@ class UnblockTests(unittest.TestCase):
             {}, {"data": [], "truncated": True}, {"data": [], "nextCursor": ""},
             {"data": [{"turnId": "other", "item": {"id": "x", "type": "userMessage"}}]},
             {"data": [{"turnId": "turn-one", "item": {"id": "x", "type": "contextCompaction"}}]},
-            {"data": [{"turnId": "turn-one", "item": {"id": "x", "type": "agentMessage"}}]},
             {"data": [{"turnId": "turn-one", "item": {"id": "x", "type": "unknown"}}]},
             {"data": [{"turnId": "turn-one", "item": {
                 "id": "x", "type": "dynamicToolCall", "tool": "request_user_input_async", "status": "completed",
@@ -279,6 +284,70 @@ class UnblockTests(unittest.TestCase):
         client = subject.Client(connection, time.monotonic() + 25)
         self.assertEqual(client.call("thread/queue/list", {"threadId": TECH}), {"data": []})
         self.assertEqual(connection.send.call_count, 1)
+
+    def test_omitted_optional_questions_defaults_to_no_question(self):
+        client = Fixture()
+        original = client.call
+        def call(method, params):
+            if method == 'thread/items/list':
+                return {'data': [{'turnId': 'turn-one', 'item': {'id': 'message', 'type': 'agentMessage', 'text': 'fixture'}}]}
+            return original(method, params)
+        client.call = call
+        self.assertEqual(self.reconcile(client)['status'], 'accepted')
+
+    def test_exact_answer_attestation_resolves_only_its_bound_question(self):
+        resolution = {'question_turn_id': 'turn-one', 'question_item_id': 'question',
+                      'answer_turn_id': 'answer-turn', 'answer_item_id': 'answer'}
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear', 'resolutions': [resolution]})
+        def fixture(answer_type='userMessage', answer_turn='answer-turn', extra_question=False):
+            client = Fixture()
+            original = client.call
+            def call(method, params):
+                if method == 'thread/items/list':
+                    self.assertEqual(params['threadId'], TECH)
+                    if params['turnId'] == 'answer-turn':
+                        return {'data': [{'turnId': answer_turn, 'item': {'id': 'answer', 'type': answer_type}}]}
+                    items = [{'turnId': 'turn-one', 'item': {'id': 'question', 'type': 'agentMessage', 'questions': [{'title': 'choose'}]}}]
+                    if extra_question:
+                        items.append({'turnId': 'turn-one', 'item': {'id': 'new-question', 'type': 'dynamicToolCall', 'tool': 'request_user_input'}})
+                    return {'data': items}
+                return original(method, params)
+            client.call = call
+            return client
+        self.assertEqual(self.reconcile(fixture())['status'], 'accepted')
+        for client in (fixture(answer_type='agentMessage'), fixture(answer_turn='wrong-turn'), fixture(answer_type='unknown'), fixture(extra_question=True)):
+            self.assertEqual(self.reconcile(client)['status'], 'deferred')
+            self.assertEqual(client.mutations(), [])
+        for changed in ([resolution, resolution], [resolution | {'answer_item_id': 'missing'}],
+                        [resolution | {'answer_turn_id': ''}]):
+            subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear', 'resolutions': changed})
+            client = fixture()
+            self.assertEqual(self.reconcile(client)['status'], 'deferred')
+            self.assertEqual(client.mutations(), [])
+
+    def test_unrelated_old_resolution_does_not_fetch_or_poison_current_clear_turn(self):
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear', 'resolutions': [
+            {'question_turn_id': 'old-unavailable', 'question_item_id': 'old-question',
+             'answer_turn_id': 'old-answer', 'answer_item_id': 'old-reply'}]})
+        client = Fixture()
+        self.assertEqual(self.reconcile(client)['status'], 'accepted')
+        self.assertTrue(all(params.get('turnId') in (None, 'turn-one') for method, params in client.calls if method == 'thread/items/list'))
+
+    def test_same_turn_answer_must_follow_exact_question(self):
+        resolution = {'question_turn_id': 'turn-one', 'question_item_id': 'question',
+                      'answer_turn_id': 'turn-one', 'answer_item_id': 'answer'}
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear', 'resolutions': [resolution]})
+        for answer_first in (True, False):
+            client = Fixture()
+            original = client.call
+            def call(method, params):
+                if method == 'thread/items/list':
+                    items = [{'turnId': 'turn-one', 'item': {'id': 'question', 'type': 'agentMessage', 'questions': [{}]}},
+                             {'turnId': 'turn-one', 'item': {'id': 'answer', 'type': 'userMessage'}}]
+                    return {'data': items[::-1] if answer_first else items}
+                return original(method, params)
+            client.call = call
+            self.assertEqual(self.reconcile(client)['status'], 'deferred' if answer_first else 'accepted')
 
 
 if __name__ == "__main__":

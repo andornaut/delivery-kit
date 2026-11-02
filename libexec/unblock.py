@@ -12,6 +12,15 @@ import time
 import uuid
 
 from codex_adapter import control_socket_available
+from monitor import accepted_inventory, capture, locked, record_health
+
+
+NATIVE_ITEM_TYPES = {
+    'agentMessage', 'collabAgentToolCall', 'commandExecution', 'dynamicToolCall',
+    'enteredReviewMode', 'exitedReviewMode', 'fileChange', 'functionCallOutput',
+    'hookPrompt', 'imageGeneration', 'imageView', 'mcpToolCall', 'plan',
+    'reasoning', 'sleep', 'subAgentActivity', 'userMessage', 'webSearch',
+}
 
 
 class CapabilityError(Exception):
@@ -101,82 +110,111 @@ def persist(path, state):
         os.close(descriptor)
 
 
-def decision_clear(state_dir, recipient):
-    # Clearance belongs to exactly one canonical thread UUID, never to another recipient.
+def decision_record(state_dir, recipient):
     try:
         if str(uuid.UUID(recipient)) != recipient:
-            return False
+            return None
         marker = json.loads((state_dir / "decisions" / f"{recipient}.json").read_text())
+        if not isinstance(marker, dict) or marker.get('thread_id') != recipient:
+            return None
+        resolutions = marker.get('resolutions', [])
+        if not isinstance(resolutions, list):
+            return None
+        seen = set()
+        for resolution in resolutions:
+            fields = ('question_turn_id', 'question_item_id', 'answer_turn_id', 'answer_item_id')
+            if (not isinstance(resolution, dict)
+                    or any(not isinstance(resolution.get(field), str) or not resolution[field] for field in fields)):
+                return None
+            reference = (resolution['question_turn_id'], resolution['question_item_id'])
+            if reference in seen:
+                return None
+            seen.add(reference)
+        return marker
     except (OSError, ValueError, TypeError, AttributeError):
-        return False
-    return (isinstance(marker, dict) and marker.get("thread_id") == recipient
-            and marker.get("state") == "clear")
+        return None
 
 
-def queue_ids(client, thread):
-    identifiers = []
-    cursors = set()
+def decision_clear(state_dir, recipient):
+    marker = decision_record(state_dir, recipient)
+    return marker is not None and marker.get('state') == 'clear'
+
+
+def question_item(item):
+    if item['type'] == 'agentMessage':
+        # Omitted questions default to null in the native schema.
+        return item.get('questions') not in (None, [])
+    if item['type'] in ('dynamicToolCall', 'functionCallOutput'):
+        tool = str(item.get('tool', item.get('name', ''))).lower().replace('_', '')
+        return any(name in tool for name in ('requestuserinput', 'askuserquestion', 'elicitation'))
+    return False
+
+
+def native_items(client, recipient, turn_id):
     cursor = None
+    cursors = set()
+    items = {}
     while True:
-        params = {"threadId": thread, "limit": 100}
+        params = {'threadId': recipient, 'turnId': turn_id, 'limit': 100, 'sortDirection': 'asc'}
         if cursor is not None:
-            params["cursor"] = cursor
-        page = client.call("thread/queue/list", params)
-        identifiers.extend(entry["id"] for entry in page["data"])
-        cursor = page.get("nextCursor")
+            params['cursor'] = cursor
+        page = client.call('thread/items/list', params)
+        if (not isinstance(page, dict) or not isinstance(page.get('data'), list)
+                or page.get('truncated') or page.get('hasMore')):
+            raise ValueError('native item history incomplete')
+        for entry in page['data']:
+            if not isinstance(entry, dict) or entry.get('turnId') != turn_id:
+                raise ValueError('native turn identity mismatch')
+            item = entry.get('item')
+            if (not isinstance(item, dict) or not isinstance(item.get('id'), str)
+                    or not item['id'] or item.get('type') not in NATIVE_ITEM_TYPES):
+                raise ValueError('unknown native item')
+            if item['type'] == 'mcpToolCall' and item.get('status') != 'completed':
+                raise ValueError('native tool incomplete')
+            if item['id'] in items:
+                raise ValueError('duplicate native item')
+            items[item['id']] = item
+        cursor = page.get('nextCursor')
         if cursor is None:
-            return list(dict.fromkeys(identifiers))
-        if cursor in cursors:
-            raise ValueError("queue pagination did not advance")
+            return items
+        if not isinstance(cursor, str) or not cursor or cursor in cursors:
+            raise ValueError('native pagination incomplete')
         cursors.add(cursor)
 
 
-def native_questions_clear(client, coordinator, turn_id):
-    cursor = None
-    cursors = set()
-    known = {
-        "agentMessage", "commandExecution", "dynamicToolCall", "enteredReviewMode",
-        "exitedReviewMode", "fileChange", "functionCallOutput", "hookPrompt", "imageGeneration",
-        "imageView", "mcpToolCall", "plan", "reasoning", "sleep", "subAgentActivity",
-        "collabAgentToolCall", "userMessage", "webSearch",
-    }
+def native_questions_clear(client, state_dir, recipient, turn_id):
     try:
-        while True:
-            params = {"threadId": coordinator, "turnId": turn_id, "limit": 100, "sortDirection": "asc"}
-            if cursor is not None:
-                params["cursor"] = cursor
-            page = client.call("thread/items/list", params)
-            if not isinstance(page, dict) or not isinstance(page.get("data"), list):
-                return False
-            if page.get("truncated") or page.get("hasMore"):
-                return False
-            for entry in page["data"]:
-                if not isinstance(entry, dict) or entry.get("turnId") != turn_id:
-                    return False
-                item = entry.get("item")
-                if not isinstance(item, dict) or not item.get("id") or item.get("type") not in known:
-                    return False
-                if item["type"] == "agentMessage":
-                    # The native schema has no resolved-question linkage. Do not infer an answer.
-                    if "questions" not in item or item["questions"] not in (None, []):
-                        return False
-                if item["type"] in ("dynamicToolCall", "functionCallOutput"):
-                    tool = str(item.get("tool", item.get("name", ""))).lower().replace("_", "")
-                    if "requestuserinput" in tool or "askuserquestion" in tool or "elicitation" in tool:
-                        return False
-                if item["type"] == "mcpToolCall" and item.get("status") != "completed":
-                    return False
-            cursor = page.get("nextCursor")
-            if cursor is None:
-                return True
-            if not isinstance(cursor, str) or not cursor or cursor in cursors:
-                return False
-            cursors.add(cursor)
+        record = decision_record(state_dir, recipient)
+        if record is None:
+            return False, 'recipient resolution record missing or invalid'
+        pages = {turn_id: native_items(client, recipient, turn_id)}
+        resolved = set()
+        for resolution in record.get('resolutions', []):
+            if resolution['question_turn_id'] != turn_id:
+                continue
+            question_turn = resolution['question_turn_id']
+            answer_turn = resolution['answer_turn_id']
+            for selected_turn in (question_turn, answer_turn):
+                if selected_turn not in pages:
+                    pages[selected_turn] = native_items(client, recipient, selected_turn)
+            question = pages[question_turn].get(resolution['question_item_id'])
+            answer = pages[answer_turn].get(resolution['answer_item_id'])
+            if question is None or not question_item(question) or answer is None or answer['type'] != 'userMessage':
+                return False, 'recipient question resolution cannot be verified by exact native IDs'
+            if question_turn == answer_turn:
+                order = list(pages[question_turn])
+                if order.index(answer['id']) <= order.index(question['id']):
+                    return False, 'recipient answer item must follow its question in the same native turn'
+            resolved.add((question_turn, question['id']))
+        for item in pages[turn_id].values():
+            if question_item(item) and (turn_id, item['id']) not in resolved:
+                return False, f'native question pending: question_turn_id={turn_id} question_item_id={item["id"]}'
+        return True, None
     except Exception:
-        return False
+        return False, 'native question history incomplete or unknown'
 
 
-def target(client, coordinator):
+def target(client, state_dir, coordinator):
     thread = client.call("thread/read", {"threadId": coordinator, "includeTurns": False})["thread"]
     status = thread.get("status", {})
     if thread.get("canAcceptDirectInput") is not True:
@@ -187,8 +225,10 @@ def target(client, coordinator):
         "threadId": coordinator, "limit": 1, "itemsView": "notLoaded", "sortDirection": "desc",
     })["data"]
     latest = turns[0] if turns else None
-    if latest and not native_questions_clear(client, coordinator, latest["id"]):
-        return None, "native question history pending, incomplete, or unknown"
+    if latest:
+        clear, reason = native_questions_clear(client, state_dir, coordinator, latest['id'])
+        if not clear:
+            return None, reason
     if status.get("type") == "active" and latest and latest["status"] == "inProgress":
         return {"method": "turn/steer", "expectedTurnId": latest["id"]}, None
     if status.get("type") == "idle" and latest and latest["status"] == "completed":
@@ -196,7 +236,7 @@ def target(client, coordinator):
     return None, "coordinator state ambiguous or interrupted; no automatic resume"
 
 
-def reminder(slot, queues):
+def reminder(slot, queues, snapshot_path):
     inventory = "\n".join(f"{thread}: {','.join(ids) if ids else 'none'}" for thread, ids in queues.items())
     return (
         f"Hourly unblock review, scheduled slot {slot}. Review recent Art, Gameplay and Tech activity "
@@ -205,27 +245,41 @@ def reminder(slot, queues):
         "original only after confirmed delivery or reconciliation. Preserve unanswered questions and "
         "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner "
         "question. Report only new or unresolved blockers. This is a triage reminder, not permission "
-        "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n" + inventory
+        "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n"
+        + f"Full local inventory: {snapshot_path}\n" + inventory
     )
 
 
-def reconcile(client, path, coordinator, peers, slot):
-    if not decision_clear(path.parent, coordinator):
-        state = {"status": "deferred", "slot": slot,
-                 "reason": "recipient-bound user-decision clearance missing, invalid or pending"}
+def reconcile(client, path, coordinator, peers, slot, snapshot=None):
+    if snapshot is None:
+        snapshot = capture(client, path.parent, [coordinator, *peers], slot)
+    queues = {thread: [entry['id'] for entry in entries]
+              for thread, entries in snapshot['queues'].items()}
+    state = {"coordinator": coordinator, "slot": slot, "queues": queues,
+             "snapshot_id": snapshot['snapshot_id'],
+             "snapshot_path": str(path.parent / 'snapshots' / (snapshot['snapshot_id'] + '.json')),
+             "requestId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"hourly-unblock:{coordinator}:{slot}"))}
+    if snapshot['errors']:
+        state.update(status='deferred', reason='queue inventory incomplete; inspect snapshot and retry reconciliation')
         persist(path, state)
         return state
-    queues = {thread: queue_ids(client, thread) for thread in dict.fromkeys([coordinator, *peers])}
-    state = {"coordinator": coordinator, "slot": slot, "queues": queues,
-             "requestId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"hourly-unblock:{coordinator}:{slot}"))}
-    text = reminder(slot, queues)
+    if not decision_clear(path.parent, coordinator):
+        state.update(status='deferred', reason='recipient-bound user-decision clearance missing, invalid or pending')
+        persist(path, state)
+        return state
+    if accepted_inventory(path.parent, coordinator, snapshot):
+        state.update(status='unchanged', reason='inventory already reminded or explicitly retained; reconcile any remaining unacknowledged work')
+        persist(path, state)
+        return state
+    text = reminder(slot, queues, state["snapshot_path"])
     for attempt in range(2):
-        selected, reason = target(client, coordinator)
+        clearance = decision_record(path.parent, coordinator)
+        selected, reason = target(client, path.parent, coordinator)
         if selected is None:
             state.update(status="deferred", reason=reason)
             persist(path, state)
             return state
-        if not decision_clear(path.parent, coordinator):
+        if not decision_clear(path.parent, coordinator) or decision_record(path.parent, coordinator) != clearance:
             state.update(status="deferred", reason="recipient-bound user-decision clearance missing, invalid or pending")
             persist(path, state)
             return state
@@ -269,23 +323,34 @@ def run(state_dir, control_socket, coordinator, peers, slot):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return {"status": "busy"}
-        if path.exists():
-            state = json.loads(path.read_text())
-            if state["status"] == "sending":
-                state.update(status="ambiguous", reason="previous send interrupted; do not resend")
-                persist(path, state)
-            return {"status": "deduplicated", "previousStatus": state["status"]}
         client = None
+        snapshot = None
         try:
-            if not decision_clear(state_dir, coordinator):
-                state = {"status": "deferred", "slot": slot,
-                         "reason": "recipient-bound user-decision clearance missing, invalid or pending"}
-                persist(path, state)
-                return state
             if not control_socket_available(control_socket):
-                return {"status": "deferred", "reason": "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path"}
+                with locked(state_dir):
+                    snapshot = capture(None, state_dir, [coordinator, *peers], slot)
+                state = {"status": "deferred", "reason": "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path"}
+                state.update(record_health(state_dir, coordinator, slot, snapshot, state))
+                state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
+                return state
             client = connect(time.monotonic() + 25, control_socket)
-            return reconcile(client, path, coordinator, peers, slot)
+            # Inventory precedes decision guards and reminder deduplication.
+            with locked(state_dir):
+                snapshot = capture(client, state_dir, [coordinator, *peers], slot)
+            if path.exists():
+                previous = json.loads(path.read_text())
+                if previous["status"] == "sending":
+                    previous.update(status="ambiguous", reason="previous send interrupted; do not resend")
+                    persist(path, previous)
+                state = {"status": "deduplicated", "previousStatus": previous['status']}
+                health_outcome = state | {"reason": previous.get("reason")}
+            else:
+                state = reconcile(client, path, coordinator, peers, slot, snapshot)
+                health_outcome = state
+            state.update(record_health(state_dir, coordinator, slot, snapshot, health_outcome))
+            state['snapshot_id'] = snapshot['snapshot_id']
+            state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
+            return state
         except Exception as error:
             # Never log queue contents, native error messages, or transport data.
             if path.exists():
@@ -296,6 +361,11 @@ def run(state_dir, control_socket, coordinator, peers, slot):
                 reason = str(error) if isinstance(error, CapabilityError) else "native metadata unavailable"
                 state = {"status": "blocked", "slot": slot, "reason": reason}
             persist(path, state)
+            if snapshot is None:
+                with locked(state_dir):
+                    snapshot = capture(None, state_dir, [coordinator, *peers], slot)
+            state.update(record_health(state_dir, coordinator, slot, snapshot, state))
+            state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
             return state
         finally:
             if client is not None:
@@ -312,8 +382,8 @@ def main():
     args = parser.parse_args()
     state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot)
     # Status only. Persisted queue IDs stay local for coordinator reconciliation.
-    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason") if key in state}))
-    return 0 if state["status"] in ("accepted", "deduplicated", "busy") else 1
+    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
+    return 0 if state["status"] in ("accepted", "deduplicated", "unchanged", "busy") and state.get("monitor_status") != "failed" else 1
 
 
 if __name__ == "__main__":
