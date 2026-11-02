@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import sys
 import time
 import uuid
 
@@ -72,7 +73,11 @@ def connect(deadline, control_socket):
     try:
         import websocket
     except ModuleNotFoundError as error:
-        raise CapabilityError("websocket-client unavailable for /usr/bin/python3") from error
+        executable = re.sub(r"[\x00-\x1f\x7f]", "?", sys.executable)
+        raise CapabilityError(
+            f"websocket-client unavailable in native interpreter {executable}; "
+            "provide websocket-client in this interpreter or select CODEX_PYTHON with that dependency"
+        ) from error
 
     transport = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     transport.settimeout(min(5, max(0, deadline - time.monotonic())))

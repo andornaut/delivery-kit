@@ -333,3 +333,21 @@ are preserved without increment until a successful observation. Same-slot retrie
 do not increment an unchanged item's age. `backlog_slots` reports the maximum
 current item age. Older health records without per-item history begin with the
 first actual observation; aggregate counters do not manufacture item history.
+
+
+### 0.3.2 native Python interpreter
+
+`CODEX_PYTHON` selects the absolute executable Python interpreter for public
+`monitor-snapshot`/`monitor-ack` and scheduled Codex resolver/reminder entry points.
+Its default is `/usr/bin/python3`; examples declare that value explicitly. There
+is no PATH fallback. The selected interpreter must provide `websocket-client`.
+Capability errors identify the actual interpreter and missing dependency without
+exposing transport error bodies or queued payloads.
+
+Interpreter validation occurs only at a native boundary. An unset value uses the
+default; an explicitly empty, relative, missing or non-executable value is refused.
+Public monitor commands report failure. Optional scheduled triage reports an
+actionable deferral while the scheduler continues. Pure-Python request and CI
+scripts retain their existing interpreter selection. Library verification uses
+isolated fake transports and does not probe a live native service or install a
+dependency.

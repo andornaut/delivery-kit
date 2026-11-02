@@ -346,7 +346,7 @@ def main():
     if args.disposition == 'retained' and not (args.reason and args.reason.strip()):
         parser.error('retained requires --reason')
     from codex_adapter import control_socket_available
-    from unblock import connect
+    from unblock import CapabilityError, connect
     if not control_socket_available(args.control_socket):
         print(json.dumps({'status': 'unavailable', 'reason': 'configure an available absolute CODEX_CONTROL_SOCKET'}))
         return 1
@@ -364,6 +364,9 @@ def main():
         results = acknowledge(client, args.state_dir, args.recipient, args.snapshot, args.queue_id, args.disposition, args.reason)
         print(json.dumps({'results': results}))
         return int(any(row['state'] not in ('deleted', 'confirmed_absent', 'retained') for row in results))
+    except CapabilityError as error:
+        print(json.dumps({'status': 'unavailable', 'reason': str(error)}))
+        return 1
     except Exception:
         print(json.dumps({'status': 'unavailable', 'reason': 'inspect local monitor state and retry explicit reconciliation'}))
         return 1

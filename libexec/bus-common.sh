@@ -18,6 +18,7 @@ export BUS_CONF BUS_STATE_DIR
 CI_POLL_SECONDS=${CI_POLL_SECONDS:-60}
 CI_TIMEOUT_SECONDS=${CI_TIMEOUT_SECONDS:-1800}
 CI_REQUIRED_NAMES=${CI_REQUIRED_NAMES:-'AI attributions|Lint|Test'}
+CODEX_PYTHON=${CODEX_PYTHON-/usr/bin/python3}
 case "$DEPLOY_MODE" in wrangler|none) ;; *) echo "bus: invalid DEPLOY_MODE" >&2; exit 2 ;; esac
 if [[ ! $CPUS =~ ^[1-4]$ || ! $MAX_WORKERS =~ ^[1-4]$ ]]; then
   echo "bus: CPUS and MAX_WORKERS must be integers from 1 through 4" >&2
@@ -127,6 +128,13 @@ bus_event() {
   bus_dispatch
 }
 
+codex_python_ready() {
+  if [[ $CODEX_PYTHON != /* || ! -f $CODEX_PYTHON || ! -x $CODEX_PYTHON ]]; then
+    echo 'bus: set CODEX_PYTHON to an absolute executable native Python interpreter with websocket-client' >&2
+    return 1
+  fi
+}
+
 # Native hourly triage shares the existing departure/observer tick and helper deduplication.
 bus_unblock_tick() {
   local slot peers_text result peer status=0
@@ -144,7 +152,8 @@ bus_unblock_tick() {
     echo "bus: hourly unblock $slot deferred: set CODEX_SHARED_ROLES to allowed shared roles (or explicitly empty for a nonhost)" >&2
     return 0
   fi
-  if ! peers_text=$(/usr/bin/python3 "$S/codex_adapter.py" \
+  codex_python_ready || return 0
+  if ! peers_text=$("$CODEX_PYTHON" "$S/codex_adapter.py" \
     "${SESSION_MAP_FILE:-}" "$REPORT_THREAD" "${SHARED_TARGETS_FILE:-}" \
     "$REPO" "${CODEX_SHARED_ROLES:-}"); then
     echo "bus: hourly unblock $slot unavailable: project session map invalid" >&2
@@ -152,7 +161,7 @@ bus_unblock_tick() {
   fi
   mapfile -t peers <<<"$peers_text"
   for peer in "${peers[@]}"; do peer_args+=(--peer "$peer"); done
-  result=$(/usr/bin/python3 "$S/unblock.py" --coordinator "$REPORT_THREAD" \
+  result=$("$CODEX_PYTHON" "$S/unblock.py" --coordinator "$REPORT_THREAD" \
     "${peer_args[@]}" --slot "$slot" --control-socket "$CODEX_CONTROL_SOCKET" \
     --state-dir "$BUS_DIR/unblock" 2>/dev/null) || status=$?
   if [ -n "$result" ]; then

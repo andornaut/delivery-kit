@@ -47,9 +47,10 @@ case "$command" in
   monitor-snapshot|monitor-ack)
     S=$ROOT/libexec
     . "$S/bus-common.sh"
+    codex_python_ready || exit 2
     action=snapshot
     [[ $command == monitor-ack ]] && action=ack
-    exec python3 "$S/monitor.py" "$action" --state-dir "$BUS_DIR/unblock" \
+    exec "$CODEX_PYTHON" "$S/monitor.py" "$action" --state-dir "$BUS_DIR/unblock" \
       --control-socket "${CODEX_CONTROL_SOCKET:-}" "$@"
     ;;
   scheduled-once) exec bash "$ROOT/libexec/scheduled-once.sh" "$@" ;;
