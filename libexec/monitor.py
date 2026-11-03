@@ -136,8 +136,72 @@ def history_refs(client, recipient, cursor=None):
     return result
 
 
-def capture(client, state_dir, recipients, slot=None, history_cursor=None):
-    record = {'snapshot_id': str(uuid.uuid4()), 'queues': {}, 'errors': {}, 'history': {}}
+def scoped_parents(parents):
+    parents = [canonical_uuid(parent) for parent in parents]
+    if len(parents) != len(set(parents)):
+        raise ValueError('duplicate parent UUID')
+    if not parents:
+        return parents
+    try:
+        from codex_adapter import resolve_route
+        route_file = os.environ.get('MONITOR_ROUTE_FILE', '')
+        if not Path(route_file).is_absolute():
+            raise ValueError('absolute route required')
+        declared = json.loads(Path(route_file).read_text())
+        route = resolve_route(route_file, declared['host_project_root'])
+        if route.get('status') != 'active':
+            raise ValueError('active route required')
+        allowed = {route['coordinator'], *route['peers']}
+        if any(parent not in allowed for parent in parents):
+            raise ValueError('parent outside active route')
+    except Exception as error:
+        raise ValueError('worker parents require membership in an active MONITOR_ROUTE_FILE') from error
+    return parents
+
+
+def worker_health(client, parents):
+    parents = scoped_parents(parents)
+    if not parents:
+        return {}
+    try:
+        from child_health import collect
+        result = collect(client, parents)
+        if not isinstance(result, dict):
+            raise ValueError('invalid collector result')
+    except Exception:
+        result = {}
+    unavailable = {'status': 'unavailable', 'schema_status': 'unavailable',
+                   'complete': False, 'children': [],
+                   'diagnostics': [{'reason_code': 'collector_unavailable'}]}
+    return {parent: (result[parent] if isinstance(result.get(parent), dict)
+                     and result[parent].get('status') in ('complete', 'partial', 'unavailable')
+                     and isinstance(result[parent].get('children'), list) else unavailable)
+            for parent in parents}
+
+
+def worker_failures(snapshot):
+    references = set()
+    for parent, health in snapshot.get('worker_health', {}).items():
+        for child in health.get('children', []):
+            if (child.get('parent_id') == parent and child.get('lineage_verified') is True
+                    and child.get('requires_parent_action') is True
+                    and child.get('turn_status') == 'failed'
+                    and all(isinstance(child.get(field), str) and child[field]
+                            for field in ('child_id', 'turn_id', 'error_code'))):
+                references.add((parent, child['child_id'], child['turn_id'], child['error_code']))
+    return [list(reference) for reference in sorted(references)]
+
+
+def pending_worker_failures(state_dir, recipient, snapshot):
+    path = state_dir / 'health' / (recipient + '.json')
+    record = json.loads(path.read_text()) if path.exists() else {}
+    accepted = record.get('accepted_worker_failures', [])
+    return [reference for reference in worker_failures(snapshot) if reference not in accepted]
+
+
+def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, parents=()):
+    record = {'snapshot_id': str(uuid.uuid4()), 'queues': {}, 'errors': {}, 'history': {},
+              'worker_health': worker_health(client, parents)}
     if slot is not None:
         record['slot'] = slot
     for recipient in dict.fromkeys(recipients):
@@ -191,6 +255,8 @@ def inventory_signature(state_dir, snapshot):
 
 
 def accepted_inventory(state_dir, recipient, snapshot):
+    if pending_worker_failures(state_dir, recipient, snapshot):
+        return False
     queues, retained = unacknowledged(state_dir, snapshot)
     if retained and not any(queues.values()) and not snapshot['errors']:
         return True
@@ -244,8 +310,16 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
         record['deferral_slots'] = 0
     if outcome['status'] == 'accepted':
         record['accepted_signature'] = inventory_signature(state_dir, snapshot)
+        # Delivery acceptance deduplicates reminders, never recovery or queue handling.
+        record['accepted_worker_failures'] = sorted({
+            tuple(reference) for reference in record.get('accepted_worker_failures', [])
+        } | {tuple(reference) for reference in worker_failures(snapshot)})
     failed = max(record.get('backlog_slots', 0), record.get('deferral_slots', 0)) >= 2
-    health = {'monitor_status': 'failed' if failed else 'degraded' if degraded else 'ok',
+    workers_degraded = any(health.get('status') != 'complete' or health.get('complete') is not True
+                           or health.get('schema_status') in ('unknown', 'unavailable')
+                           for health in snapshot.get('worker_health', {}).values())
+    health = {'worker_health_status': 'degraded' if workers_degraded else 'ok',
+              'monitor_status': 'failed' if failed else 'degraded' if degraded else 'ok',
               'history_status': 'degraded' if degraded else 'ok', 'recipient': recipient,
               'snapshot_id': snapshot['snapshot_id'],
               'backlog_slots': record.get('backlog_slots', 0),
@@ -384,10 +458,15 @@ def main():
     parser.add_argument('--recipient', type=canonical_uuid, required=True)
     parser.add_argument('--snapshot', type=canonical_uuid)
     parser.add_argument('--history-cursor')
+    parser.add_argument('--parent', type=canonical_uuid, action='append', default=[])
     parser.add_argument('--queue-id', action='append', default=[])
     parser.add_argument('--disposition', choices=('handled', 'superseded', 'retained'))
     parser.add_argument('--reason')
     args = parser.parse_args()
+    try:
+        args.parent = scoped_parents(args.parent)
+    except ValueError as error:
+        parser.error(str(error))
     if args.command == 'ack' and (not args.snapshot or not args.queue_id or not args.disposition):
         parser.error('ack requires --snapshot, --queue-id and --disposition')
     if args.disposition == 'retained' and not (args.reason and args.reason.strip()):
@@ -402,11 +481,12 @@ def main():
         client = connect(time.monotonic() + 25, args.control_socket)
         if args.command == 'snapshot':
             with locked(args.state_dir):
-                snapshot = capture(client, args.state_dir, [args.recipient], history_cursor=args.history_cursor)
+                snapshot = capture(client, args.state_dir, [args.recipient], history_cursor=args.history_cursor, parents=args.parent)
             print(json.dumps({'snapshot_id': snapshot['snapshot_id'],
                               'path': str(args.state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json')),
                               'queue_ids': [entry['id'] for entry in snapshot['queues'].get(args.recipient, [])],
-                              'complete': not snapshot['errors'], 'history': snapshot['history']}))
+                              'complete': not snapshot['errors'], 'history': snapshot['history'],
+                              'worker_health': snapshot['worker_health']}))
             return int(bool(snapshot['errors']))
         results = acknowledge(client, args.state_dir, args.recipient, args.snapshot, args.queue_id, args.disposition, args.reason)
         print(json.dumps({'results': results}))

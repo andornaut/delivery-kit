@@ -528,3 +528,47 @@ or interrupted sends remain unresolved for manual reconciliation and are never
 automatically retried: the supported native item schema does not expose an exact
 `clientUserMessageId` acceptance link. Matching text, `clientId` or `turnId` cannot
 establish that link. Receipts and logs contain no native message bodies.
+
+
+## Scoped child-health snapshots
+
+`monitor.py snapshot` and `unblock.py` accept repeatable `--parent UUID` arguments.
+Only these explicitly configured parents are passed to `child_health.collect`.
+Queue recipients and peers never imply parent scope. Without `--parent`, no child
+collection occurs. Existing callers retain their queue and question contracts.
+`WORKER_PARENT_THREADS` is an optional whitespace-separated list of canonical
+parent UUIDs, defaulting to empty. Scheduled monitoring collects only configured
+parents validated against the active `MONITOR_ROUTE_FILE` monitor identity and
+active targets, independently of `REPORT_THREAD`, role maps and dispatch-host
+election. The existing host scheduler alone dispatches reviews; nonhosts do not
+create additional reviews or reject the global parent list. Public snapshots require explicit
+`--parent` arguments and never infer parent scope. Both Python interfaces reject
+duplicate or noncanonical parent UUIDs before native access. A nonempty parent
+list requires an active valid route and membership in its monitor plus active
+targets, validated with the route's declared host. Held, missing, invalid or
+out-of-scope routes fail closed before native access. Consumers must configure their
+approved scope explicitly when adopting this feature.
+
+Snapshots add `worker_health`, keyed by exact parent UUID, separately from `history`.
+Each parent reports `status` (`complete`, `partial` or `unavailable`), `complete`,
+`children` and safe `diagnostics`. Unsupported capability and collection failures
+remain unavailable, rather than reporting healthy zero-child inventories.
+`worker_health_status` reports degraded collection independently of queue backlog
+and reminder-deferral counters. Snapshot collection makes no native mutations.
+
+At each scheduled capture, verified latest failed child turns requiring parent
+action bypass unchanged-queue reminder suppression. References contain only parent,
+child, failed-turn and typed error-code identities. The existing guarded reminder
+asks the monitor to live deliver the exact references to the owning parent while
+preserving that parent's decision and native-question guards. The parent owns
+checkpointing, quiescing and reassignment of approved work, preserving WIP,
+worktrees, jobs and unanswered questions within eight useful workers and ten total
+spawns. The monitor never contacts or mutates children or spawns replacements.
+
+Accepted reminders durably deduplicate those four-part failure references in the
+recipient health record. Acceptance proves delivery only, never handled recovery
+or queue acknowledgement. A new failed turn or typed code remains eligible even
+when queues are unchanged. Existing duplicate-slot and ambiguous-delivery receipts
+remain authoritative. A later success supersedes an earlier failure in collection;
+active retries, guarded waits, long-running work and silence do not prove terminal
+failure or a stall. No usage-ratio or elapsed-time detector is added.

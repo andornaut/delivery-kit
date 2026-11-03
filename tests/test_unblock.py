@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import time
@@ -59,6 +60,13 @@ class UnblockTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
         self.path = Path(self.scratch.name) / "slot.json"
+        route = self.path.parent / 'route.json'
+        route.write_text(json.dumps({'version': 1, 'harness': 'codex', 'state': 'active',
+            'host_project_root': str(self.path.parent), 'monitor_thread_id': TECH,
+            'targets': [{'thread_id': ART, 'ownership': 'active'}]}))
+        environment = patch.dict(os.environ, {'MONITOR_ROUTE_FILE': str(route)})
+        environment.start()
+        self.addCleanup(environment.stop)
         (self.path.parent / "decisions").mkdir()
         self.decision = self.path.parent / "decisions" / f"{TECH}.json"
         subject.persist(self.decision, {"thread_id": TECH, "state": "clear"})
@@ -68,6 +76,74 @@ class UnblockTests(unittest.TestCase):
 
     def reconcile(self, client):
         return subject.reconcile(client, self.path, TECH, [ART, GAMEPLAY], 100)
+
+    def test_invalid_parent_scope_defers_without_native(self):
+        for parents in ([ART, ART], [GAMEPLAY], ['ABCDEFAB-0000-0000-0000-000000000002']):
+            with self.subTest(parents=parents), patch.object(subject, 'connect') as connect:
+                outcome = subject.run(self.path.parent, Path('/fixture.sock'), TECH, [ART], 100,
+                                      parents=parents)
+                self.assertEqual(outcome['status'], 'deferred')
+                connect.assert_not_called()
+        with patch.dict(os.environ, {'MONITOR_ROUTE_FILE': ''}), \
+                patch.object(subject, 'connect') as connect:
+            outcome = subject.run(self.path.parent, Path('/fixture.sock'), TECH, [ART], 100, parents=[ART])
+            self.assertEqual(outcome['status'], 'deferred')
+            connect.assert_not_called()
+
+    def test_new_worker_failure_bypasses_unchanged_queue_and_preserves_guard(self):
+        import monitor
+        client = Fixture(outcomes=[{'turnId': 'turn-one'}] * 4)
+        snapshot = monitor.capture(client, self.path.parent, [TECH, ART])
+        snapshot['queues'] = {TECH: [], ART: []}
+        row = {'parent_id': ART, 'child_id': GAMEPLAY, 'turn_id': 'failed-one',
+               'turn_status': 'failed', 'error_code': 'contextWindowExceeded',
+               'lineage_verified': True, 'requires_parent_action': True}
+        snapshot['worker_health'] = {ART: {'status': 'partial', 'complete': False,
+                                         'children': [row], 'diagnostics': []}}
+        first = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+        self.assertEqual(first['status'], 'accepted')
+        text = client.mutations()[-1][1]['input'][0]['text']
+        for reference in (ART, GAMEPLAY, 'failed-one', 'contextWindowExceeded'):
+            self.assertIn(reference, text)
+        self.assertIn('recipient guards', text)
+        self.assertIn('Parent decides', text)
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, first)
+        self.assertTrue(monitor.accepted_inventory(self.path.parent, TECH, snapshot))
+        second = subject.reconcile(client, self.path, TECH, [ART], 200, snapshot)
+        self.assertEqual(second['status'], 'unchanged')
+        self.assertEqual(len(client.mutations()), 1)
+        row['turn_id'] = 'failed-two'
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'pending'})
+        guarded = subject.reconcile(client, self.path, TECH, [ART], 300, snapshot)
+        self.assertEqual(guarded['status'], 'deferred')
+        self.assertEqual(len(client.mutations()), 1)
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear'})
+        new = subject.reconcile(client, self.path, TECH, [ART], 400, snapshot)
+        self.assertEqual(new['status'], 'accepted')
+        monitor.record_health(self.path.parent, TECH, 400, snapshot, new)
+        self.assertEqual(len(client.mutations()), 2)
+        self.assertTrue(all(params['threadId'] == TECH for _, params in client.mutations()))
+        record = json.loads((self.path.parent / 'health' / (TECH + '.json')).read_text())
+        self.assertEqual(len(record['accepted_worker_failures']), 2)
+        self.assertNotIn('handled', record)
+        row['turn_id'] = 'failed-one'
+        self.assertTrue(monitor.accepted_inventory(self.path.parent, TECH, snapshot))
+
+    def test_worker_scope_run_duplicate_slot_collects_without_redelivery(self):
+        import types
+        client = Fixture()
+        collector = types.SimpleNamespace(collect=Mock(return_value={
+            ART: {'status': 'complete', 'complete': True, 'children': [], 'diagnostics': []}}))
+        with patch.dict(sys.modules, {'child_health': collector}), \
+                patch.object(subject, 'control_socket_available', return_value=True), \
+                patch.object(subject, 'connect', return_value=client):
+            first = subject.run(self.path.parent, Path('/fixture.sock'), TECH, [ART], 100, parents=[ART])
+            second = subject.run(self.path.parent, Path('/fixture.sock'), TECH, [ART], 100, parents=[ART])
+        self.assertEqual(first['status'], 'accepted')
+        self.assertEqual(second['status'], 'deduplicated')
+        self.assertEqual(collector.collect.call_count, 2)
+        collector.collect.assert_called_with(client, [ART])
+        self.assertEqual(len(client.mutations()), 1)
 
     def test_active_reminder_reads_all_peer_queue_pages_and_retains_only_ids(self):
         client = Fixture()

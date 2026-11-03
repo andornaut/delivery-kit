@@ -3,6 +3,7 @@ import contextlib
 import copy
 import io
 import json
+import os
 import stat
 from pathlib import Path
 import sys
@@ -68,6 +69,13 @@ class MonitorTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.state = Path(self.temp.name) / 'unblock'
         self.state.mkdir()
+        route = self.state / 'route.json'
+        route.write_text(json.dumps({'version': 1, 'harness': 'codex', 'state': 'active',
+            'host_project_root': str(self.state), 'monitor_thread_id': TECH,
+            'targets': [{'thread_id': ART, 'ownership': 'active'}]}))
+        environment = patch.dict(os.environ, {'MONITOR_ROUTE_FILE': str(route)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.client = NativeFixture()
         self.snapshot = monitor.capture(self.client, self.state, [TECH, ART], 100)
         self.identity = self.snapshot['snapshot_id']
@@ -77,6 +85,111 @@ class MonitorTests(unittest.TestCase):
 
     def receipt(self):
         return json.loads(next((self.state / 'acks').glob('*.json')).read_text())
+
+    def test_reviewed_collector_dependency_produces_safe_failure_and_timeout_metadata(self):
+        child = '00000000-0000-0000-0000-000000000003'
+        failed_turn = '00000000-0000-0000-0000-000000000004'
+        original = self.client.call
+        def call(method, params):
+            if method == 'thread/list':
+                self.assertEqual(params['parentThreadId'], TECH)
+                return {'data': [] if params['archived'] else [
+                    {'id': child, 'parentThreadId': TECH}]}
+            if method == 'thread/read':
+                self.assertEqual(params['threadId'], child)
+                return {'thread': {'id': child, 'parentThreadId': TECH,
+                                   'status': {'type': 'idle'}}}
+            if method == 'thread/turns/list':
+                self.assertEqual(params['threadId'], child)
+                return {'data': [{'id': failed_turn, 'status': 'failed',
+                    'error': {'codexErrorInfo': 'contextWindowExceeded', 'message': 'PRIVATE_BODY'}}]}
+            return original(method, params)
+        self.client.call = call
+        snapshot = monitor.capture(self.client, self.state, [TECH], parents=[TECH])
+        self.assertEqual(monitor.worker_failures(snapshot),
+                         [[TECH, child, failed_turn, 'contextWindowExceeded']])
+        self.assertEqual(snapshot['worker_health'][TECH]['schema_status'], 'available')
+        self.assertNotIn('PRIVATE_BODY', json.dumps(snapshot))
+        def timeout(method, params):
+            if method == 'thread/list':
+                raise TimeoutError('PRIVATE_BODY')
+            return original(method, params)
+        self.client.call = timeout
+        snapshot = monitor.capture(self.client, self.state, [TECH], parents=[TECH])
+        self.assertEqual(snapshot['worker_health'][TECH]['status'], 'unavailable')
+        self.assertEqual(snapshot['worker_health'][TECH]['schema_status'], 'unknown')
+        self.assertEqual(monitor.worker_failures(snapshot), [])
+        self.assertNotIn('PRIVATE_BODY', json.dumps(snapshot))
+
+    def test_parent_scope_rejects_duplicates_noncanonical_and_unowned_before_native(self):
+        for parents in ([TECH, TECH], [TECH.replace('00000000', 'ABCDEFAB', 1)],
+                        ['00000000-0000-0000-0000-000000000099']):
+            with self.subTest(parents=parents), self.assertRaises(ValueError):
+                monitor.scoped_parents(parents)
+        route = Path(os.environ['MONITOR_ROUTE_FILE'])
+        data = json.loads(route.read_text())
+        for change in ({'state': 'held'}, {'version': 99}):
+            route.write_text(json.dumps(data | change))
+            with self.assertRaises(ValueError):
+                monitor.scoped_parents([TECH])
+        with patch.dict(os.environ, {'MONITOR_ROUTE_FILE': ''}):
+            with self.assertRaises(ValueError):
+                monitor.scoped_parents([TECH])
+        self.assertEqual(monitor.scoped_parents([]), [])
+
+    def test_worker_collection_is_explicit_scoped_and_failure_is_unavailable(self):
+        import types
+        collector = types.SimpleNamespace(collect=__import__('unittest.mock').mock.Mock())
+        collector.collect.return_value = {
+            TECH: {'status': 'partial', 'complete': False, 'children': [], 'diagnostics': []},
+            ART: {'status': 'complete', 'complete': True, 'children': [], 'diagnostics': []}}
+        with patch.dict(sys.modules, {'child_health': collector}):
+            plain = monitor.capture(self.client, self.state, [TECH, ART])
+            collector.collect.assert_not_called()
+            self.assertEqual(plain['worker_health'], {})
+            scoped = monitor.capture(self.client, self.state, [ART], parents=[TECH])
+            collector.collect.assert_called_once_with(self.client, [TECH])
+            self.assertEqual(list(scoped['worker_health']), [TECH])
+            self.assertEqual(scoped['worker_health'][TECH]['status'], 'partial')
+            collector.collect.side_effect = TimeoutError('PRIVATE_ERROR')
+            unavailable = monitor.capture(self.client, self.state, [ART], parents=[TECH])
+        self.assertEqual(unavailable['worker_health'][TECH]['status'], 'unavailable')
+        self.assertFalse(unavailable['worker_health'][TECH]['complete'])
+        self.assertNotIn('PRIVATE_ERROR', json.dumps(unavailable))
+        self.assertFalse(unavailable['errors'])
+        self.assertFalse(self.client.deletions())
+        self.assertFalse(any(method.startswith('turn/') for method, _ in self.client.calls))
+
+    def test_worker_diagnostics_never_age_queue_starvation(self):
+        snapshot = dict(self.snapshot, queues={TECH: []}, worker_health={
+            TECH: {'status': 'unavailable', 'complete': False, 'children': []}})
+        with patch.object(monitor, 'health_event') as event:
+            for slot in (100, 100, 200):
+                health = monitor.record_health(self.state, TECH, slot, snapshot, {'status': 'accepted'})
+                self.assertEqual(health['worker_health_status'], 'degraded')
+                self.assertEqual(health['monitor_status'], 'ok')
+                self.assertEqual(health['backlog_slots'], 0)
+                self.assertEqual(health['deferral_slots'], 0)
+            event.assert_not_called()
+
+    def test_worker_failure_requires_exact_lineage_action_and_latest_failed_turn(self):
+        row = {'parent_id': TECH, 'child_id': ART, 'turn_id': 'failed-turn',
+               'turn_status': 'failed', 'error_code': 'contextWindowExceeded',
+               'lineage_verified': True, 'requires_parent_action': True}
+        def snapshot(changes):
+            return {'worker_health': {TECH: {'children': [row | changes]}}}
+        self.assertEqual(monitor.worker_failures(snapshot({})),
+                         [[TECH, ART, 'failed-turn', 'contextWindowExceeded']])
+        for name, changes in (
+                ('invalid lineage', {'parent_id': ART}),
+                ('unverified', {'lineage_verified': False}),
+                ('retrying', {'turn_status': 'inProgress'}),
+                ('waiting', {'requires_parent_action': False}),
+                ('long busy', {'turn_status': 'inProgress', 'requires_parent_action': False}),
+                ('recovered failure', {'turn_status': 'completed'}),
+                ('untyped', {'error_code': None})):
+            with self.subTest(name=name):
+                self.assertEqual(monitor.worker_failures(snapshot(changes)), [])
 
     def test_snapshot_paginates_and_retains_full_payload_without_stdout_leak(self):
         self.assertEqual(self.snapshot['queues'][TECH], [entry('one'), entry('two')])

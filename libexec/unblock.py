@@ -13,7 +13,7 @@ import time
 import uuid
 
 from codex_adapter import control_socket_available
-from monitor import accepted_inventory, capture, locked, record_health
+from monitor import accepted_inventory, canonical_uuid, capture, locked, pending_worker_failures, record_health, scoped_parents
 
 
 NATIVE_ITEM_TYPES = {
@@ -243,8 +243,19 @@ def target(client, state_dir, coordinator):
     return None, "coordinator state ambiguous or interrupted; no automatic resume"
 
 
-def reminder(slot, queues, snapshot_path):
+def reminder(slot, queues, snapshot_path, worker_failures=()):
     inventory = "\n".join(f"{thread}: {','.join(ids) if ids else 'none'}" for thread, ids in queues.items())
+    worker_review = (
+        "\nVerified latest failed child turns (parent, child, turn, typed code): "
+        + json.dumps(worker_failures) +
+        ". Live deliver these exact references to the owning parent only after checking its "
+        "recipient guards and native questions. Request that parent checkpoint and quiesce affected "
+        "approved work before reassigning to a healthy existing worker or replacement, within eight "
+        "useful workers and ten total spawns. Preserve WIP, worktrees, jobs, exact decisions and "
+        "unanswered questions. Parent decides and confirms handling; acceptance is delivery only. "
+        "Do not contact or mutate children, spawn workers, clear guards, or infer stalls from silence."
+        if worker_failures else ""
+    )
     return (
         f"Scheduled monitoring review, slot {slot}. Review recent Art, Gameplay and Tech activity "
         "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies "
@@ -253,7 +264,7 @@ def reminder(slot, queues, snapshot_path):
         "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner "
         "question. Report only new or unresolved blockers. This is a triage reminder, not permission "
         "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n"
-        + f"Full local inventory: {snapshot_path}\n" + inventory
+        + f"Full local inventory: {snapshot_path}\n" + inventory + worker_review
     )
 
 
@@ -278,7 +289,8 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
         state.update(status='unchanged', reason='inventory already reminded or explicitly retained; reconcile any remaining unacknowledged work')
         persist(path, state)
         return state
-    text = reminder(slot, queues, state["snapshot_path"])
+    text = reminder(slot, queues, state["snapshot_path"],
+                    pending_worker_failures(path.parent, coordinator, snapshot))
     for attempt in range(2):
         clearance = decision_record(path.parent, coordinator)
         selected, reason = target(client, path.parent, coordinator)
@@ -322,7 +334,11 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
     raise AssertionError("bounded attempt exhausted")
 
 
-def run(state_dir, control_socket, coordinator, peers, slot):
+def run(state_dir, control_socket, coordinator, peers, slot, *, parents=()):
+    try:
+        parents = scoped_parents(parents)
+    except ValueError:
+        return {'status': 'deferred', 'reason': 'worker parents require unique canonical UUIDs in an active MONITOR_ROUTE_FILE'}
     state_dir.mkdir(parents=True, exist_ok=True)
     path = state_dir / f"{coordinator}-{slot}.json"
     with (state_dir / "unblock.lock").open("a") as lock:
@@ -335,7 +351,7 @@ def run(state_dir, control_socket, coordinator, peers, slot):
         try:
             if not control_socket_available(control_socket):
                 with locked(state_dir):
-                    snapshot = capture(None, state_dir, [coordinator, *peers], slot)
+                    snapshot = capture(None, state_dir, [coordinator, *peers], slot, parents=parents)
                 state = {"status": "deferred", "reason": "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path"}
                 state.update(record_health(state_dir, coordinator, slot, snapshot, state))
                 state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
@@ -343,7 +359,7 @@ def run(state_dir, control_socket, coordinator, peers, slot):
             client = connect(time.monotonic() + 25, control_socket)
             # Inventory precedes decision guards and reminder deduplication.
             with locked(state_dir):
-                snapshot = capture(client, state_dir, [coordinator, *peers], slot)
+                snapshot = capture(client, state_dir, [coordinator, *peers], slot, parents=parents)
             if path.exists():
                 previous = json.loads(path.read_text())
                 if previous["status"] == "sending":
@@ -370,7 +386,7 @@ def run(state_dir, control_socket, coordinator, peers, slot):
             persist(path, state)
             if snapshot is None:
                 with locked(state_dir):
-                    snapshot = capture(None, state_dir, [coordinator, *peers], slot)
+                    snapshot = capture(None, state_dir, [coordinator, *peers], slot, parents=parents)
             state.update(record_health(state_dir, coordinator, slot, snapshot, state))
             state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
             return state
@@ -381,15 +397,21 @@ def run(state_dir, control_socket, coordinator, peers, slot):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--coordinator", type=uuid.UUID, required=True)
-    parser.add_argument("--peer", type=uuid.UUID, action="append", default=[])
+    parser.add_argument("--coordinator", type=canonical_uuid, required=True)
+    parser.add_argument("--peer", type=canonical_uuid, action="append", default=[])
+    parser.add_argument("--parent", type=canonical_uuid, action="append", default=[])
     parser.add_argument("--slot", type=int, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--control-socket", type=Path)
     args = parser.parse_args()
-    state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot)
+    try:
+        args.parent = scoped_parents(args.parent)
+    except ValueError as error:
+        parser.error(str(error))
+    state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot,
+                parents=[str(parent) for parent in args.parent])
     # Status only. Persisted queue IDs stay local for coordinator reconciliation.
-    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
+    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "worker_health_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
     return 0 if state["status"] in ("accepted", "deduplicated", "unchanged", "busy") and state.get("monitor_status") != "failed" else 1
 
 
