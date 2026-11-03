@@ -72,10 +72,35 @@ def pending_question(owner=ART):
                            'confirmed_at': '2026-11-03T12:00:00Z'}]}
 
 
+def process_fixture(owner=ART, slot=100):
+    invocation = {'thread_id': owner, 'turn_id': 'launch-turn', 'item_id': 'launch-item'}
+    evidence = {'confirmed_by': owner, 'confirmed_at': '2026-11-03T12:00:00Z',
+                'identity_verified': True, 'provenance': 'owner_attested', 'state': 'running',
+                'confirmed_stalled': True, 'episode_id': 'episode-1'}
+    identity = {'owner_parent_id': owner, 'worker_id': None, 'kind': 'process',
+                'job_id': 'job-1', 'start_identity': 'start-1', 'invocation': invocation}
+    sample = identity | {'slot': slot, 'provenance': 'owner_attested', 'collected_at': '2026-11-03T12:01:00Z',
+                         'protected': False, 'owner_evidence': evidence}
+    row = identity | {'protected': False, 'identity_provenance': 'owner_attested',
+        'progress_provenance': 'owner_attested', 'lineage_verified': True, 'invocation_verified': True,
+        'native_status': 'completed', 'exit_code': 0, 'state': 'stalled', 'stall_episode': 'episode-1',
+        'requires_owner_action': True, 'closure_status': 'none', 'closure_provenance': None,
+        'closure_result_ref': None, 'closure_evidence_id': None, 'closure_reason_code': None,
+        'closure_next_review_slot': None, 'owner_evidence_ref': {'confirmed_by': owner,
+          'confirmed_at': evidence['confirmed_at'], 'episode_id': 'episode-1', 'blocked_condition': None},
+        'diagnostics': []}
+    return {'status': 'complete', 'complete': True, 'jobs': [row], 'observations': [sample],
+            'diagnostics': ['live_process_getter_unavailable'], 'budget': {}, 'omitted_jobs': 0}
+
+
 class UnblockTests(unittest.TestCase):
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
+        process_environment = patch.dict(os.environ)
+        process_environment.start()
+        self.addCleanup(process_environment.stop)
+        os.environ.pop('PROCESS_HEALTH_FILE', None)
         self.question_collector = types.SimpleNamespace(collect=Mock(side_effect=empty_question_state))
         question_module = patch.dict(sys.modules, {'question_state': self.question_collector})
         question_module.start()
@@ -211,6 +236,93 @@ class UnblockTests(unittest.TestCase):
         self.assertEqual(len(rows), len(keys))
         self.assertLessEqual(len(json.dumps(rows, ensure_ascii=False).encode()), 32768)
         self.assertTrue(all(row['options'] == ['x' * 5000, 'Second'] for row in rows))
+
+    def process_snapshot(self, client):
+        import monitor
+        snapshot = monitor.capture(client, self.path.parent, [TECH, ART])
+        snapshot['queues'] = {TECH: [], ART: []}
+        snapshot['process_health'] = {ART: process_fixture(ART)}
+        snapshot['process_health_source'] = {'status': 'available', 'diagnostics': []}
+        return snapshot
+
+    def test_confirmed_process_stall_requests_owner_closure_once_and_keeps_guard(self):
+        import monitor
+        client = Fixture(outcomes=[{'turnId': 'turn-one'}] * 3)
+        snapshot = self.process_snapshot(client)
+        first = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+        self.assertEqual(first['status'], 'accepted')
+        text = client.mutations()[-1][1]['input'][0]['text']
+        for value in (ART, 'job-1', 'start-1', 'launch-turn', 'launch-item', 'episode-1', 'owner_attested'):
+            self.assertIn(value, text)
+        self.assertIn('Do not kill, remove, cancel, restart or rerun', text)
+        self.assertIn('Reported closure is not verified closure', text)
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, first)
+        self.assertEqual(subject.reconcile(client, self.path, TECH, [ART], 200, snapshot)['status'], 'unchanged')
+        job = snapshot['process_health'][ART]['jobs'][0]
+        job['start_identity'] = 'start-2'
+        snapshot['process_health'][ART]['observations'][0]['start_identity'] = 'start-2'
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'pending'})
+        blocked = subject.reconcile(client, self.path, TECH, [ART], 300, snapshot)
+        self.assertEqual(blocked['status'], 'deferred')
+        self.assertEqual(len(client.mutations()), 1)
+        record = json.loads((self.path.parent / 'health' / (TECH + '.json')).read_text())
+        self.assertEqual(record['accepted_process_requests'], [[ART, 'process', 'job-1', 'start-1', 'episode-1']])
+        self.assertNotIn('closure_status', record)
+        self.assertEqual(job['closure_status'], 'none')
+
+    def test_process_receipts_protected_and_unknown_never_duplicate_closure_request(self):
+        import monitor
+        client = Fixture()
+        snapshot = self.process_snapshot(client)
+        job = snapshot['process_health'][ART]['jobs'][0]
+        for status in ('requested', 'delivery_accepted', 'ambiguous', 'reported_closed', 'verified_closed',
+                       'blocked', 'retained', 'unknown'):
+            job['closure_status'] = status
+            self.assertEqual(monitor.process_notices(self.path.parent, TECH, snapshot), [])
+        job['closure_status'] = 'none'
+        for key, value in (('protected', True), ('state', 'unknown'), ('invocation_verified', False),
+                           ('identity_provenance', 'native_verified')):
+            original = job[key]
+            job[key] = value
+            self.assertEqual(monitor.process_notices(self.path.parent, TECH, snapshot), [])
+            job[key] = original
+
+    def test_ambiguous_send_is_not_accepted_closure_or_owner_outcome(self):
+        import monitor
+        client = Fixture(outcomes=[TimeoutError('PRIVATE_SEND_ERROR')])
+        snapshot = self.process_snapshot(client)
+        result = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+        self.assertEqual(result['status'], 'ambiguous')
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, result)
+        record = json.loads((self.path.parent / 'health' / (TECH + '.json')).read_text())
+        self.assertEqual(record['accepted_process_requests'], [])
+        self.assertEqual(snapshot['process_health'][ART]['jobs'][0]['closure_status'], 'none')
+        self.assertEqual(monitor.process_notices(self.path.parent, TECH, snapshot), [])
+        self.assertNotIn('PRIVATE_SEND_ERROR', self.path.read_text())
+
+    def test_interrupted_process_send_is_guarded_across_future_slots(self):
+        import monitor
+        client = Fixture()
+        snapshot = self.process_snapshot(client)
+        notice = monitor.process_notices(self.path.parent, TECH, snapshot)[0]
+        key = notice['request_key']
+        self.assertTrue(monitor.process_request_started(self.path.parent, TECH, [key], 'exact-request-one'))
+        self.assertEqual(monitor.process_notices(self.path.parent, TECH, snapshot), [])
+        self.assertFalse(monitor.process_request_started(self.path.parent, TECH, [key], 'different-request'))
+        self.assertTrue(monitor.process_request_started(self.path.parent, TECH, [key], 'exact-request-one'))
+        self.assertEqual(client.mutations(), [])
+
+    def test_explicit_native_rejection_does_not_permanently_guard_process_request(self):
+        import monitor
+        client = Fixture(outcomes=[subject.RpcError({'code': -1, 'message': 'explicit rejection'})])
+        snapshot = self.process_snapshot(client)
+        result = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+        self.assertEqual(result['status'], 'rejected')
+        # Definitive rejection releases the sending barrier before health recording.
+        self.assertEqual(len(monitor.process_notices(self.path.parent, TECH, snapshot)), 1)
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, result)
+        self.assertEqual(len(monitor.process_notices(self.path.parent, TECH, snapshot)), 1)
+        self.assertEqual(snapshot['process_health'][ART]['jobs'][0]['closure_status'], 'none')
 
     def test_invalid_parent_scope_defers_without_native(self):
         for parents in ([ART, ART], [GAMEPLAY], ['ABCDEFAB-0000-0000-0000-000000000002']):

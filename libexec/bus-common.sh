@@ -138,6 +138,7 @@ export REPORT_THREAD=${REPORT_THREAD:-}
 export CODEX_PYTHON
 if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then export MONITOR_ROUTE_FILE; fi
 if declare -p CODEX_CONTROL_SOCKET >/dev/null 2>&1; then export CODEX_CONTROL_SOCKET; fi
+if declare -p PROCESS_HEALTH_FILE >/dev/null 2>&1; then export PROCESS_HEALTH_FILE; fi
 bus_dispatch() {
   [ -n "$REPORT_THREAD" ] || return 0
   (

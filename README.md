@@ -671,3 +671,103 @@ that a prompt is hidden or interrupts a turn. The monitor's own pending decision
 still prevents steering. Unknown questions are never presented as pending;
 unavailable lifecycle or visibility evidence degrades metadata reporting without
 manufacturing a pending decision or a failed-work episode.
+
+
+## 0.7.0 optional owner-attested process health
+
+`PROCESS_HEALTH_FILE`, when declared, selects an absolute local JSON manifest.
+Unset skips all process inspection. Trusted Bash configuration exports the variable
+only when declared; path and manifest validation happen at the process-health
+boundary, without rejecting unrelated delivery commands. The file must be a
+regular nonsymlink file of at most 1 MiB. Missing, denied, relative, oversized or
+invalid files produce explicit unavailable diagnostics; no alternate path or
+backend is tried. The monitor never edits this owner-maintained file.
+
+The manifest is `{version: 1, jobs: [...]}` with at most 100 registrations. Every
+job binds `owner_parent_id`, nullable `worker_id`, `kind` (`process`, `container` or
+`browser_job`), `job_id`, `start_identity`, and exact `invocation` references
+(`thread_id`, `turn_id`, `item_id`). Job, start, episode and evidence tokens are
+nonsecret ASCII letters, digits, periods, underscores, colons or hyphens, from one
+to 128 characters. Never put commands, output, paths, environment values or access
+material in registrations. Optional `protected: true` prevents closure requests.
+
+`owner_evidence` binds `confirmed_by` to the owning parent, a fresh ISO UTC
+`confirmed_at`, `identity_verified: true`, `provenance: owner_attested`, and the
+owner's declared state. Supported states are `running`, `blocked`, `terminal`,
+`waiting_on_user`, `service` and `unknown`. Fresh means zero through 1800 seconds
+old, never a future confirmation. Identity and progress remain owner-attested;
+verified native lineage and invocation references corroborate metadata only.
+There is no live process-identity getter or direct host probe. Native invocation
+completion, exit zero or an absent handle alone proves neither runtime identity
+nor resource closure.
+
+Inspection is limited to explicitly requested snapshot recipients and worker
+parents that are current active route identities. Registration never expands that
+scope or discovers unrelated sessions or resources. Queue and history capture
+runs first; question, worker and process collectors share the same 256 native
+calls and connection deadline, narrowed once by five seconds for guarded delivery.
+Native reads use only exact lineage and invocation references. There is no process
+listing, container inspection, browser scan, new polling or schedule change.
+
+Snapshots add `process_health`, keyed by allowed parent, and
+`process_health_source` availability diagnostics. Parent results contain `status`,
+`complete`, safe `jobs`, `observations`, `diagnostics`, `budget` and `omitted_jobs`.
+Rows preserve exact resource references and distinguish owner-attested identity
+and progress, metadata verification, native status, stall episode and closure
+receipt state/provenance. Unsupported visibility remains explicit and never
+manufactures a stall. Process metadata degrades reporting independently of queue
+backlog, question clearance and worker recovery.
+
+A closure request requires either fresh exact owner confirmation of a stall and
+its `episode_id`, or two meaningful scheduled observations with the same exact
+resource, invocation, progress contract, epoch, unchanged counter and episode.
+The progress contract must explicitly expect advancement, and a confirmed
+`blocked_condition` must cite an evidence token with code `deadlock`,
+`dependency_failure`, `unresponsive` or `owner_confirmed_block`. Both scheduled
+slot and owner confirmation must strictly increase. Static counters, age, silence
+or repeated capture of the same owner attestation are insufficient. Protected
+resources, services, user waits, declared terminal work and unknown identities
+never produce closure requests.
+
+Scheduled observations preserve the collector's exact sample shape: `slot`,
+`collected_at`, `provenance: owner_attested`, owner/worker/kind/job/start/invocation,
+`protected`, and sanitized `owner_evidence`. The sample's slot is minute-aligned,
+and collection must occur within that slot's 60-second window. Prior evidence is
+validated for freshness at its original collection time, allowing later reviews
+without treating a stale owner confirmation as fresh. Current evidence must be
+fresh now. Prior samples retain their actual timestamps; delivery acceptance never
+creates an owner observation or closure outcome. Only scheduled health recording
+persists these safe samples in existing health state. Public snapshots use
+`slot: null`, perform no two-sample inference, emit no scheduled observations and
+never load or mutate prior samples or owner receipts.
+
+The guarded reminder asks only the exact owning parent/team to checkpoint WIP,
+preserve diagnostics, safely close the exact resource and return confirmed
+closure proof or a concrete blocker. The request includes job/start identity,
+invocation references, owner evidence references and stall episode. A safe
+`owner_evidence_ref` on a validated row preserves confirmation references even
+when no scheduled progress sample qualifies; it never creates a prior sample. The monitor
+never kills, removes, cancels, restarts or reruns resources. Deduplication binds
+parent, kind, job ID, start identity and episode. Existing health state records
+request delivery before sending; interrupted or ambiguous sends remain guarded
+across slots. A definitive native rejection releases its sending barrier; it
+does not become an ambiguous or accepted request. Acceptance means delivery only, not resource closure. Original
+recipient guards and pending questions remain authoritative.
+
+Optional `closure` receipts bind the exact owner/kind/job/start/invocation,
+`confirmed_by`, fresh UTC `confirmed_at`, `provenance: owner_attested`, `state` and
+`evidence_id`. States are `requested`, `delivery_accepted`, `ambiguous`,
+`reported_closed`, `verified_closed`, `blocked` and `retained`. Unknown receipts
+prevent a fresh closure request. Existing requested, accepted or ambiguous
+receipts require reconciliation; they never authorize a duplicate close request.
+Reported closure remains reported. Blocked and retained receipts require a
+nonsecret `reason_code`; retained also requires `next_review_slot`.
+
+`verified_closed` additionally requires `owner_verified: true`,
+`verification_succeeded: true` and an exact `native_result_ref` different from the
+launch invocation. Its supported native verification result must be a completed
+command-execution item with exit zero. The provenance is
+`owner_verified_native_result_corroborated`: the owner verified closure and cited
+a successful native verification result. The library does not inspect command or
+output semantics or claim direct host verification. Missing verification never
+upgrades a reported closure; absence never establishes closure.

@@ -5,6 +5,8 @@ import fcntl
 import hashlib
 import json
 import os
+import re
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -347,6 +349,210 @@ def record_questions(record, snapshot, slot, accepted_keys):
         previous[identity] = old
 
 
+def process_key(job):
+    return [job.get(key) for key in ('owner_parent_id', 'kind', 'job_id', 'start_identity', 'stall_episode')]
+
+
+def process_sample(sample, allowed_parents):
+    """Validate the collector's exact safe sample shape without manufacturing proof."""
+    keys = {'slot', 'collected_at', 'provenance', 'owner_parent_id', 'worker_id', 'kind', 'job_id', 'start_identity',
+            'invocation', 'protected', 'owner_evidence'}
+    evidence_keys = {'confirmed_by', 'confirmed_at', 'identity_verified', 'provenance', 'state',
+                     'confirmed_stalled', 'episode_id', 'blocked_condition', 'progress'}
+    return (isinstance(sample, dict) and set(sample) == keys
+            and sample.get('owner_parent_id') in allowed_parents
+            and type(sample.get('slot')) is int
+            and sample.get('provenance') == 'owner_attested'
+            and isinstance(sample.get('owner_evidence'), dict)
+            and not set(sample['owner_evidence']) - evidence_keys
+            and sample['owner_evidence'].get('provenance') == 'owner_attested'
+            and len(json.dumps(sample).encode('utf-8')) <= 8192)
+
+
+def prior_process_observations(state_dir, coordinator):
+    if 'PROCESS_HEALTH_FILE' not in os.environ:
+        return None
+    try:
+        record = json.loads((state_dir / 'health' / (coordinator + '.json')).read_text())
+        values = record.get('process_observations', [])
+        return values if isinstance(values, list) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def process_health(client, recipients, parents, slot, prior_observations):
+    source = {'status': 'disabled', 'diagnostics': []}
+    if 'PROCESS_HEALTH_FILE' not in os.environ:
+        return {}, source
+    unavailable = lambda code: {'status': 'unavailable', 'complete': False, 'jobs': [],
+                               'observations': [], 'diagnostics': [code], 'omitted_jobs': 0}
+    allowed = []
+    try:
+        # Manifest registration never expands the explicitly requested route scope.
+        candidates = list(dict.fromkeys([*recipients, *parents]))
+        for parent in candidates:
+            try:
+                scoped_parents([parent])
+                allowed.append(parent)
+            except ValueError:
+                pass
+        if not allowed:
+            raise ValueError('process_route_unavailable')
+        path = Path(os.environ['PROCESS_HEALTH_FILE'])
+        if not path.is_absolute():
+            raise ValueError('process_manifest_path_invalid')
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError('process_manifest_not_regular')
+            if info.st_size > 1048576:
+                raise ValueError('process_manifest_size_exceeded')
+            data = stream.read(1048577)
+            if len(data) > 1048576:
+                raise ValueError('process_manifest_size_exceeded')
+        registrations = json.loads(data)
+        if (not isinstance(registrations, dict) or registrations.get('version') != 1
+                or type(registrations.get('version')) is not int
+                or not isinstance(registrations.get('jobs'), list) or len(registrations['jobs']) > 100):
+            raise ValueError('process_manifest_schema_unavailable')
+    except ValueError as error:
+        code = str(error)
+        if code not in {'process_route_unavailable', 'process_manifest_path_invalid',
+                        'process_manifest_not_regular', 'process_manifest_size_exceeded',
+                        'process_manifest_schema_unavailable'}:
+            code = 'process_manifest_unavailable'
+        source.update(status='unavailable', diagnostics=[code])
+        return {parent: unavailable(code) for parent in allowed}, source
+    except OSError:
+        source.update(status='unavailable', diagnostics=['process_manifest_unavailable'])
+        return {parent: unavailable('process_manifest_unavailable') for parent in allowed}, source
+    prior = ([sample for sample in prior_observations if process_sample(sample, allowed)]
+             if type(slot) is int and isinstance(prior_observations, list) else None)
+    try:
+        from process_health import collect
+        collected = collect(client, registrations, allowed_parents=allowed, slot=slot,
+                            prior_observations=prior)
+        if not isinstance(collected, dict):
+            raise ValueError('process collector shape')
+        result = {}
+        for parent in allowed:
+            value = collected.get(parent)
+            if (not isinstance(value, dict) or value.get('status') not in ('complete', 'partial', 'unavailable')
+                    or not isinstance(value.get('jobs'), list) or not isinstance(value.get('observations'), list)):
+                value = unavailable('process_collector_unavailable')
+            result[parent] = value
+        source.update(status='available')
+        return result, source
+    except Exception:
+        source.update(status='unavailable', diagnostics=['process_collector_unavailable'])
+        return {parent: unavailable('process_collector_unavailable') for parent in allowed}, source
+
+
+def process_notices(state_dir, coordinator, snapshot):
+    path = state_dir / 'health' / (coordinator + '.json')
+    record = json.loads(path.read_text()) if path.exists() else {}
+    accepted = record.get('accepted_process_requests', [])
+    unresolved = [item.get('request_key') for item in record.get('process_request_delivery', {}).values()
+                  if item.get('status') in ('sending', 'ambiguous', 'accepted')]
+    notices = []
+    for parent, health in snapshot.get('process_health', {}).items():
+        for job in health.get('jobs', []):
+            key = process_key(job)
+            if (job.get('owner_parent_id') != parent or job.get('state') != 'stalled'
+                    or job.get('requires_owner_action') is not True or job.get('protected') is not False
+                    or job.get('kind') not in ('process', 'container', 'browser_job')
+                    or job.get('identity_provenance') != 'owner_attested'
+                    or job.get('progress_provenance') != 'owner_attested'
+                    or job.get('lineage_verified') is not True or job.get('invocation_verified') is not True
+                    or any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}', value)
+                           for value in key) or key in accepted or key in unresolved
+                    or job.get('closure_status') != 'none'):
+                continue
+            evidence = []
+            for sample in health.get('observations', []):
+                if (process_sample(sample, [parent])
+                        and all(sample.get(field) == job.get(field) for field in
+                                ('owner_parent_id', 'kind', 'job_id', 'start_identity', 'invocation'))):
+                    owner = sample['owner_evidence']
+                    evidence.append({field: owner[field] for field in
+                        ('confirmed_by', 'confirmed_at', 'episode_id', 'blocked_condition') if field in owner})
+            if not evidence and isinstance(job.get('owner_evidence_ref'), dict):
+                reference = job['owner_evidence_ref']
+                if reference.get('confirmed_by') == parent and reference.get('episode_id') == job['stall_episode']:
+                    evidence.append(reference)
+            if not evidence:
+                continue
+            notice = {field: job.get(field) for field in
+                      ('owner_parent_id', 'worker_id', 'kind', 'job_id', 'start_identity',
+                       'invocation', 'stall_episode', 'identity_provenance', 'progress_provenance')}
+            notice.update(evidence_refs=evidence, request_key=key)
+            if len(json.dumps(notices + [notice]).encode('utf-8')) > 16384:
+                break
+            notices.append(notice)
+    return notices
+
+
+def process_request_started(state_dir, coordinator, keys, request_id):
+    if not keys:
+        return True
+    path = state_dir / 'health' / (coordinator + '.json')
+    record = json.loads(path.read_text()) if path.exists() else {'seen_slots': []}
+    deliveries = record.setdefault('process_request_delivery', {})
+    for key in keys:
+        old = deliveries.get(digest(key), {})
+        if old.get('status') in ('sending', 'ambiguous', 'accepted') and old.get('request_id') != request_id:
+            return False
+    for key in keys:
+        deliveries[digest(key)] = {'request_key': key, 'request_id': request_id, 'status': 'sending'}
+    persist(path, record)
+    return True
+
+
+def process_request_result(state_dir, coordinator, keys, request_id, status):
+    if not keys:
+        return
+    path = state_dir / 'health' / (coordinator + '.json')
+    record = json.loads(path.read_text())
+    deliveries = record.get('process_request_delivery', {})
+    for key in keys:
+        item = deliveries.get(digest(key))
+        if item is not None and item.get('request_id') == request_id:
+            item['status'] = status
+    persist(path, record)
+
+
+def record_processes(record, snapshot, slot, outcome):
+    samples = []
+    for parent, health in snapshot.get('process_health', {}).items():
+        for sample in health.get('observations', []):
+            if process_sample(sample, [parent]) and sample['slot'] == slot:
+                samples.append(sample)
+    if snapshot.get('process_health'):
+        # The collector's exact samples remain owner evidence, never monitor attestations.
+        previous = record.get('process_observations', [])
+        merged = {digest([sample.get(key) for key in
+                  ('owner_parent_id', 'kind', 'job_id', 'start_identity', 'invocation')]): sample
+                  for sample in previous if process_sample(sample, snapshot.get('process_health', {}))}
+        for sample in samples:
+            identity = digest([sample.get(key) for key in
+                       ('owner_parent_id', 'kind', 'job_id', 'start_identity', 'invocation')])
+            old = merged.get(identity)
+            if old is None or sample['slot'] >= old.get('slot', -1):
+                merged[identity] = sample
+        record['process_observations'] = list(merged.values())[-100:]
+    request_keys = outcome.get('process_request_keys', [])
+    accepted_keys = request_keys if outcome['status'] == 'accepted' else []
+    deliveries = record.setdefault('process_request_delivery', {})
+    if outcome['status'] in ('accepted', 'ambiguous', 'rejected'):
+        for key in request_keys:
+            old = deliveries.get(digest(key), {})
+            deliveries[digest(key)] = old | {'request_key': key, 'status': outcome['status']}
+    record['accepted_process_requests'] = [list(key) for key in sorted({
+        tuple(key) for key in record.get('accepted_process_requests', [])
+    } | {tuple(key) for key in accepted_keys})]
+
+
 def worker_failures(snapshot):
     references = set()
     for parent, health in snapshot.get('worker_health', {}).items():
@@ -367,7 +573,7 @@ def pending_worker_failures(state_dir, recipient, snapshot):
     return [reference for reference in worker_failures(snapshot) if reference not in accepted]
 
 
-def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, parents=()):
+def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, parents=(), process_prior=None):
     parents = scoped_parents(parents)
     recipients = list(dict.fromkeys(canonical_uuid(recipient) for recipient in recipients))
     record = {'snapshot_id': str(uuid.uuid4()), 'queues': {}, 'errors': {}, 'history': {}}
@@ -387,6 +593,8 @@ def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, pa
             client.deadline = original_deadline - 5
         record['question_state'] = question_state(shared, state_dir, recipients)
         record['worker_health'] = worker_health(shared, parents, reserve=False)
+        record['process_health'], record['process_health_source'] = process_health(
+            shared, recipients, parents, slot, process_prior)
     finally:
         if original_deadline is not None:
             client.deadline = original_deadline
@@ -437,7 +645,8 @@ def inventory_signature(state_dir, snapshot):
 
 def accepted_inventory(state_dir, recipient, snapshot):
     if (pending_worker_failures(state_dir, recipient, snapshot)
-            or question_notices(state_dir, recipient, snapshot)):
+            or question_notices(state_dir, recipient, snapshot)
+            or process_notices(state_dir, recipient, snapshot)):
         return False
     queues, retained = unacknowledged(state_dir, snapshot)
     if retained and not any(queues.values()) and not snapshot['errors']:
@@ -499,6 +708,7 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
         } | {tuple(reference) for reference in worker_failures(snapshot)})
     record_questions(record, snapshot, slot, outcome.get('question_notice_keys', [])
                      if outcome['status'] == 'accepted' else [])
+    record_processes(record, snapshot, slot, outcome)
     failed = max(record.get('backlog_slots', 0), record.get('deferral_slots', 0)) >= 2
     workers_degraded = any(health.get('status') != 'complete' or health.get('complete') is not True
                            or health.get('schema_status') in ('unknown', 'unavailable')
@@ -506,9 +716,15 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
     questions_degraded = any(value.get('status') != 'complete' or value.get('complete') is not True
                              or any(q.get('state') == 'unknown' for q in value.get('questions', []))
                              for value in snapshot.get('question_state', {}).values())
-    health = {'question_state_status': 'degraded' if questions_degraded else 'ok',
+    processes_degraded = snapshot.get('process_health_source', {}).get('status') == 'unavailable' or any(
+        value.get('status') != 'complete' or value.get('complete') is not True
+        or any(job.get('state') in ('stalled', 'unknown') for job in value.get('jobs', []))
+        for value in snapshot.get('process_health', {}).values())
+    health = {'process_health_status': ('degraded' if processes_degraded else
+              'disabled' if snapshot.get('process_health_source', {}).get('status') == 'disabled' else 'ok'),
+              'question_state_status': 'degraded' if questions_degraded else 'ok',
               'worker_health_status': 'degraded' if workers_degraded else 'ok',
-              'monitor_status': 'failed' if failed else 'degraded' if degraded or workers_degraded or questions_degraded else 'ok',
+              'monitor_status': 'failed' if failed else 'degraded' if degraded or workers_degraded or questions_degraded or processes_degraded else 'ok',
               'history_status': 'degraded' if degraded else 'ok', 'recipient': recipient,
               'snapshot_id': snapshot['snapshot_id'],
               'backlog_slots': record.get('backlog_slots', 0),
@@ -520,7 +736,7 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
         if record.get('deferral_slots', 0) >= 2:
             reasons.append('queue inventory or reminder delivery repeatedly deferred; inspect inventory errors and recipient clearance')
         health['monitor_reason'] = '; '.join(reasons)
-    elif degraded or workers_degraded or questions_degraded:
+    elif degraded or workers_degraded or questions_degraded or processes_degraded:
         reasons = []
         if degraded:
             reasons.append('history metadata incomplete or unavailable; inspect history diagnostics without inferring question clearance')
@@ -528,6 +744,8 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
             reasons.append('worker metadata incomplete or unavailable; inspect worker health diagnostics without inferring recovery')
         if questions_degraded:
             reasons.append('question lifecycle or visibility unavailable; inspect question state diagnostics without inferring pending decisions or clearance')
+        if processes_degraded:
+            reasons.append('process metadata unavailable or owner action needed; inspect scoped process evidence without inferring resource closure')
         health['monitor_reason'] = '; '.join(reasons)
     record.pop('monitor_reason', None)
     record.update(health, last_delivery_status=outcome['status'])
@@ -684,7 +902,9 @@ def main():
                               'complete': not snapshot['errors'], 'history': snapshot['history'],
                               'worker_health': snapshot['worker_health'],
                               'question_state_status': {owner: value['status'] for owner, value in snapshot['question_state'].items()},
-                              'collection_budget': snapshot['collection_budget']}))
+                              'collection_budget': snapshot['collection_budget'],
+                              'process_health_source': snapshot['process_health_source'],
+                              'process_health_status': {owner: value['status'] for owner, value in snapshot['process_health'].items()}}))
             return int(bool(snapshot['errors']))
         results = acknowledge(client, args.state_dir, args.recipient, args.snapshot, args.queue_id, args.disposition, args.reason)
         print(json.dumps({'results': results}))

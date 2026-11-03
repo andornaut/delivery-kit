@@ -5,6 +5,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -80,10 +81,35 @@ def pending_question(owner=ART):
                            'confirmed_at': '2026-11-03T12:00:00Z'}]}
 
 
+def process_fixture(owner=ART, slot=100):
+    invocation = {'thread_id': owner, 'turn_id': 'launch-turn', 'item_id': 'launch-item'}
+    evidence = {'confirmed_by': owner, 'confirmed_at': '2026-11-03T12:00:00Z',
+                'identity_verified': True, 'provenance': 'owner_attested', 'state': 'running',
+                'confirmed_stalled': True, 'episode_id': 'episode-1'}
+    identity = {'owner_parent_id': owner, 'worker_id': None, 'kind': 'process',
+                'job_id': 'job-1', 'start_identity': 'start-1', 'invocation': invocation}
+    sample = identity | {'slot': slot, 'provenance': 'owner_attested', 'collected_at': '2026-11-03T12:01:00Z',
+                         'protected': False, 'owner_evidence': evidence}
+    row = identity | {'protected': False, 'identity_provenance': 'owner_attested',
+        'progress_provenance': 'owner_attested', 'lineage_verified': True, 'invocation_verified': True,
+        'native_status': 'completed', 'exit_code': 0, 'state': 'stalled', 'stall_episode': 'episode-1',
+        'requires_owner_action': True, 'closure_status': 'none', 'closure_provenance': None,
+        'closure_result_ref': None, 'closure_evidence_id': None, 'closure_reason_code': None,
+        'closure_next_review_slot': None, 'owner_evidence_ref': {'confirmed_by': owner,
+          'confirmed_at': evidence['confirmed_at'], 'episode_id': 'episode-1', 'blocked_condition': None},
+        'diagnostics': []}
+    return {'status': 'complete', 'complete': True, 'jobs': [row], 'observations': [sample],
+            'diagnostics': ['live_process_getter_unavailable'], 'budget': {}, 'omitted_jobs': 0}
+
+
 class MonitorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        process_environment = patch.dict(os.environ)
+        process_environment.start()
+        self.addCleanup(process_environment.stop)
+        os.environ.pop('PROCESS_HEALTH_FILE', None)
         self.question_collector = types.SimpleNamespace(collect=Mock(side_effect=empty_question_state))
         question_module = patch.dict(sys.modules, {'question_state': self.question_collector})
         question_module.start()
@@ -106,6 +132,179 @@ class MonitorTests(unittest.TestCase):
 
     def receipt(self):
         return json.loads(next((self.state / 'acks').glob('*.json')).read_text())
+
+    def manifest_path(self, jobs=None):
+        path = self.state / 'process-health.json'
+        path.write_text(json.dumps({'version': 1, 'jobs': [] if jobs is None else jobs}))
+        return path
+
+    def test_unset_process_feature_never_loads_or_inspects_resources(self):
+        collector = Mock()
+        with patch.dict(sys.modules, {'process_health': types.SimpleNamespace(collect=collector)}):
+            snapshot = monitor.capture(self.client, self.state, [TECH])
+        self.assertEqual(snapshot['process_health'], {})
+        self.assertEqual(snapshot['process_health_source']['status'], 'disabled')
+        collector.assert_not_called()
+        self.assertFalse(any(method == 'thread/items/read' for method, _ in self.client.calls))
+
+    def test_process_manifest_bad_paths_bounds_and_schema_do_not_block_queues(self):
+        valid = self.manifest_path()
+        oversized = self.state / 'oversized.json'
+        oversized.write_bytes(b'x' * 1048577)
+        alias = self.state / 'alias.json'
+        alias.symlink_to(valid)
+        invalid = self.state / 'invalid.json'
+        invalid.write_text('{PRIVATE_BAD_JSON')
+        too_many = self.manifest_path([{}] * 101)
+        paths = ['relative.json', str(self.state / 'missing.json'), str(oversized), str(alias),
+                 str(invalid), str(too_many)]
+        collector = Mock()
+        for path in paths:
+            with patch.dict(os.environ, {'PROCESS_HEALTH_FILE': path}), \
+                    patch.dict(sys.modules, {'process_health': types.SimpleNamespace(collect=collector)}):
+                snapshot = monitor.capture(self.client, self.state, [TECH])
+            self.assertFalse(snapshot['errors'])
+            self.assertEqual(snapshot['queues'][TECH], [entry('one'), entry('two')])
+            self.assertEqual(snapshot['process_health_source']['status'], 'unavailable')
+            self.assertNotIn('PRIVATE_BAD_JSON', json.dumps(snapshot))
+        collector.assert_not_called()
+
+    def test_process_collection_explicit_route_scope_and_shared_deadline(self):
+        path = self.manifest_path()
+        self.client.deadline = 125.0
+        def collect(client, registrations, *, allowed_parents, slot, prior_observations):
+            self.assertEqual(client.deadline, 120.0)
+            self.assertEqual(registrations, {'version': 1, 'jobs': []})
+            self.assertEqual(allowed_parents, [TECH])
+            self.assertIsNone(slot)
+            self.assertIsNone(prior_observations)
+            return {TECH: process_fixture(TECH), ART: process_fixture(ART)}
+        with patch.dict(os.environ, {'PROCESS_HEALTH_FILE': str(path)}), \
+                patch.object(monitor.time, 'monotonic', return_value=100.0), \
+                patch.dict(sys.modules, {'process_health': types.SimpleNamespace(collect=collect)}):
+            snapshot = monitor.capture(self.client, self.state, [TECH])
+        self.assertEqual(set(snapshot['process_health']), {TECH})
+        self.assertEqual(self.client.deadline, 125.0)
+
+    def test_public_snapshot_never_loads_or_persists_process_prior_samples(self):
+        path = self.manifest_path()
+        sample = process_fixture(TECH)['observations'][0]
+        health_path = self.state / 'health' / (TECH + '.json')
+        monitor.persist(health_path, {'process_observations': [sample]})
+        before = health_path.read_bytes()
+        collector = Mock(return_value={TECH: process_fixture(TECH)})
+        with patch.dict(os.environ, {'PROCESS_HEALTH_FILE': str(path)}), \
+                patch.dict(sys.modules, {'process_health': types.SimpleNamespace(collect=collector)}):
+            monitor.capture(self.client, self.state, [TECH])
+        self.assertIsNone(collector.call_args.kwargs['prior_observations'])
+        self.assertEqual(health_path.read_bytes(), before)
+
+    def test_scheduled_health_stores_exact_samples_without_owner_record_mutation(self):
+        first = process_fixture(TECH, 100)
+        second = process_fixture(TECH, 200)
+        marker = self.manifest_path()
+        before = marker.read_bytes()
+        first_snapshot = dict(self.snapshot, queues={TECH: []}, process_health={TECH: first})
+        monitor.record_health(self.state, TECH, 100, first_snapshot, {'status': 'unchanged'})
+        with patch.dict(os.environ, {'PROCESS_HEALTH_FILE': str(marker)}):
+            prior = monitor.prior_process_observations(self.state, TECH)
+            self.assertEqual(prior, first['observations'])
+            collector = Mock(return_value={TECH: second})
+            with patch.dict(sys.modules, {'process_health': types.SimpleNamespace(collect=collector)}):
+                snapshot = monitor.capture(self.client, self.state, [TECH], 200, process_prior=prior)
+            self.assertEqual(collector.call_args.kwargs['prior_observations'], first['observations'])
+            self.assertEqual(marker.read_bytes(), before)
+            snapshot['queues'] = {TECH: []}
+            monitor.record_health(self.state, TECH, 200, snapshot, {'status': 'unchanged'})
+            self.assertEqual(monitor.prior_process_observations(self.state, TECH), second['observations'])
+            self.assertEqual(second['observations'][0]['owner_evidence']['confirmed_at'],
+                             first['observations'][0]['owner_evidence']['confirmed_at'])
+
+    def test_process_collection_cannot_restart_exhausted_shared_budget(self):
+        path = self.manifest_path()
+        self.client.deadline = 125.0
+        def questions(client, recipients, **kwargs):
+            for _ in range(256):
+                client.call('thread/items/list', {'threadId': TECH})
+            return empty_question_state(client, recipients, decision_records={})
+        self.question_collector.collect.side_effect = questions
+        def processes(client, *args, **kwargs):
+            self.assertEqual(client.deadline, 120.0)
+            client.call('thread/items/read', {'threadId': TECH})
+        with patch.dict(os.environ, {'PROCESS_HEALTH_FILE': str(path)}), \
+                patch.object(monitor.time, 'monotonic', return_value=100.0), \
+                patch.dict(sys.modules, {'process_health': types.SimpleNamespace(collect=processes)}):
+            snapshot = monitor.capture(self.client, self.state, [TECH])
+        self.assertEqual(snapshot['collection_budget']['calls_used'], 256)
+        self.assertEqual(snapshot['process_health'][TECH]['status'], 'unavailable')
+        self.assertFalse(any(method == 'thread/items/read' for method, _ in self.client.calls))
+        self.assertEqual(self.client.deadline, 125.0)
+
+    def test_real_process_collector_public_and_scheduled_provenance_and_closure(self):
+        import process_health as dependency
+        from datetime import datetime, timezone
+        now, slot = 1800000030, 1800000000
+        stamp = datetime.fromtimestamp(now - 10, timezone.utc).isoformat()
+        invocation = {'thread_id': TECH, 'turn_id': 'launch-turn', 'item_id': 'launch-item'}
+        job = {'owner_parent_id': TECH, 'worker_id': None, 'kind': 'process', 'job_id': 'job-1',
+               'start_identity': 'start-1', 'invocation': invocation,
+               'owner_evidence': {'confirmed_by': TECH, 'confirmed_at': stamp, 'identity_verified': True,
+                   'provenance': 'owner_attested', 'state': 'running', 'confirmed_stalled': True,
+                   'episode_id': 'episode-1'}}
+        path = self.manifest_path([job])
+        original = self.client.call
+        def call(method, params):
+            if method == 'thread/items/read':
+                self.assertEqual(params, {'threadId': TECH, 'turnId': 'launch-turn', 'itemIds': ['launch-item']})
+                return {'data': [{'turnId': 'launch-turn', 'item': {'id': 'launch-item',
+                    'type': 'commandExecution', 'status': 'completed', 'exitCode': 0,
+                    'command': 'PRIVATE_COMMAND', 'aggregatedOutput': 'PRIVATE_COMMAND'}}]}
+            return original(method, params)
+        self.client.call = call
+        with patch.dict(os.environ, {'PROCESS_HEALTH_FILE': str(path)}), \
+                patch.object(dependency.time, 'time', return_value=now):
+            public = monitor.capture(self.client, self.state, [TECH])
+            self.assertEqual(public['process_health'][TECH]['observations'], [])
+            self.assertEqual(public['process_health'][TECH]['jobs'][0]['state'], 'stalled')
+            self.assertEqual(public['process_health'][TECH]['jobs'][0]['closure_status'], 'none')
+            snapshot = monitor.capture(self.client, self.state, [TECH], slot)
+            self.assertEqual(len(monitor.process_notices(self.state, TECH, snapshot)), 1)
+            self.assertEqual(snapshot['process_health'][TECH]['jobs'][0]['identity_provenance'], 'owner_attested')
+            sample = snapshot['process_health'][TECH]['observations'][0]
+            self.assertEqual(sample['collected_at'], datetime.fromtimestamp(now, timezone.utc).isoformat())
+            self.assertEqual(sample['provenance'], 'owner_attested')
+            self.assertTrue(monitor.process_sample(sample, [TECH]))
+            self.assertNotIn('PRIVATE_COMMAND', json.dumps(snapshot))
+            with patch.object(dependency.time, 'time', return_value=now + 90):
+                outside = monitor.capture(self.client, self.state, [TECH], slot)
+                self.assertEqual(outside['process_health'][TECH]['observations'], [])
+                self.assertEqual(len(monitor.process_notices(self.state, TECH, outside)), 1)
+            job['closure'] = {key: job[key] for key in
+                              ('owner_parent_id', 'kind', 'job_id', 'start_identity', 'invocation')}
+            job['closure'].update(confirmed_by=TECH, confirmed_at=stamp, provenance='owner_attested',
+                                  state='reported_closed', evidence_id='owner-closure-1')
+            self.manifest_path([job])
+            before = path.read_bytes()
+            closed = monitor.capture(self.client, self.state, [TECH], slot)
+            self.assertEqual(closed['process_health'][TECH]['jobs'][0]['closure_status'], 'reported_closed')
+            self.assertEqual(monitor.process_notices(self.state, TECH, closed), [])
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_optional_process_path_export_does_not_validate_unrelated_bus(self):
+        root = Path(__file__).resolve().parents[1]
+        config = self.state / 'project.conf'
+        example = (root / 'examples/project.conf').read_text()
+        environment = dict(os.environ, BUS_CONF=str(config), BUS_STATE_DIR=str(self.state),
+                           S=str(root / 'libexec'))
+        environment.pop('PROCESS_HEALTH_FILE', None)
+        for declared in (False, True):
+            config.write_text(example + ('\nPROCESS_HEALTH_FILE=relative-invalid-at-feature-boundary\n' if declared else ''))
+            check = ('[[ $PROCESS_HEALTH_FILE == relative-invalid-at-feature-boundary ]] && '
+                     '[[ $(declare -p PROCESS_HEALTH_FILE) == "declare -x "* ]]' if declared else
+                     '! declare -p PROCESS_HEALTH_FILE >/dev/null 2>&1')
+            result = subprocess.run(['bash', '-c', 'source "$S/bus-common.sh"; ' + check],
+                                    env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 0)
 
     def test_question_state_reads_existing_records_only_and_keeps_module_flags(self):
         decisions = self.state / 'decisions'

@@ -13,7 +13,7 @@ import time
 import uuid
 
 from codex_adapter import control_socket_available
-from monitor import accepted_inventory, canonical_uuid, capture, locked, pending_worker_failures, pending_proven, question_brief, question_notices, record_health, scoped_parents
+from monitor import accepted_inventory, canonical_uuid, capture, locked, pending_worker_failures, pending_proven, question_brief, question_notices, process_notices, process_request_started, process_request_result, prior_process_observations, record_health, scoped_parents
 
 
 NATIVE_ITEM_TYPES = {
@@ -243,7 +243,7 @@ def target(client, state_dir, coordinator):
     return None, "coordinator state ambiguous or interrupted; no automatic resume"
 
 
-def reminder(slot, queues, snapshot_path, worker_failures=(), questions=(), question_diagnostics=()):
+def reminder(slot, queues, snapshot_path, worker_failures=(), questions=(), question_diagnostics=(), processes=(), process_diagnostics=()):
     inventory = "\n".join(f"{thread}: {','.join(ids) if ids else 'none'}" for thread, ids in queues.items())
     worker_review = (
         "\nVerified latest failed child turns (parent, child, turn, typed code): "
@@ -268,6 +268,22 @@ def reminder(slot, queues, snapshot_path, worker_failures=(), questions=(), ques
     )
     diagnostic_review = ("\nQuestion capability diagnostics (no pending-decision inference): "
                          + json.dumps(question_diagnostics) if question_diagnostics else "")
+    process_review = (
+        "\nConfirmed owner-attested stalled resources: " + json.dumps(processes)
+        + ". Ask only the exact owning parent/team to checkpoint WIP and preserve diagnostics, "
+        "then safely close that exact job/start identity and report closure proof or a concrete blocker. "
+        "Resource identity and progress are owner_attested; native invocation references corroborate "
+        "metadata only. Do not kill, remove, cancel, restart or rerun any resource from the monitor. "
+        "Preserve healthy jobs, services, protected and unknown resources, and unanswered questions. "
+        "Delivery acceptance is not reported closure. Reported closure is not verified closure. "
+        "Verified closure means an exact owner verification receipt corroborated by a supported "
+        "successful native verification result, never a direct host probe. Exit zero, completed "
+        "invocation or an absent handle alone never proves closure. Reconcile ambiguous existing "
+        "requests before another request; do not duplicate accepted closure requests."
+        if processes else ""
+    )
+    process_diagnostic_review = ("\nProcess visibility diagnostics (no stall or closure inference): "
+                                 + json.dumps(process_diagnostics) if process_diagnostics else "")
     return (
         f"Scheduled monitoring review, slot {slot}. Review recent Art, Gameplay and Tech activity "
         "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies "
@@ -276,7 +292,7 @@ def reminder(slot, queues, snapshot_path, worker_failures=(), questions=(), ques
         "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner "
         "question. Report only new or unresolved blockers. This is a triage reminder, not permission "
         "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n"
-        + f"Full local inventory: {snapshot_path}\n" + inventory + worker_review + question_review + diagnostic_review
+        + f"Full local inventory: {snapshot_path}\n" + inventory + worker_review + question_review + diagnostic_review + process_review + process_diagnostic_review
     )
 
 
@@ -314,8 +330,23 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
     if len(json.dumps(diagnostics).encode('utf-8')) > 4096:
         diagnostics = [{'reason_code': 'question_diagnostics_exceed_brief_bounds',
                         'snapshot_path': state['snapshot_path']}]
+    processes = process_notices(path.parent, coordinator, snapshot)
+    state['process_request_keys'] = [notice['request_key'] for notice in processes]
+    process_diagnostics = [{'owner': owner, 'status': value['status'],
+        'diagnostics': value.get('diagnostics', []), 'closure_receipts': [
+            {field: job.get(field) for field in ('kind', 'job_id', 'start_identity', 'closure_status',
+             'closure_provenance', 'closure_result_ref', 'closure_evidence_id',
+             'closure_reason_code', 'closure_next_review_slot')}
+            for job in value.get('jobs', []) if job.get('closure_status') not in ('none', None)]}
+            for owner, value in snapshot.get('process_health', {}).items()]
+    if snapshot.get('process_health_source', {}).get('status') == 'unavailable':
+        process_diagnostics.append(snapshot['process_health_source'])
+    if len(json.dumps(process_diagnostics).encode('utf-8')) > 4096:
+        process_diagnostics = [{'reason_code': 'process_diagnostics_exceed_brief_bounds',
+                                'snapshot_path': state['snapshot_path']}]
     text = reminder(slot, queues, state["snapshot_path"],
-                    pending_worker_failures(path.parent, coordinator, snapshot), questions, diagnostics)
+                    pending_worker_failures(path.parent, coordinator, snapshot), questions, diagnostics,
+                    processes, process_diagnostics)
     for attempt in range(2):
         clearance = decision_record(path.parent, coordinator)
         selected, reason = target(client, path.parent, coordinator)
@@ -333,17 +364,23 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
                   "clientUserMessageId": state["requestId"]}
         if method == "turn/steer":
             params["expectedTurnId"] = selected["expectedTurnId"]
+        if not process_request_started(path.parent, coordinator, state['process_request_keys'], state['requestId']):
+            state.update(status='deferred', reason='process request has an unresolved delivery; reconcile exact existing receipt')
+            persist(path, state)
+            return state
         state.update(status="sending", method=method, attempt=attempt + 1)
         persist(path, state)
         try:
             response = client.call(method, params)
         except RpcError as error:
+            process_request_result(path.parent, coordinator, state['process_request_keys'], state['requestId'], 'rejected')
             state.update(status="rejected", errorCode=error.code)
             persist(path, state)
             if method == "turn/steer" and error.stale_turn and attempt == 0:
                 continue
             return state
         except Exception:
+            process_request_result(path.parent, coordinator, state['process_request_keys'], state['requestId'], 'ambiguous')
             state.update(status="ambiguous", reason="response unavailable; do not resend")
             persist(path, state)
             return state
@@ -351,9 +388,11 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
         if not isinstance(turn_id, str) or not turn_id or (
             method == "turn/steer" and turn_id != params["expectedTurnId"]
         ):
+            process_request_result(path.parent, coordinator, state['process_request_keys'], state['requestId'], 'ambiguous')
             state.update(status="ambiguous", reason="unexpected acceptance response; do not resend")
             persist(path, state)
             return state
+        process_request_result(path.parent, coordinator, state['process_request_keys'], state['requestId'], 'accepted')
         state.update(status="accepted", turnId=turn_id)
         persist(path, state)
         return state
@@ -377,7 +416,8 @@ def run(state_dir, control_socket, coordinator, peers, slot, *, parents=()):
         try:
             if not control_socket_available(control_socket):
                 with locked(state_dir):
-                    snapshot = capture(None, state_dir, [coordinator, *peers], slot, parents=parents)
+                    snapshot = capture(None, state_dir, [coordinator, *peers], slot, parents=parents,
+                                       process_prior=prior_process_observations(state_dir, coordinator))
                 state = {"status": "deferred", "reason": "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path"}
                 state.update(record_health(state_dir, coordinator, slot, snapshot, state))
                 state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
@@ -385,7 +425,8 @@ def run(state_dir, control_socket, coordinator, peers, slot, *, parents=()):
             client = connect(time.monotonic() + 25, control_socket)
             # Inventory precedes decision guards and reminder deduplication.
             with locked(state_dir):
-                snapshot = capture(client, state_dir, [coordinator, *peers], slot, parents=parents)
+                snapshot = capture(client, state_dir, [coordinator, *peers], slot, parents=parents,
+                                       process_prior=prior_process_observations(state_dir, coordinator))
             if path.exists():
                 previous = json.loads(path.read_text())
                 if previous["status"] == "sending":
@@ -412,7 +453,8 @@ def run(state_dir, control_socket, coordinator, peers, slot, *, parents=()):
             persist(path, state)
             if snapshot is None:
                 with locked(state_dir):
-                    snapshot = capture(None, state_dir, [coordinator, *peers], slot, parents=parents)
+                    snapshot = capture(None, state_dir, [coordinator, *peers], slot, parents=parents,
+                                       process_prior=prior_process_observations(state_dir, coordinator))
             state.update(record_health(state_dir, coordinator, slot, snapshot, state))
             state['snapshot_path'] = str(state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json'))
             return state
@@ -437,7 +479,7 @@ def main():
     state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot,
                 parents=[str(parent) for parent in args.parent])
     # Status only. Persisted queue IDs stay local for coordinator reconciliation.
-    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "worker_health_status", "question_state_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
+    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "worker_health_status", "question_state_status", "process_health_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
     return 0 if state["status"] in ("accepted", "deduplicated", "unchanged", "busy") and state.get("monitor_status") != "failed" else 1
 
 
