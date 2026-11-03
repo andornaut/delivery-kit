@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'libexec'))
 from child_health import collect, ERROR_CLASSES
@@ -85,8 +87,9 @@ class ChildHealthTests(unittest.TestCase):
 
     def test_no_status_or_untyped_error_inference(self):
         for status in ('completed', 'interrupted', 'inProgress', 'failed'):
-            for code in (None, 'other', 'rateLimitExceeded', 'serverOverloaded',
-                         'flexUnavailable', {'unknown': PRIVATE}, PRIVATE):
+            for code in (None, 'other', {'rateLimitExceeded': {}},
+                         {'flexUnavailable': {}}, {'serverOverloaded': {}},
+                         {'unknown': PRIVATE}, PRIVATE):
                 native = Native()
                 native.turn = turn(status, code)
                 child = self.snapshot(native)['children'][0]
@@ -200,6 +203,99 @@ class ChildHealthTests(unittest.TestCase):
             child = self.snapshot(native)['children'][0]
             self.assertFalse(child['requires_parent_action'])
             self.assertEqual(child['complete'], data == [] and cursor is None)
+
+    def test_shared_deadline_stops_calls_and_preserves_all_parent_results(self):
+        native = Native()
+        native.deadline = time.monotonic() - 1
+        snapshots = collect(native, [P, N])
+        self.assertEqual(native.calls, [])
+        for snapshot in snapshots.values():
+            self.assertEqual(snapshot['status'], 'unavailable')
+            self.assertFalse(snapshot['complete'])
+            self.assertIn('native_deadline_exhausted', snapshot['diagnostics'])
+            self.assertEqual(snapshot['budget']['calls_used'], 0)
+
+    def test_timeout_halts_native_work_and_marks_omissions(self):
+        class TimedOut:
+            def __init__(self):
+                self.calls = 0
+            def call(self, method, params):
+                self.calls += 1
+                raise TimeoutError(PRIVATE)
+        native = TimedOut()
+        snapshots = collect(native, [P, N])
+        self.assertEqual(native.calls, 1)
+        for snapshot in snapshots.values():
+            self.assertIn('native_timeout', snapshot['diagnostics'])
+            self.assertTrue(snapshot['budget']['exhausted'])
+            self.assertNotIn(PRIVATE, json.dumps(snapshot))
+
+    def test_all_parent_inventories_precede_child_reads_and_call_cap(self):
+        class ManyParents:
+            def __init__(self):
+                self.calls = []
+            def call(self, method, params):
+                self.calls.append((method, params))
+                if method == 'thread/list':
+                    parent = params['parentThreadId']
+                    return {'data': [] if params['archived'] else [row(parent=parent)]}
+                raise RuntimeError(PRIVATE)
+        native = ManyParents()
+        snapshots = collect(native, [P, N])
+        self.assertEqual([m for m, _ in native.calls[:4]], ['thread/list'] * 4)
+        self.assertFalse(any(s['complete'] for s in snapshots.values()))
+        native = Native()
+        with patch('child_health.MAX_CALLS', 3):
+            snapshot = self.snapshot(native)
+        self.assertEqual(len(native.calls), 3)
+        child = snapshot['children'][0]
+        self.assertTrue(child['lineage_verified'])
+        self.assertEqual(child['status'], 'partial')
+        self.assertFalse(child['requires_parent_action'])
+        self.assertIn('native_call_budget_exhausted', snapshot['diagnostics'])
+        self.assertEqual(snapshot['budget']['max_calls'], 3)
+
+    def test_expiring_deadline_during_call_never_alerts(self):
+        native = Native()
+        native.deadline = time.monotonic() + 100
+        original = native.call
+        def call(method, params):
+            response = original(method, params)
+            if method == 'thread/read':
+                native.deadline = time.monotonic() - 1
+            return response
+        native.call = call
+        snapshot = self.snapshot(native)
+        self.assertEqual(len(native.calls), 3)
+        self.assertIn('native_deadline_exhausted', snapshot['diagnostics'])
+        self.assertFalse(snapshot['children'][0]['requires_parent_action'])
+
+    def test_recognized_rate_capacity_errors_require_terminal_failed_turn(self):
+        for code in ('rateLimitExceeded', 'flexUnavailable', 'serverOverloaded'):
+            for status in ('completed', 'interrupted', 'inProgress'):
+                native = Native()
+                native.turn = turn(status, code)
+                child = self.snapshot(native)['children'][0]
+                self.assertEqual(child['error_code'], code)
+                self.assertFalse(child['requires_parent_action'])
+            native = Native()
+            native.turn = turn(code=code)
+            native.child['status'] = {'type': 'active', 'activeFlags': ['waitingOnUserInput']}
+            self.assertFalse(self.snapshot(native)['children'][0]['requires_parent_action'])
+
+    def test_unknown_recent_error_clears_earlier_typed_metadata(self):
+        native = Native()
+        native.turn = turn(code='unknownFutureCode')
+        child = self.snapshot(native)['children'][0]
+        self.assertIsNone(child['error_code'])
+        self.assertFalse(child['requires_parent_action'])
+        native = Native()
+        native.fresh_turn = turn(code='unknownFutureCode', identifier=N)
+        child = self.snapshot(native)['children'][0]
+        self.assertFalse(child['requires_parent_action'])
+        self.assertEqual(child['status'], 'partial')
+        self.assertIsNone(child['error_code'])
+        self.assertEqual(child['turn_id'], N)
 
     def test_invalid_scope_and_bounds_make_no_calls(self):
         for parents in ([PRIVATE], P, [P.upper() + 'x']):

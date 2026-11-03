@@ -5,12 +5,17 @@ This module performs no delivery, persistence, scheduling or lifecycle mutation.
 """
 from datetime import datetime, timezone
 from uuid import UUID
+import math
+import time
 
 
 ERROR_CLASSES = {
     'contextWindowExceeded': 'context_exhaustion',
     'sessionBudgetExceeded': 'session_budget_exhaustion',
     'usageLimitExceeded': 'usage_limit',
+    'rateLimitExceeded': 'rate_limit',
+    'flexUnavailable': 'flex_capacity',
+    'serverOverloaded': 'server_capacity',
     'modelNotFound': 'model_unavailable',
     'policyCapacityUnavailable': 'model_capacity',
 }
@@ -18,6 +23,45 @@ THREAD_STATUSES = {'active', 'idle', 'notLoaded', 'systemError'}
 TURN_STATUSES = {'completed', 'interrupted', 'failed', 'inProgress'}
 PAGE_SIZE = 50
 MAX_CHILDREN = 100
+MAX_CALLS = 256
+
+
+class _BudgetExhausted(Exception):
+    pass
+
+
+class _Budget:
+    def __init__(self, client):
+        self.client = client
+        self.calls_used = 0
+        self.reason = None
+
+    def check(self):
+        deadline = getattr(self.client, 'deadline', None)
+        if (type(deadline) in (int, float) and math.isfinite(deadline)
+                and time.monotonic() >= deadline):
+            self.reason = 'native_deadline_exhausted'
+        if self.reason is None and self.calls_used >= MAX_CALLS:
+            self.reason = 'native_call_budget_exhausted'
+        if self.reason:
+            raise _BudgetExhausted()
+
+    def call(self, method, params):
+        self.check()
+        self.calls_used += 1
+        try:
+            return self.client.call(method, params)
+        except TimeoutError:
+            self.reason = 'native_timeout'
+            raise _BudgetExhausted() from None
+        except Exception:
+            self.check()
+            raise
+
+    def metadata(self):
+        return {'max_calls': MAX_CALLS, 'calls_used': self.calls_used,
+                'exhausted': self.reason is not None, 'reason_code': self.reason}
+
 
 
 def _uuid(value):
@@ -87,6 +131,7 @@ def _child(client, parent, child, observed):
                   lineage_verified=False, status='unavailable', complete=False,
                   diagnostics=[])
     try:
+        client.check()
         row = _read(client, parent, child)
         if row is None:
             result['diagnostics'].append('lineage_unverified')
@@ -110,7 +155,10 @@ def _child(client, parent, child, observed):
         if (fresh is None or _status(fresh) != result['thread_status']
                 or fresh.get('updatedAt') != row.get('updatedAt')
                 or diagnostic or latest != turn):
-            result.update(status='partial', diagnostics=['observation_changed'])
+            result.update(status='partial', diagnostics=['observation_changed'], error_code=None)
+            if latest:
+                result.update(turn_id=latest['id'], turn_status=latest['status'],
+                              error_code=latest['error_code'])
             return result
         if result['thread_status'] is None:
             result['diagnostics'].append('thread_schema_unavailable')
@@ -119,6 +167,10 @@ def _child(client, parent, child, observed):
         if turn['status'] == 'failed' and result['thread_status'] != 'active' and result['error_code']:
             result.update(classification=ERROR_CLASSES[result['error_code']],
                           requires_parent_action=True)
+        return result
+    except _BudgetExhausted:
+        result.update(status='partial' if result['lineage_verified'] else 'unavailable',
+                      diagnostics=[client.reason])
         return result
     except Exception:
         result['diagnostics'].append('native_read_unavailable')
@@ -130,7 +182,11 @@ def collect(client, parents, *, max_pages=10):
 
     max_pages bounds each active/archived inventory (50 rows per page).
     At most 100 verified direct children are inspected per parent, with four
-    read-only calls each. The caller bounds transport time and the parent list.
+    read-only calls each. All parent inventories precede child detail reads.
+    The whole collection allows at most MAX_CALLS (256) native calls and respects
+    an optional monotonic client.deadline. TimeoutError halts further calls.
+    Every parent receives final shared budget metadata and explicit diagnostics
+    for omitted evidence. The caller bounds per-call transport time and parents.
     Exhaustion requires an allowlisted code on a stable latest failed turn.
     Completeness covers the bounded latest-turn observation, not full history.
     Historical pagination is unnecessary: only the newest turn is evaluated.
@@ -143,6 +199,8 @@ def collect(client, parents, *, max_pages=10):
         raise ValueError('invalid_parent_scope')
     observed = datetime.now(timezone.utc).isoformat()
     output = {}
+    scoped_children = {}
+    client = _Budget(client)
     for parent in dict.fromkeys(parents):
         result = dict(status='complete', complete=True, children=[], diagnostics=[],
                       observed_at=observed, provenance='native_protocol',
@@ -188,12 +246,16 @@ def collect(client, parents, *, max_pages=10):
                     seen.add(cursor)
                 else:
                     inventory['diagnostics'].append('page_bound_reached')
+            except _BudgetExhausted:
+                inventory['diagnostics'].append(client.reason)
             except Exception:
                 inventory['diagnostics'].append('native_inventory_unavailable')
             inventory['diagnostics'] = sorted(set(inventory['diagnostics']))
             if inventory['diagnostics']:
                 inventory.update(status='partial' if inventory['pages'] else 'unavailable', complete=False)
-        for child in sorted(children.keys() - rejected):
+        scoped_children[parent] = sorted(children.keys() - rejected)
+    for parent, result in output.items():
+        for child in scoped_children[parent]:
             result['children'].append(_child(client, parent, child, observed))
         parts = list(result['inventories'].values()) + result['children']
         result['complete'] = all(p['complete'] for p in parts)
@@ -205,4 +267,6 @@ def collect(client, parents, *, max_pages=10):
                 result['schema_status'] = 'unavailable'
         if any(p['status'] == 'unavailable' for p in result['inventories'].values()):
             result['schema_status'] = 'unknown'
+    for result in output.values():
+        result['budget'] = client.metadata()
     return output
