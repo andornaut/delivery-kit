@@ -122,6 +122,57 @@ MONITOR_ROUTE_FILE={self.route_path}
         self.shell(f'bus_monitor_due_ticks {due-1} {due}')
         self.assertEqual(len(self.invocations()), 1)
 
+    def test_monitor_report_sink_and_route_preserve_distinct_tech_role(self):
+        session_map = self.root / 'sessions.json'
+        roles = {'codex': {'tech': TECH, 'art': TARGET, 'gameplay': HELD}}
+        session_map.write_text(json.dumps(roles))
+        original_map = session_map.read_bytes()
+        self.conf.write_text(self.original + f'REPORT_THREAD={MONITOR}\nSESSION_MAP_FILE={session_map}\n')
+        (self.mechanism / 'event.py').symlink_to(ROOT / 'libexec' / 'event.py')
+        fake_bin = self.root / 'bin'
+        fake_bin.mkdir()
+        report_calls = self.root / 'report-calls'
+        fake_codex = fake_bin / 'codex'
+        fake_codex.write_text('''#!/usr/bin/python3
+import json,os,sys
+with open(os.environ['REPORT_CALLS'], 'a') as stream:
+    stream.write(json.dumps(sys.argv[1:])+'\\n')
+''')
+        fake_codex.chmod(0o755)
+        env = self.env | {'PATH': str(fake_bin) + os.pathsep + self.env['PATH'],
+                          'REPORT_CALLS': str(report_calls)}
+        due = self.epoch('2026-11-02 14:20:00')
+        for host in (True, False):
+            with self.subTest(host=host):
+                self.route_path.write_text(json.dumps(self.route | {
+                    'host_project_root': str(self.root if host else self.root / 'other-project')}))
+                checked = subprocess.run(
+                    ['bash', str(ROOT / 'bin' / 'delivery-kit'), '--config', str(self.conf),
+                     '--state-dir', str(self.state), 'check-config'],
+                    env=env, capture_output=True, text=True, timeout=3)
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                self.assertIn('configuration accepted', checked.stdout)
+                self.assertEqual(len(self.invocations()), int(not host))
+                script = (f'S="{self.mechanism}"; . "$S/bus-common.sh"; '
+                          'bus_dispatch() { python3 "$S/event.py" "$BUS_DIR" flush; }; '
+                          f'bus_monitor_due_ticks {due-1} {due}; '
+                          f'bus_report_scheduled_tick {due + int(not host)} "fixture release report"')
+                result = subprocess.run(['bash', '-c', script], env=env,
+                                        capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.invocations()), 1)
+                native = self.invocations()[0]
+                self.assertEqual(native[native.index('--coordinator')+1], MONITOR)
+                self.assertNotIn(TECH, native)
+                reports = [json.loads(line) for line in report_calls.read_text().splitlines()]
+                self.assertEqual(len(reports), 1 if host else 2)
+                self.assertTrue(all(row[:3] == ['queue', '--thread', MONITOR] for row in reports))
+                self.assertTrue(all('fixture release report' in row[row.index('--message')+1]
+                                    for row in reports))
+                self.assertEqual(session_map.read_bytes(), original_map)
+                self.assertEqual(json.loads(session_map.read_text())['codex']['tech'], TECH)
+                self.assertNotEqual(TECH, MONITOR)
+
     def test_monitor_minutes_validate_without_config_load_activity_or_release_coupling(self):
         due = self.epoch('2026-11-02 14:20:00')
         self.assertEqual(self.shell(':').returncode, 0)
