@@ -131,8 +131,40 @@ class EventNativeTests(unittest.TestCase):
             route = json.loads(self.route.read_text())
             with patch.object(subject, 'resolve_route', wraps=subject.resolve_route):
                 self.route.write_text(json.dumps(route | change))
-                self.assertFalse(subject.monitor_recipient(env, TECH))
+                self.assertIsNone(subject.monitor_recipient(env, TECH))
             self.route.write_text(json.dumps(route))
+
+    def test_invalid_unavailable_empty_and_held_routes_never_fall_back_to_queue(self):
+        log = self.root / 'transport-calls'
+        stub = self.root / 'codex'
+        stub.write_text('#!/bin/sh\nprintf called >> "$FIXTURE_LOG"\n')
+        stub.chmod(0o755)
+        native = self.root / 'native-python'
+        native.write_text(stub.read_text())
+        native.chmod(0o755)
+        route = json.loads(self.route.read_text())
+        unavailable = str(self.root / 'missing-route.json')
+        cases = [('empty', '', None), ('missing', unavailable, None),
+                 ('malformed', str(self.route), 'not json'),
+                 ('invalid', str(self.route), json.dumps(route | {'version': 2})),
+                 ('held', str(self.route), json.dumps(route | {'state': 'held'})),
+                 ('held-unknown', str(self.route), json.dumps(route | {
+                     'state': 'held', 'monitor_thread_id': None}))]
+        env = os.environ | {'REPORT_THREAD': TECH, 'PATH': str(self.root) + ':' + os.environ['PATH'],
+            'FIXTURE_LOG': str(log), 'CODEX_PYTHON': str(native)}
+        for name, route_path, content in cases:
+            with self.subTest(route=name):
+                if content is not None:
+                    self.route.write_text(content)
+                current = env | {'MONITOR_ROUTE_FILE': route_path}
+                for args in (('emit', 'push', name, 'PRIVATE_EVENT'), ('flush',)):
+                    result = subprocess.run(['/usr/bin/python3', str(ROOT / 'libexec/event.py'),
+                        str(self.root), *args], env=current, capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout + result.stderr, '')
+                self.assertFalse(log.exists())
+                self.assertTrue(all(not json.loads(path.read_text())['sent']
+                    for path in (self.root / 'events').glob('*.json')))
 
     def test_subprocess_config_exports_selected_interpreter_and_unset_semantics(self):
         bus = self.root / 'bus'
@@ -189,8 +221,16 @@ REPORT_THREAD={TECH}
         stub.chmod(0o755)
         env = os.environ | {'REPORT_THREAD': ART, 'MONITOR_ROUTE_FILE': str(self.route),
             'PATH': str(self.root) + ':' + os.environ['PATH'], 'FIXTURE_LOG': str(log)}
-        for args in (('emit', 'push', 'key', 'message'), ('flush',)):
-            subprocess.run(['/usr/bin/python3', str(ROOT / 'libexec/event.py'), str(self.root), *args],
-                           env=env, check=True, timeout=5)
-        self.assertEqual(json.loads(log.read_text())[:4], ['queue', '--thread', ART, '--message'])
-        self.assertTrue(json.loads(next((self.root / 'events').glob('*.json')).read_text())['sent'])
+        route = json.loads(self.route.read_text())
+        for state in ('active', 'held', 'legacy'):
+            with self.subTest(state=state):
+                self.route.write_text(json.dumps(route | {'state': state}))
+                current = dict(env)
+                if state == 'legacy':
+                    current.pop('MONITOR_ROUTE_FILE')
+                for args in (('emit', 'push', state, 'message'), ('flush',)):
+                    subprocess.run(['/usr/bin/python3', str(ROOT / 'libexec/event.py'), str(self.root), *args],
+                                   env=current, check=True, timeout=5)
+                self.assertEqual(json.loads(log.read_text())[:4], ['queue', '--thread', ART, '--message'])
+                self.assertTrue(all(json.loads(path.read_text())['sent']
+                    for path in (self.root / 'events').glob('*.json')))

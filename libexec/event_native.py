@@ -11,16 +11,21 @@ from unblock import connect, decision_clear, decision_record, persist, RpcError,
 
 
 def monitor_recipient(environment, recipient):
-    """Validate the route using its declared host, including nonhost reporters."""
+    """Return True for native, False for queue, or None for deferred routing."""
     route_file = environment.get('MONITOR_ROUTE_FILE')
     if route_file is None:
         return False
     try:
         route = json.loads(Path(route_file).read_text())
         resolved = resolve_route(route_file, route['host_project_root'])
-        return resolved.get('status') == 'active' and resolved['coordinator'] == recipient
+        monitor = route['monitor_thread_id']
+        if monitor is None:
+            return None
+        if monitor != recipient:
+            return False
+        return True if resolved.get('status') == 'active' else None
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        return False
+        return None
 
 
 def deliver(client, state_dir, path, recipient, event, message):
@@ -98,7 +103,7 @@ def main():
     state_dir, event_path, recipient, message = sys.argv[1:]
     state_dir = Path(state_dir)
     event = json.loads(Path(event_path).read_text())
-    if not monitor_recipient(os.environ, recipient):
+    if monitor_recipient(os.environ, recipient) is not True:
         return 1
     receipts = state_dir / 'events' / 'native'
     receipts.mkdir(exist_ok=True)

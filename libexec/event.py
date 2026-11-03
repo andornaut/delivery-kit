@@ -74,7 +74,10 @@ elif sys.argv[2] == 'flush' and thread:
                 write(path, event)
                 continue
             try:
-                if monitor_recipient(os.environ, thread):
+                route = monitor_recipient(os.environ, thread)
+                if route is None:
+                    break
+                if route:
                     interpreter = os.environ.get('CODEX_PYTHON', '/usr/bin/python3')
                     if not pathlib.Path(interpreter).is_absolute() or not os.access(interpreter, os.X_OK):
                         break

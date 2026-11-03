@@ -51,7 +51,7 @@ The optional Codex triage adapter retains the three-role game metadata schema an
 
 ### Operational reporting recipient and configuration adoption
 
-`REPORT_THREAD` selects the queued bus-event recipient. Changing it alone grants
+`REPORT_THREAD` selects the bus-event recipient. Changing it alone grants
 no operational authority or recipient decision clearance. After an explicitly
 confirmed transfer, the existing monitor owns game-bus operations: queue admission
 and mutation after Tech approval, gate/push/deploy tracking, retries, reporting and
@@ -502,3 +502,29 @@ The `monitor-snapshot` CLI exit status reflects queue capture errors only.
 Incomplete or unavailable history diagnostics remain independently usable; a zero
 exit status does not establish complete history, decision clearance or successful
 guarded delivery.
+
+
+### 0.4.2 monitor event delivery
+
+With a valid active `MONITOR_ROUTE_FILE`, bus events addressed to its confirmed
+monitor UUID use native live delivery from both host and nonhost reporters.
+Recipient decision clearance and native question, approval and history guards
+take precedence over immediate delivery. A guarded active turn receives
+`turn/steer` with its current `expectedTurnId`; an idle completed thread receives
+`turn/start`. No turn is interrupted. An explicit stale-turn rejection permits
+one refreshed attempt.
+
+A declared invalid, empty or unavailable route defers event delivery. A valid held
+route defers its monitor; a held route without a monitor identity defers all
+recipients. Valid routes retain queue delivery for verified nonmonitor recipients.
+An undeclared route preserves legacy queue delivery. Monitor delivery never falls
+back to the queue after a native failure or guard deferral.
+
+`STATE/events/native/EVENT_ID-RECIPIENT_UUID.json` durably records the deterministic
+`clientUserMessageId`, attempts and outcomes before native mutation. The original
+outbox payload, event identity and sent receipt remain authoritative. Native
+acceptance records delivery acceptance only, never recipient handling. Ambiguous
+or interrupted sends remain unresolved for manual reconciliation and are never
+automatically retried: the supported native item schema does not expose an exact
+`clientUserMessageId` acceptance link. Matching text, `clientId` or `turnId` cannot
+establish that link. Receipts and logs contain no native message bodies.
