@@ -49,6 +49,51 @@ reminder delivery. No live native connection is made by verification.
 
 The optional Codex triage adapter retains the three-role game metadata schema and its coordinator reminder wording. That schema is an adapter contract, not a repository identifier. Other applications may omit reporting/triage rather than supplying fake identities.
 
+### Operational reporting recipient and configuration adoption
+
+`REPORT_THREAD` selects the queued bus-event recipient independently of Tech's
+approval and release ownership. A confirmed existing operational monitor may receive
+these reports; changing the recipient grants no release approval, queue mutation,
+deployment or decision-clearance authority. `MONITOR_ROUTE_FILE` selects guarded
+monitoring targets separately; `MONITOR_MINUTES` sets their cadence. In legacy
+mode (route variable unset),
+`REPORT_THREAD` also selects the triage coordinator, so changing it is not an
+independent reporting transfer until routed monitoring is adopted.
+
+Configuration is sourced by each shell entry point through `bus-common.sh`.
+The resident runner, departure loop and observer retain their loaded values.
+Fresh batch, deployment/retry, resource-report and detached CI-watch shells source
+the configuration again when started. A CI watcher already running retains its
+values through completion. Detached `event.py` flushers inherit `REPORT_THREAD`
+from their spawning process and never reload configuration. Editing the file or
+running `check-config` does not reload resident processes; there is no supported
+reload command or signal. The observer does reread route JSON at its loaded
+`MONITOR_ROUTE_FILE` path on each due monitor slot; that does not reload config.
+
+For an approved reporting transfer, the runtime owner uses the idle cutover below:
+
+1. Confirm the new recipient's identity and acceptance, preserve Tech approval
+   ownership, and inventory the owned runner/loop, notifier, detached CI watchers,
+   event flushers, pending CI/deployment work and unsent outbox entries.
+2. Wait for an idle departure boundary and reconcile detached reporting still in
+   flight. Preserve exact-SHA retry artifacts and event receipts. Stop only the
+   verified owned idle runner/loop and descendants before changing configuration.
+3. Set the confirmed `REPORT_THREAD`, validate configuration, then start exactly
+   one pinned adapter using the existing launch mechanism and unchanged state,
+   locks, queue and release schedule. Do not use `scheduled-once` to test adoption.
+4. Verify the single runner/loop and observe subsequent scheduled, CI and
+   deployment reports at the confirmed recipient. Record old in-flight reports
+   separately; queued delivery acceptance is not proof of recipient handling.
+
+The outbox stores event identity and sent state, not a recipient binding. A new
+flusher sends unsent entries to its inherited recipient; sent entries are not
+replayed. An old detached flusher can still deliver to the former recipient.
+There is no atomic recipient transfer, automatic drain/retarget operation or
+resident reload acknowledgement. If detached reporters cannot be reconciled,
+transfer completion remains blocked. A later deployment retry reads the new
+configuration while using the retained exact-SHA artifacts; retain the source
+snapshot until its processes and retry dependencies are released.
+
 ## Snapshot and cutover
 
 Prepare a new immutable local snapshot from a reviewed commit:
@@ -408,9 +453,27 @@ legacy game-role metadata and `CODEX_SHARED_ROLES`.
 Snapshot `history` diagnostics include safe `reason_code` and `category` values.
 Malformed pages, rows and items, unsupported item types, transport failures,
 native RPC failures, JSON parse failures and incomplete pages are distinguished
-without raw exception text or native bodies. Unsupported context compaction is
-reported as `context_compaction` and remains rejected. Valid pagination remains
+without raw exception text or native bodies. Valid pagination remains
 `partial` with `nextCursor`; safe references read before a malformed row remain
 available but are not a completeness claim. These diagnostics require no extra
 native requests. Queue capture and explicit acknowledgement remain available even
 when history metadata is unavailable.
+
+
+### 0.4.1 history degradation
+
+Recognized native `contextCompaction` items preserve safe references and cursor
+metadata while reporting history `status: partial`, `complete: false`, and both
+`reason_code: context_compaction` and `category: context_compaction`. This is an
+incomplete history diagnostic, not recipient decision clearance. Unknown item
+types remain unsupported. Ordinary paginated history may be `partial` without
+being degraded.
+
+Health adds `history_status: degraded|ok`. History degradation produces
+`monitor_status: degraded` unless an actual failure requires `failed`, which
+always takes precedence. History-only degradation does not increment
+`deferral_slots`; an actual guarded delivery outcome of `deferred` or `blocked`
+still does. Queue backlog and inventory failure rules remain applicable.
+`history_status: ok` describes history metadata only: it does not establish
+recipient clearance, successful delivery or overall monitor health. Inspect the
+history diagnostics, delivery outcome, backlog and deferral counters separately.
