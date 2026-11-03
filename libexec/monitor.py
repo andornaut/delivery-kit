@@ -325,6 +325,15 @@ def acknowledge(client, state_dir, recipient, snapshot_id, queue_ids, dispositio
                 continue
             if identity not in current:
                 operation['state'] = 'confirmed_absent'
+                if disposition == 'retained' and retained_path.exists():
+                    retention = json.loads(retained_path.read_text())
+                    if (retention.get('active') is True and retention.get('recipient') == recipient
+                            and retention.get('queue_id') == identity
+                            and retention.get('payload_signature') == payload_signature(originals[identity])):
+                        retention['active'] = False
+                        retention.setdefault('history', []).append({
+                            'state': 'confirmed_absent', 'snapshot_id': snapshot_id})
+                        persist(retained_path, retention)
             elif payload_signature(current[identity]) != payload_signature(originals[identity]):
                 operation['state'] = 'changed_payload'
             elif disposition == 'retained':

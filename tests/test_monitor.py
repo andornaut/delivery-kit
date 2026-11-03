@@ -386,6 +386,78 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(monitor.acknowledge(self.client, self.state, TECH, fresh['snapshot_id'], ['one'], 'handled')[0]['state'], 'deleted')
         self.assertEqual(self.client.queues[TECH], [entry('new-work')])
 
+    def test_retained_ack_confirms_absence_and_deactivates_matching_retention(self):
+        monitor.acknowledge(self.client, self.state, TECH, self.identity, ['one'], 'retained', 'planned work')
+        path = monitor.retention_path(self.state, TECH, 'one')
+        before = json.loads(path.read_text())
+        operation_before = self.receipt()
+        self.client.queues[TECH] = [entry('two')]
+        self.client.calls.clear()
+        snapshots_before = sorted((self.state / 'snapshots').iterdir())
+
+        result = monitor.acknowledge(self.client, self.state, TECH, self.identity, ['one'], 'retained', 'planned work')
+
+        self.assertEqual(result, [{'queue_id': 'one', 'state': 'confirmed_absent'}])
+        after = json.loads(path.read_text())
+        self.assertEqual(after, before | {'active': False, 'history': before['history'] + [
+            {'state': 'confirmed_absent', 'snapshot_id': self.identity}]})
+        operation = self.receipt()
+        self.assertEqual(operation['disposition'], 'retained')
+        self.assertEqual(operation['attempts'], operation_before['attempts'])
+        self.assertEqual(operation['history'][:-1], operation_before['history'])
+        self.assertEqual(operation['history'][-1]['state'], 'confirmed_absent')
+        self.assertEqual(self.client.deletions(), [])
+        self.assertTrue(self.client.calls)
+        self.assertTrue(all(method == 'thread/queue/list' for method, _ in self.client.calls))
+        self.assertEqual(sorted((self.state / 'snapshots').iterdir()), snapshots_before)
+        with self.assertRaises(ValueError):
+            self.ack(disposition='handled')
+        monitor.acknowledge(self.client, self.state, TECH, self.identity, ['one'], 'retained', 'planned work')
+        self.assertEqual(json.loads(path.read_text()), after)
+
+    def test_retained_absence_preserves_different_or_inactive_retention(self):
+        original = entry('one')
+        cases = (
+            {'recipient': ART},
+            {'queue_id': 'two'},
+            {'payload_signature': monitor.payload_signature(original | {'input': []})},
+            {'payload_signature': monitor.payload_signature(original | {'clientUserMessageId': 'changed'})},
+            {'active': False},
+        )
+        self.client.queues[TECH] = [entry('two')]
+        path = monitor.retention_path(self.state, TECH, 'one')
+        for changes in cases:
+            with self.subTest(changes=changes):
+                snapshot = monitor.capture(NativeFixture(), self.state, [TECH])
+                retention = {'active': True, 'recipient': TECH, 'queue_id': 'one',
+                             'payload_signature': monitor.payload_signature(original),
+                             'history': [{'state': 'retained', 'snapshot_id': self.identity}]} | changes
+                monitor.persist(path, retention)
+                result = monitor.acknowledge(self.client, self.state, TECH, snapshot['snapshot_id'],
+                                             ['one'], 'retained', 'planned work')
+                self.assertEqual(result[0]['state'], 'confirmed_absent')
+                self.assertEqual(json.loads(path.read_text()), retention)
+        self.assertEqual(self.client.deletions(), [])
+
+    def test_retained_ack_with_present_unchanged_or_changed_identity(self):
+        for changes in ({}, {'input': []}, {'clientUserMessageId': 'changed'}):
+            with self.subTest(changes=changes):
+                self.client.queues[TECH] = [entry('one')]
+                snapshot = monitor.capture(self.client, self.state, [TECH])
+                snapshot_id = snapshot['snapshot_id']
+                monitor.acknowledge(self.client, self.state, TECH, snapshot_id, ['one'], 'retained', 'planned work')
+                path = monitor.retention_path(self.state, TECH, 'one')
+                before = json.loads(path.read_text())
+                self.client.queues[TECH][0].update(changes)
+                result = monitor.acknowledge(self.client, self.state, TECH, snapshot_id, ['one'], 'retained', 'planned work')
+                self.assertEqual(result[0]['state'], 'changed_payload' if changes else 'retained')
+                after = json.loads(path.read_text())
+                self.assertTrue(after['active'])
+                if changes:
+                    self.assertEqual(after, before)
+                self.assertNotIn('confirmed_absent', [row['state'] for row in after['history']])
+        self.assertEqual(self.client.deletions(), [])
+
     def test_persistent_item_ages_through_arrivals_errors_edits_and_retention(self):
         def snapshot(identities):
             self.client.queues[TECH] = [entry(identity) for identity in identities]
