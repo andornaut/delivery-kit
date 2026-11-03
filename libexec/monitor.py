@@ -92,6 +92,7 @@ def history_refs(client, recipient, cursor=None):
             result.update(reason_code='invalid_cursor', category='pagination')
             return result
         result['nextCursor'] = next_cursor
+        compacted = False
         for entry in page['data']:
             if not isinstance(entry, dict) or not isinstance(entry.get('turnId'), str) or not entry['turnId']:
                 result.update(reason_code='malformed_row', category='row')
@@ -101,9 +102,11 @@ def history_refs(client, recipient, cursor=None):
                     or not item['id'] or not isinstance(item.get('type'), str)):
                 result.update(reason_code='malformed_item', category='item')
                 return result
+            if item['type'] == 'contextCompaction':
+                compacted = True
+                continue
             if item['type'] not in NATIVE_ITEM_TYPES:
-                category = 'context_compaction' if item['type'] == 'contextCompaction' else 'unknown_item'
-                result.update(reason_code='unsupported_item_type', category=category)
+                result.update(reason_code='unsupported_item_type', category='unknown_item')
                 return result
             reference = {'turn_id': entry['turnId'], 'item_id': item['id']}
             if question_item(item):
@@ -111,9 +114,11 @@ def history_refs(client, recipient, cursor=None):
                 result['question_refs'].append(reference)
             elif item['type'] == 'userMessage':
                 result['user_reply_refs'].append(reference)
-        result['complete'] = not (next_cursor is not None or page.get('truncated') or page.get('hasMore'))
+        result['complete'] = not (compacted or next_cursor is not None or page.get('truncated') or page.get('hasMore'))
         result['status'] = 'complete' if result['complete'] else 'partial'
-        if page.get('truncated') or page.get('hasMore'):
+        if compacted:
+            result.update(reason_code='context_compaction', category='context_compaction')
+        elif page.get('truncated') or page.get('hasMore'):
             result.update(reason_code='incomplete_page', category='pagination')
         elif next_cursor is not None:
             result.update(reason_code='more_history', category='pagination')
@@ -228,8 +233,10 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
     record['backlog_slots'] = max((item['age'] for entries in items.values()
                                    for item in entries.values()), default=0)
     status = outcome.get('previousStatus', outcome['status'])
-    deferred = (status in ('deferred', 'blocked') or bool(snapshot['errors'])
-                or any(history['status'] == 'unavailable' for history in snapshot.get('history', {}).values()))
+    deferred = status in ('deferred', 'blocked') or bool(snapshot['errors'])
+    degraded = any(history['status'] == 'unavailable'
+                   or history.get('reason_code') in ('context_compaction', 'incomplete_page')
+                   for history in snapshot.get('history', {}).values())
     if slot not in record['seen_slots']:
         record['seen_slots'].append(slot)
         record['deferral_slots'] = record.get('deferral_slots', 0) + 1 if deferred else 0
@@ -238,12 +245,21 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
     if outcome['status'] == 'accepted':
         record['accepted_signature'] = inventory_signature(state_dir, snapshot)
     failed = max(record.get('backlog_slots', 0), record.get('deferral_slots', 0)) >= 2
-    health = {'monitor_status': 'failed' if failed else 'ok', 'recipient': recipient,
+    health = {'monitor_status': 'failed' if failed else 'degraded' if degraded else 'ok',
+              'history_status': 'degraded' if degraded else 'ok', 'recipient': recipient,
               'snapshot_id': snapshot['snapshot_id'],
               'backlog_slots': record.get('backlog_slots', 0),
               'deferral_slots': record.get('deferral_slots', 0)}
     if failed:
-        health['monitor_reason'] = 'owner must inspect snapshot, reconcile queued work or recipient clearance, and explicitly acknowledge handled IDs'
+        reasons = []
+        if record.get('backlog_slots', 0) >= 2:
+            reasons.append('unacknowledged queue items observed in two distinct slots; inspect snapshot and explicitly reconcile IDs')
+        if record.get('deferral_slots', 0) >= 2:
+            reasons.append('queue inventory or reminder delivery repeatedly deferred; inspect inventory errors and recipient clearance')
+        health['monitor_reason'] = '; '.join(reasons)
+    elif degraded:
+        health['monitor_reason'] = 'history metadata incomplete or unavailable; inspect history diagnostics without inferring question clearance'
+    record.pop('monitor_reason', None)
     record.update(health, last_delivery_status=outcome['status'])
     if not failed:
         record['reported'] = False
@@ -382,7 +398,7 @@ def main():
                               'path': str(args.state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json')),
                               'queue_ids': [entry['id'] for entry in snapshot['queues'].get(args.recipient, [])],
                               'complete': not snapshot['errors'], 'history': snapshot['history']}))
-            return int(bool(snapshot['errors']) or any(history['status'] == 'unavailable' for history in snapshot['history'].values()))
+            return int(bool(snapshot['errors']))
         results = acknowledge(client, args.state_dir, args.recipient, args.snapshot, args.queue_id, args.disposition, args.reason)
         print(json.dumps({'results': results}))
         return int(any(row['state'] not in ('deleted', 'confirmed_absent', 'retained') for row in results))

@@ -140,12 +140,126 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(unknown['nextCursor'], 'older')
         compacted = monitor.history_refs(page_client({'data': [{'turnId': 'compact-turn', 'item': {'id': 'compact', 'type': 'contextCompaction'}}]}), TECH)
         self.assertEqual(compacted['category'], 'context_compaction')
+        self.assertEqual(compacted['status'], 'partial')
+        self.assertFalse(compacted['complete'])
         failed = monitor.history_refs(page_client(TimeoutError('PRIVATE_TRANSPORT_BODY')), TECH)
         self.assertEqual(failed['reason_code'], 'transport_failure')
         self.assertNotIn('PRIVATE_', json.dumps([malformed, unknown, compacted, failed]))
         snap = monitor.capture(page_client(TimeoutError('PRIVATE_TRANSPORT_BODY')), self.state, [TECH])
         self.assertFalse(snap['errors'])
         self.assertEqual(snap['queues'][TECH], [entry('one'), entry('two')])
+
+    def test_compaction_preserves_both_sides_and_pagination_without_clearance(self):
+        original = self.client.call
+        def call(method, params):
+            if method == 'thread/items/list':
+                return {'data': [
+                    {'turnId': 'question', 'item': {'id': 'prompt', 'type': 'agentMessage', 'questions': [{}]}},
+                    {'turnId': 'compact', 'item': {'id': 'compact', 'type': 'contextCompaction', 'text': 'PRIVATE_BODY'}},
+                    {'turnId': 'answer', 'item': {'id': 'reply', 'type': 'userMessage', 'content': 'PRIVATE_BODY'}}],
+                    'nextCursor': 'older'}
+            return original(method, params)
+        self.client.call = call
+        guard = self.state / 'decisions' / (TECH + '.json')
+        monitor.persist(guard, {'thread_id': TECH, 'state': 'pending'})
+        before = guard.read_bytes()
+        snapshot = monitor.capture(self.client, self.state, [TECH])
+        history = snapshot['history'][TECH]
+        self.assertEqual(history['status'], 'partial')
+        self.assertFalse(history['complete'])
+        self.assertEqual(history['reason_code'], 'context_compaction')
+        self.assertEqual(history['category'], 'context_compaction')
+        self.assertEqual(history['nextCursor'], 'older')
+        self.assertEqual(history['question_refs'], [{'turn_id': 'question', 'item_id': 'prompt', 'kind': 'rendered_prompt'}])
+        self.assertEqual(history['user_reply_refs'], [{'turn_id': 'answer', 'item_id': 'reply'}])
+        self.assertNotIn('PRIVATE_BODY', json.dumps(snapshot))
+        self.assertEqual(guard.read_bytes(), before)
+        self.assertEqual(snapshot['queues'][TECH], [entry('one'), entry('two')])
+        output = io.StringIO()
+        argv = ['monitor.py', 'snapshot', '--recipient', TECH, '--state-dir', str(self.state),
+                '--control-socket', '/fixture/control.sock']
+        with patch.object(sys, 'argv', argv), patch('codex_adapter.control_socket_available', return_value=True), \
+                patch.object(unblock, 'connect', return_value=self.client), contextlib.redirect_stdout(output):
+            self.assertEqual(monitor.main(), 0)
+        self.assertFalse(json.loads(output.getvalue())['history'][TECH]['complete'])
+        self.assertEqual(guard.read_bytes(), before)
+
+    def test_metadata_degradation_does_not_age_delivery_failures_or_hide_backlog(self):
+        snapshot = copy.deepcopy(self.snapshot)
+        snapshot['queues'] = {TECH: []}
+        snapshot['history'] = {TECH: {'status': 'unavailable', 'reason_code': 'transport_failure'}}
+        path = self.state / 'health' / (TECH + '.json')
+        monitor.persist(path, {'seen_slots': [10, 20], 'deferral_slots': 8,
+                               'monitor_status': 'failed', 'reported': True,
+                               'monitor_reason': 'old failure', 'problem_signature': 'old'})
+        with patch.object(monitor, 'health_event') as event:
+            for slot in (100, 200):
+                result = monitor.record_health(self.state, TECH, slot, snapshot, {'status': 'accepted'})
+                self.assertEqual(result['monitor_status'], 'degraded')
+                self.assertEqual(result['history_status'], 'degraded')
+                self.assertEqual(result['deferral_slots'], 0)
+                self.assertEqual(result['backlog_slots'], 0)
+            self.assertFalse(json.loads(path.read_text())['reported'])
+            for slot, reason in ((210, 'context_compaction'), (220, 'incomplete_page')):
+                snapshot['history'][TECH] = {'status': 'partial', 'reason_code': reason}
+                result = monitor.record_health(self.state, TECH, slot, snapshot, {'status': 'accepted'})
+                self.assertEqual(result['monitor_status'], 'degraded')
+                self.assertEqual(result['deferral_slots'], 0)
+            snapshot['queues'][TECH] = [entry('one')]
+            first = monitor.record_health(self.state, TECH, 300, snapshot, {'status': 'unchanged'})
+            self.assertEqual(first['backlog_slots'], 1)
+            failed = monitor.record_health(self.state, TECH, 400, snapshot, {'status': 'unchanged'})
+            self.assertEqual(failed['monitor_status'], 'failed')
+            self.assertEqual(failed['history_status'], 'degraded')
+            self.assertIn('unacknowledged queue items', failed['monitor_reason'])
+            self.assertNotIn('repeatedly deferred', failed['monitor_reason'])
+            self.assertEqual(event.call_count, 1)
+            snapshot['queues'][TECH] = []
+            snapshot['history'][TECH] = {'status': 'partial', 'reason_code': 'more_history'}
+            recovered = monitor.record_health(self.state, TECH, 500, snapshot, {'status': 'accepted'})
+            self.assertEqual(recovered['monitor_status'], 'ok')
+            self.assertEqual(recovered['history_status'], 'ok')
+            self.assertNotIn('monitor_reason', json.loads(path.read_text()))
+
+    def test_snapshot_exit_depends_on_queue_inventory_not_history_availability(self):
+        original = self.client.call
+        inventory_fails = False
+        def call(method, params):
+            if method == 'thread/items/list' or inventory_fails:
+                raise TimeoutError('PRIVATE_TRANSPORT_BODY')
+            return original(method, params)
+        self.client.call = call
+        argv = ['monitor.py', 'snapshot', '--recipient', TECH, '--state-dir', str(self.state),
+                '--control-socket', '/fixture/control.sock']
+        for inventory_fails in (False, True):
+            output = io.StringIO()
+            with patch.object(sys, 'argv', argv), patch('codex_adapter.control_socket_available', return_value=True), \
+                    patch.object(unblock, 'connect', return_value=self.client), contextlib.redirect_stdout(output):
+                self.assertEqual(monitor.main(), int(inventory_fails))
+            public = json.loads(output.getvalue())
+            self.assertEqual(public['complete'], not inventory_fails)
+            self.assertEqual(public['history'][TECH]['status'], 'unavailable')
+            self.assertEqual(public['queue_ids'], [] if inventory_fails else ['one', 'two'])
+            self.assertNotIn('PRIVATE_TRANSPORT_BODY', output.getvalue())
+
+    def test_queue_errors_and_delivery_deferrals_fail_even_with_degraded_history(self):
+        for cause in ('inventory', 'delivery'):
+            with self.subTest(cause=cause):
+                snapshot = copy.deepcopy(self.snapshot)
+                snapshot['queues'] = {}
+                snapshot['history'] = {TECH: {'status': 'partial', 'reason_code': 'context_compaction'}}
+                if cause == 'inventory':
+                    snapshot['errors'] = {TECH: 'inventory incomplete'}
+                outcome = {'status': 'deferred' if cause == 'delivery' else 'accepted'}
+                recipient = TECH if cause == 'inventory' else ART
+                with patch.object(monitor, 'health_event') as event:
+                    first = monitor.record_health(self.state, recipient, 100, snapshot, outcome)
+                    self.assertEqual(first['monitor_status'], 'degraded')
+                    second = monitor.record_health(self.state, recipient, 200, snapshot, outcome)
+                    self.assertEqual(second['monitor_status'], 'failed')
+                    self.assertEqual(second['deferral_slots'], 2)
+                    self.assertIn('inventory or reminder delivery', second['monitor_reason'])
+                    self.assertEqual(event.call_count, 1)
 
     def test_explicit_ack_deletes_exact_id_even_with_pending_recipient(self):
         (self.state / 'decisions').mkdir()
