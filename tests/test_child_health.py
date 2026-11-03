@@ -31,7 +31,7 @@ class Native:
         self.calls = []
         self.child = row()
         self.turn = turn()
-        self.list_pages = {False: [{'data': [row()], 'nextCursor': None}],
+        self.list_pages = {False: [{'data': [self.child], 'nextCursor': None}],
                            True: [{'data': [], 'nextCursor': None}]}
         self.failure = None
         self.read_count = 0
@@ -53,7 +53,7 @@ class Native:
         if method == 'thread/read':
             assert params['includeTurns'] is False
             self.read_count += 1
-            return {'thread': copy.deepcopy(self.fresh_child if self.read_count > 1 and
+            return {'thread': copy.deepcopy(self.fresh_child if self.read_count >= 1 and
                                            self.fresh_child is not None else self.child)}
         if method == 'thread/turns/list':
             assert params['itemsView'] == 'notLoaded'
@@ -62,6 +62,44 @@ class Native:
             latest = self.fresh_turn if self.turn_count > 1 and self.fresh_turn is not None else self.turn
             return {'data': [copy.deepcopy(latest)], 'nextCursor': 'older-private-cursor'}
         raise AssertionError(method)
+
+
+class ScopedNative:
+    def __init__(self, sizes, failures=0):
+        self.parents = [f'00000000-0000-0000-0001-{n:012d}' for n in range(len(sizes))]
+        self.rows = {}
+        self.turns = {}
+        self.calls = []
+        self.children = {}
+        for i, (parent, size) in enumerate(zip(self.parents, sizes)):
+            children = [f'00000000-0000-0000-0002-{i * 1000 + n:012d}' for n in range(size)]
+            self.children[parent] = children
+            for n, child in enumerate(children):
+                self.rows[child] = row(child, parent)
+                failed = i == 0 and n < failures
+                self.turns[child] = turn('failed' if failed else 'completed',
+                                         'serverOverloaded' if failed else None,
+                                         f'00000000-0000-0000-0003-{i * 1000 + n:012d}')
+
+    def call(self, method, params):
+        self.calls.append((method, copy.deepcopy(params)))
+        if method == 'thread/list':
+            parent = params['parentThreadId']
+            assert parent in self.parents
+            assert params['sourceKinds'] == ['subAgentThreadSpawn']
+            children = [] if params['archived'] else self.children[parent]
+            start = int(params.get('cursor', 0))
+            end = start + params['limit']
+            return {'data': [copy.deepcopy(self.rows[c]) for c in children[start:end]],
+                    'nextCursor': str(end) if end < len(children) else None}
+        child = params['threadId']
+        assert child in self.rows
+        if method == 'thread/read':
+            assert params['includeTurns'] is False
+            return {'thread': copy.deepcopy(self.rows[child])}
+        assert method == 'thread/turns/list'
+        assert params == {'threadId': child, 'sortDirection': 'desc', 'limit': 1, 'itemsView': 'notLoaded'}
+        return {'data': [copy.deepcopy(self.turns[child])], 'nextCursor': 'privateOlderHistory'}
 
 
 class ChildHealthTests(unittest.TestCase):
@@ -83,7 +121,7 @@ class ChildHealthTests(unittest.TestCase):
                 self.assertEqual(child['turn_id'], T)
                 self.assertNotIn(PRIVATE, json.dumps(snapshot))
                 self.assertNotIn('older-private-cursor', json.dumps(snapshot))
-                self.assertEqual(len(native.calls), 6)
+                self.assertEqual(len(native.calls), 5)
 
     def test_no_status_or_untyped_error_inference(self):
         for status in ('completed', 'interrupted', 'inProgress', 'failed'):
@@ -130,7 +168,7 @@ class ChildHealthTests(unittest.TestCase):
             self.assertEqual(snapshot['children'], [])
             self.assertEqual(len(native.calls), 2)
         native = Native()
-        native.child['parentThreadId'] = N
+        native.fresh_child = row(parent=N)
         self.assertFalse(self.snapshot(native)['children'][0]['lineage_verified'])
 
     def test_active_and_archived_pagination_and_deduplication(self):
@@ -254,6 +292,7 @@ class ChildHealthTests(unittest.TestCase):
         self.assertFalse(child['requires_parent_action'])
         self.assertIn('native_call_budget_exhausted', snapshot['diagnostics'])
         self.assertEqual(snapshot['budget']['max_calls'], 3)
+        self.assertEqual(snapshot['counts'], {'discovered': 1, 'observed': 1, 'validated': 0, 'omitted': 0})
 
     def test_expiring_deadline_during_call_never_alerts(self):
         native = Native()
@@ -266,7 +305,7 @@ class ChildHealthTests(unittest.TestCase):
             return response
         native.call = call
         snapshot = self.snapshot(native)
-        self.assertEqual(len(native.calls), 3)
+        self.assertEqual(len(native.calls), 4)
         self.assertIn('native_deadline_exhausted', snapshot['diagnostics'])
         self.assertFalse(snapshot['children'][0]['requires_parent_action'])
 
@@ -296,6 +335,73 @@ class ChildHealthTests(unittest.TestCase):
         self.assertEqual(child['status'], 'partial')
         self.assertIsNone(child['error_code'])
         self.assertEqual(child['turn_id'], N)
+
+    def test_125_children_ten_parents_complete_with_eight_exact_failures(self):
+        native = ScopedNative([22, 11, 12, 12, 12, 12, 11, 11, 11, 11], failures=8)
+        snapshots = collect(native, native.parents)
+        self.assertEqual(len(native.calls), 20 + 125 + 2 * 8)
+        self.assertEqual(sum(s['counts']['observed'] for s in snapshots.values()), 125)
+        self.assertEqual(sum(s['counts']['validated'] for s in snapshots.values()), 8)
+        self.assertTrue(all(s['complete'] for s in snapshots.values()))
+        for parent, snapshot in snapshots.items():
+            count = len(native.children[parent])
+            self.assertEqual(snapshot['counts'], {'discovered': count, 'observed': count,
+                             'validated': 8 if parent == native.parents[0] else 0, 'omitted': 0})
+        self.assertNotIn(PRIVATE, json.dumps(snapshots))
+        self.assertNotIn('privateOlderHistory', json.dumps(snapshots))
+        methods = [m for m, _ in native.calls]
+        self.assertEqual(methods.count('thread/read'), 8)
+        self.assertEqual(methods.count('thread/turns/list'), 133)
+
+    def test_inventory_pages_round_robin_before_any_parent_second_page(self):
+        native = ScopedNative([120, 120])
+        with patch('child_health.MAX_CALLS', 4):
+            snapshots = collect(native, native.parents)
+        self.assertEqual([(p['parentThreadId'], p['archived']) for _, p in native.calls],
+                         [(native.parents[0], False), (native.parents[1], False),
+                          (native.parents[0], True), (native.parents[1], True)])
+        for snapshot in snapshots.values():
+            self.assertEqual(snapshot['counts'], {'discovered': 50, 'observed': 0, 'validated': 0, 'omitted': 50})
+            self.assertFalse(snapshot['complete'])
+            self.assertIn('native_call_budget_exhausted', snapshot['diagnostics'])
+
+    def test_child_observations_round_robin_under_call_bound(self):
+        native = ScopedNative([3, 3, 3])
+        with patch('child_health.MAX_CALLS', 9):
+            snapshots = collect(native, native.parents)
+        self.assertEqual([p['threadId'] for _, p in native.calls[6:]],
+                         [native.children[parent][0] for parent in native.parents])
+        for snapshot in snapshots.values():
+            self.assertEqual(snapshot['counts'], {'discovered': 3, 'observed': 1, 'validated': 0, 'omitted': 2})
+            self.assertFalse(snapshot['complete'])
+
+    def test_discovered_counts_include_listed_beyond_child_inspection_bound(self):
+        native = ScopedNative([125])
+        snapshot = collect(native, native.parents)[native.parents[0]]
+        self.assertEqual(snapshot['counts'], {'discovered': 125, 'observed': 100, 'validated': 0, 'omitted': 25})
+        self.assertIn('child_bound_exceeded', snapshot['diagnostics'])
+        self.assertFalse(snapshot['complete'])
+
+    def test_nonfailed_and_unknown_children_need_only_latest_turn_read(self):
+        for status, code in [('completed', None), ('interrupted', None),
+                             ('inProgress', 'contextWindowExceeded'), ('failed', 'unknown')]:
+            native = Native()
+            native.turn = turn(status, code)
+            snapshot = self.snapshot(native)
+            self.assertEqual([method for method, _ in native.calls],
+                             ['thread/list', 'thread/list', 'thread/turns/list'])
+            self.assertEqual(snapshot['counts'], {'discovered': 1, 'observed': 1, 'validated': 0, 'omitted': 0})
+            self.assertFalse(snapshot['children'][0]['requires_parent_action'])
+
+    def test_invalid_inventory_metadata_cannot_validate_failure(self):
+        for key, value in [('updatedAt', None), ('updatedAt', True), ('status', {'type': 'future'})]:
+            native = Native()
+            native.child[key] = value
+            snapshot = self.snapshot(native)
+            self.assertEqual(len(native.calls), 2)
+            self.assertEqual(snapshot['counts'], {'discovered': 1, 'observed': 0, 'validated': 0, 'omitted': 1})
+            self.assertFalse(snapshot['complete'])
+            self.assertIn('thread_schema_unavailable', snapshot['diagnostics'])
 
     def test_invalid_scope_and_bounds_make_no_calls(self):
         for parents in ([PRIVATE], P, [P.upper() + 'x']):

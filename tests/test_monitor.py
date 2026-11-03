@@ -136,11 +136,12 @@ class MonitorTests(unittest.TestCase):
             if method == 'thread/list':
                 self.assertEqual(params['parentThreadId'], TECH)
                 return {'data': [] if params['archived'] else [
-                    {'id': child, 'parentThreadId': TECH}]}
+                    {'id': child, 'parentThreadId': TECH,
+                     'status': {'type': 'idle'}, 'updatedAt': 1}]}
             if method == 'thread/read':
                 self.assertEqual(params['threadId'], child)
                 return {'thread': {'id': child, 'parentThreadId': TECH,
-                                   'status': {'type': 'idle'}}}
+                                   'status': {'type': 'idle'}, 'updatedAt': 1}}
             if method == 'thread/turns/list':
                 self.assertEqual(params['threadId'], child)
                 return {'data': [{'id': failed_turn, 'status': 'failed',
