@@ -1,5 +1,6 @@
 """Isolated protocol fixtures. No live daemon connection or queue mutation."""
 
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -324,16 +325,16 @@ class UnblockTests(unittest.TestCase):
             self.assertEqual(self.reconcile(client)['status'], 'deferred')
             self.assertEqual(client.mutations(), [])
 
-    def test_compaction_marker_preserves_exact_question_proof_and_guards(self):
+    def test_latest_turn_compaction_defers_even_with_visible_exact_proof(self):
         question = {'id': 'question', 'type': 'agentMessage', 'questions': [{}]}
         answer = {'id': 'answer', 'type': 'userMessage'}
         marker = {'id': 'compaction', 'type': 'contextCompaction'}
         resolution = {'question_turn_id': 'turn-one', 'question_item_id': 'question',
                       'answer_turn_id': 'turn-one', 'answer_item_id': 'answer'}
         cases = [
-            ('structural marker', [marker], [], 'accepted'),
+            ('structural marker', [marker], [], 'deferred'),
             ('unattested answer', [question, marker, answer], [], 'deferred'),
-            ('exact proof', [question, marker, answer], [resolution], 'accepted'),
+            ('exact proof', [question, marker, answer], [resolution], 'deferred'),
             ('lost question proof', [marker, answer], [resolution], 'deferred'),
             ('lost answer proof', [question, marker], [resolution], 'deferred'),
             ('opaque lost proof', [marker], [resolution], 'deferred'),
@@ -356,7 +357,7 @@ class UnblockTests(unittest.TestCase):
                 original = client.call
                 def call(method, params):
                     if method == 'thread/items/list':
-                        # Split at the marker to exercise complete paginated proof.
+                        # Paginate the visible proof independently of the structural marker.
                         selected = items[1:] if params.get('cursor') else items[:1]
                         page = {'data': [{'turnId': 'turn-one', 'item': item} for item in selected]}
                         if not params.get('cursor'):
@@ -364,8 +365,40 @@ class UnblockTests(unittest.TestCase):
                         return page
                     return original(method, params)
                 client.call = call
-                self.assertEqual(self.reconcile(client)['status'], expected)
-                self.assertEqual(len(client.mutations()), int(expected == 'accepted'))
+                result = self.reconcile(client)
+                self.assertEqual(result['status'], expected)
+                if name != 'unknown item':
+                    self.assertEqual(result['reason'],
+                        'native latest-turn context compaction prevents complete question proof')
+                self.assertEqual(client.mutations(), [])
+
+    def test_older_turn_compaction_does_not_poison_clear_latest_turn(self):
+        client = Fixture()
+        original = client.call
+        def call(method, params):
+            if method == 'thread/items/list' and 'turnId' not in params:
+                return {'data': [{'turnId': 'older-turn', 'item': {
+                    'id': 'old-compaction', 'type': 'contextCompaction',
+                }}]}
+            return original(method, params)
+        client.call = call
+        self.assertEqual(self.reconcile(client)['status'], 'accepted')
+        self.assertEqual(len(client.mutations()), 1)
+        self.assertTrue(all(params['turnId'] == 'turn-one' for method, params in client.calls
+                            if method == 'thread/items/list' and 'turnId' in params))
+
+    def test_stdout_includes_history_status_without_private_state(self):
+        state = {'status': 'deferred', 'history_status': 'incomplete',
+                 'queues': {'private': ['payload']}}
+        output = io.StringIO()
+        argv = ['unblock', '--coordinator', TECH, '--slot', '100',
+                '--state-dir', str(self.path.parent)]
+        with patch.object(sys, 'argv', argv), patch.object(subject, 'run', return_value=state), \
+                patch('sys.stdout', output):
+            self.assertEqual(subject.main(), 1)
+        self.assertEqual(json.loads(output.getvalue()), {
+            'status': 'deferred', 'history_status': 'incomplete',
+        })
 
     def test_unrelated_old_resolution_does_not_fetch_or_poison_current_clear_turn(self):
         subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear', 'resolutions': [

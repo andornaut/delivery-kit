@@ -193,6 +193,8 @@ def native_questions_clear(client, state_dir, recipient, turn_id):
         if record is None:
             return False, 'recipient resolution record missing or invalid'
         pages = {turn_id: native_items(client, recipient, turn_id)}
+        if any(item['type'] == 'contextCompaction' for item in pages[turn_id].values()):
+            return False, 'native latest-turn context compaction prevents complete question proof'
         resolved = set()
         for resolution in record.get('resolutions', []):
             if resolution['question_turn_id'] != turn_id:
@@ -387,7 +389,7 @@ def main():
     args = parser.parse_args()
     state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot)
     # Status only. Persisted queue IDs stay local for coordinator reconciliation.
-    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
+    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
     return 0 if state["status"] in ("accepted", "deduplicated", "unchanged", "busy") and state.get("monitor_status") != "failed" else 1
 
 
