@@ -66,7 +66,13 @@ report or changing a route is not activation. Preserve outstanding work and its
 owner throughout the transfer.
 
 `MONITOR_ROUTE_FILE` selects guarded monitoring targets separately;
-`MONITOR_MINUTES` sets their cadence. In legacy mode (route variable unset),
+`MONITOR_MINUTES` sets their cadence. In routed mode, set `REPORT_THREAD` to the
+confirmed monitor UUID independently of the unchanged Tech role maps. Keep the
+existing Tech UUID and role assignments; do not relabel Tech as monitor. Route
+validation uses the explicit monitor route, not a reporting-recipient role-map
+match. Configuration acceptance alone does not prove native route acceptance or
+consumer adoption. Verify both with isolated consumer fixtures before cutover.
+In legacy mode (route variable unset),
 `REPORT_THREAD` also selects the triage coordinator, so changing it is not an
 independent reporting transfer until routed monitoring is adopted.
 
