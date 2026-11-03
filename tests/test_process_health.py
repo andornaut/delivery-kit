@@ -212,6 +212,25 @@ class ProcessHealthTests(unittest.TestCase):
         self.assertTrue(result['jobs'][0]['requires_owner_action'])
         self.assertEqual(result['observations'], [])
 
+    def test_confirmation_references_do_not_depend_on_scheduled_sample_emission(self):
+        value = job(owner_evidence=evidence(confirmed_stalled=True, progress=progress(),
+                                           blocked_condition=blocked(), unrelated=PRIVATE))
+        expected = {'confirmed_by': P, 'confirmed_at': timestamp(), 'episode_id': 'episode-1',
+                    'blocked_condition': {'code': 'deadlock', 'evidence_id': 'diagnostic-1'}}
+        for slot, now in ((None, NOW), (NOW, NOW+61)):
+            with self.subTest(slot=slot):
+                result = self.collect([value], slot=slot, now=now)
+                self.assertEqual(result['observations'], [])
+                row = result['jobs'][0]
+                self.assertTrue(row['requires_owner_action'])
+                self.assertEqual(row['owner_evidence_ref'], expected)
+                self.assertNotIn('progress', row['owner_evidence_ref'])
+        native = Native()
+        native.parent = OTHER
+        self.assertIsNone(self.collect([value], native)['jobs'][0]['owner_evidence_ref'])
+        value['owner_evidence']['confirmed_at'] = timestamp(1801)
+        self.assertIsNone(self.collect([value])['jobs'][0]['owner_evidence_ref'])
+
     def test_stasis_duration_native_status_and_exit_never_imply_stall_or_closed(self):
         native = Native()
         native.status, native.exit_code = 'completed', 0

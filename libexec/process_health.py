@@ -312,7 +312,8 @@ def collect(client, registrations, *, allowed_parents, slot, prior_observations=
             result['complete'] = False
             result['diagnostics'].append('duplicate_job_identity')
             previous = seen[key]
-            previous.update(state='unknown', requires_owner_action=False, stall_episode=None)
+            previous.update(state='unknown', requires_owner_action=False, stall_episode=None,
+                            owner_evidence_ref=None)
             previous['diagnostics'].append('duplicate_job_identity')
             result['observations'] = [sample for sample in result['observations']
                                       if any(sample[field] != identity[field] for field in IDENTITY[:-1])]
@@ -321,7 +322,7 @@ def collect(client, registrations, *, allowed_parents, slot, prior_observations=
             'identity_provenance': 'owner_attested', 'progress_provenance': 'owner_attested',
             'lineage_verified': False, 'invocation_verified': False,
             'native_status': None, 'exit_code': None, 'state': 'unknown', 'stall_episode': None,
-            'requires_owner_action': False, 'closure_status': 'unknown',
+            'requires_owner_action': False, 'owner_evidence_ref': None, 'closure_status': 'unknown',
             'closure_provenance': None, 'closure_result_ref': None,
             'closure_evidence_id': None, 'closure_reason_code': None,
             'closure_next_review_slot': None, 'diagnostics': []}
@@ -342,6 +343,12 @@ def collect(client, registrations, *, allowed_parents, slot, prior_observations=
                 row['diagnostics'].append('native_invocation_unavailable')
                 continue
             row.update(command, invocation_verified=True)
+            blocked = evidence.get('blocked_condition')
+            row['owner_evidence_ref'] = {
+                'confirmed_by': evidence['confirmed_by'], 'confirmed_at': evidence['confirmed_at'],
+                'episode_id': evidence.get('episode_id'),
+                'blocked_condition': ({key: blocked[key] for key in ('code', 'evidence_id')}
+                                      if blocked is not None else None)}
             closure, provenance, reference, diagnostics = _closure(reader, now, identity,
                                                                   registration.get('closure'))
             row.update(closure_status=closure, closure_provenance=provenance,
