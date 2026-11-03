@@ -554,7 +554,12 @@ Each parent reports `status` (`complete`, `partial` or `unavailable`), `complete
 `children` and safe `diagnostics`. Unsupported capability and collection failures
 remain unavailable, rather than reporting healthy zero-child inventories.
 `worker_health_status` reports degraded collection independently of queue backlog
-and reminder-deferral counters. Snapshot collection makes no native mutations.
+and reminder-deferral counters, and degrades overall monitor status without
+creating a queue-starvation failure. Queue and history capture precede child
+collection. Child collection uses the existing connection with its deadline
+narrowed by five seconds to reserve transport time for guards and delivery; the
+original deadline is restored on every exit. Snapshot collection makes no native
+mutations.
 
 At each scheduled capture, verified latest failed child turns requiring parent
 action bypass unchanged-queue reminder suppression. References contain only parent,

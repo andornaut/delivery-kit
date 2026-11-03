@@ -163,16 +163,28 @@ def worker_health(client, parents):
     parents = scoped_parents(parents)
     if not parents:
         return {}
+    original_deadline = getattr(client, 'deadline', None)
+    reason_code = 'collector_unavailable'
     try:
+        if original_deadline is not None:
+            client.deadline = original_deadline - 5
+            if time.monotonic() >= client.deadline:
+                raise TimeoutError('child collection budget exhausted')
         from child_health import collect
         result = collect(client, parents)
         if not isinstance(result, dict):
             raise ValueError('invalid collector result')
+    except TimeoutError:
+        reason_code = 'collector_budget_exhausted'
+        result = {}
     except Exception:
         result = {}
+    finally:
+        if original_deadline is not None:
+            client.deadline = original_deadline
     unavailable = {'status': 'unavailable', 'schema_status': 'unavailable',
                    'complete': False, 'children': [],
-                   'diagnostics': [{'reason_code': 'collector_unavailable'}]}
+                   'diagnostics': [{'reason_code': reason_code}]}
     return {parent: (result[parent] if isinstance(result.get(parent), dict)
                      and result[parent].get('status') in ('complete', 'partial', 'unavailable')
                      and isinstance(result[parent].get('children'), list) else unavailable)
@@ -200,8 +212,8 @@ def pending_worker_failures(state_dir, recipient, snapshot):
 
 
 def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, parents=()):
-    record = {'snapshot_id': str(uuid.uuid4()), 'queues': {}, 'errors': {}, 'history': {},
-              'worker_health': worker_health(client, parents)}
+    parents = scoped_parents(parents)
+    record = {'snapshot_id': str(uuid.uuid4()), 'queues': {}, 'errors': {}, 'history': {}}
     if slot is not None:
         record['slot'] = slot
     for recipient in dict.fromkeys(recipients):
@@ -211,6 +223,7 @@ def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, pa
         except Exception:
             record['errors'][recipient] = 'queue inventory unavailable or incomplete; retry snapshot before reconciliation'
         record['history'][recipient] = history_refs(client, recipient, history_cursor)
+    record['worker_health'] = worker_health(client, parents)
     path = state_dir / 'snapshots' / (record['snapshot_id'] + '.json')
     persist(path, record)
     return record
@@ -319,7 +332,7 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
                            or health.get('schema_status') in ('unknown', 'unavailable')
                            for health in snapshot.get('worker_health', {}).values())
     health = {'worker_health_status': 'degraded' if workers_degraded else 'ok',
-              'monitor_status': 'failed' if failed else 'degraded' if degraded else 'ok',
+              'monitor_status': 'failed' if failed else 'degraded' if degraded or workers_degraded else 'ok',
               'history_status': 'degraded' if degraded else 'ok', 'recipient': recipient,
               'snapshot_id': snapshot['snapshot_id'],
               'backlog_slots': record.get('backlog_slots', 0),
@@ -331,8 +344,13 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
         if record.get('deferral_slots', 0) >= 2:
             reasons.append('queue inventory or reminder delivery repeatedly deferred; inspect inventory errors and recipient clearance')
         health['monitor_reason'] = '; '.join(reasons)
-    elif degraded:
-        health['monitor_reason'] = 'history metadata incomplete or unavailable; inspect history diagnostics without inferring question clearance'
+    elif degraded or workers_degraded:
+        reasons = []
+        if degraded:
+            reasons.append('history metadata incomplete or unavailable; inspect history diagnostics without inferring question clearance')
+        if workers_degraded:
+            reasons.append('worker metadata incomplete or unavailable; inspect worker health diagnostics without inferring recovery')
+        health['monitor_reason'] = '; '.join(reasons)
     record.pop('monitor_reason', None)
     record.update(health, last_delivery_status=outcome['status'])
     if not failed:

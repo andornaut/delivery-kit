@@ -86,6 +86,48 @@ class MonitorTests(unittest.TestCase):
     def receipt(self):
         return json.loads(next((self.state / 'acks').glob('*.json')).read_text())
 
+    def test_child_budget_follows_inventory_reserves_delivery_and_restores_deadline(self):
+        import types
+        clock = [100.0]
+        self.client.deadline = 125.0
+        original = self.client.call
+        def inventory(method, params):
+            self.assertEqual(self.client.deadline, 125.0)
+            clock[0] += 1
+            return original(method, params)
+        self.client.call = inventory
+        def slow_collector(client, parents):
+            self.assertEqual(parents, [TECH])
+            self.assertEqual(client.deadline, 120.0)
+            self.assertTrue(any(method == 'thread/items/list' for method, _ in client.calls))
+            self.assertTrue(any(method == 'thread/queue/list' for method, _ in client.calls))
+            clock[0] = client.deadline
+            raise TimeoutError('PRIVATE_BUDGET_DETAIL')
+        collector = types.SimpleNamespace(collect=__import__('unittest.mock').mock.Mock(side_effect=slow_collector))
+        with patch.dict(sys.modules, {'child_health': collector}), \
+                patch.object(monitor.time, 'monotonic', side_effect=lambda: clock[0]):
+            snapshot = monitor.capture(self.client, self.state, [TECH], parents=[TECH])
+        self.assertEqual(snapshot['queues'][TECH], [entry('one'), entry('two')])
+        self.assertEqual(snapshot['history'][TECH]['status'], 'complete')
+        self.assertFalse(snapshot['errors'])
+        self.assertEqual(self.client.deadline, 125.0)
+        self.assertEqual(self.client.deadline - clock[0], 5.0)
+        self.assertEqual(snapshot['worker_health'][TECH]['status'], 'unavailable')
+        self.assertNotIn('PRIVATE_BUDGET_DETAIL', json.dumps(snapshot))
+        collector.collect.side_effect = RuntimeError('PRIVATE_COLLECTOR_ERROR')
+        with patch.dict(sys.modules, {'child_health': collector}), \
+                patch.object(monitor.time, 'monotonic', return_value=100.0):
+            monitor.worker_health(self.client, [TECH])
+        self.assertEqual(self.client.deadline, 125.0)
+        collector.collect.reset_mock()
+        with patch.dict(sys.modules, {'child_health': collector}), \
+                patch.object(monitor.time, 'monotonic', return_value=121.0):
+            unavailable = monitor.worker_health(self.client, [TECH])
+        collector.collect.assert_not_called()
+        self.assertEqual(self.client.deadline, 125.0)
+        self.assertEqual(unavailable[TECH]['diagnostics'],
+                         [{'reason_code': 'collector_budget_exhausted'}])
+
     def test_reviewed_collector_dependency_produces_safe_failure_and_timeout_metadata(self):
         child = '00000000-0000-0000-0000-000000000003'
         failed_turn = '00000000-0000-0000-0000-000000000004'
@@ -167,7 +209,9 @@ class MonitorTests(unittest.TestCase):
             for slot in (100, 100, 200):
                 health = monitor.record_health(self.state, TECH, slot, snapshot, {'status': 'accepted'})
                 self.assertEqual(health['worker_health_status'], 'degraded')
-                self.assertEqual(health['monitor_status'], 'ok')
+                self.assertEqual(health['monitor_status'], 'degraded')
+                self.assertEqual(health['history_status'], 'ok')
+                self.assertIn('worker metadata', health['monitor_reason'])
                 self.assertEqual(health['backlog_slots'], 0)
                 self.assertEqual(health['deferral_slots'], 0)
             event.assert_not_called()
