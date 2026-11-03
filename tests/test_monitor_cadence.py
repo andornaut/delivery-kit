@@ -139,6 +139,32 @@ with open(os.environ['REPORT_CALLS'], 'a') as stream:
     stream.write(json.dumps(sys.argv[1:])+'\\n')
 ''')
         fake_codex.chmod(0o755)
+        native_python = self.root / 'native-python'
+        native_python.write_text('''#!/usr/bin/python3
+import json,os,pathlib,sys
+from unittest.mock import patch
+if pathlib.Path(sys.argv[1]).name != 'event_native.py':
+    os.execv('/usr/bin/python3', ['/usr/bin/python3', *sys.argv[1:]])
+sys.path.insert(0, ROOT + '/libexec')
+sys.path.insert(0, ROOT + '/tests')
+import event_native
+from test_unblock import Fixture
+client = Fixture()
+sys.argv = sys.argv[1:]
+with patch.object(event_native, 'control_socket_available', return_value=True), \\
+        patch.object(event_native, 'connect', return_value=client):
+    result = event_native.main()
+with open(os.environ['REPORT_CALLS'], 'a') as stream:
+    for method, params in client.mutations():
+        stream.write(json.dumps({'method': method, 'params': params})+'\\n')
+raise SystemExit(result)
+'''.replace('ROOT', repr(str(ROOT))))
+        native_python.chmod(0o755)
+        self.conf.write_text(self.conf.read_text() + f'CODEX_PYTHON={native_python}\n')
+        decisions = self.state / 'unblock' / 'decisions'
+        decisions.mkdir(parents=True)
+        (decisions / f'{MONITOR}.json').write_text(json.dumps({
+            'thread_id': MONITOR, 'state': 'clear'}))
         env = self.env | {'PATH': str(fake_bin) + os.pathsep + self.env['PATH'],
                           'REPORT_CALLS': str(report_calls)}
         due = self.epoch('2026-11-02 14:20:00')
@@ -166,8 +192,11 @@ with open(os.environ['REPORT_CALLS'], 'a') as stream:
                 self.assertNotIn(TECH, native)
                 reports = [json.loads(line) for line in report_calls.read_text().splitlines()]
                 self.assertEqual(len(reports), 1 if host else 2)
-                self.assertTrue(all(row[:3] == ['queue', '--thread', MONITOR] for row in reports))
-                self.assertTrue(all('fixture release report' in row[row.index('--message')+1]
+                self.assertTrue(all(row['method'] == 'turn/steer'
+                                    and row['params']['threadId'] == MONITOR
+                                    and row['params']['expectedTurnId'] == 'turn-one'
+                                    for row in reports))
+                self.assertTrue(all('fixture release report' in row['params']['input'][0]['text']
                                     for row in reports))
                 self.assertEqual(session_map.read_bytes(), original_map)
                 self.assertEqual(json.loads(session_map.read_text())['codex']['tech'], TECH)

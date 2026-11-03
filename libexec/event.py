@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 
+from event_native import monitor_recipient
+
 root = pathlib.Path(sys.argv[1]) / 'events'
 root.mkdir(exist_ok=True)
 project = os.environ.get('REPORT_PROJECT', 'Game')
@@ -72,8 +74,15 @@ elif sys.argv[2] == 'flush' and thread:
                 write(path, event)
                 continue
             try:
-                result = subprocess.run(['codex', 'queue', '--thread', thread, '--message',
-                                         delivery_message(event)],
+                if monitor_recipient(os.environ, thread):
+                    interpreter = os.environ.get('CODEX_PYTHON', '/usr/bin/python3')
+                    if not pathlib.Path(interpreter).is_absolute() or not os.access(interpreter, os.X_OK):
+                        break
+                    command = [interpreter, str(pathlib.Path(__file__).with_name('event_native.py')),
+                               str(root.parent), str(path), thread, delivery_message(event)]
+                else:
+                    command = ['codex', 'queue', '--thread', thread, '--message', delivery_message(event)]
+                result = subprocess.run(command,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
                 if result.returncode: break
             except (OSError, subprocess.TimeoutExpired): break
