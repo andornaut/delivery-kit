@@ -12,6 +12,10 @@ import uuid
 
 MAX_CALLS = 256
 PAGE_SIZE = 100
+MAX_QUESTIONS = 100
+MAX_TITLE_BYTES = 4096
+MAX_OPTIONS = 32
+MAX_QUESTION_BYTES = 16384
 ITEM_TYPES = {
     'agentMessage', 'collabAgentToolCall', 'commandExecution', 'contextCompaction',
     'dynamicToolCall', 'enteredReviewMode', 'exitedReviewMode', 'fileChange',
@@ -75,6 +79,17 @@ def _resolutions(records, recipient):
     return record.get('resolutions', [])
 
 
+
+def _bounded_content(title, options):
+    try:
+        title_size = len(title.encode('utf-8'))
+        return (title_size <= MAX_TITLE_BYTES
+                and (options is None or (len(options) <= MAX_OPTIONS
+                     and title_size + sum(len(option.encode('utf-8')) for option in options)
+                     <= MAX_QUESTION_BYTES)))
+    except UnicodeError:
+        return False
+
 def _questions(turn, item):
     base = {'turn_id': turn, 'item_id': item['id'], 'question_index': None,
             'kind': 'question_tool', 'title': None, 'options': None,
@@ -86,7 +101,9 @@ def _questions(turn, item):
         if not isinstance(questions, list):
             return [base | {'kind': 'rendered_prompt'}], ['question_schema_unavailable']
         rows, diagnostics = [], []
-        for index, question in enumerate(questions):
+        if len(questions) > MAX_QUESTIONS:
+            diagnostics.append('rendered_question_bound_exceeded')
+        for index, question in enumerate(questions[:MAX_QUESTIONS]):
             row = base | {'kind': 'rendered_prompt', 'question_index': index}
             if isinstance(question, dict) and question.get('isSecret') is True:
                 diagnostics.append('sensitive_question_omitted')
@@ -96,6 +113,8 @@ def _questions(turn, item):
                         and (not isinstance(question['options'], list)
                              or not all(isinstance(option, str) for option in question['options'])))):
                 diagnostics.append('question_schema_unavailable')
+            elif not _bounded_content(question['title'], question.get('options')):
+                diagnostics.append('question_content_bound_exceeded')
             else:
                 row.update(title=question['title'], options=question.get('options'))
             rows.append(row)
@@ -107,11 +126,11 @@ def _questions(turn, item):
     return [], []
 
 
-def _capture(reader, recipient, max_pages):
+def _capture(reader, recipient, max_pages, turn_id=None):
     result = {'status': 'unavailable', 'complete': False, 'questions': [],
               'diagnostics': ['exact_unresolved_request_unavailable'],
               'pending_status': 'unavailable', 'cancelled_status': 'unavailable',
-              'ui_visibility': 'unknown'}
+              'ui_visibility': 'unknown', 'omitted_questions': 0}
     positions, kinds = {}, {}
     cursor, cursors = None, set()
     pages = 0
@@ -119,6 +138,8 @@ def _capture(reader, recipient, max_pages):
     try:
         for _ in range(max_pages):
             params = {'threadId': recipient, 'limit': PAGE_SIZE, 'sortDirection': 'desc'}
+            if turn_id is not None:
+                params['turnId'] = turn_id
             if cursor is not None:
                 params['cursor'] = cursor
             page = reader.call(params)
@@ -129,7 +150,8 @@ def _capture(reader, recipient, max_pages):
                 raise ValueError('page_bound_exceeded')
             for entry in page['data']:
                 if (not isinstance(entry, dict) or not _identifier(entry.get('turnId'))
-                        or (entry.get('threadId', recipient) != recipient)):
+                        or (entry.get('threadId', recipient) != recipient)
+                        or (turn_id is not None and entry['turnId'] != turn_id)):
                     raise ValueError('item_recipient_or_turn_mismatch')
                 item = entry.get('item')
                 if (not isinstance(item, dict) or not _identifier(item.get('id'))
@@ -140,6 +162,8 @@ def _capture(reader, recipient, max_pages):
                     raise ValueError('duplicate_item')
                 positions[identity] = len(positions)
                 kinds[identity] = item['type']
+                if item['type'] == 'agentMessage' and isinstance(item.get('questions'), list):
+                    result['omitted_questions'] += max(0, len(item['questions']) - MAX_QUESTIONS)
                 rows, diagnostics = _questions(entry['turnId'], item)
                 result['questions'].extend(rows)
                 result['diagnostics'].extend(diagnostics)
@@ -181,7 +205,8 @@ def _pending_context(reader, recipient):
     try:
         response = reader.call({'threadId': recipient, 'includeTurns': False}, 'thread/read')
         thread = response.get('thread') if isinstance(response, dict) else None
-        if not isinstance(thread, dict) or thread.get('id') != recipient:
+        if (not isinstance(thread, dict) or thread.get('id') != recipient
+                or type(thread.get('updatedAt')) is not int):
             return None
         status = thread.get('status')
         if (not isinstance(status, dict) or status.get('type') != 'active'
@@ -220,6 +245,8 @@ def _fresh_attestation(attestation, now):
                 and (not isinstance(attestation['options'], list)
                      or not all(isinstance(option, str) for option in attestation['options'])))):
         return False
+    if not _bounded_content(attestation['title'], attestation['options']):
+        return False
     value = attestation['confirmed_at']
     try:
         if not value.endswith(('Z', '+00:00')):
@@ -232,7 +259,8 @@ def _fresh_attestation(attestation, now):
         return False
 
 
-def _apply_pending(result, positions, kinds, recipient, attestations, contexts, resolutions):
+def _apply_pending(result, positions, kinds, recipient, attestations, contexts, resolutions,
+                   latest_proof, history_positions):
     if not attestations:
         return
     if not isinstance(attestations, list):
@@ -252,7 +280,7 @@ def _apply_pending(result, positions, kinds, recipient, attestations, contexts, 
             continue
         seen.add(key)
         candidates[key] = attestation
-    if (not result['complete'] or resolutions is None or contexts[0] is None
+    if (not latest_proof['complete'] or resolutions is None or contexts[0] is None
             or contexts[0] != contexts[1]):
         result['diagnostics'].append('owner_pending_native_proof_unavailable')
         return
@@ -264,7 +292,7 @@ def _apply_pending(result, positions, kinds, recipient, attestations, contexts, 
             continue
         matched.add(key)
         identity = key[:2]
-        if (question['kind'] != 'rendered_prompt' or question['title'] is None
+        if (identity not in positions or question['kind'] != 'rendered_prompt' or question['title'] is None
                 or attestation['title'] != question['title'] or attestation['options'] != question['options']
                 or contexts[1][0] != question['turn_id']):
             result['diagnostics'].append('owner_pending_attestation_mismatch')
@@ -273,15 +301,16 @@ def _apply_pending(result, positions, kinds, recipient, attestations, contexts, 
                for resolution in resolutions):
             result['diagnostics'].append('owner_pending_resolution_conflict')
             continue
-        if any(reference[0] != identity[0] and positions[reference] < positions[identity]
-               for reference in positions):
+        if identity in history_positions and any(
+                reference[0] != identity[0] and history_positions[reference] < history_positions[identity]
+                for reference in history_positions):
             result['diagnostics'].append('owner_pending_newer_turn_ambiguity')
             continue
         if any(kind == 'userMessage' and positions[reference] < positions[identity]
                for reference, kind in kinds.items()):
             result['diagnostics'].append('owner_pending_later_reply')
             continue
-        question.update(state='pending', proof_refs=[{
+        question.update(state='pending', proof_complete=True, proof_scope='latest_turn', proof_refs=[{
             'recipient': recipient, 'question_turn_id': identity[0], 'question_item_id': identity[1],
             'question_index': key[2], 'confirmed_at': attestation['confirmed_at'],
             'kind': 'owner_pending_attestation'}])
@@ -294,12 +323,13 @@ def collect(client, recipients, *, decision_records, max_pages=10):
     Native pending and cancelled lifecycle is unavailable. Optional exact owner
     pending_questions attestations require fresh UTC confirmation, matching
     rendered title/options/index, stable current waitingOnUserInput/latest turn,
-    complete history and no later reply or resolution conflict. Owner resolution attestations must
+    complete latest-turn proof and no later reply or resolution conflict. Owner
+    resolution attestations must
     identify exact question/reply items on the recipient, with native descending
     history proving the reply follows the question. Partial, compacted or unknown
     history cannot establish an answered state. Tool results remain opaque.
 
-    max_pages bounds each recipient's history. All recipients share 256 calls
+    max_pages bounds each recipient's thread history and separate latest-turn proof. All recipients share 256 calls
     and the provided client.deadline, without changing or extending that deadline.
     Uses thread/items/list, and thread/read plus thread/turns/list only when exact
     owner pending attestations are supplied. No persistence or mutation occurs.
@@ -316,9 +346,19 @@ def collect(client, recipients, *, decision_records, max_pages=10):
     reader, output = _Reader(client), {}
     for recipient in recipients:
         attestations = _pending_attestations(decision_records, recipient)
-        before = _pending_context(reader, recipient) if attestations else None
+        fresh = (isinstance(attestations, list)
+                 and any(_fresh_attestation(attestation, time.time()) for attestation in attestations))
+        before = _pending_context(reader, recipient) if fresh else None
+        latest = {'status': 'unavailable', 'complete': False, 'questions': [],
+                  'diagnostics': ['latest_turn_proof_unavailable'], 'omitted_questions': 0}
+        latest_positions, latest_kinds = {}, {}
+        if before is not None:
+            latest, latest_positions, latest_kinds = _capture(reader, recipient, max_pages, before[0])
         result, positions, kinds = _capture(reader, recipient, max_pages)
-        after = _pending_context(reader, recipient) if attestations else None
+        after = _pending_context(reader, recipient) if fresh else None
+        result['latest_turn_proof'] = {key: latest[key]
+            for key in ('status', 'complete', 'diagnostics', 'omitted_questions')}
+        result['latest_turn_proof']['turn_id'] = before[0] if before else None
         resolutions = _resolutions(decision_records, recipient)
         if resolutions is None:
             result['diagnostics'].append('owner_resolution_record_unavailable')
@@ -338,7 +378,18 @@ def collect(client, recipients, *, decision_records, max_pages=10):
                             'recipient': recipient, **{field: resolution[field] for field in RESOLUTION_FIELDS}}])
                     else:
                         result['diagnostics'].append('owner_resolution_proof_unavailable')
-        _apply_pending(result, positions, kinds, recipient, attestations, (before, after), resolutions)
+        current = {(q['turn_id'], q['item_id'], q['question_index']): q for q in latest['questions']}
+        for index, question in enumerate(result['questions']):
+            key = (question['turn_id'], question['item_id'], question['question_index'])
+            if key in current:
+                replacement = current.pop(key)
+                if (question['state'] == 'answered' and question['title'] == replacement['title']
+                        and question['options'] == replacement['options']):
+                    replacement.update(state='answered', proof_refs=question['proof_refs'])
+                result['questions'][index] = replacement
+        result['questions'].extend(current.values())
+        _apply_pending(result, latest_positions, latest_kinds, recipient, attestations,
+                       (before, after), resolutions, latest, positions)
         result['pending_status'] = ('owner_attested' if any(q['state'] == 'pending'
                                    for q in result['questions']) else 'unavailable')
         result['diagnostics'] = sorted(set(result['diagnostics']))

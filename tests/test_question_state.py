@@ -53,6 +53,8 @@ class Native:
         self.latest = 'current'
         self.context_reads = 0
         self.fresh_latest = None
+        self.latest_pages = None
+        self.updated_at = 1
 
     def call(self, method, params):
         self.calls.append((method, copy.deepcopy(params)))
@@ -63,11 +65,16 @@ class Native:
         if method == 'thread/items/list':
             assert params['sortDirection'] == 'desc'
             index = int(params.get('cursor', '0'))
-            return copy.deepcopy(self.pages[index])
+            pages = self.latest_pages if 'turnId' in params and self.latest_pages is not None else self.pages
+            page = copy.deepcopy(pages[index])
+            if 'turnId' in params and self.latest_pages is None:
+                page['data'] = [entry for entry in page.get('data', [])
+                                if 'turnId' not in entry or entry['turnId'] == params['turnId']]
+            return page
         if method == 'thread/read':
             assert params['includeTurns'] is False
             self.context_reads += 1
-            return {'thread': {'id': P, 'updatedAt': 1,
+            return {'thread': {'id': P, 'updatedAt': self.updated_at,
                 'status': {'type': 'active', 'activeFlags': ['waitingOnUserInput'] if self.waiting else []}}}
         if method == 'thread/turns/list':
             latest = self.fresh_latest if self.context_reads > 1 and self.fresh_latest else self.latest
@@ -100,7 +107,7 @@ class QuestionStateTests(unittest.TestCase):
         self.assertEqual(result['pending_status'], 'owner_attested')
         self.assertEqual(result['ui_visibility'], 'unknown')
         self.assertEqual(result['cancelled_status'], 'unavailable')
-        self.assertEqual(len(native.calls), 5)
+        self.assertEqual(len(native.calls), 6)
         self.assertIn('exact_unresolved_request_unavailable', result['diagnostics'])
 
     def test_generic_pending_waitflag_and_absent_reply_never_prove_pending(self):
@@ -170,7 +177,7 @@ class QuestionStateTests(unittest.TestCase):
         result = self.collect(native)
         self.assertEqual(result['questions'][0]['state'], 'pending')
         self.assertTrue(result['complete'])
-        self.assertEqual(result['budget']['calls_used'], 6)
+        self.assertEqual(result['budget']['calls_used'], 8)
 
     def test_compaction_unknown_malformed_and_partial_pages_never_establish_pending_or_answered(self):
         cases = [
@@ -270,6 +277,74 @@ class QuestionStateTests(unittest.TestCase):
         with patch.object(native, 'call', side_effect=TimeoutError(PRIVATE)):
             result = self.collect(native, record(state='clear', pending=False))
         self.assertIn('native_timeout', result['diagnostics'])
+
+    def test_old_compaction_or_partial_history_does_not_taint_complete_current_proof(self):
+        for history in (
+                {'data': [question(), {'turnId': 'older', 'item': {'id': 'old-compact', 'type': 'contextCompaction'}}]},
+                {'data': [question()], 'nextCursor': '1'}):
+            native = Native()
+            native.pages = [history]
+            native.latest_pages = [{'data': [question()]}]
+            result = self.collect(native, max_pages=1)
+            self.assertFalse(result['complete'])
+            self.assertEqual(result['status'], 'partial')
+            self.assertTrue(result['latest_turn_proof']['complete'])
+            self.assertEqual(result['questions'][0]['state'], 'pending')
+            self.assertTrue(result['questions'][0]['proof_complete'])
+            self.assertEqual(result['questions'][0]['proof_scope'], 'latest_turn')
+        for current in (
+                {'data': [question(), {'turnId': 'current', 'item': {'id': 'compact', 'type': 'contextCompaction'}}]},
+                {'data': [question()], 'truncated': True},
+                {'data': [question()], 'nextCursor': '1'}):
+            native = Native()
+            native.latest_pages = [current]
+            result = self.collect(native, max_pages=1)
+            self.assertFalse(result['latest_turn_proof']['complete'])
+            self.assertEqual(result['questions'][0]['state'], 'unknown')
+
+    def test_stable_context_requires_integer_updated_at(self):
+        for value in (None, True, '1', 1.5):
+            native = Native()
+            native.updated_at = value
+            with self.subTest(updated_at=value):
+                result = self.collect(native)
+                self.assertEqual(result['questions'][0]['state'], 'unknown')
+                self.assertFalse(result['latest_turn_proof']['complete'])
+
+    def test_content_limits_omit_exact_fields_without_truncating_options(self):
+        oversized = [
+            {'title': 'x' * 4097, 'options': ['small']},
+            {'title': 'é' * 2049, 'options': None},
+            {'title': 'small', 'options': ['x'] * 33},
+            {'title': 'small', 'options': ['x' * 16384]},
+            {'title': 'bad-surrogate-\ud800', 'options': None},
+        ]
+        for native_question in oversized:
+            native = Native([question(questions=[native_question])])
+            owner = record(pending_questions=[attestation(
+                title=native_question['title'], options=native_question['options'])])
+            with self.subTest(title_length=len(native_question['title'])):
+                result = self.collect(native, owner)
+                self.assertFalse(result['complete'])
+                self.assertIn('question_content_bound_exceeded', result['diagnostics'])
+                self.assertEqual(result['questions'][0]['state'], 'unknown')
+                self.assertIsNone(result['questions'][0]['title'])
+                self.assertIsNone(result['questions'][0]['options'])
+        limits = {'title': 'é' * 2048, 'options': ['x' * 384] * 32}
+        result = self.collect(Native([question(questions=[limits])]),
+            record(pending_questions=[attestation(**limits)]))
+        self.assertEqual(result['questions'][0]['state'], 'pending')
+        self.assertEqual(result['questions'][0]['title'], limits['title'])
+        self.assertEqual(result['questions'][0]['options'], limits['options'])
+
+    def test_rendered_question_count_is_bounded_with_explicit_omission(self):
+        native = Native([question(questions=[{'title': 'Choose', 'options': ['A', 'B']}] * 101)])
+        result = self.collect(native, record(pending=False))
+        self.assertEqual(len(result['questions']), 100)
+        self.assertEqual(result['omitted_questions'], 1)
+        self.assertFalse(result['complete'])
+        self.assertIn('rendered_question_bound_exceeded', result['diagnostics'])
+        self.assertTrue(all(q['state'] == 'unknown' for q in result['questions']))
 
     def test_input_bounds_and_malformed_resolution_records_fail_closed(self):
         for recipients in ([P, P], [P.upper().replace('00000000', 'ABCDEFAB', 1)], ['invalid']):
