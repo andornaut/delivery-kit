@@ -19,6 +19,25 @@ CI_POLL_SECONDS=${CI_POLL_SECONDS:-60}
 CI_TIMEOUT_SECONDS=${CI_TIMEOUT_SECONDS:-1800}
 CI_REQUIRED_NAMES=${CI_REQUIRED_NAMES:-'AI attributions|Lint|Test'}
 CODEX_PYTHON=${CODEX_PYTHON-/usr/bin/python3}
+WORKER_PARENT_THREADS=${WORKER_PARENT_THREADS-}
+worker_parents_ready() {
+  local parent
+  local parents=()
+  local -A seen=()
+  IFS=$' \t\n' read -r -d '' -a parents <<<"$WORKER_PARENT_THREADS" || :
+  for parent in "${parents[@]}"; do
+    if [[ ! $parent =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+      echo 'bus: WORKER_PARENT_THREADS must contain canonical UUIDs' >&2
+      return 1
+    fi
+    if [[ -n ${seen[$parent]:-} ]]; then
+      echo 'bus: WORKER_PARENT_THREADS must not contain duplicate UUIDs' >&2
+      return 1
+    fi
+    seen[$parent]=1
+  done
+}
+worker_parents_ready || exit 2
 if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then
   MONITOR_MINUTES=${MONITOR_MINUTES-'20 50'}
 fi
@@ -142,12 +161,40 @@ codex_python_ready() {
 }
 
 bus_native_unblock() {
-  local slot=$1 coordinator=$2 result peer status=0
+  local slot=$1 coordinator=$2 result peer parent status=0
   shift 2
-  local peer_args=()
+  local peer_args=() parent_args=() parents=()
   for peer in "$@"; do peer_args+=(--peer "$peer"); done
+  IFS=$' \t\n' read -r -d '' -a parents <<<"$WORKER_PARENT_THREADS" || :
+  if (( ${#parents[@]} )); then
+    if ! "$CODEX_PYTHON" - "$S" "${MONITOR_ROUTE_FILE:-}" "${parents[@]}" <<'PYPARENTS'
+import json
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[1])
+from codex_adapter import resolve_route
+try:
+    route_file = sys.argv[2]
+    route = json.loads(Path(route_file).read_text())
+    scope = resolve_route(route_file, route['host_project_root'])
+    if scope.get('status') != 'active':
+        raise ValueError('inactive parent scope')
+    allowed = {scope['coordinator'], *scope['peers']}
+    if not set(sys.argv[3:]).issubset(allowed):
+        raise ValueError('parent outside active route')
+except (OSError, ValueError, TypeError, KeyError, AttributeError):
+    raise SystemExit(1)
+PYPARENTS
+    then
+      echo 'bus: monitor deferred: WORKER_PARENT_THREADS requires parents in the active monitor route' >&2
+      return 0
+    fi
+  fi
+  for parent in "${parents[@]}"; do
+    parent_args+=(--parent "$parent")
+  done
   result=$("$CODEX_PYTHON" "$S/unblock.py" --coordinator "$coordinator" \
-    "${peer_args[@]}" --slot "$slot" --control-socket "$CODEX_CONTROL_SOCKET" \
+    "${peer_args[@]}" "${parent_args[@]}" --slot "$slot" --control-socket "$CODEX_CONTROL_SOCKET" \
     --state-dir "$BUS_DIR/unblock" 2>/dev/null) || status=$?
   if [ -n "$result" ]; then
     printf 'bus: scheduled monitor %s: %s\n' "$slot" "$result"

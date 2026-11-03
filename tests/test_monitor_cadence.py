@@ -97,11 +97,69 @@ MONITOR_ROUTE_FILE={self.route_path}
             self.assertEqual(row.count(TARGET), 1)
             self.assertNotIn(TECH, row)
             self.assertNotIn(HELD, row)
+            self.assertNotIn('--parent', row)
         reports = self.events.read_text()
         self.assertIn(f'scheduled-status {release}', reports)
         self.assertIn(f'scheduled-status {release+600}', reports)
         self.assertIn('still checking', reports)
         self.assertTrue(result.stdout.endswith('00 10'))
+
+    def test_scheduled_parents_use_full_active_route_independent_of_reporting_recipient(self):
+        # Ten explicit parents include the monitor and active game/library targets.
+        extra = [f'00000000-0000-0000-0000-{value:012d}' for value in range(10, 18)]
+        parents = [MONITOR, TARGET, *extra]
+        route = self.route | {'targets': self.route['targets'] + [
+            {'thread_id': value, 'ownership': 'active'} for value in extra]}
+        self.route_path.write_text(json.dumps(route))
+        self.conf.write_text(self.original + "WORKER_PARENT_THREADS='" + '\n\t'.join(parents) + "'\n")
+        due = self.epoch('2026-11-02 14:20:00')
+        result = self.shell(f'bus_monitor_due_ticks {due-1} {due}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        calls = self.invocations()
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        selected = [call[index+1] for index, arg in enumerate(call) if arg == '--parent']
+        self.assertEqual(selected, parents)
+        self.assertEqual(call[call.index('--coordinator')+1], MONITOR)
+        self.assertNotIn(TECH, call)
+        self.assertNotIn(HELD, call)
+
+    def test_nonhost_global_parent_list_does_not_dispatch_or_reject(self):
+        self.conf.write_text(self.original + f"WORKER_PARENT_THREADS='{MONITOR} {TARGET}'\n")
+        self.route_path.write_text(json.dumps(self.route | {
+            'host_project_root': str(self.root / 'dispatch-host')}))
+        due = self.epoch('2026-11-02 14:20:00')
+        result = self.shell(f'bus_monitor_due_ticks {due-1} {due}; bus_unblock_tick {due}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout + result.stderr, '')
+        self.assertEqual(self.invocations(), [])
+
+    def test_held_or_unrelated_parents_defer_before_native_helper(self):
+        due = self.epoch('2026-11-02 14:20:00')
+        for parent in (HELD, TECH, '00000000-0000-0000-0000-000000000099'):
+            with self.subTest(parent=parent):
+                self.conf.write_text(self.original + f"WORKER_PARENT_THREADS='{MONITOR} {parent}'\n")
+                result = self.shell(f'bus_monitor_due_ticks {due-1} {due}')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('WORKER_PARENT_THREADS requires parents in the active monitor route', result.stderr)
+                self.assertEqual(self.invocations(), [])
+
+    def test_nonempty_parent_list_requires_valid_active_route_at_native_boundary(self):
+        self.conf.write_text(self.original + f'WORKER_PARENT_THREADS={MONITOR}\n')
+        cases = [None, '', 'not json', json.dumps(self.route | {'version': 2}),
+                 json.dumps(self.route | {'state': 'held'})]
+        for content in cases:
+            with self.subTest(route=content):
+                if content is None:
+                    self.conf.write_text(self.original + f'WORKER_PARENT_THREADS={MONITOR}\nunset MONITOR_ROUTE_FILE\n')
+                else:
+                    self.conf.write_text(self.original + f'WORKER_PARENT_THREADS={MONITOR}\n')
+                    self.route_path.write_text(content)
+                result = self.shell(f'bus_native_unblock 1793556000 {MONITOR} {TARGET}')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('WORKER_PARENT_THREADS requires parents in the active monitor route', result.stderr)
+                self.assertEqual(self.invocations(), [])
 
     def test_route_guards_and_monitor_disabled_reports_do_not_depend_on_reporting_flag(self):
         due = self.epoch('2026-11-02 14:20:00')

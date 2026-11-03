@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 usage() {
-  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]|request-once --request-id SAFE_ID|monitor-snapshot --recipient UUID|monitor-ack --recipient UUID --snapshot UUID --queue-id ID --disposition handled|superseded|retained [--reason REASON]'
+  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]|request-once --request-id SAFE_ID|monitor-snapshot --recipient UUID [--parent UUID ...]|monitor-ack --recipient UUID --snapshot UUID --queue-id ID --disposition handled|superseded|retained [--reason REASON]'
 }
 if (( $# == 1 )) && [[ $1 == --help || $1 == help ]]; then
   usage

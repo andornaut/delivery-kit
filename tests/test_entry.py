@@ -64,6 +64,49 @@ DEPLOY_MODE=none
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(list(self.state.iterdir()), [])
 
+    def test_worker_parent_config_validates_canonical_unique_whitespace_list_offline(self):
+        original = self.conf.read_text()
+        first = '00000000-0000-0000-0000-000000000001'
+        second = 'abcdefab-1234-5678-9012-abcdefabcdef'
+        interpreter = self.root / 'unexpected-python'
+        marker = self.root / 'unexpected-native-call'
+        interpreter.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 99\n')
+        interpreter.chmod(0o755)
+        base = original + f'CODEX_PYTHON="{interpreter}"\n'
+        for value in ('', ' \t\n ', first, f' \t{first}\n{second} '):
+            with self.subTest(valid=value):
+                self.conf.write_text(base + f"WORKER_PARENT_THREADS='{value}'\n")
+                result = self.call('check-config')
+                self.assertEqual(result.returncode, 0, result.stderr)
+        for value in ('invalid', second.upper(), first.replace('-', ''),
+                      f'{first} {first}', f'{first}\n{first}', '*', first + ','):
+            with self.subTest(invalid=value):
+                self.conf.write_text(base + f"WORKER_PARENT_THREADS='{value}'\n")
+                result = self.call('check-config')
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('WORKER_PARENT_THREADS', result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertEqual(list(self.state.iterdir()), [])
+
+    def test_snapshot_forwards_only_explicit_repeated_parent_flags_to_native_entrypoint(self):
+        first = '00000000-0000-0000-0000-000000000001'
+        second = '00000000-0000-0000-0000-000000000002'
+        interpreter = self.root / 'native-python'
+        interpreter.write_text('#!/usr/bin/python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+        interpreter.chmod(0o755)
+        with self.conf.open('a') as stream:
+            stream.write(f'CODEX_PYTHON="{interpreter}"\nWORKER_PARENT_THREADS={second}\n')
+        for parents in ([], ['--parent', first, '--parent', second]):
+            with self.subTest(parents=parents):
+                result = self.call('monitor-snapshot', '--recipient', first, *parents)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), [str(ROOT / 'libexec/monitor.py'),
+                    'snapshot', '--state-dir', str(self.state / 'unblock'), '--control-socket', '',
+                    '--recipient', first, *parents])
+        help_result = subprocess.run(['bash', str(ROOT / 'bin/delivery-kit'), '--help'],
+                                     capture_output=True, text=True, timeout=3)
+        self.assertIn('--parent UUID', help_result.stdout)
+
     def test_manual_and_unpinned_snapshot_commands_are_rejected(self):
         self.assertEqual(self.call('depart').returncode, 2)
         self.assertEqual(self.call('--revision', 'a' * 40, 'check-config').returncode, 2)
