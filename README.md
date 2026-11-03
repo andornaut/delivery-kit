@@ -577,3 +577,30 @@ when queues are unchanged. Existing duplicate-slot and ambiguous-delivery receip
 remain authoritative. A later success supersedes an earlier failure in collection;
 active retries, guarded waits, long-running work and silence do not prove terminal
 failure or a stall. No usage-ratio or elapsed-time detector is added.
+
+
+## 0.5.1 child-health coverage
+
+Child inventory and observations use round-robin scheduling across scoped parents
+within each capture. Validated list metadata is reused; each child needs one
+latest-turn read, with fresh metadata and latest-turn revalidation reserved for
+typed failed candidates. The shared 256-call cap, transport deadline, five-second
+delivery reserve, archived inventory and recipient guards remain unchanged.
+
+Each parent's `counts` distinguishes discovered coverage from validated failures:
+
+- `discovered`: unique verified child IDs returned by bounded inventory, excluding
+  the unknown total of children not listed.
+- `observed`: children with a successful latest-turn observation, including an
+  empty turn list.
+- `validated`: actionable typed failed candidates whose fresh metadata and latest
+  turn match the observation. This does not count all successful observations.
+- `omitted`: `discovered - observed`.
+
+If budget exhaustion prevents revalidating an observed failed candidate, it
+counts as observed but not validated and leaves `complete` false. Partial inventory
+separately signals unknown coverage of unlisted children; zero omitted children
+does not prove full inventory coverage. Fairness applies within each capture,
+without guaranteeing full coverage or eventual rotation across scheduled slots.
+Partial observations remain explicit and do not establish healthy children or
+handled recovery.
