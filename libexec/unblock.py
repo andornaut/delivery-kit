@@ -13,7 +13,7 @@ import time
 import uuid
 
 from codex_adapter import control_socket_available
-from monitor import accepted_inventory, canonical_uuid, capture, locked, pending_worker_failures, record_health, scoped_parents
+from monitor import accepted_inventory, canonical_uuid, capture, locked, pending_worker_failures, pending_proven, question_brief, question_notices, record_health, scoped_parents
 
 
 NATIVE_ITEM_TYPES = {
@@ -243,7 +243,7 @@ def target(client, state_dir, coordinator):
     return None, "coordinator state ambiguous or interrupted; no automatic resume"
 
 
-def reminder(slot, queues, snapshot_path, worker_failures=()):
+def reminder(slot, queues, snapshot_path, worker_failures=(), questions=(), question_diagnostics=()):
     inventory = "\n".join(f"{thread}: {','.join(ids) if ids else 'none'}" for thread, ids in queues.items())
     worker_review = (
         "\nVerified latest failed child turns (parent, child, turn, typed code): "
@@ -256,6 +256,18 @@ def reminder(slot, queues, snapshot_path, worker_failures=()):
         "Do not contact or mutate children, spawn workers, clear guards, or infer stalls from silence."
         if worker_failures else ""
     )
+    question_review = (
+        "\nOwner-attested confirmed pending questions: " + json.dumps(questions, ensure_ascii=False)
+        + ". Surface the exact owner, native references, original title and choices, and where to answer "
+        "in the owner's native conversation. An escalation is a visibility notification after distinct "
+        "scheduled slots, not queue starvation, failed work, recovery or clearance. Only if needed, ask "
+        "that owner to restore its prompt through supported controls while preserving the original "
+        "decision and any replacement mapping. Never auto reissue, answer, cancel, clear guards, "
+        "interrupt or create another owner's question. UI visibility is unknown; acceptance is delivery only."
+        if questions else ""
+    )
+    diagnostic_review = ("\nQuestion capability diagnostics (no pending-decision inference): "
+                         + json.dumps(question_diagnostics) if question_diagnostics else "")
     return (
         f"Scheduled monitoring review, slot {slot}. Review recent Art, Gameplay and Tech activity "
         "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies "
@@ -264,13 +276,14 @@ def reminder(slot, queues, snapshot_path, worker_failures=()):
         "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner "
         "question. Report only new or unresolved blockers. This is a triage reminder, not permission "
         "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n"
-        + f"Full local inventory: {snapshot_path}\n" + inventory + worker_review
+        + f"Full local inventory: {snapshot_path}\n" + inventory + worker_review + question_review + diagnostic_review
     )
 
 
 def reconcile(client, path, coordinator, peers, slot, snapshot=None):
     if snapshot is None:
         snapshot = capture(client, path.parent, [coordinator, *peers], slot)
+    snapshot = dict(snapshot, slot=slot)
     queues = {thread: [entry['id'] for entry in entries]
               for thread, entries in snapshot['queues'].items()}
     state = {"coordinator": coordinator, "slot": slot, "queues": queues,
@@ -281,7 +294,10 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
         state.update(status='deferred', reason='queue inventory incomplete; inspect snapshot and retry reconciliation')
         persist(path, state)
         return state
+    own_wait = any(pending_proven(coordinator, q) for q in
+                   snapshot.get('question_state', {}).get(coordinator, {}).get('questions', []))
     if not decision_clear(path.parent, coordinator):
+        state['waiting_on_user'] = own_wait
         state.update(status='deferred', reason='recipient-bound user-decision clearance missing, invalid or pending')
         persist(path, state)
         return state
@@ -289,12 +305,22 @@ def reconcile(client, path, coordinator, peers, slot, snapshot=None):
         state.update(status='unchanged', reason='inventory already reminded or explicitly retained; reconcile any remaining unacknowledged work')
         persist(path, state)
         return state
+    notices = question_notices(path.parent, coordinator, snapshot, slot)
+    questions, state['question_notice_keys'] = question_brief(notices)
+    diagnostics = [{'owner': owner, **{key: value.get(key) for key in
+                    ('status', 'pending_status', 'cancelled_status', 'ui_visibility', 'diagnostics')}}
+                   for owner, value in snapshot.get('question_state', {}).items()]
+    # Diagnostics carry safe capability codes only, never unknown question bodies.
+    if len(json.dumps(diagnostics).encode('utf-8')) > 4096:
+        diagnostics = [{'reason_code': 'question_diagnostics_exceed_brief_bounds',
+                        'snapshot_path': state['snapshot_path']}]
     text = reminder(slot, queues, state["snapshot_path"],
-                    pending_worker_failures(path.parent, coordinator, snapshot))
+                    pending_worker_failures(path.parent, coordinator, snapshot), questions, diagnostics)
     for attempt in range(2):
         clearance = decision_record(path.parent, coordinator)
         selected, reason = target(client, path.parent, coordinator)
         if selected is None:
+            state['waiting_on_user'] = own_wait
             state.update(status="deferred", reason=reason)
             persist(path, state)
             return state
@@ -411,7 +437,7 @@ def main():
     state = run(args.state_dir, args.control_socket, str(args.coordinator), [str(peer) for peer in args.peer], args.slot,
                 parents=[str(parent) for parent in args.parent])
     # Status only. Persisted queue IDs stay local for coordinator reconciliation.
-    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "worker_health_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
+    print(json.dumps({key: state[key] for key in ("status", "previousStatus", "reason", "snapshot_id", "snapshot_path", "history_status", "worker_health_status", "question_state_status", "monitor_status", "monitor_reason", "recipient", "backlog_slots", "deferral_slots") if key in state}))
     return 0 if state["status"] in ("accepted", "deduplicated", "unchanged", "busy") and state.get("monitor_status") != "failed" else 1
 
 

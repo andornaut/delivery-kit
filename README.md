@@ -604,3 +604,70 @@ does not prove full inventory coverage. Fairness applies within each capture,
 without guaranteeing full coverage or eventual rotation across scheduled slots.
 Partial observations remain explicit and do not establish healthy children or
 handled recovery.
+
+
+## 0.6.0 question visibility
+
+Snapshots add `question_state` for their explicitly requested recipients. When a
+monitor route is declared, only its active monitor and targets qualify; an
+invalid, held or out-of-scope route produces unavailable diagnostics without
+question collection for that recipient. Queue recipients never expand into a
+session scan. Existing queue and history capture runs first. Question collection
+then child collection share one 256-call budget and the existing connection's
+deadline narrowed once by five seconds. The original deadline is restored on
+exit. No new polling, schedule or native mutation is introduced.
+
+Each recipient reports `status`, historical `complete`, `questions`, safe
+`diagnostics`, `pending_status`, `cancelled_status`, `ui_visibility`, `budget` and
+`latest_turn_proof`. Exact unresolved-request and cancellation capabilities remain
+unavailable; UI visibility remains unknown. Those diagnostics remain present even
+when no question qualifies. Snapshot stdout reports status metadata, never prompt
+text. Owner-only local snapshot files contain typed rendered title/options and
+exact native references, never native message text or opaque tool arguments.
+
+An owner may maintain optional `pending_questions` in its existing recipient-bound
+decision record. Each entry supplies `question_turn_id`, `question_item_id`,
+nonnegative `question_index`, exact `title` and `options` (a list of strings or null),
+`confirmed_pending: true` and an ISO UTC `confirmed_at` timestamp. The record must
+bind the exact `thread_id` with `state: pending`. Confirmation must be between zero
+and 1800 seconds old, with no future timestamps. Collection never creates or
+refreshes attestations. Existing exact resolution records remain the proof for
+answered questions.
+
+Pending proof additionally requires stable native waiting-on-user-input state,
+the matching latest in-progress turn, complete clean turn-filtered history and no
+later reply or conflicting resolution. Each qualifying question has
+`state: pending`, `proof_complete: true`, `proof_scope: latest_turn` and exact owner
+attestation `proof_refs`. Older historical compaction may keep the recipient's
+historical `complete` false while current proof succeeds. Partial or compacted
+current proof remains unknown. Tool output, old question text, silence and owner
+attestation alone never establish a pending decision.
+
+Typed content is bounded to 4096 UTF-8 bytes per title, 32 options and 16384 total
+content bytes, with at most 100 rendered questions per native item. Oversized,
+sensitive or unsupported content remains references plus unknown state; options
+are never truncated and presented as originals. The guarded reminder's question
+section is bounded to 32768 UTF-8 JSON bytes. Only included exact notices receive
+delivery deduplication; omitted notices remain eligible in subsequent existing
+reviews. Capability diagnostics have a separate bounded summary with the local
+snapshot path as fallback.
+
+Confirmed pending questions bypass unchanged-queue reminder suppression. The first
+observed scheduled slot requests visibility; the next distinct slot permits one
+visibility escalation. Same-slot retries do not advance escalation. Deduplication
+binds the exact owner, question references, index, kind and observed state/content
+signature. Confirmed answered identities and older snapshots cannot resurrect a
+pending notice. Notification acceptance proves delivery only. A legitimate user
+wait or its visibility escalation alone is not queue starvation, worker failure,
+recovery or prompt clearance. Queue backlog and inventory errors retain their
+independent health rules.
+
+The reminder identifies the exact owner, references, original title/options and
+the owner's native conversation as the answer destination. Only if needed, it
+asks that owner to restore its prompt through supported controls while preserving
+the original decision and mapping any replacement. It never automatically
+reissues, answers, cancels or clears a prompt, changes a recipient guard, claims
+that a prompt is hidden or interrupts a turn. The monitor's own pending decision
+still prevents steering. Unknown questions are never presented as pending;
+unavailable lifecycle or visibility evidence degrades metadata reporting without
+manufacturing a pending decision or a failed-work episode.

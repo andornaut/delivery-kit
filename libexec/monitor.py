@@ -159,14 +159,14 @@ def scoped_parents(parents):
     return parents
 
 
-def worker_health(client, parents):
+def worker_health(client, parents, *, reserve=True):
     parents = scoped_parents(parents)
     if not parents:
         return {}
     original_deadline = getattr(client, 'deadline', None)
     reason_code = 'collector_unavailable'
     try:
-        if original_deadline is not None:
+        if reserve and original_deadline is not None:
             client.deadline = original_deadline - 5
             if time.monotonic() >= client.deadline:
                 raise TimeoutError('child collection budget exhausted')
@@ -180,7 +180,7 @@ def worker_health(client, parents):
     except Exception:
         result = {}
     finally:
-        if original_deadline is not None:
+        if reserve and original_deadline is not None:
             client.deadline = original_deadline
     unavailable = {'status': 'unavailable', 'schema_status': 'unavailable',
                    'complete': False, 'children': [],
@@ -189,6 +189,162 @@ def worker_health(client, parents):
                      and result[parent].get('status') in ('complete', 'partial', 'unavailable')
                      and isinstance(result[parent].get('children'), list) else unavailable)
             for parent in parents}
+
+
+class CollectionClient:
+    """Share the connection's reserved deadline and 256 calls across collectors."""
+    def __init__(self, client):
+        self.client = client
+        self.calls_used = 0
+        self.reason_code = None
+
+    @property
+    def deadline(self):
+        return getattr(self.client, 'deadline', None)
+
+    def call(self, method, params):
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            self.reason_code = 'collection_deadline_exhausted'
+        if self.calls_used >= 256:
+            self.reason_code = 'collection_call_budget_exhausted'
+        if self.reason_code:
+            raise TimeoutError('shared collection budget exhausted')
+        self.calls_used += 1
+        try:
+            return self.client.call(method, params)
+        except TimeoutError:
+            self.reason_code = 'collection_timeout'
+            raise
+
+
+def question_state(client, state_dir, recipients):
+    unavailable = lambda code: {'status': 'unavailable', 'complete': False, 'questions': [],
+        'diagnostics': [code], 'pending_status': 'unavailable',
+        'cancelled_status': 'unavailable', 'ui_visibility': 'unknown'}
+    allowed = list(recipients)
+    result = {}
+    if 'MONITOR_ROUTE_FILE' in os.environ:
+        for recipient in recipients:
+            try:
+                scoped_parents([recipient])
+            except ValueError:
+                result[recipient] = unavailable('question_recipient_outside_active_route')
+        allowed = [recipient for recipient in recipients if recipient not in result]
+    if not allowed:
+        return result
+    from unblock import decision_record
+    decisions = {recipient: decision_record(state_dir, recipient) for recipient in allowed}
+    try:
+        deadline = getattr(client, 'deadline', None)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError('question collection deadline')
+        from question_state import collect
+        collected = collect(client, allowed, decision_records=decisions)
+        if not isinstance(collected, dict):
+            raise ValueError('invalid question collector result')
+    except TimeoutError:
+        collected = {recipient: unavailable('question_collection_budget_exhausted') for recipient in allowed}
+    except Exception:
+        collected = {recipient: unavailable('question_collector_unavailable') for recipient in allowed}
+    for recipient in allowed:
+        value = collected.get(recipient)
+        result[recipient] = (value if isinstance(value, dict)
+            and value.get('status') in ('complete', 'partial', 'unavailable')
+            and isinstance(value.get('questions'), list) else unavailable('question_collector_unavailable'))
+        # Keep exact snapshot choices; never present truncated choices as originals.
+        value = result[recipient]
+        for question in value['questions']:
+            content = json.dumps({'owner': recipient, 'level': 'escalation',
+                **{key: question.get(key) for key in
+                   ('turn_id', 'item_id', 'question_index', 'kind', 'title', 'options')}}, ensure_ascii=False)
+            if len(content.encode('utf-8')) > 32768:
+                question['state'] = 'unknown'
+                value.update(status='partial', complete=False)
+                value.setdefault('diagnostics', []).append('question_text_exceeds_reminder_bounds')
+    return {recipient: result[recipient] for recipient in recipients}
+
+
+def question_observations(snapshot):
+    observations = {}
+    for recipient, health in snapshot.get('question_state', {}).items():
+        for question in health.get('questions', []):
+            if not isinstance(question, dict) or question.get('state') not in ('pending', 'answered', 'unknown'):
+                continue
+            if (not all(isinstance(question.get(key), str) and question[key]
+                        for key in ('turn_id', 'item_id', 'kind'))
+                    or type(question.get('question_index')) is not int or question['question_index'] < 0):
+                continue
+            identity = digest([recipient, question['turn_id'], question['item_id'],
+                               question['question_index'], question['kind']])
+            signature = digest([identity, question['state'], question.get('title'), question.get('options')])
+            observations[identity] = (signature, recipient, question)
+    return observations
+
+
+def pending_proven(owner, question):
+    proofs = question.get('proof_refs')
+    return (question.get('state') == 'pending' and question.get('proof_complete') is True
+            and question.get('proof_scope') == 'latest_turn' and isinstance(proofs, list)
+            and any(isinstance(proof, dict) and proof.get('kind') == 'owner_pending_attestation'
+                    and proof.get('recipient') == owner
+                    and proof.get('question_turn_id') == question.get('turn_id')
+                    and proof.get('question_item_id') == question.get('item_id')
+                    and proof.get('question_index') == question.get('question_index') for proof in proofs))
+
+
+def question_notices(state_dir, recipient, snapshot, slot=None):
+    path = state_dir / 'health' / (recipient + '.json')
+    record = json.loads(path.read_text()) if path.exists() else {}
+    previous = record.get('question_observations', {})
+    slot = snapshot.get('slot') if slot is None else slot
+    notices = []
+    for identity, (signature, owner, question) in question_observations(snapshot).items():
+        if not pending_proven(owner, question):
+            continue
+        old = previous.get(identity, {})
+        if (old.get('answered_seen') or (slot is not None and old.get('last_slot') is not None
+                                        and slot < old['last_slot'])):
+            continue
+        matching = old.get('signature') == signature
+        level = ('escalation' if matching and slot is not None
+                 and old.get('first_slot') is not None and old['first_slot'] != slot else 'initial')
+        if matching and level in old.get('accepted_levels', []):
+            continue
+        notices.append({'identity': identity, 'signature': signature, 'level': level,
+                        'owner': owner, 'question': question})
+    return notices
+
+
+def question_brief(notices):
+    rows = []
+    keys = []
+    for notice in notices:
+        question = notice['question']
+        row = {'owner': notice['owner'], 'level': notice['level'],
+               **{key: question[key] for key in ('turn_id', 'item_id', 'question_index', 'kind', 'title', 'options')}}
+        if len(json.dumps(rows + [row], ensure_ascii=False).encode('utf-8')) > 32768:
+            break
+        rows.append(row)
+        keys.append({key: notice[key] for key in ('identity', 'signature', 'level')})
+    return rows, keys
+
+
+def record_questions(record, snapshot, slot, accepted_keys):
+    previous = record.setdefault('question_observations', {})
+    for identity, (signature, owner, question) in question_observations(snapshot).items():
+        old = previous.get(identity, {})
+        if old.get('last_slot') is not None and slot < old['last_slot']:
+            continue
+        answered_seen = old.get('answered_seen', False) or question['state'] == 'answered'
+        if old.get('signature') != signature:
+            old = {'signature': signature, 'state': question['state'],
+                   'first_slot': slot, 'accepted_levels': []}
+        old.update(last_slot=slot, answered_seen=answered_seen)
+        for notice in accepted_keys:
+            if (notice.get('identity') == identity and notice.get('signature') == signature
+                    and notice.get('level') in ('initial', 'escalation')):
+                old['accepted_levels'] = sorted(set(old['accepted_levels']) | {notice['level']})
+        previous[identity] = old
 
 
 def worker_failures(snapshot):
@@ -213,6 +369,7 @@ def pending_worker_failures(state_dir, recipient, snapshot):
 
 def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, parents=()):
     parents = scoped_parents(parents)
+    recipients = list(dict.fromkeys(canonical_uuid(recipient) for recipient in recipients))
     record = {'snapshot_id': str(uuid.uuid4()), 'queues': {}, 'errors': {}, 'history': {}}
     if slot is not None:
         record['slot'] = slot
@@ -223,7 +380,18 @@ def capture(client, state_dir, recipients, slot=None, history_cursor=None, *, pa
         except Exception:
             record['errors'][recipient] = 'queue inventory unavailable or incomplete; retry snapshot before reconciliation'
         record['history'][recipient] = history_refs(client, recipient, history_cursor)
-    record['worker_health'] = worker_health(client, parents)
+    original_deadline = getattr(client, 'deadline', None)
+    shared = CollectionClient(client)
+    try:
+        if original_deadline is not None:
+            client.deadline = original_deadline - 5
+        record['question_state'] = question_state(shared, state_dir, recipients)
+        record['worker_health'] = worker_health(shared, parents, reserve=False)
+    finally:
+        if original_deadline is not None:
+            client.deadline = original_deadline
+    record['collection_budget'] = {'max_calls': 256, 'calls_used': shared.calls_used,
+                                   'reason_code': shared.reason_code}
     path = state_dir / 'snapshots' / (record['snapshot_id'] + '.json')
     persist(path, record)
     return record
@@ -268,7 +436,8 @@ def inventory_signature(state_dir, snapshot):
 
 
 def accepted_inventory(state_dir, recipient, snapshot):
-    if pending_worker_failures(state_dir, recipient, snapshot):
+    if (pending_worker_failures(state_dir, recipient, snapshot)
+            or question_notices(state_dir, recipient, snapshot)):
         return False
     queues, retained = unacknowledged(state_dir, snapshot)
     if retained and not any(queues.values()) and not snapshot['errors']:
@@ -312,7 +481,8 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
     record['backlog_slots'] = max((item['age'] for entries in items.values()
                                    for item in entries.values()), default=0)
     status = outcome.get('previousStatus', outcome['status'])
-    deferred = status in ('deferred', 'blocked') or bool(snapshot['errors'])
+    user_wait = outcome.get('waiting_on_user') is True
+    deferred = (status in ('deferred', 'blocked') and not user_wait) or bool(snapshot['errors'])
     degraded = any(history['status'] == 'unavailable'
                    or history.get('reason_code') in ('context_compaction', 'incomplete_page')
                    for history in snapshot.get('history', {}).values())
@@ -327,12 +497,18 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
         record['accepted_worker_failures'] = sorted({
             tuple(reference) for reference in record.get('accepted_worker_failures', [])
         } | {tuple(reference) for reference in worker_failures(snapshot)})
+    record_questions(record, snapshot, slot, outcome.get('question_notice_keys', [])
+                     if outcome['status'] == 'accepted' else [])
     failed = max(record.get('backlog_slots', 0), record.get('deferral_slots', 0)) >= 2
     workers_degraded = any(health.get('status') != 'complete' or health.get('complete') is not True
                            or health.get('schema_status') in ('unknown', 'unavailable')
                            for health in snapshot.get('worker_health', {}).values())
-    health = {'worker_health_status': 'degraded' if workers_degraded else 'ok',
-              'monitor_status': 'failed' if failed else 'degraded' if degraded or workers_degraded else 'ok',
+    questions_degraded = any(value.get('status') != 'complete' or value.get('complete') is not True
+                             or any(q.get('state') == 'unknown' for q in value.get('questions', []))
+                             for value in snapshot.get('question_state', {}).values())
+    health = {'question_state_status': 'degraded' if questions_degraded else 'ok',
+              'worker_health_status': 'degraded' if workers_degraded else 'ok',
+              'monitor_status': 'failed' if failed else 'degraded' if degraded or workers_degraded or questions_degraded else 'ok',
               'history_status': 'degraded' if degraded else 'ok', 'recipient': recipient,
               'snapshot_id': snapshot['snapshot_id'],
               'backlog_slots': record.get('backlog_slots', 0),
@@ -344,12 +520,14 @@ def record_health(state_dir, recipient, slot, snapshot, outcome):
         if record.get('deferral_slots', 0) >= 2:
             reasons.append('queue inventory or reminder delivery repeatedly deferred; inspect inventory errors and recipient clearance')
         health['monitor_reason'] = '; '.join(reasons)
-    elif degraded or workers_degraded:
+    elif degraded or workers_degraded or questions_degraded:
         reasons = []
         if degraded:
             reasons.append('history metadata incomplete or unavailable; inspect history diagnostics without inferring question clearance')
         if workers_degraded:
             reasons.append('worker metadata incomplete or unavailable; inspect worker health diagnostics without inferring recovery')
+        if questions_degraded:
+            reasons.append('question lifecycle or visibility unavailable; inspect question state diagnostics without inferring pending decisions or clearance')
         health['monitor_reason'] = '; '.join(reasons)
     record.pop('monitor_reason', None)
     record.update(health, last_delivery_status=outcome['status'])
@@ -504,7 +682,9 @@ def main():
                               'path': str(args.state_dir / 'snapshots' / (snapshot['snapshot_id'] + '.json')),
                               'queue_ids': [entry['id'] for entry in snapshot['queues'].get(args.recipient, [])],
                               'complete': not snapshot['errors'], 'history': snapshot['history'],
-                              'worker_health': snapshot['worker_health']}))
+                              'worker_health': snapshot['worker_health'],
+                              'question_state_status': {owner: value['status'] for owner, value in snapshot['question_state'].items()},
+                              'collection_budget': snapshot['collection_budget']}))
             return int(bool(snapshot['errors']))
         results = acknowledge(client, args.state_dir, args.recipient, args.snapshot, args.queue_id, args.disposition, args.reason)
         print(json.dumps({'results': results}))

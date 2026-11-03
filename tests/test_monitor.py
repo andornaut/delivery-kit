@@ -9,7 +9,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+import types
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'libexec'))
 import monitor
@@ -63,10 +64,30 @@ class NativeFixture:
         return [params for method, params in self.calls if method == 'thread/queue/delete']
 
 
+def empty_question_state(client, recipients, *, decision_records, max_pages=10):
+    return {owner: {'status': 'complete', 'complete': True, 'questions': [],
+                   'diagnostics': ['native_pending_getter_unavailable'],
+                   'pending_status': 'unavailable', 'cancelled_status': 'unavailable',
+                   'ui_visibility': 'unknown', 'budget': {}} for owner in recipients}
+
+
+def pending_question(owner=ART):
+    return {'turn_id': 'question-turn', 'item_id': 'question-item', 'question_index': 0,
+            'kind': 'rendered_prompt', 'title': 'Choose the local path', 'options': ['First', 'Second'],
+            'state': 'pending', 'proof_complete': True, 'proof_scope': 'latest_turn',
+            'proof_refs': [{'kind': 'owner_pending_attestation', 'recipient': owner,
+                           'question_turn_id': 'question-turn', 'question_item_id': 'question-item', 'question_index': 0,
+                           'confirmed_at': '2026-11-03T12:00:00Z'}]}
+
+
 class MonitorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        self.question_collector = types.SimpleNamespace(collect=Mock(side_effect=empty_question_state))
+        question_module = patch.dict(sys.modules, {'question_state': self.question_collector})
+        question_module.start()
+        self.addCleanup(question_module.stop)
         self.state = Path(self.temp.name) / 'unblock'
         self.state.mkdir()
         route = self.state / 'route.json'
@@ -86,6 +107,123 @@ class MonitorTests(unittest.TestCase):
     def receipt(self):
         return json.loads(next((self.state / 'acks').glob('*.json')).read_text())
 
+    def test_question_state_reads_existing_records_only_and_keeps_module_flags(self):
+        decisions = self.state / 'decisions'
+        decisions.mkdir()
+        marker = {'thread_id': ART, 'state': 'pending', 'pending_questions': []}
+        path = decisions / (ART + '.json')
+        path.write_text(json.dumps(marker))
+        before = path.read_bytes()
+        snapshot = monitor.capture(self.client, self.state, [TECH, ART])
+        args, kwargs = self.question_collector.collect.call_args
+        self.assertEqual(args[1], [TECH, ART])
+        self.assertEqual(kwargs['decision_records'], {TECH: None, ART: marker})
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(snapshot['question_state'][ART]['ui_visibility'], 'unknown')
+        self.assertIn('native_pending_getter_unavailable', snapshot['question_state'][ART]['diagnostics'])
+        self.assertEqual(stat.S_IMODE((self.state / 'snapshots' / (snapshot['snapshot_id'] + '.json')).stat().st_mode), 0o600)
+
+    def test_questions_use_explicit_recipient_route_scope_without_native_expansion(self):
+        other = '00000000-0000-0000-0000-000000000099'
+        self.client.queues[other] = []
+        snapshot = monitor.capture(self.client, self.state, [ART, other])
+        self.assertEqual(self.question_collector.collect.call_args.args[1], [ART])
+        self.assertEqual(snapshot['question_state'][other]['status'], 'unavailable')
+        self.assertIn('question_recipient_outside_active_route', snapshot['question_state'][other]['diagnostics'])
+        self.assertEqual(set(snapshot['question_state']), {ART, other})
+        self.assertEqual(set(self.question_collector.collect.call_args.kwargs['decision_records']), {ART})
+
+    def test_worker_and_questions_share_reserved_deadline_and_call_budget(self):
+        self.client.deadline = 125.0
+        def questions(client, recipients, *, decision_records, max_pages=10):
+            self.assertEqual(client.deadline, 120.0)
+            for _ in range(256):
+                client.call('thread/items/list', {'threadId': TECH})
+            return empty_question_state(client, recipients, decision_records=decision_records)
+        self.question_collector.collect.side_effect = questions
+        def workers(client, parents):
+            self.assertEqual(client.deadline, 120.0)
+            client.call('thread/list', {'parentThreadId': TECH})
+        with patch.object(monitor.time, 'monotonic', return_value=100.0), \
+                patch.dict(sys.modules, {'child_health': types.SimpleNamespace(collect=workers)}):
+            snapshot = monitor.capture(self.client, self.state, [TECH], parents=[TECH])
+        self.assertEqual(snapshot['collection_budget']['calls_used'], 256)
+        self.assertEqual(snapshot['collection_budget']['reason_code'], 'collection_call_budget_exhausted')
+        self.assertEqual(snapshot['worker_health'][TECH]['status'], 'unavailable')
+        self.assertEqual(self.client.deadline, 125.0)
+        self.assertFalse(any(method == 'thread/list' for method, _ in self.client.calls))
+
+    def test_question_failure_reports_visibility_without_queue_failure_or_raw_errors(self):
+        self.question_collector.collect.side_effect = RuntimeError('PRIVATE_NATIVE_ERROR')
+        snapshot = monitor.capture(self.client, self.state, [TECH])
+        snapshot['queues'] = {TECH: []}
+        with patch.object(monitor, 'health_event') as event:
+            for slot in (100, 200):
+                health = monitor.record_health(self.state, TECH, slot, snapshot, {'status': 'accepted'})
+                self.assertEqual(health['monitor_status'], 'degraded')
+                self.assertEqual(health['deferral_slots'], 0)
+            event.assert_not_called()
+        self.assertNotIn('PRIVATE_NATIVE_ERROR', json.dumps(snapshot))
+        self.assertEqual(snapshot['question_state'][TECH]['pending_status'], 'unavailable')
+
+    def test_oversized_question_preserves_snapshot_choices_but_is_unknown(self):
+        question = pending_question()
+        question['options'] = ['x' * 40000, 'Second']
+        value = empty_question_state(None, [ART], decision_records={})
+        value[ART]['questions'] = [question]
+        self.question_collector.collect.side_effect = lambda *args, **kwargs: value
+        snapshot = monitor.capture(self.client, self.state, [ART])
+        self.assertEqual(snapshot['question_state'][ART]['questions'][0]['options'], ['x' * 40000, 'Second'])
+        self.assertEqual(snapshot['question_state'][ART]['questions'][0]['state'], 'unknown')
+        self.assertEqual(monitor.question_notices(self.state, TECH, snapshot), [])
+        self.assertIn('question_text_exceeds_reminder_bounds', snapshot['question_state'][ART]['diagnostics'])
+
+    def test_real_collector_partial_old_history_and_complete_current_proof(self):
+        import importlib.util
+        from datetime import datetime, timezone
+        spec = importlib.util.spec_from_file_location('question_dependency',
+            Path(__file__).resolve().parents[1] / 'libexec/question_state.py')
+        dependency = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(dependency)
+        question = {'turnId': 'current', 'item': {'id': 'prompt', 'type': 'agentMessage',
+                    'text': 'PRIVATE_UNRELATED_BODY',
+                    'questions': [{'title': 'Choose a local path', 'options': ['First', 'Second']}]}}
+        compact = {'turnId': 'older', 'item': {'id': 'old-compaction', 'type': 'contextCompaction'}}
+        marker = {'thread_id': TECH, 'state': 'pending', 'pending_questions': [{
+            'question_turn_id': 'current', 'question_item_id': 'prompt', 'question_index': 0,
+            'title': 'Choose a local path', 'options': ['First', 'Second'],
+            'confirmed_pending': True, 'confirmed_at': datetime.now(timezone.utc).isoformat()}]}
+        monitor.persist(self.state / 'decisions' / (TECH + '.json'), marker)
+        original = self.client.call
+        incomplete = [False]
+        def call(method, params):
+            if method == 'thread/read':
+                return {'thread': {'id': TECH, 'updatedAt': 1,
+                        'status': {'type': 'active', 'activeFlags': ['waitingOnUserInput']}}}
+            if method == 'thread/turns/list':
+                return {'data': [{'id': 'current', 'status': 'inProgress'}]}
+            if method == 'thread/items/list':
+                if 'turnId' in params:
+                    return {'data': [question], 'truncated': incomplete[0]}
+                return {'data': [question, compact]}
+            return original(method, params)
+        self.client.call = call
+        with patch.dict(sys.modules, {'question_state': dependency}):
+            snapshot = monitor.capture(self.client, self.state, [TECH], 100)
+            value = snapshot['question_state'][TECH]
+            self.assertEqual(value['status'], 'partial')
+            self.assertFalse(value['complete'])
+            self.assertTrue(value['latest_turn_proof']['complete'])
+            self.assertTrue(value['questions'][0]['proof_complete'])
+            self.assertEqual(len(monitor.question_notices(self.state, ART, snapshot, 100)), 1)
+            self.assertNotIn('PRIVATE_UNRELATED_BODY', json.dumps(snapshot))
+            incomplete[0] = True
+            snapshot = monitor.capture(self.client, self.state, [TECH], 200)
+            self.assertFalse(snapshot['question_state'][TECH]['latest_turn_proof']['complete'])
+            self.assertEqual(snapshot['question_state'][TECH]['questions'][0]['state'], 'unknown')
+            self.assertEqual(monitor.question_notices(self.state, ART, snapshot, 200), [])
+        self.assertEqual(json.loads((self.state / 'decisions' / (TECH + '.json')).read_text()), marker)
+
     def test_child_budget_follows_inventory_reserves_delivery_and_restores_deadline(self):
         import types
         clock = [100.0]
@@ -99,8 +237,8 @@ class MonitorTests(unittest.TestCase):
         def slow_collector(client, parents):
             self.assertEqual(parents, [TECH])
             self.assertEqual(client.deadline, 120.0)
-            self.assertTrue(any(method == 'thread/items/list' for method, _ in client.calls))
-            self.assertTrue(any(method == 'thread/queue/list' for method, _ in client.calls))
+            self.assertTrue(any(method == 'thread/items/list' for method, _ in self.client.calls))
+            self.assertTrue(any(method == 'thread/queue/list' for method, _ in self.client.calls))
             clock[0] = client.deadline
             raise TimeoutError('PRIVATE_BUDGET_DETAIL')
         collector = types.SimpleNamespace(collect=__import__('unittest.mock').mock.Mock(side_effect=slow_collector))
@@ -191,7 +329,9 @@ class MonitorTests(unittest.TestCase):
             collector.collect.assert_not_called()
             self.assertEqual(plain['worker_health'], {})
             scoped = monitor.capture(self.client, self.state, [ART], parents=[TECH])
-            collector.collect.assert_called_once_with(self.client, [TECH])
+            collector.collect.assert_called_once()
+            self.assertIs(collector.collect.call_args.args[0].client, self.client)
+            self.assertEqual(collector.collect.call_args.args[1], [TECH])
             self.assertEqual(list(scoped['worker_health']), [TECH])
             self.assertEqual(scoped['worker_health'][TECH]['status'], 'partial')
             collector.collect.side_effect = TimeoutError('PRIVATE_ERROR')

@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import types
 from unittest.mock import Mock, patch
 
 import importlib.util
@@ -55,10 +56,30 @@ class Fixture:
         return [(method, params) for method, params in self.calls if method.startswith("turn/")]
 
 
+def empty_question_state(client, recipients, *, decision_records, max_pages=10):
+    return {owner: {'status': 'complete', 'complete': True, 'questions': [],
+                   'diagnostics': ['native_pending_getter_unavailable'],
+                   'pending_status': 'unavailable', 'cancelled_status': 'unavailable',
+                   'ui_visibility': 'unknown', 'budget': {}} for owner in recipients}
+
+
+def pending_question(owner=ART):
+    return {'turn_id': 'question-turn', 'item_id': 'question-item', 'question_index': 0,
+            'kind': 'rendered_prompt', 'title': 'Choose the local path', 'options': ['First', 'Second'],
+            'state': 'pending', 'proof_complete': True, 'proof_scope': 'latest_turn',
+            'proof_refs': [{'kind': 'owner_pending_attestation', 'recipient': owner,
+                           'question_turn_id': 'question-turn', 'question_item_id': 'question-item', 'question_index': 0,
+                           'confirmed_at': '2026-11-03T12:00:00Z'}]}
+
+
 class UnblockTests(unittest.TestCase):
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
+        self.question_collector = types.SimpleNamespace(collect=Mock(side_effect=empty_question_state))
+        question_module = patch.dict(sys.modules, {'question_state': self.question_collector})
+        question_module.start()
+        self.addCleanup(question_module.stop)
         self.path = Path(self.scratch.name) / "slot.json"
         route = self.path.parent / 'route.json'
         route.write_text(json.dumps({'version': 1, 'harness': 'codex', 'state': 'active',
@@ -76,6 +97,120 @@ class UnblockTests(unittest.TestCase):
 
     def reconcile(self, client):
         return subject.reconcile(client, self.path, TECH, [ART, GAMEPLAY], 100)
+
+    def question_snapshot(self, client):
+        import monitor
+        snapshot = monitor.capture(client, self.path.parent, [TECH, ART])
+        snapshot['queues'] = {TECH: [], ART: []}
+        snapshot['question_state'][ART]['questions'] = [pending_question()]
+        snapshot['question_state'][ART]['complete'] = False
+        snapshot['question_state'][ART]['status'] = 'partial'
+        return snapshot
+
+    def test_confirmed_question_first_slot_then_one_distinct_slot_escalation(self):
+        import monitor
+        client = Fixture(outcomes=[{'turnId': 'turn-one'}] * 4)
+        snapshot = self.question_snapshot(client)
+        first = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+        self.assertEqual(first['status'], 'accepted')
+        text = client.mutations()[-1][1]['input'][0]['text']
+        for value in (ART, 'question-turn', 'question-item', 'Choose the local path', 'First', 'Second'):
+            self.assertIn(value, text)
+        self.assertIn('"level": "initial"', text)
+        self.assertIn('Never auto reissue', text)
+        self.assertIn('UI visibility is unknown', text)
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, first)
+        self.assertEqual(subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)['status'], 'unchanged')
+        second = subject.reconcile(client, self.path, TECH, [ART], 200, snapshot)
+        self.assertEqual(second['status'], 'accepted')
+        self.assertIn('"level": "escalation"', client.mutations()[-1][1]['input'][0]['text'])
+        monitor.record_health(self.path.parent, TECH, 200, snapshot, second)
+        self.assertEqual(subject.reconcile(client, self.path, TECH, [ART], 300, snapshot)['status'], 'unchanged')
+        self.assertEqual(len(client.mutations()), 2)
+        self.assertTrue(all(params['threadId'] == TECH for _, params in client.mutations()))
+
+    def test_unknown_answered_and_unproven_questions_never_brief_or_clear_guard(self):
+        import monitor
+        client = Fixture(outcomes=[{'turnId': 'turn-one'}] * 5)
+        snapshot = self.question_snapshot(client)
+        question = snapshot['question_state'][ART]['questions'][0]
+        for state in ('unknown', 'answered'):
+            question['state'] = state
+            question['title'] = 'UNCONFIRMED_PRIVATE_TITLE'
+            result = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+            self.assertNotIn('UNCONFIRMED_PRIVATE_TITLE', client.mutations()[-1][1]['input'][0]['text'])
+            monitor.record_health(self.path.parent, TECH, 100, snapshot, result)
+        question['state'] = 'pending'
+        question['proof_complete'] = False
+        self.assertEqual(monitor.question_notices(self.path.parent, TECH, snapshot, 200), [])
+        question['proof_complete'] = True
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'pending'})
+        count = len(client.mutations())
+        result = subject.reconcile(client, self.path, TECH, [ART], 200, snapshot)
+        self.assertEqual(result['status'], 'deferred')
+        self.assertEqual(len(client.mutations()), count)
+        self.assertEqual(json.loads(self.decision.read_text())['state'], 'pending')
+
+    def test_new_question_state_dedup_does_not_resurrect_old_pending_body(self):
+        import monitor
+        client = Fixture(outcomes=[{'turnId': 'turn-one'}] * 4)
+        snapshot = self.question_snapshot(client)
+        first = subject.reconcile(client, self.path, TECH, [ART], 100, snapshot)
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, first)
+        question = snapshot['question_state'][ART]['questions'][0]
+        question['state'] = 'answered'
+        monitor.record_health(self.path.parent, TECH, 200, snapshot, {'status': 'unchanged'})
+        self.assertEqual(monitor.question_notices(self.path.parent, TECH, snapshot, 300), [])
+        question['state'] = 'pending'
+        question['item_id'] = 'replacement-exact-item'
+        question['proof_refs'][0]['question_item_id'] = 'replacement-exact-item'
+        notices = monitor.question_notices(self.path.parent, TECH, snapshot, 300)
+        self.assertEqual(notices[0]['level'], 'initial')
+        self.assertEqual(notices[0]['question']['item_id'], 'replacement-exact-item')
+
+    def test_own_confirmed_question_wait_never_fails_health_by_itself(self):
+        import monitor
+        client = Fixture()
+        snapshot = self.question_snapshot(client)
+        snapshot['question_state'] = {TECH: {'status': 'complete', 'complete': True,
+                                            'questions': [pending_question(TECH)], 'diagnostics': []}}
+        subject.persist(self.decision, {'thread_id': TECH, 'state': 'pending'})
+        with patch.object(monitor, 'health_event') as event:
+            for slot in (100, 200):
+                outcome = subject.reconcile(client, self.path, TECH, [ART], slot, snapshot)
+                self.assertTrue(outcome['waiting_on_user'])
+                health = monitor.record_health(self.path.parent, TECH, slot, snapshot, outcome)
+                self.assertEqual(health['monitor_status'], 'ok')
+                self.assertEqual(health['deferral_slots'], 0)
+            event.assert_not_called()
+        self.assertEqual(client.mutations(), [])
+
+    def test_answered_identity_and_older_snapshots_cannot_resurrect_pending(self):
+        import monitor
+        client = Fixture()
+        snapshot = self.question_snapshot(client)
+        monitor.record_health(self.path.parent, TECH, 100, snapshot, {'status': 'unchanged'})
+        stale = json.loads(json.dumps(snapshot))
+        snapshot['question_state'][ART]['questions'][0]['state'] = 'answered'
+        monitor.record_health(self.path.parent, TECH, 200, snapshot, {'status': 'unchanged'})
+        self.assertEqual(monitor.question_notices(self.path.parent, TECH, stale, 100), [])
+        self.assertEqual(monitor.question_notices(self.path.parent, TECH, stale, 300), [])
+        monitor.record_health(self.path.parent, TECH, 100, stale, {'status': 'unchanged'})
+        self.assertEqual(monitor.question_notices(self.path.parent, TECH, stale, 300), [])
+
+    def test_question_brief_bound_never_slices_original_options_or_dedups_omitted_rows(self):
+        import monitor
+        notices = []
+        for number in range(10):
+            question = pending_question()
+            question['options'] = ['x' * 5000, 'Second']
+            notices.append({'identity': str(number), 'signature': str(number), 'level': 'initial',
+                            'owner': ART, 'question': question})
+        rows, keys = monitor.question_brief(notices)
+        self.assertLess(len(rows), len(notices))
+        self.assertEqual(len(rows), len(keys))
+        self.assertLessEqual(len(json.dumps(rows, ensure_ascii=False).encode()), 32768)
+        self.assertTrue(all(row['options'] == ['x' * 5000, 'Second'] for row in rows))
 
     def test_invalid_parent_scope_defers_without_native(self):
         for parents in ([ART, ART], [GAMEPLAY], ['ABCDEFAB-0000-0000-0000-000000000002']):
@@ -142,7 +277,8 @@ class UnblockTests(unittest.TestCase):
         self.assertEqual(first['status'], 'accepted')
         self.assertEqual(second['status'], 'deduplicated')
         self.assertEqual(collector.collect.call_count, 2)
-        collector.collect.assert_called_with(client, [ART])
+        self.assertIs(collector.collect.call_args.args[0].client, client)
+        self.assertEqual(collector.collect.call_args.args[1], [ART])
         self.assertEqual(len(client.mutations()), 1)
 
     def test_active_reminder_reads_all_peer_queue_pages_and_retains_only_ids(self):
