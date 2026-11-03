@@ -465,8 +465,10 @@ when history metadata is unavailable.
 Recognized native `contextCompaction` items preserve safe references and cursor
 metadata while reporting history `status: partial`, `complete: false`, and both
 `reason_code: context_compaction` and `category: context_compaction`. This is an
-incomplete history diagnostic, not recipient decision clearance. Unknown item
-types remain unsupported. Ordinary paginated history may be `partial` without
+incomplete history diagnostic, not recipient decision clearance. Compaction in
+the latest turn remains guarded: a structural marker cannot prove that opaque
+questions are absent. Older compaction in across-thread history does not invalidate
+a separately complete latest turn. Unknown item types remain unsupported. Ordinary paginated history may be `partial` without
 being degraded.
 
 Health adds `history_status: degraded|ok`. History degradation produces
@@ -477,3 +479,8 @@ still does. Queue backlog and inventory failure rules remain applicable.
 `history_status: ok` describes history metadata only: it does not establish
 recipient clearance, successful delivery or overall monitor health. Inspect the
 history diagnostics, delivery outcome, backlog and deferral counters separately.
+
+The `monitor-snapshot` CLI exit status reflects queue capture errors only.
+Incomplete or unavailable history diagnostics remain independently usable; a zero
+exit status does not establish complete history, decision clearance or successful
+guarded delivery.
