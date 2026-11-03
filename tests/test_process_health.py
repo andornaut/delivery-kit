@@ -92,11 +92,11 @@ class Native:
 
 
 class ProcessHealthTests(unittest.TestCase):
-    def collect(self, jobs=None, native=None, prior=None, slot=200, manifest=None):
+    def collect(self, jobs=None, native=None, prior=None, slot=NOW, manifest=None, now=NOW):
         native = native or Native()
         manifest = {'version': 1, 'jobs': [job()] if jobs is None else jobs} if manifest is None else manifest
         before = copy.deepcopy(manifest)
-        with patch.object(subject.time, 'time', return_value=NOW), \
+        with patch.object(subject.time, 'time', return_value=now), \
                 patch.object(subject.time, 'monotonic', return_value=100.0):
             result = subject.collect(native, manifest, allowed_parents=[P], slot=slot,
                                      prior_observations=prior)[P]
@@ -141,18 +141,18 @@ class ProcessHealthTests(unittest.TestCase):
 
     def test_same_owner_timestamp_across_slots_is_not_new_progress_evidence(self):
         value = job(owner_evidence=evidence(progress=progress(), blocked_condition=blocked()))
-        first = self.collect([value], slot=100)
-        second = self.collect([value], slot=200, prior=first['observations'])
+        first = self.collect([value], slot=NOW, now=NOW+5)
+        second = self.collect([value], slot=NOW+60, now=NOW+65, prior=first['observations'])
         self.assertFalse(first['jobs'][0]['requires_owner_action'])
         self.assertFalse(second['jobs'][0]['requires_owner_action'])
         self.assertNotEqual(second['jobs'][0]['state'], 'stalled')
 
     def test_two_distinct_owner_observations_need_expected_progress_and_corroborated_block(self):
-        old = job(owner_evidence=evidence(confirmed_at=timestamp(120), progress=progress(),
+        old = job(owner_evidence=evidence(confirmed_at=timestamp(1860), progress=progress(),
                                           blocked_condition=blocked()))
-        prior = self.collect([old], slot=100)['observations']
+        prior = self.collect([old], slot=NOW-1800, now=NOW-1795)['observations']
         current = job(owner_evidence=evidence(progress=progress(), blocked_condition=blocked()))
-        row = self.collect([current], slot=200, prior=prior)['jobs'][0]
+        row = self.collect([current], slot=NOW, now=NOW+5, prior=prior)['jobs'][0]
         self.assertTrue(row['requires_owner_action'])
         self.assertEqual(row['state'], 'stalled')
         changes = [
@@ -161,17 +161,56 @@ class ProcessHealthTests(unittest.TestCase):
             {'progress': progress(expected_to_advance=False)}, {'progress': progress(counter=True)},
             {'blocked_condition': None}, {'blocked_condition': blocked(confirmed=False)},
             {'blocked_condition': blocked(evidence_id='different')}, {'episode_id': 'new'},
-            {'confirmed_at': timestamp(130)}, {'confirmed_at': timestamp(1801)},
+            {'confirmed_at': timestamp(1900)}, {'confirmed_at': timestamp(1801)},
         ]
         for change in changes:
             with self.subTest(change=change):
                 fields = {'progress': progress(), 'blocked_condition': blocked()} | change
                 value = job(owner_evidence=evidence(**fields))
                 self.assertFalse(self.collect([value], prior=prior)['jobs'][0]['requires_owner_action'])
-        self.assertFalse(self.collect([current], slot=100, prior=prior)['jobs'][0]['requires_owner_action'])
+        self.assertFalse(self.collect([current], slot=NOW-1800, now=NOW-1795, prior=prior)['jobs'][0]['requires_owner_action'])
         changed = copy.deepcopy(prior)
         changed[0]['start_identity'] = 'reused-handle-new-start'
         self.assertFalse(self.collect([current], prior=changed)['jobs'][0]['requires_owner_action'])
+
+    def test_prior_owner_evidence_fresh_at_capture_survives_thirty_minute_jitter(self):
+        old_slot = NOW - 1800
+        old = job(owner_evidence=evidence(confirmed_at=timestamp(1900),
+            progress=progress(), blocked_condition=blocked()))
+        prior = self.collect([old], slot=old_slot, now=old_slot+10)['observations']
+        self.assertEqual(len(prior), 1)
+        self.assertGreater(NOW+15 - subject._stamp(prior[0]['owner_evidence']['confirmed_at']), 1800)
+        current = job(owner_evidence=evidence(progress=progress(), blocked_condition=blocked()))
+        result = self.collect([current], slot=NOW, now=NOW+15, prior=prior)
+        self.assertTrue(result['jobs'][0]['requires_owner_action'])
+        for changes in (
+                {'collected_at': timestamp(1790+60)},
+                {'collected_at': timestamp(-60)},
+                {'slot': old_slot+1},
+                {'provenance': 'native_verified'},
+                {'owner_evidence': evidence(confirmed_at=timestamp(3701),
+                    progress=progress(), blocked_condition=blocked())},
+                {'owner_evidence': evidence(confirmed_at=timestamp(1700),
+                    progress=progress(), blocked_condition=blocked())}):
+            changed = [copy.deepcopy(prior[0]) | changes]
+            with self.subTest(changes=changes):
+                row = self.collect([current], slot=NOW, now=NOW+15, prior=changed)['jobs'][0]
+                self.assertFalse(row['requires_owner_action'])
+        changed = copy.deepcopy(prior)
+        changed[0].pop('collected_at')
+        self.assertFalse(self.collect([current], prior=changed)['jobs'][0]['requires_owner_action'])
+
+    def test_public_observation_none_slot_does_not_synthesize_scheduled_samples(self):
+        old = job(owner_evidence=evidence(confirmed_at=timestamp(1860), progress=progress(),
+                                          blocked_condition=blocked()))
+        prior = self.collect([old], slot=NOW-1800, now=NOW-1795)['observations']
+        current = job(owner_evidence=evidence(progress=progress(), blocked_condition=blocked()))
+        result = self.collect([current], slot=None, prior=prior)
+        self.assertEqual(result['observations'], [])
+        self.assertFalse(result['jobs'][0]['requires_owner_action'])
+        result = self.collect([job(owner_evidence=evidence(confirmed_stalled=True))], slot=None)
+        self.assertTrue(result['jobs'][0]['requires_owner_action'])
+        self.assertEqual(result['observations'], [])
 
     def test_stasis_duration_native_status_and_exit_never_imply_stall_or_closed(self):
         native = Native()

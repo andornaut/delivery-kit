@@ -214,17 +214,29 @@ def _closure(reader, now, identity, value):
     return 'verified_closed', 'owner_verified_native_result_corroborated', reference, []
 
 
+
+def _scheduled_capture(slot, collected_at):
+    return (type(slot) is int and slot >= 0 and slot % 60 == 0
+            and collected_at is not None and 0 <= collected_at - slot < 60)
+
 def _two_samples(now, slot, identity, evidence, prior):
+    if not _scheduled_capture(slot, now):
+        return False
     progress, blocked = evidence.get('progress'), evidence.get('blocked_condition')
     if (progress is None or progress['expected_to_advance'] is not True or blocked is None
             or 'episode_id' not in evidence):
         return False
     for sample in prior:
         if (not isinstance(sample, dict) or any(sample.get(key) != identity[key] for key in IDENTITY)
-                or sample.get('protected') is not False or type(sample.get('slot')) is not int
-                or not 0 <= sample['slot'] < slot):
+                or sample.get('protected') is not False or sample.get('provenance') != 'owner_attested'
+                or type(sample.get('slot')) is not int or not 0 <= sample['slot'] < slot):
             continue
-        old = _evidence(now, identity['owner_parent_id'], sample.get('owner_evidence'))
+        collected_at = _stamp(sample.get('collected_at'))
+        if (not _scheduled_capture(sample['slot'], collected_at) or collected_at > now):
+            continue
+        # Prior evidence is evaluated at its original scheduled observation.
+        # The caller supplies trusted typed snapshots; this is not native proof.
+        old = _evidence(collected_at, identity['owner_parent_id'], sample.get('owner_evidence'))
         if (old is None or old['state'] not in ('running', 'blocked')
                 or old.get('episode_id') != evidence['episode_id']
                 or old.get('progress') != progress or old.get('blocked_condition') != blocked
@@ -262,11 +274,17 @@ def collect(client, registrations, *, allowed_parents, slot, prior_observations=
     means explicit owner verification corroborated by its successful native
     result reference, never direct host verification. Collector output is data
     for closure requests to the owner, never authority to mutate resources.
+
+    slot=None is observational: it neither infers two-sample stalls nor emits
+    scheduled observations. Prior observations are trusted typed owner-attested
+    snapshots, not native liveness proof. Their evidence must have been fresh at
+    collected_at, within the original slot's existing 60-second minute window.
+    No particular interval between distinct scheduled slots is assumed.
     """
     if (not isinstance(allowed_parents, (list, tuple)) or not all(_uuid(p) for p in allowed_parents)
             or len(allowed_parents) != len(set(allowed_parents))):
         raise ValueError('invalid_parent_scope')
-    if type(slot) is not int or slot < 0:
+    if slot is not None and (type(slot) is not int or slot < 0):
         raise ValueError('invalid_slot')
     reader, now = _Reader(client), time.time()
     output = {parent: {'status': 'complete', 'complete': True, 'jobs': [], 'observations': [],
@@ -350,8 +368,13 @@ def collect(client, registrations, *, allowed_parents, slot, prior_observations=
             row.update(state='stalled', stall_episode=evidence['episode_id'],
                        requires_owner_action=closure in
                        ('none', 'requested', 'delivery_accepted', 'ambiguous'))
-        result['observations'].append(identity | {'slot': slot, 'protected': row['protected'],
-                                                 'owner_evidence': evidence})
+        if _scheduled_capture(slot, now):
+            result['observations'].append(identity | {
+                'slot': slot, 'collected_at': datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                'provenance': 'owner_attested', 'protected': row['protected'],
+                'owner_evidence': evidence})
+        elif slot is not None:
+            result['diagnostics'].append('scheduled_sample_time_unavailable')
     for result in output.values():
         if len(jobs) > MAX_JOBS:
             result.update(complete=False, omitted_jobs=len(jobs) - MAX_JOBS)
