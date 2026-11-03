@@ -17,7 +17,7 @@ from monitor import accepted_inventory, capture, locked, record_health
 
 
 NATIVE_ITEM_TYPES = {
-    'agentMessage', 'collabAgentToolCall', 'commandExecution', 'dynamicToolCall',
+    'agentMessage', 'collabAgentToolCall', 'commandExecution', 'contextCompaction', 'dynamicToolCall',
     'enteredReviewMode', 'exitedReviewMode', 'fileChange', 'functionCallOutput',
     'hookPrompt', 'imageGeneration', 'imageView', 'mcpToolCall', 'plan',
     'reasoning', 'sleep', 'subAgentActivity', 'userMessage', 'webSearch',

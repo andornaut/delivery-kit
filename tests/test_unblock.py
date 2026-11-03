@@ -217,11 +217,10 @@ class UnblockTests(unittest.TestCase):
         self.assertEqual(self.reconcile(client)["status"], "deferred")
         self.assertEqual(client.mutations(), [])
 
-    def test_unknown_truncated_compacted_or_question_tool_history_defers(self):
+    def test_unknown_truncated_or_question_tool_history_defers(self):
         cases = [
             {}, {"data": [], "truncated": True}, {"data": [], "nextCursor": ""},
             {"data": [{"turnId": "other", "item": {"id": "x", "type": "userMessage"}}]},
-            {"data": [{"turnId": "turn-one", "item": {"id": "x", "type": "contextCompaction"}}]},
             {"data": [{"turnId": "turn-one", "item": {"id": "x", "type": "unknown"}}]},
             {"data": [{"turnId": "turn-one", "item": {
                 "id": "x", "type": "dynamicToolCall", "tool": "request_user_input_async", "status": "completed",
@@ -324,6 +323,49 @@ class UnblockTests(unittest.TestCase):
             client = fixture()
             self.assertEqual(self.reconcile(client)['status'], 'deferred')
             self.assertEqual(client.mutations(), [])
+
+    def test_compaction_marker_preserves_exact_question_proof_and_guards(self):
+        question = {'id': 'question', 'type': 'agentMessage', 'questions': [{}]}
+        answer = {'id': 'answer', 'type': 'userMessage'}
+        marker = {'id': 'compaction', 'type': 'contextCompaction'}
+        resolution = {'question_turn_id': 'turn-one', 'question_item_id': 'question',
+                      'answer_turn_id': 'turn-one', 'answer_item_id': 'answer'}
+        cases = [
+            ('structural marker', [marker], [], 'accepted'),
+            ('unattested answer', [question, marker, answer], [], 'deferred'),
+            ('exact proof', [question, marker, answer], [resolution], 'accepted'),
+            ('lost question proof', [marker, answer], [resolution], 'deferred'),
+            ('lost answer proof', [question, marker], [resolution], 'deferred'),
+            ('opaque lost proof', [marker], [resolution], 'deferred'),
+            ('answer before question', [answer, marker, question], [resolution], 'deferred'),
+            ('new rendered question', [question, marker, answer,
+                {'id': 'new-question', 'type': 'agentMessage', 'questions': [{}]}],
+                [resolution], 'deferred'),
+            ('new question tool', [question, marker, answer,
+                {'id': 'new-tool', 'type': 'dynamicToolCall', 'tool': 'request_user_input'}],
+                [resolution], 'deferred'),
+            ('unknown item', [question, marker, answer,
+                {'id': 'unknown', 'type': 'futureQuestion'}], [resolution], 'deferred'),
+        ]
+        for name, items, resolutions, expected in cases:
+            with self.subTest(name=name):
+                subject.persist(self.decision, {
+                    'thread_id': TECH, 'state': 'clear', 'resolutions': resolutions,
+                })
+                client = Fixture()
+                original = client.call
+                def call(method, params):
+                    if method == 'thread/items/list':
+                        # Split at the marker to exercise complete paginated proof.
+                        selected = items[1:] if params.get('cursor') else items[:1]
+                        page = {'data': [{'turnId': 'turn-one', 'item': item} for item in selected]}
+                        if not params.get('cursor'):
+                            page['nextCursor'] = 'remaining'
+                        return page
+                    return original(method, params)
+                client.call = call
+                self.assertEqual(self.reconcile(client)['status'], expected)
+                self.assertEqual(len(client.mutations()), int(expected == 'accepted'))
 
     def test_unrelated_old_resolution_does_not_fetch_or_poison_current_clear_turn(self):
         subject.persist(self.decision, {'thread_id': TECH, 'state': 'clear', 'resolutions': [
