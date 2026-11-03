@@ -51,12 +51,22 @@ The optional Codex triage adapter retains the three-role game metadata schema an
 
 ### Operational reporting recipient and configuration adoption
 
-`REPORT_THREAD` selects the queued bus-event recipient independently of Tech's
-approval and release ownership. A confirmed existing operational monitor may receive
-these reports; changing the recipient grants no release approval, queue mutation,
-deployment or decision-clearance authority. `MONITOR_ROUTE_FILE` selects guarded
-monitoring targets separately; `MONITOR_MINUTES` sets their cadence. In legacy
-mode (route variable unset),
+`REPORT_THREAD` selects the queued bus-event recipient. Changing it alone grants
+no operational authority or recipient decision clearance. After an explicitly
+confirmed transfer, the existing monitor owns game-bus operations: queue admission
+and mutation after Tech approval, gate/push/deploy tracking, retries, reporting and
+resource oversight. Tech owns implementation, integration and approval of exact
+pins. The library owns delivery-kit source and releases; existing project runners
+execute approved work. This division creates no new timer, manual departure or
+team.
+
+Source Tech retains runtime ownership until controlled idle adoption, drained and
+reconciled detached reporters, and final activation are confirmed. Receiving a
+report or changing a route is not activation. Preserve outstanding work and its
+owner throughout the transfer.
+
+`MONITOR_ROUTE_FILE` selects guarded monitoring targets separately;
+`MONITOR_MINUTES` sets their cadence. In legacy mode (route variable unset),
 `REPORT_THREAD` also selects the triage coordinator, so changing it is not an
 independent reporting transfer until routed monitoring is adopted.
 
@@ -72,8 +82,8 @@ reload command or signal. The observer does reread route JSON at its loaded
 
 For an approved reporting transfer, the runtime owner uses the idle cutover below:
 
-1. Confirm the new recipient's identity and acceptance, preserve Tech approval
-   ownership, and inventory the owned runner/loop, notifier, detached CI watchers,
+1. Confirm the new recipient's identity and acceptance, preserve Tech exact-pin
+   approval, and inventory the owned runner/loop, notifier, detached CI watchers,
    event flushers, pending CI/deployment work and unsent outbox entries.
 2. Wait for an idle departure boundary and reconcile detached reporting still in
    flight. Preserve exact-SHA retry artifacts and event receipts. Stop only the
@@ -84,6 +94,8 @@ For an approved reporting transfer, the runtime owner uses the idle cutover belo
 4. Verify the single runner/loop and observe subsequent scheduled, CI and
    deployment reports at the confirmed recipient. Record old in-flight reports
    separately; queued delivery acceptance is not proof of recipient handling.
+5. Confirm drained/reconciled reporters and explicit final activation before
+   transferring runtime operations from source Tech to the existing monitor.
 
 The outbox stores event identity and sent state, not a recipient binding. A new
 flusher sends unsent entries to its inherited recipient; sent entries are not
@@ -468,8 +480,8 @@ metadata while reporting history `status: partial`, `complete: false`, and both
 incomplete history diagnostic, not recipient decision clearance. Compaction in
 the latest turn remains guarded: a structural marker cannot prove that opaque
 questions are absent. Older compaction in across-thread history does not invalidate
-a separately complete latest turn. Unknown item types remain unsupported. Ordinary paginated history may be `partial` without
-being degraded.
+a separately complete latest turn. Unknown item types remain unsupported.
+Ordinary paginated history may be `partial` without being degraded.
 
 Health adds `history_status: degraded|ok`. History degradation produces
 `monitor_status: degraded` unless an actual failure requires `failed`, which
