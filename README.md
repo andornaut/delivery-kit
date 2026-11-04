@@ -1004,3 +1004,11 @@ Codex thread IDs, and any copies of older delivery scripts kept beside project
 state. A changed `REPORT_THREAD`, `REPORT_SESSION_ID` or route path takes effect
 only through the controlled idle runner replacement, because resident runners
 and detached flushers keep the values they started with.
+
+## 0.9.1 non-root gate cache
+
+This patch release is compatible. The gate creates `STATE/npm-cache` before mounting
+it and mounts it with `--mount type=bind`, so a missing source fails instead of
+being created as root. Gate and verification containers run as the invoking user
+with `HOME=/tmp`. Configuration, CLI and state contracts are unchanged; adoption
+takes effect only through controlled idle runner replacement.
