@@ -9,7 +9,15 @@
     "ownership": "active"
   },
   "targets": [
-    {"session_id": "00000000-0000-4000-8000-000000000002", "name": "Archie tech", "ownership": "active"},
-    {"session_id": "00000000-0000-4000-8000-000000000003", "name": "Chibi tech", "ownership": "held"}
+    {
+      "session_id": "00000000-0000-4000-8000-000000000002",
+      "name": "Archie tech",
+      "ownership": "active"
+    },
+    {
+      "session_id": "00000000-0000-4000-8000-000000000003",
+      "name": "Chibi tech",
+      "ownership": "held"
+    }
   ]
 }

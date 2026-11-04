@@ -14,3 +14,5 @@ jobs:
         run: docker pull node:24.21.0
       - name: Isolated offline checks and package validation
         run: bash scripts/check.sh
+      - name: Build the npm release asset offline
+        run: bash scripts/pack.sh "$GITHUB_SHA" "$RUNNER_TEMP/release"

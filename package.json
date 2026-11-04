@@ -1,0 +1,74 @@
+{
+  "name": "@andornaut/delivery-kit",
+  "version": "1.0.0-dev",
+  "description": "Local scheduled Git delivery with an isolated gate, exact-commit CI monitoring and deployment.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.21.0"
+  },
+  "bin": {
+    "delivery-kit": "dist/cli.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SOURCE_COMMIT"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc",
+    "format": "prettier --write . && eslint --fix .",
+    "lint": "prettier --check . && eslint --max-warnings 0 . && markdownlint-cli2",
+    "test": "vitest run",
+    "verify": "bash scripts/check.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-simple-import-sort": "^14.0.0",
+    "eslint-plugin-sort-destructure-keys": "^3.0.0",
+    "globals": "^17.13.0",
+    "markdownlint-cli2": "^0.24.0",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andornaut/delivery-kit.git"
+  },
+  "homepage": "https://github.com/andornaut/delivery-kit#readme",
+  "overrides": {
+    "@eslint/config-array": {
+      "minimatch": "11.0.3"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.3"
+    },
+    "eslint": {
+      "minimatch": "11.0.3"
+    },
+    "eslint-plugin-import-x": {
+      "minimatch": "11.0.3"
+    },
+    "markdownlint": {
+      "re2js": "2.8.7"
+    },
+    "micromark-extension-math": {
+      "katex": "0.18.2"
+    }
+  }
+}

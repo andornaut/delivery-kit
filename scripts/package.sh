@@ -10,7 +10,7 @@ fi
 revision=$(git -C "$ROOT" rev-parse --verify "$1^{commit}")
 [[ $revision == "$1" ]] || exit 2
 version=$(git -C "$ROOT" show "$revision:VERSION")
-[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || {
   echo 'delivery-kit: VERSION must be a semantic version' >&2; exit 2;
 }
 epoch=$(git -C "$ROOT" show -s --format=%ct "$revision")

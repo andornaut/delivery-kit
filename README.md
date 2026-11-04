@@ -11,6 +11,8 @@ Local scheduled Git delivery with one isolated gate per integrated tree, exact-c
 - `scripts/package.sh`: deterministic release archive and source identity from a pinned commit.
 - `scripts/export.sh`: exports one committed source revision to a new local snapshot directory.
 - `tests/`: mechanism and adapter contract tests. Consumers test only their own configuration and integration.
+- `src/`: the TypeScript 1.0 implementation in progress, bundled by `npm run build` into `dist/cli.js` (the `delivery-kit` bin) and `dist/registry.js` (the `@andornaut/delivery-kit/registry` subpath export). Each bundle imports only `node:` builtins.
+- `scripts/pack.sh`: the npm release asset (`delivery-kit-VERSION.tgz`, `SOURCE_COMMIT`, `SHA256SUMS`) from a pinned commit.
 
 Releases are versioned source archives with no installation daemon or registry dependency. The tool uses the existing Bash scheduling mechanism and creates no additional timer.
 
@@ -140,7 +142,7 @@ This source extraction does not perform cutover. A project owner must explicitly
 bash scripts/check.sh
 ```
 
-Verification requires Docker and a locally available `node:24.21.0` image. It starts only below one-minute load 24, uses at most four CPUs, mounts source read-only, copies it to container scratch, disables network and exposes no host socket or credential stores. Tests use fake commands and protocol fixtures only. No project gate, push, deployment, live queue operation or coordinator input runs.
+Verification requires Docker and the `node` image named by `.nvmrc`. Containers run as the invoking user with `HOME=/tmp`, start only below one-minute load 24 and use at most four CPUs. The first container populates the project npm cache (`.claude/npm-cache`, created before it is bind-mounted) with network access. The second mounts source read-only, copies it to container scratch, disables network and runs type checking, lint, the build, the Vitest suite (four workers) and the 0.9.x Bash and Python suite. No container exposes a host socket or credential store. Tests use fake commands and protocol fixtures only. No project gate, push, deployment, live queue operation or coordinator input runs.
 
 ## Versions, licensing and releases
 
@@ -220,7 +222,6 @@ Consult exact-commit CI status, deployment pointers and normal event reports.
 Publication or recording a request does not adopt a new snapshot: the consumer
 owner performs the normal idle cutover to the 0.1.0 resident loop first.
 
-
 ## 0.2.0 compatibility
 
 This pre-1.0 minor release removes the `workers-builds` deployment adapter and its
@@ -245,7 +246,6 @@ Batch history-resolution failures report the skipped branch, `merge-base`
 operation, exit status and Git diagnostic. Valid branches in the same batch
 continue through integration and the existing gate. Inspect and requeue skipped
 work after fixing its reference or history.
-
 
 ## 0.3.0 monitoring and recipient clearance
 
@@ -357,7 +357,6 @@ resolution of the previous failure. Owners inspect the full local snapshot,
 classify/reconcile work and explicitly acknowledge handled IDs. No additional
 runner, schedule, timer or automatic queue deletion is introduced.
 
-
 To preserve planned independent work without treating it as a stuck backlog:
 
 ```bash
@@ -385,7 +384,6 @@ before processing, including if deletion subsequently fails, while retaining its
 history. Native queue editing must remain quiescent during either kind of
 acknowledgement. This consistency requirement does not imply an atomic API.
 
-
 ### 0.3.1 backlog persistence
 
 Backlog age is tracked separately for each recipient and queue ID, bound to its
@@ -396,7 +394,6 @@ are preserved without increment until a successful observation. Same-slot retrie
 do not increment an unchanged item's age. `backlog_slots` reports the maximum
 current item age. Older health records without per-item history begin with the
 first actual observation; aggregate counters do not manufacture item history.
-
 
 ### 0.3.2 native Python interpreter
 
@@ -414,7 +411,6 @@ actionable deferral while the scheduler continues. Pure-Python request and CI
 scripts retain their existing interpreter selection. Library verification uses
 isolated fake transports and does not probe a live native service or install a
 dependency.
-
 
 ## 0.4.0 monitor cadence and routing
 
@@ -477,7 +473,6 @@ available but are not a completeness claim. These diagnostics require no extra
 native requests. Queue capture and explicit acknowledgement remain available even
 when history metadata is unavailable.
 
-
 ### 0.4.1 history degradation
 
 Recognized native `contextCompaction` items preserve safe references and cursor
@@ -503,7 +498,6 @@ Incomplete or unavailable history diagnostics remain independently usable; a zer
 exit status does not establish complete history, decision clearance or successful
 guarded delivery.
 
-
 ### 0.4.2 monitor event delivery
 
 With a valid active `MONITOR_ROUTE_FILE`, bus events addressed to its confirmed
@@ -528,7 +522,6 @@ or interrupted sends remain unresolved for manual reconciliation and are never
 automatically retried: the supported native item schema does not expose an exact
 `clientUserMessageId` acceptance link. Matching text, `clientId` or `turnId` cannot
 establish that link. Receipts and logs contain no native message bodies.
-
 
 ## Scoped child-health snapshots
 
@@ -578,7 +571,6 @@ remain authoritative. A later success supersedes an earlier failure in collectio
 active retries, guarded waits, long-running work and silence do not prove terminal
 failure or a stall. No usage-ratio or elapsed-time detector is added.
 
-
 ## 0.5.1 child-health coverage
 
 Child inventory and observations use round-robin scheduling across scoped parents
@@ -604,7 +596,6 @@ does not prove full inventory coverage. Fairness applies within each capture,
 without guaranteeing full coverage or eventual rotation across scheduled slots.
 Partial observations remain explicit and do not establish healthy children or
 handled recovery.
-
 
 ## 0.6.0 question visibility
 
@@ -671,7 +662,6 @@ that a prompt is hidden or interrupts a turn. The monitor's own pending decision
 still prevents steering. Unknown questions are never presented as pending;
 unavailable lifecycle or visibility evidence degrades metadata reporting without
 manufacturing a pending decision or a failed-work episode.
-
 
 ## 0.7.0 optional owner-attested process health
 
@@ -784,7 +774,6 @@ version 2 route file, the consumer in that monitor session's MCP configuration
 with development channels enabled, and the normal idle cutover of the resident
 runner to the reviewed 0.8.0 snapshot.
 
-
 A Claude Code monitor uses a version 2 route selected through the existing
 `MONITOR_ROUTE_FILE`, for example
 `MONITOR_ROUTE_FILE=/absolute/path/to/host-project/.claude/monitor/route-claude.json`.
@@ -797,8 +786,8 @@ output and delivery path. `examples/route-claude.json` shows the schema:
   "harness": "claude",
   "host_project_root": "/absolute/path/to/host-project",
   "state": "active",
-  "monitor": {"session_id": "MONITOR_SESSION_UUID", "name": "monitor", "ownership": "active"},
-  "targets": [{"session_id": "TARGET_SESSION_UUID", "name": "Archie tech", "ownership": "active"}]
+  "monitor": { "session_id": "MONITOR_SESSION_UUID", "name": "monitor", "ownership": "active" },
+  "targets": [{ "session_id": "TARGET_SESSION_UUID", "name": "Archie tech", "ownership": "active" }]
 }
 ```
 

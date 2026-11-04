@@ -1,46 +1,67 @@
 #!/usr/bin/env bash
-# Verification uses a read-only source mount and a scratch copy with no live host services.
+# Verification in isolated containers running as the invoking user: the source is mounted
+# read-only and copied to container scratch; only the project npm cache is writable. A first
+# container populates that cache with network access; every check then runs with no network.
+# The 0.9.x Bash and Python suite runs alongside the TypeScript checks until its removal.
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-read -r load _ </proc/loadavg
-awk -v value="$load" 'BEGIN { exit !(value < 24) }' || { echo 'delivery: load must be below 24' >&2; exit 1; }
-fingerprint() {
-  python3 - "$ROOT" <<'PYFINGERPRINT'
-import hashlib
-from pathlib import Path
-import subprocess
-import sys
-root = Path(sys.argv[1])
-if (root / '.git').exists():
-    status = subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain=v1', '-z'])
-    paths = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-co', '--exclude-standard', '-z'])
-else:
-    if not (root / 'SOURCE_COMMIT').is_file():
-        raise SystemExit('delivery-kit: checks require a checkout or identified source snapshot')
-    status = b'snapshot'
-    paths = b'\0'.join(str(path.relative_to(root)).encode() for path in root.rglob('*')
-                       if path.is_file() or path.is_symlink())
-digest = hashlib.sha256(status)
-for name in sorted(set(paths.split(b'\0')) - {b''}):
-    path = root / name.decode()
-    digest.update(name + b'\0')
-    if path.is_symlink():
-        digest.update(str(path.readlink()).encode())
-    elif path.is_file():
-        digest.update(path.read_bytes())
-        digest.update(str(path.stat().st_mode).encode())
-    else:
-        digest.update(b'missing')
-print(digest.hexdigest())
-PYFINGERPRINT
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+. "$root/scripts/runtime.sh"
+image=$(node_check_image "$root")
+cache=${DELIVERY_KIT_NPM_CACHE:-$root/.claude/npm-cache}
+
+before=$(source_fingerprint "$root")
+finish() {
+  local result=$? after
+  trap - EXIT
+  if ! after=$(source_fingerprint "$root"); then
+    echo 'delivery-kit: cannot verify source fingerprints; discard the check result' >&2
+    exit 1
+  fi
+  if [[ $before != "$after" ]]; then
+    echo 'delivery-kit: source changed during checks; discard the check result' >&2
+    exit 1
+  fi
+  exit "$result"
 }
-before=$(fingerprint)
-result=0
-docker run --rm --network none --cpus 4 --read-only \
-  --mount "type=bind,src=$ROOT,dst=/source,readonly" \
-  --tmpfs /tmp:exec,mode=1777 \
-  node:24.21.0 bash -c \
-  'set -e; cp -a /source /tmp/check; cd /tmp/check; for path in bin/* libexec/*.sh scripts/*.sh; do bash -n "$path"; done; python3 tests/verify-scripts.py; python3 tests/verify-events.py; python3 tests/verify-events.py --delivery-only; python3 tests/verify-events.py --quiet-only; python3 tests/verify-once.py; python3 -m unittest discover -s tests -p "test_*.py"' || result=$?
-after=$(fingerprint)
-[[ $before == "$after" ]] || { echo 'delivery-kit: source changed during checks; discard results' >&2; exit 1; }
-exit "$result"
+trap finish EXIT
+
+# Docker creates a missing bind source as root, so the cache exists before it is mounted.
+mkdir -p -- "$cache"
+container=(
+  docker run --rm --read-only --cpus 4
+  -u "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/npmcache
+  --mount "type=bind,src=$root,dst=/source,readonly"
+  --mount "type=bind,src=$cache,dst=/npmcache"
+  --tmpfs "/tmp:exec,uid=$(id -u),gid=$(id -g)"
+  -w /tmp
+)
+
+require_load
+echo 'delivery-kit: populating the project npm cache in a container'
+"${container[@]}" "$image" sh -ec '
+  mkdir /tmp/fetch
+  cp /source/package.json /source/package-lock.json /tmp/fetch/
+  cd /tmp/fetch
+  npm ci --prefer-offline --ignore-scripts --no-audit --no-fund
+'
+
+require_load
+echo 'delivery-kit: checking types, lint, build, tests and the 0.9.x suite offline'
+"${container[@]}" --network none "$image" bash -ec '
+  mkdir /tmp/check
+  tar -C /source --exclude=./.git --exclude=./.claude --exclude=./node_modules --exclude=./dist -cf - . \
+    | tar -C /tmp/check -xf -
+  cd /tmp/check
+  npm ci --offline --ignore-scripts --no-audit --no-fund
+  npm run check
+  npm run lint
+  npm run build
+  npm test -- --maxWorkers=4
+  for path in bin/* libexec/*.sh scripts/*.sh; do bash -n "$path"; done
+  python3 tests/verify-scripts.py
+  python3 tests/verify-events.py
+  python3 tests/verify-events.py --delivery-only
+  python3 tests/verify-events.py --quiet-only
+  python3 tests/verify-once.py
+  python3 -m unittest discover -s tests -p "test_*.py"
+'
