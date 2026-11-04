@@ -335,8 +335,17 @@ async function gateAndPush(
   try {
     await stageDeploy(context, { sha: head, work }, await deployNeeded(context, remote, head));
   } catch (error) {
-    context.log(
-      `bus: deployment staging failed: ${error instanceof Error ? error.message : String(error)}`,
+    rethrowInterrupted(error);
+    // Never leave a pushed SHA undeployed without a report.
+    const cause = error instanceof Error ? error.message : String(error);
+    context.log(`bus: deployment staging failed: ${cause}`);
+    context.events.emit(
+      "deploy_failure",
+      head,
+      [
+        `Deployment of pushed ${head} could not be staged (${cause}); nothing will deploy it.`,
+        "An operator fix is required; then fix forward with a new merge on main.",
+      ].join(" "),
     );
   }
   context.startCi(head);
