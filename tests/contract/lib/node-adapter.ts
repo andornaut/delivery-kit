@@ -29,6 +29,11 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
   };
   fill("ci", { requiredNames: ["Test"], pollSeconds: 60, timeoutSeconds: 1800 });
   fill("reports", { project: "Fixture", scheduledTicks: false, recipient: "monitor", workerParents: [] });
+  // 0.9 spells "no exclusions" as an empty pattern; 1.0 omits the field. Same behaviour.
+  if (c.deploy?.skipPattern === "") delete c.deploy.skipPattern;
+  // 0.9 spells "no CI watch" as an empty GitHub slug; 1.0 requires a slug and always watches.
+  // The fixture slug keeps those cases runnable; cases asserting CI-disabled behaviour diverge.
+  if (c.git?.github === "") c.git.github = "fixture/game";
   for (const path of ws.omit) {
     const [section, key] = path.split(".");
     if (section && key && c[section]) delete c[section]![key];

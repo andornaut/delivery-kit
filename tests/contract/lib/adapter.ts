@@ -60,6 +60,8 @@ export function execute(command: Command, options: { input?: string; timeoutMs?:
       clearTimeout(timer);
       resolve({ code, signal, stdout, stderr });
     });
+    // A command may exit before reading its input.
+    child.stdin.on("error", () => undefined);
     child.stdin.end(options.input ?? "");
   });
 }
