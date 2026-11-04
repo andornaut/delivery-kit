@@ -110,8 +110,8 @@ export interface StatusReport {
   readonly [key: string]: unknown;
 }
 
-/** The status report. `ciEnabled` requires a CI record for the last push. */
-export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport {
+/** The status report. The last push needs a CI record, because every 1.x game watches CI. */
+export function statusReport(paths: BusPaths): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
@@ -151,7 +151,7 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
     }
   }
   const pushed = readTrimmed(paths.lastPushSha);
-  if (ciEnabled && pushed && readText(ciStatusFile(paths, pushed)) === undefined) {
+  if (pushed && readText(ciStatusFile(paths, pushed)) === undefined) {
     blockers.push(`ci_watch_unrecorded:${pushed}`);
   }
   const requests = jsonFiles(paths.requestsDir, ".json");

@@ -16,7 +16,7 @@ function paths() {
 describe("status report", () => {
   it("reports an idle, drained bus with no runner", () => {
     const bus = paths();
-    expect(statusReport(bus, true)).toEqual({
+    expect(statusReport(bus)).toEqual({
       drained: true,
       identity: null,
       identity_status: "absent",
@@ -42,7 +42,7 @@ describe("status report", () => {
       version: "1.0.0",
     });
     // The holder is another open file description of the same process, so the probe sees it.
-    const running = statusReport(bus, true);
+    const running = statusReport(bus);
     expect(running).toMatchObject({
       identity_status: "current",
       runner_lock_held: true,
@@ -52,7 +52,7 @@ describe("status report", () => {
       1_800_000_000_123_456_789n,
     );
     lock.release();
-    expect(statusReport(bus, true).identity_status).toBe("stale");
+    expect(statusReport(bus).identity_status).toBe("stale");
   });
 
   it("lists idle and reporter blockers", () => {
@@ -68,7 +68,7 @@ describe("status report", () => {
     writeFileSync(join(bus.eventsDir, "e.json"), '{"sent": false}\n');
     mkdirSync(bus.gateFailedDir);
     writeFileSync(join(bus.gateFailedDir, "c".repeat(40)), "failed\n");
-    expect(statusReport(bus, true)).toMatchObject({
+    expect(statusReport(bus)).toMatchObject({
       drained: false,
       idle: false,
       idle_blockers: [
@@ -89,7 +89,7 @@ describe("status report", () => {
     writeFileSync(bus.ciDir, "");
     writeFileSync(bus.eventsDir, "");
     writeFileSync(bus.identity, "{not json");
-    expect(statusReport(bus, true)).toMatchObject({
+    expect(statusReport(bus)).toMatchObject({
       drained: false,
       identity: null,
       identity_status: "unreadable",
@@ -113,7 +113,7 @@ describe("status report", () => {
       holder.stdout.once("data", resolve);
     });
     try {
-      expect(statusReport(bus, true)).toMatchObject({ runner_lock_held: true, status: "running" });
+      expect(statusReport(bus)).toMatchObject({ runner_lock_held: true, status: "running" });
     } finally {
       holder.kill("SIGKILL");
     }

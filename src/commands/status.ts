@@ -63,7 +63,6 @@ export const status: Handler = (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  // CI is monitored for every 1.x game: git.remote and git.github are required.
-  io.out(`${dumpsJson(statusReport(busPaths(resolved.game.busDir), true))}\n`);
+  io.out(`${dumpsJson(statusReport(busPaths(resolved.game.busDir)))}\n`);
   return EXIT_OK;
 };
