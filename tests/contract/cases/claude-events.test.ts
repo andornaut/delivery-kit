@@ -48,6 +48,8 @@ function deliveryMessage(event: Event): string {
 function blockedDeparture(ws: Workspace): void {
   claudeGame(ws, { recipient: true });
   ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
+  // A zero limit against the real host load forces a load block.
+  ws.hostLoad = "real";
   ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
   // Keep monitor slots out of the event window.
   ws.updateGameDevConfig({ wakeMinutes: [45] });

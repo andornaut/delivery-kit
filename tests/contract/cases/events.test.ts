@@ -216,6 +216,8 @@ suite("events", () => {
   contract("a blocked delivery holds no runner or loop lock", async () => {
     const ws = workspace();
     bus(ws);
+    // A zero limit against the real host load forces a load block.
+    ws.hostLoad = "real";
     ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
     const gate = join(ws.root, "hold-delivery");
     writeFileSync(gate, "");
@@ -242,6 +244,8 @@ suite("events", () => {
     async () => {
       const ws = workspace();
       bus(ws);
+      // A zero limit against the real host load forces a load block.
+      ws.hostLoad = "real";
       ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
       ws.queue([`bus/${"漢🙂é".repeat(200)}`]);
       const runner = start(ws);

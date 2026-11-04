@@ -43,11 +43,9 @@ export function renderBusConf(ws: Workspace): string {
   set("CONTAINER_PREFIX", "fixture-");
   set("CPUS", c.resources?.cpus);
   set("MAX_WORKERS", c.resources?.maxWorkers);
-  // 0.9 reads the real /proc/loadavg. The 1.0 ceiling (24) is the neutral fixture value, so it
-  // renders unbounded here and host load from parallel suites cannot block a case; any other
-  // value (for example 0, which forces a load block) passes through.
-  const load = c.resources?.loadLimit;
-  set("LOAD_LIMIT", load === 24 ? 1000000 : load);
+  // 0.9 reads the real /proc/loadavg and has no override, so hostLoad "ignore" renders an
+  // unbounded limit; "real" passes resources.loadLimit through.
+  set("LOAD_LIMIT", ws.hostLoad === "ignore" ? 1000000 : c.resources?.loadLimit);
   set("GATE_INSTALL", c.gate?.install);
   if (c.gate?.steps !== undefined && !ws.omit.includes("GATE_STEPS")) {
     const steps = Array.isArray(c.gate.steps) ? c.gate.steps : [];

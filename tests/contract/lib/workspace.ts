@@ -52,6 +52,8 @@ export interface GameConfig {
   };
 }
 
+export type HostLoad = "ignore" | "real";
+
 export interface RoleRecord {
   ownership?: string;
   conversations: { claude?: string | null; codex?: string | null };
@@ -76,6 +78,8 @@ export interface GameOptions {
   omit?: string[];
   /** Use a real Git repository instead of the scripted fake. */
   realGit?: boolean;
+  /** Harness-only; see Workspace.hostLoad. */
+  hostLoad?: HostLoad;
 }
 
 export function defaultConfig(): GameConfig {
@@ -154,6 +158,12 @@ export class Workspace {
   legacyConf: string;
   omit: string[];
   readonly realGit: boolean;
+  /**
+   * Harness-only fixture flag, never written to delivery-kit.json. "ignore" (the default)
+   * keeps the host's real load from blocking departures; "real" applies resources.loadLimit
+   * against the actual load, which cases use with loadLimit 0 to force a load block.
+   */
+  hostLoad: HostLoad;
   /** Extra environment for every CLI invocation (adapter overrides such as CODEX_CONTROL_SOCKET). */
   env: Record<string, string> = {};
 
@@ -172,6 +182,7 @@ export class Workspace {
     this.legacyConf = options.legacyConf ?? "";
     this.omit = options.omit ?? [];
     this.realGit = options.realGit ?? false;
+    this.hostLoad = options.hostLoad ?? "ignore";
     for (const path of [this.xdgState, this.fakeBin, this.repo, this.state])
       mkdirSync(path, { recursive: true });
     // Docker would create a missing bind source as root; consumers keep this cache in state.

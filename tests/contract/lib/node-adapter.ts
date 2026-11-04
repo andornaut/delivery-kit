@@ -8,6 +8,8 @@
 //   (Date.now() - realStartMs) * speed / 1000. Timers scale by the same speed.
 // - CODEX_CONTROL_SOCKET and CLAUDE_AGENTS_COMMAND: adapter overrides (plan: retired keys).
 // - PATH supplies fake git, docker, gh, wrangler, claude and codex.
+// - ws.hostLoad: pending. Once the bus port names its test-only load reading, "ignore" maps to
+//   a load below every limit and "real" leaves the host reading in place.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
