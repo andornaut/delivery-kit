@@ -4,8 +4,8 @@
 // volume. A first container populates that volume with network access; every check, the
 // contract cases included, then runs with no network. Nothing is written to the host.
 //
-// The v0.9.1 parity release gates the contract cases. The 1.0 bundle's cases gate once
-// DELIVERY_KIT_CONTRACT_NODE=1 is set; until then their results are reported only.
+// The contract cases gate on both implementations: the v0.9.1 parity release and the 1.0
+// bundle.
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -51,11 +51,7 @@ const CHECK = `
   npm ci --offline --ignore-scripts --no-audit --no-fund
   npx tsc
   DK_IMPL=bash npx vitest run --maxWorkers=4
-  if [ "$DELIVERY_KIT_CONTRACT_NODE" = 1 ]; then
-    DK_IMPL=node npx vitest run --maxWorkers=4
-  else
-    DK_IMPL=node npx vitest run --maxWorkers=4 || echo "delivery-kit: Node contract cases failed (reported only)"
-  fi
+  DK_IMPL=node npx vitest run --maxWorkers=4
 `;
 
 function main(): number {
@@ -90,8 +86,6 @@ function main(): number {
       "npm_config_cache=/var/tmp/npm",
       "-e",
       "DK_PARITY_DIR=/var/tmp/parity",
-      "-e",
-      `DELIVERY_KIT_CONTRACT_NODE=${process.env.DELIVERY_KIT_CONTRACT_NODE ?? "0"}`,
       "--mount",
       `type=bind,src=${root},dst=/source,readonly`,
       "--mount",

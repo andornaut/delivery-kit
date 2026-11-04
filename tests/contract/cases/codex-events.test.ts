@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
-import { cli } from "../lib/adapter.ts";
+import { cli, impl } from "../lib/adapter.ts";
 import {
   bashConfig,
   CASE_TIMEOUT_MS,
@@ -164,7 +164,18 @@ suite("codex events", () => {
       }
       await m.start();
       await m.runner!.until(() => receiptStatus(m.ws) === "deferred");
-      await flushes(m, 1);
+      if (impl.name === "node" && mode === "local") {
+        // 1.0 defers from the local record alone with no handshake: later flushes open no
+        // connection either. Step the clock across three flush intervals and look.
+        const before = m.socket.connections.length;
+        for (let step = 0; step < 3; step += 1) {
+          m.ws.advanceClock(60);
+          await sleep(500);
+        }
+        expect(m.socket.connections.length, mode).toBe(before);
+      } else {
+        await flushes(m, 1);
+      }
       expect(m.world.mutations(), mode).toEqual([]);
       expect(sent(m.ws)).toBe(false);
     }

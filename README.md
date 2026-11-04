@@ -288,8 +288,8 @@ builtins: they run on the host as the invoking user and drive `docker`. `scripts
   offline containers running as uid 19001 in the checkout's group (`--group-add`). The checkout
   and its file list are bound read-only and copied into container scratch. The npm cache and the
   verified v0.9.1 parity release live in a named volume that one networked step populates. The
-  v0.9.1 contract cases gate; the 1.0 bundle's cases gate once `DELIVERY_KIT_CONTRACT_NODE=1` is
-  set and are reported only until then. A changed source fingerprint, ownership or mode change,
+  contract cases gate on both the v0.9.1 parity release and the 1.0 bundle. A changed source
+  fingerprint, ownership or mode change,
   or any file owned by uid or gid 19001 discards the result.
 - `npm run contract -- [--lock] [VITEST_ARGS]` (`scripts/contract.ts`): the contract harness alone,
   with the source streamed in as a tar and both implementations gating. `--lock` regenerates
