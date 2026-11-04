@@ -223,10 +223,11 @@ describe("codexAdapter.deliver", () => {
     expect(receiptOf(context).status).toBe("rejected");
   });
 
-  it("defers without a recipient-bound clearance and sends no turn", async () => {
+  it("defers without a recipient-bound clearance and opens no connection", async () => {
     const context = await setup({}, null);
     const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
     expect(result.status).toBe("deferred");
+    expect(context.control.calls).toEqual([]);
     expect(context.control.methods().some((method) => method.startsWith("turn/"))).toBe(false);
     expect(receiptOf(context).status).toBe("deferred");
   });

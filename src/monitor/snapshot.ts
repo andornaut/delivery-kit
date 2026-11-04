@@ -9,6 +9,7 @@ import { type AgentEntry, roleDiagnostics } from "../adapters/claude/agents.ts";
 import { deliveredEntries } from "../adapters/claude/index.ts";
 import { spoolDir } from "../adapters/claude/spool.ts";
 import { unavailableCollected } from "../adapters/codex/collect.ts";
+import { SOCKET_MISSING_OUTPUT, TRANSPORT_UNAVAILABLE } from "../adapters/codex/index.ts";
 import type { ActiveScope } from "../adapters/shared/route.ts";
 import type { CollectRequest, HarnessAdapter } from "../adapters/types.ts";
 import { nativeEntry } from "./ack.ts";
@@ -117,6 +118,14 @@ function priorProcess(
   }
 }
 
+/** The Codex control socket is missing or refused the connection; `message` is the reason. */
+export class TransportUnavailable extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "TransportUnavailable";
+  }
+}
+
 export interface CodexCaptureOptions {
   readonly slot?: number | null;
   readonly historyCursor?: string | null;
@@ -141,6 +150,16 @@ export async function captureCodex(
   const inventories = await Promise.all(
     recipients.map((recipient) => adapter.inventory(recipient)),
   );
+  // A socket that is missing or refuses the connection stops the snapshot before it is
+  // recorded; an inventory read that fails after connecting is a per-recipient error.
+  const refused = inventories.find(
+    (inventory) =>
+      inventory.status === "unavailable" &&
+      (inventory.reason === SOCKET_MISSING_OUTPUT || inventory.reason === TRANSPORT_UNAVAILABLE),
+  );
+  if (refused?.reason !== undefined) {
+    throw new TransportUnavailable(refused.reason);
+  }
   recipients.forEach((recipient, index) => {
     const inventory = inventories[index];
     if (inventory === undefined || inventory.status !== "available") {

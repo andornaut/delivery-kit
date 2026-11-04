@@ -12,7 +12,7 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { acknowledge, ackSucceeded, DISPOSITIONS } from "../monitor/ack.ts";
 import { adapterFor } from "../monitor/harnesses.ts";
-import { captureClaude, captureCodex } from "../monitor/snapshot.ts";
+import { captureClaude, captureCodex, TransportUnavailable } from "../monitor/snapshot.ts";
 import { locked, snapshotPath } from "../monitor/store.ts";
 import { MONITOR_ROLE } from "../monitor/wake.ts";
 import { resolveConversation } from "../registry/resolve.ts";
@@ -213,6 +213,10 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
     if (error instanceof UsageError) {
       io.err(`delivery-kit: ${error.message}\n`);
       return EXIT_USAGE;
+    }
+    if (error instanceof TransportUnavailable) {
+      io.out(`${pyJsonDumps({ reason: error.message, status: "unavailable" })}\n`);
+      return EXIT_INVALID;
     }
     io.out(`${pyJsonDumps(UNAVAILABLE_OUTPUT)}\n`);
     return EXIT_INVALID;

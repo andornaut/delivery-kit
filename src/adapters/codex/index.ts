@@ -18,7 +18,7 @@ import type {
 import { collectAll, unavailableCollected } from "./collect.ts";
 import { acknowledgeEntry, type AckOutcome, queueEntries, queuePayload } from "./inventory.ts";
 import { connectControl, type RpcClient } from "./rpc.ts";
-import { deliverReceipt } from "./steer.ts";
+import { deferLocally, deliverReceipt } from "./steer.ts";
 
 export { BudgetClient, collectAll, unavailableCollected } from "./collect.ts";
 export { nativeQuestionsClear, questionItem } from "./guard.ts";
@@ -29,6 +29,10 @@ export { deliverReceipt, selectTarget } from "./steer.ts";
 export const SOCKET_MISSING =
   "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
 const METADATA_UNAVAILABLE = "native metadata unavailable";
+/** Inventory reasons for a control socket that is missing or refused the connection. */
+export const SOCKET_MISSING_OUTPUT = "configure an available absolute CODEX_CONTROL_SOCKET";
+export const TRANSPORT_UNAVAILABLE =
+  "inspect local monitor state and retry explicit reconciliation";
 const INVENTORY_UNAVAILABLE =
   "queue inventory unavailable or incomplete; retry snapshot before reconciliation";
 
@@ -187,6 +191,10 @@ export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexA
         return { reason: "receipt path outside a bus layout", requestId, status: "blocked" };
       }
       try {
+        const local = deferLocally(unblockDir, receiptPath, seed, requestId, conversationId);
+        if (local !== null) {
+          return local;
+        }
         return await withClient((client) =>
           deliverReceipt(client, unblockDir, receiptPath, seed, requestId, conversationId, text),
         );
@@ -199,8 +207,18 @@ export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexA
     harness: "codex",
 
     async inventory(conversationId: string): Promise<Inventory> {
+      if (!socketAvailable(socket)) {
+        return { entries: [], reason: SOCKET_MISSING_OUTPUT, status: "unavailable" };
+      }
+      let client: RpcClient;
       try {
-        const entries = await withClient((client) => queueEntries(client, conversationId));
+        client = await connectControl(performance.now() + deadlineMs, socket);
+      } catch {
+        // Refused before any inventory read: the transport, not the queue, is unavailable.
+        return { entries: [], reason: TRANSPORT_UNAVAILABLE, status: "unavailable" };
+      }
+      try {
+        const entries = await queueEntries(client, conversationId).finally(() => client.close());
         return {
           entries: entries.map((entry) => ({
             clientUserMessageId: entry.clientUserMessageId,

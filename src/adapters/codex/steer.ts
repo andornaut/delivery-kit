@@ -179,6 +179,30 @@ async function send(
 }
 
 /**
+ * The local part of the guard, before any connection: a pending receipt whose recipient has no
+ * clear decision record is deferred here, so a deferral opens no handshake-only connection.
+ * Null when the native exchange must decide.
+ */
+export function deferLocally(
+  unblockDir: string,
+  path: string,
+  seed: Readonly<Record<string, PyJson>>,
+  requestId: string,
+  recipient: string,
+): DeliveryReceipt | null {
+  const state = loadReceipt(path, requestId, recipient, seed);
+  if (state === null || (state.status !== undefined && state.status !== "deferred")) {
+    return null;
+  }
+  if (decisionClear(unblockDir, recipient)) {
+    return null;
+  }
+  state.status = "deferred";
+  persistReceipt(path, state);
+  return receipt(requestId, "deferred", CLEARANCE_MISSING);
+}
+
+/**
  * Deliver `text` once under the receipt at `path`, keyed by `requestId` (the native
  * clientUserMessageId). An existing accepted receipt is reported as accepted; an existing
  * sending, ambiguous or rejected receipt is never resent. A stale-turn rejection of turn/steer
