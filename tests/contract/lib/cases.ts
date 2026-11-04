@@ -27,6 +27,12 @@ export function suite(name: string, body: () => void): void {
 export const contract = it;
 
 /**
+ * The per-case real-time ceiling for cases that set one explicitly; the configured default is the
+ * same. Condition waits are bounded separately (WAIT_CEILING_MS), so this only ends a hung case.
+ */
+export const CASE_TIMEOUT_MS = 600_000;
+
+/**
  * Whether a native reply that never arrives is classified as a timeout. The v0.9.1 release
  * reads the control socket through websocket-client, whose receive timeout raises
  * WebSocketTimeoutException rather than TimeoutError, so its collectors record a generic

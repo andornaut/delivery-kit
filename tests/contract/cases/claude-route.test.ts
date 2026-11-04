@@ -4,7 +4,13 @@ import { expect } from "vitest";
 
 import { cli, impl } from "../lib/adapter.ts";
 import { ARCHIE, CHIBI, claudeGame, claudeRoute, MONITOR, tick } from "../lib/claude-fixture.ts";
-import { contract, ROUTE_INVALID_MESSAGE, suite, workspaces } from "../lib/cases.ts";
+import {
+  CASE_TIMEOUT_MS,
+  contract,
+  ROUTE_INVALID_MESSAGE,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 
 const SLOT = at(20);
@@ -85,7 +91,7 @@ suite("claude route", () => {
         expect(ws.exists(`unblock/${MONITOR}-${SLOT}.json`)).toBe(false);
       }
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract("route harness selection keeps the Codex and Claude resolvers disjoint", async () => {

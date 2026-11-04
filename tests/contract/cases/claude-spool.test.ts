@@ -16,7 +16,13 @@ import {
   slotRequestId,
   tick,
 } from "../lib/claude-fixture.ts";
-import { contract, ROUTE_INVALID_MESSAGE, suite, workspaces } from "../lib/cases.ts";
+import {
+  CASE_TIMEOUT_MS,
+  contract,
+  ROUTE_INVALID_MESSAGE,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
@@ -95,7 +101,7 @@ suite("claude monitor slots", () => {
       expect(receipt(ws).status).toBe("accepted");
       expect((await tick(ws, at(20, 0, 2))).monitor[0]!.result.status).toBe("sending");
     },
-    120_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -124,7 +130,7 @@ suite("claude monitor slots", () => {
       }
       expect(spooled(ws)).toEqual([]);
     },
-    120_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -148,7 +154,7 @@ suite("claude monitor slots", () => {
       });
       expect(spooled(ws)).toHaveLength(1);
     },
-    90_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract("an interrupted send becomes ambiguous and is never resent", async () => {

@@ -164,6 +164,11 @@ export class Workspace {
    * against the actual load, which cases use with loadLimit 0 to force a load block.
    */
   hostLoad: HostLoad;
+  /**
+   * Pause the virtual clock while a Bash runner starts (see startRunner). Cases whose collectors
+   * compare slots with the real time run the clock at wall speed and turn this off.
+   */
+  pauseAtStart = true;
   /** Extra environment for every CLI invocation (adapter overrides such as CODEX_CONTROL_SOCKET). */
   env: Record<string, string> = {};
 
@@ -334,6 +339,38 @@ export class Workspace {
   setClock(epoch: number, speed = 60): void {
     rmSync(join(this.fakeDir, "clock-offsets"), { force: true });
     writeJson(join(this.fakeDir, "clock.json"), { epoch, realStartMs: Date.now(), speed });
+  }
+
+  /**
+   * Hold virtual time where it is (speed 0) and return the speed to restore. Offsets already
+   * stepped stay in place. Fake `date` and `sleep` read the clock on every call.
+   */
+  pauseClock(): number | undefined {
+    if (!existsSync(this.clockFile)) return undefined;
+    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as {
+      epoch: number;
+      realStartMs: number;
+      speed: number;
+    };
+    const now = clock.epoch + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
+    writeJson(this.clockFile, { epoch: now, realStartMs: Date.now(), speed: 0 });
+    return clock.speed;
+  }
+
+  /** Resume a paused clock at `speed` from the virtual time it was held at. */
+  resumeClock(speed: number): void {
+    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as {
+      epoch: number;
+      speed: number;
+    };
+    if (clock.speed !== 0) return;
+    writeJson(this.clockFile, { epoch: clock.epoch, realStartMs: Date.now(), speed });
+  }
+
+  /** How many fake `sleep` calls have started so far. */
+  sleepers(): number {
+    const path = join(this.fakeDir, "sleepers");
+    return existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).length : 0;
   }
 
   get clockFile(): string {

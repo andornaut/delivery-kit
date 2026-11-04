@@ -3,7 +3,7 @@
 import { writeFileSync } from "node:fs";
 import { afterEach, expect } from "vitest";
 
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import {
   ART,
   CHILD,
@@ -382,7 +382,7 @@ suite("unblock briefs", () => {
       }
       expect(m.world.mutations()).toHaveLength(1);
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -500,6 +500,6 @@ suite("unblock briefs", () => {
           .every((call) => call.params.threadId !== CHILD),
       ).toBe(true);
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 });

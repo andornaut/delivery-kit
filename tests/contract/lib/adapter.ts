@@ -71,7 +71,11 @@ export function execute(
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs ?? 20_000);
+    // A command that should exit gets a generous ceiling; only a hung command reaches it.
+    const timer = setTimeout(
+      () => child.kill("SIGKILL"),
+      Math.max(options.timeoutMs ?? 0, WAIT_CEILING_MS),
+    );
     child.on("error", reject);
     child.on("close", (code, signal) => {
       clearTimeout(timer);
@@ -146,8 +150,8 @@ export function start(command: Command): Resident {
   return {
     child,
     done,
-    async until(predicate, timeoutMs = 20_000) {
-      const deadline = Date.now() + timeoutMs;
+    async until(predicate, timeoutMs = WAIT_CEILING_MS) {
+      const deadline = Date.now() + Math.max(timeoutMs, WAIT_CEILING_MS);
       while (!predicate()) {
         if (finished || Date.now() > deadline) {
           throw new Error(
@@ -178,6 +182,64 @@ export function start(command: Command): Resident {
   };
 }
 
+/**
+ * Start the resident runner. On Bash the virtual clock is paused until the runner holds its
+ * lock and its loops have reached their first wait, then resumed at its speed: a slow start
+ * under host load cannot move virtual time past the slot a case is aiming at. The 1.0 runner
+ * reads its clock file once at startup, so its clock is not paused.
+ */
 export function startRunner(ws: Workspace): Resident {
-  return start(impl.run(ws));
+  const speed = impl.name === "bash" && ws.pauseAtStart ? ws.pauseClock() : undefined;
+  const sleepers = ws.sleepers();
+  const resident = start(impl.run(ws));
+  if (speed === undefined) return resident;
+  let resumed = false;
+  const resume = () => {
+    if (!resumed) ws.resumeClock(speed);
+    resumed = true;
+  };
+  const ready = (async () => {
+    const deadline = Date.now() + READY_CEILING_MS;
+    // Ready: the identity record (written under the runner lock), the loop's pid file (written
+    // under the loop lock, just before its first clock read), and the reporter and notifier at
+    // their first fake `sleep`. A short settle lets the loop finish that first read.
+    const hadPid = ws.exists("codex-bus.pid") ? ws.read("codex-bus.pid") : undefined;
+    while (
+      Date.now() < deadline &&
+      !(
+        ws.exists("runner.identity.json") &&
+        ws.exists("codex-bus.pid") &&
+        ws.read("codex-bus.pid") !== hadPid &&
+        ws.sleepers() >= sleepers + 2
+      )
+    ) {
+      if (resident.child.exitCode !== null) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    resume();
+  })();
+  return {
+    ...resident,
+    child: resident.child,
+    done: resident.done,
+    async until(predicate, timeoutMs) {
+      await ready;
+      return resident.until(predicate, timeoutMs);
+    },
+    async stop() {
+      resume();
+      return resident.stop();
+    },
+    async terminateLeader() {
+      resume();
+      return resident.terminateLeader();
+    },
+  };
 }
+
+/** The real-time ceiling for a runner to reach its first wait while the clock is paused. */
+const READY_CEILING_MS = 120_000;
+
+/** The least real time any condition wait allows; virtual-time conditions usually end sooner. */
+export const WAIT_CEILING_MS = 120_000;

@@ -19,6 +19,7 @@ import {
 import { threads, tick, virtualNow } from "../lib/claude-fixture.ts";
 import {
   bashConfig,
+  CASE_TIMEOUT_MS,
   contract,
   suite,
   WORKER_PARENTS_ROUTE_MESSAGE,
@@ -82,7 +83,7 @@ suite("monitor cadence", () => {
       expect(reports.map((event) => event.key)).toEqual([String(at(0)), String(at(10))]);
       expect(stdout).toContain("bus: scheduled 00 10 (America/Toronto)");
     },
-    90_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -156,7 +157,7 @@ suite("monitor cadence", () => {
         expect(socket.calls, parent).toEqual([]);
       }
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -177,7 +178,7 @@ suite("monitor cadence", () => {
         expect(socket.calls, content).toEqual([]);
       }
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   bashConfig(
@@ -227,7 +228,7 @@ suite("monitor cadence", () => {
         expect(socket.connections, JSON.stringify(update)).toHaveLength(1);
       }
     },
-    120_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -267,7 +268,7 @@ suite("monitor cadence", () => {
         expect(ws.registry().roles.tech!.conversations.codex).toBe(TECH);
       }
     },
-    90_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -310,7 +311,7 @@ suite("monitor cadence", () => {
       expect(ten.monitor.map((row) => row.slot)).toEqual([at(10)]);
       expect(socket.connections).toHaveLength(1);
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(

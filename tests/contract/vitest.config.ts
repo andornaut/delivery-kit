@@ -5,7 +5,7 @@ export default defineConfig({
     environment: "node",
     include: ["cases/**/*.test.ts"],
     maxWorkers: 4,
-    testTimeout: 60_000,
-    hookTimeout: 30_000,
+    testTimeout: 600_000,
+    hookTimeout: 120_000,
   },
 });

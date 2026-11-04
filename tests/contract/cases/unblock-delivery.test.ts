@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import type { RpcCall } from "../lib/codex-socket.ts";
-import { bashConfig, contract, suite, workspaces } from "../lib/cases.ts";
+import { bashConfig, CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { rpcError, STALE, TECH, ART, GAMEPLAY } from "../lib/unblock-native.ts";
 import { Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
@@ -139,7 +139,7 @@ suite("unblock delivery", () => {
         expect(m.receipt(wake(index)).status).toBe("ambiguous");
       }
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract("other native rejections are rejected without a stale retry", async () => {

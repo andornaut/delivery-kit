@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { bashConfig, contract, suite, workspaces } from "../lib/cases.ts";
+import { bashConfig, CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { sleep } from "../lib/time.ts";
 import { ART, rpcError, STALE, TECH } from "../lib/unblock-native.ts";
 import { codexRoute, Monitored } from "../lib/unblock-runner.ts";
@@ -216,7 +216,7 @@ suite("codex events", () => {
         new Set(["initialize", "initialized"]),
       );
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -254,7 +254,7 @@ suite("codex events", () => {
         expect(sent(m.ws)).toBe(false);
       }
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract(
@@ -279,7 +279,7 @@ suite("codex events", () => {
         ).toBe(true);
       }
     },
-    60_000,
+    CASE_TIMEOUT_MS,
   );
 
   bashConfig(

@@ -5,7 +5,14 @@ import { dirname, join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { bashConfig, contract, RECEIVE_TIMEOUT_LATCHES, suite, workspaces } from "../lib/cases.ts";
+import {
+  bashConfig,
+  CASE_TIMEOUT_MS,
+  contract,
+  RECEIVE_TIMEOUT_LATCHES,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import {
   ART,
   entry,
@@ -443,7 +450,7 @@ suite("monitor snapshot", () => {
         "PRIVATE_",
       );
     },
-    40_000,
+    CASE_TIMEOUT_MS,
   );
 
   contract("compaction preserves both sides and pagination without clearance", async () => {

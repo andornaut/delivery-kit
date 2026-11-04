@@ -57,8 +57,13 @@ function passthrough(binary, argv) {
 }
 
 function virtualNow() {
+  return Math.floor(preciseNow());
+}
+
+/** Virtual seconds with the fraction, from clock.json and the clock-offsets steps. */
+function preciseNow() {
   const clock = readJson(join(dir, "clock.json"), null);
-  if (!clock) return Math.floor(Date.now() / 1000);
+  if (!clock) return Date.now() / 1000;
   let offset = 0;
   try {
     for (const line of readFileSync(join(dir, "clock-offsets"), "utf8").split("\n")) {
@@ -67,7 +72,7 @@ function virtualNow() {
   } catch {
     // No offsets recorded.
   }
-  return Math.floor(clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
+  return clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
 }
 
 function advanceClock(seconds) {
@@ -392,12 +397,16 @@ function date() {
 }
 
 function sleep() {
-  const clock = readJson(join(dir, "clock.json"), null);
   const seconds = Number(args[0] ?? 0);
-  const speed = clock?.speed ?? 1;
-  // Real waits stay short; virtual time advances by wall time times the clock speed.
-  const realSeconds = Math.min(seconds / speed, control.maxRealSleep ?? 30);
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, realSeconds * 1000));
+  // Record the sleeper, so the harness knows a resident loop has reached its first wait.
+  appendFileSync(join(dir, "sleepers"), `${process.ppid}\n`);
+  // Sleep in virtual time: wake when the clock has advanced by `seconds`, however fast it runs,
+  // so a paused, slowed or stepped clock holds and releases sleepers consistently. The real
+  // wait is still capped.
+  const target = preciseNow() + seconds;
+  const deadline = Date.now() + (control.maxRealSleep ?? 30) * 1000;
+  const cell = new Int32Array(new SharedArrayBuffer(4));
+  while (preciseNow() < target && Date.now() < deadline) Atomics.wait(cell, 0, 0, 25);
   return 0;
 }
 

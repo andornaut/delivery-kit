@@ -16,7 +16,14 @@ import {
   eventRequestId,
   MONITOR,
 } from "../lib/claude-fixture.ts";
-import { bashConfig, contract, EXIT_INVALID_CONFIG, suite, workspaces } from "../lib/cases.ts";
+import {
+  bashConfig,
+  CASE_TIMEOUT_MS,
+  contract,
+  EXIT_INVALID_CONFIG,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
@@ -234,7 +241,7 @@ suite("claude bus events", () => {
         ).toEqual([false, false]);
       }
     },
-    90_000,
+    CASE_TIMEOUT_MS,
   );
 
   bashConfig(

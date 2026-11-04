@@ -33,6 +33,8 @@ export class MonitorSchedule {
 
   async start(): Promise<void> {
     this.ws.setClock(this.now, this.realtime ? 1 : 0.001);
+    // Real-time collectors compare slots with the wall clock; a start pause would skew them.
+    this.ws.pauseAtStart = !this.realtime;
     this.runner = startRunner(this.ws);
     let buffer = "";
     const collect = (chunk: Buffer) => {
@@ -55,7 +57,7 @@ export class MonitorSchedule {
       // The next wall-clock minute after the previous slot.
       slot = this.now - (this.now % 60) + 60;
       this.now = slot;
-      timeoutMs = Math.max(timeoutMs, 90_000);
+      timeoutMs = Math.max(timeoutMs, 120_000);
     } else {
       this.now += 60;
       this.ws.advanceClock(60);

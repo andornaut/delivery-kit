@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
-import { bashConfig, suite, workspaces } from "../lib/cases.ts";
+import { bashConfig, CASE_TIMEOUT_MS, suite, workspaces } from "../lib/cases.ts";
 import { at, sleep } from "../lib/time.ts";
 import { ART, GAMEPLAY, TECH } from "../lib/unblock-native.ts";
 import { codexRegistry, codexRoute, decide, Monitored, wake } from "../lib/unblock-runner.ts";
@@ -122,7 +122,7 @@ suite("codex triage", () => {
         expect((await depart(m, -1)).recipients).toEqual([TECH, ART, GAMEPLAY]);
       }
     },
-    180_000,
+    CASE_TIMEOUT_MS,
   );
 
   bashConfig(
@@ -152,7 +152,7 @@ suite("codex triage", () => {
       );
       expect((await depart(m, 0)).recipients).toEqual([TECH, ART, GAMEPLAY]);
     },
-    180_000,
+    CASE_TIMEOUT_MS,
   );
 
   bashConfig(
@@ -176,7 +176,7 @@ suite("codex triage", () => {
       expect(m.socket.connections).toEqual([]);
       expect(ws.exists("unblock/snapshots")).toBe(false);
     },
-    180_000,
+    CASE_TIMEOUT_MS,
   );
 
   bashConfig(
@@ -198,6 +198,6 @@ suite("codex triage", () => {
       expect(m.text()).not.toContain("monitor deferred");
       expect(m.socket.connections).toEqual([]);
     },
-    180_000,
+    CASE_TIMEOUT_MS,
   );
 });
