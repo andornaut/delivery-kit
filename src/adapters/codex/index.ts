@@ -18,7 +18,7 @@ import type {
 import { collectAll, unavailableCollected } from "./collect.ts";
 import { acknowledgeEntry, type AckOutcome, queueEntries, queuePayload } from "./inventory.ts";
 import { connectControl, type RpcClient } from "./rpc.ts";
-import { deliverReceipt } from "./steer.ts";
+import { deferLocally, deliverReceipt } from "./steer.ts";
 
 export { BudgetClient, collectAll, unavailableCollected } from "./collect.ts";
 export { nativeQuestionsClear, questionItem } from "./guard.ts";
@@ -191,6 +191,10 @@ export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexA
         return { reason: "receipt path outside a bus layout", requestId, status: "blocked" };
       }
       try {
+        const local = deferLocally(unblockDir, receiptPath, seed, requestId, conversationId);
+        if (local !== null) {
+          return local;
+        }
         return await withClient((client) =>
           deliverReceipt(client, unblockDir, receiptPath, seed, requestId, conversationId, text),
         );
