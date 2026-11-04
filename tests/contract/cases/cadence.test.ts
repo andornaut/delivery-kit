@@ -253,22 +253,36 @@ suite("monitor cadence", () => {
         expect(checked.code, checked.stderr).toBe(0);
         expect(checked.stdout).toContain("configuration accepted");
         expect(socket.calls).toEqual([]);
-        ws.setClock(at(-1, 30), 60);
+        // The observer dispatches only the current wall minute. At speed 60 a slow host's
+        // notifier iteration can outlast the wake minute and miss it, so this case runs the
+        // clock at 6 (a virtual minute is ten real seconds).
+        ws.setClock(at(-1, 30), 6);
         const runner = startRunner(ws);
         const steered = () =>
           socket
             .callsOf("turn/steer")
             .filter((call) => JSON.stringify(call.params).includes("scheduled slot"));
-        // The host's wake at minute 1 writes its slot receipt after its native calls; wait for
-        // it, not for a span of virtual time a slow host can outrun.
-        const receipt = `unblock/${MONITOR}-${at(1)}.json`;
+        // The wake's slot comes from the runner's own report line, and its receipt is written
+        // after its native calls; wait for both rather than a precomputed slot or a time span.
+        const wake = () => {
+          const match = /bus: scheduled monitor (\d+): /.exec(runner.output().stdout);
+          return match ? Number(match[1]) : undefined;
+        };
         try {
-          await runner.until(
-            () =>
-              steered().length > 0 && virtualNow(ws) > at(2, 30) && (!host || ws.exists(receipt)),
-          );
+          await runner.until(() => {
+            if (steered().length === 0) return false;
+            if (!host) return virtualNow(ws) > at(2, 30);
+            const slot = wake();
+            return slot !== undefined && ws.exists(`unblock/${MONITOR}-${slot}.json`);
+          });
         } finally {
           await runner.stop();
+        }
+        if (host) {
+          // The configured wake minute, in whichever hour the runner reached it.
+          expect(new Date(wake()! * 1000).getUTCMinutes()).toBe(1);
+        } else {
+          expect(wake()).toBeUndefined();
         }
         for (const call of steered()) {
           expect(call.params.threadId).toBe(MONITOR);
