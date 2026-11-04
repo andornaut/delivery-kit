@@ -114,6 +114,7 @@ describe("monitor-snapshot (claude)", () => {
       reason: "inspect local monitor state and retry explicit reconciliation",
       status: "unavailable",
     });
+    expect(result.err).toBe("delivery-kit: recipient must be the active route monitor\n");
     expect((await run(fixture, "monitor-snapshot")).code).toBe(EXIT_USAGE);
   });
 

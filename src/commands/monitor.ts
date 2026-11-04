@@ -214,6 +214,8 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
       io.err(`delivery-kit: ${error.message}\n`);
       return EXIT_USAGE;
     }
+    // stdout keeps the JSON consumers parse; stderr names the cause for the operator.
+    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
     if (error instanceof TransportUnavailable) {
       io.out(`${pyJsonDumps({ reason: error.message, status: "unavailable" })}\n`);
       return EXIT_INVALID;
