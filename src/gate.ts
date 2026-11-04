@@ -1,20 +1,21 @@
 // The isolated gate for one integrated tree.
 //
 // One container per batch, named deterministically and labelled with its game, runs as uid
-// 19001 with no host mount. The host copies the exact commit in (git archive, docker cp),
-// the install step runs with network access, the container is then disconnected from every
+// 19001 in the checkout's group. The scratch worktree, checked out at the batch SHA, is bound
+// read-only; the container copies it into its own /tmp/work and verifies that the copy's tree
+// is the commit's tree, so the gate never writes the checkout and runs on the exact commit.
+// The install step runs with network access, the container is then disconnected from every
 // network, and the gate steps run. The host copies the gate logs and dist/ out with docker cp
 // and removes the container, also after a failure or timeout. The npm cache lives in the
-// game's named volume. Host worktree files are not readable by uid 19001 (umask 007), so the
-// checkout is copied in rather than bind-mounted.
+// game's named volume.
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, readlinkSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BusContext } from "./bus/context.ts";
 import { type ExecResult, git } from "./bus/exec.ts";
 import type { GateStep } from "./config.ts";
-import { npmCacheArgs, npmVolume, userArgs } from "./container.ts";
+import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -25,10 +26,10 @@ export function stepLogName(index: number, name: string): string {
   return `${String(index).padStart(2, "0")}-${name.replace(/[^A-Za-z0-9_.-]/g, "_")}.log`;
 }
 
-/** The container paths: the copied checkout, the step logs and the incoming archive. */
+/** The container paths: the read-only checkout, its copy and the step logs. */
 export const GATE_WORK = "/tmp/work";
 export const GATE_LOGS = "/tmp/gate-logs";
-const SOURCE_TAR = "/tmp/source.tar";
+export const GATE_SOURCE = "/src";
 export const GATE_LABEL = "delivery-kit-gate";
 /** An upper bound for install and for the gate steps; the container is removed after it. */
 export const GATE_TIMEOUT_SECONDS = 4 * 3600;
@@ -98,7 +99,7 @@ export function gateContainerName(game: string, batch: string): string {
   return `delivery-kit-gate-${game}-${batch}`;
 }
 
-export function createArgs(context: BusContext, name: string, sha: string): string[] {
+export function createArgs(context: BusContext, name: string, input: GateInput): string[] {
   const { config, game } = context;
   return [
     "create",
@@ -111,8 +112,9 @@ export function createArgs(context: BusContext, name: string, sha: string): stri
     "--cpus",
     String(config.resources.cpus),
     ...userArgs(),
+    ...checkoutMount(input.work, GATE_SOURCE),
     "-e",
-    `WORKERS_CI_COMMIT_SHA=${sha}`,
+    `WORKERS_CI_COMMIT_SHA=${input.sha}`,
     ...npmCacheArgs(npmVolume(game.id)),
     config.gate.image,
     "sleep",
@@ -176,20 +178,30 @@ function timedOut(result: ExecResult): boolean {
   return result.status === null;
 }
 
+// Copy the read-only checkout (without its .git link) and confirm the copy is the commit's tree.
+const COPY_SCRIPT = [
+  `mkdir -p ${GATE_WORK} ${GATE_LOGS}`,
+  `tar -C ${GATE_SOURCE} --exclude=./.git -cf - . | tar -x -C ${GATE_WORK}`,
+  `cd ${GATE_WORK}`,
+  "git init -q",
+  "git add -A -f",
+  "actual=$(git write-tree)",
+  "rm -rf .git",
+  'test "$actual" = "$EXPECTED_TREE"',
+].join(" && ");
+
 async function copyIn(context: BusContext, name: string, input: GateInput): Promise<boolean> {
-  const archive = join(input.logs, "source.tar");
-  await git(context.exec, input.work, ["archive", "--format=tar", "-o", archive, "HEAD"]);
-  try {
-    // docker cp keeps the mode; the copy is root-owned in the container, so it must be world-readable.
-    chmodSync(archive, 0o644);
-    if ((await docker(context, ["cp", archive, `${name}:${SOURCE_TAR}`])).status !== 0) {
-      return false;
-    }
-  } finally {
-    unlinkSync(archive);
-  }
-  const unpack = `mkdir -p ${GATE_WORK} ${GATE_LOGS} && tar -xf ${SOURCE_TAR} -C ${GATE_WORK} && rm ${SOURCE_TAR}`;
-  return (await docker(context, ["exec", name, "sh", "-c", unpack])).status === 0;
+  const tree = await git(context.exec, input.work, ["rev-parse", `${input.sha}^{tree}`]);
+  const copy = await docker(context, [
+    "exec",
+    "-e",
+    `EXPECTED_TREE=${tree}`,
+    name,
+    "sh",
+    "-c",
+    COPY_SCRIPT,
+  ]);
+  return copy.status === 0;
 }
 
 async function copyOut(
@@ -219,14 +231,14 @@ async function copyOut(
 async function gate(context: BusContext, name: string, input: GateInput): Promise<GateOutcome> {
   const { gate: settings } = context.config;
   const timeoutMs = GATE_TIMEOUT_SECONDS * 1000;
-  if ((await docker(context, createArgs(context, name, input.sha))).status !== 0) {
+  if ((await docker(context, createArgs(context, name, input))).status !== 0) {
     return failed("install", "gate container could not be created");
   }
   if (
     (await docker(context, ["start", name])).status !== 0 ||
     !(await copyIn(context, name, input))
   ) {
-    return failed("install", "gate container could not receive the checkout");
+    return failed("install", "gate container copy of the checkout does not match the batch commit");
   }
   if (settings.install !== "") {
     const log = join(input.logs, "install.log");

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import {
   assertContainerRules,
   fakeExec,
   gateDocker,
+  gitSync,
   makeGame,
   ok,
   testContext,
@@ -48,7 +49,12 @@ describe("runGate", () => {
     );
     const context = testContext(test, { exec });
     const logs = mkdtempSync(join(tmpdir(), "logs-"));
-    const input = { batch: "batch-1", logs, sha: "a".repeat(40), work: test.repo };
+    const input = {
+      batch: "batch-1",
+      logs,
+      sha: gitSync(test.repo, "rev-parse", "HEAD"),
+      work: test.repo,
+    };
     return { context, exec, input, logs, test };
   }
   const NAME = "delivery-kit-gate-archies-dog-walks-batch-1";
@@ -60,12 +66,42 @@ describe("runGate", () => {
     expect(await runGate(context, input)).toEqual({ ok: true, output: "lint ok\ntest ok\n" });
     expect(readFileSync(join(logs, "01-lint.log"), "utf8")).toBe("linted\n");
     expect(readFileSync(join(test.repo, "dist", "index.js"), "utf8")).toBe("built\n");
-    expect(existsSync(join(logs, "source.tar"))).toBe(false);
-    expect(exec.calls.find((call) => call.args[0] === "cp")?.args).toEqual([
-      "cp",
-      join(logs, "source.tar"),
-      `${NAME}:/tmp/source.tar`,
-    ]);
+    const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
+    expect(create).toEqual(
+      expect.arrayContaining([
+        "--group-add",
+        String(statSync(test.repo).gid),
+        `type=bind,src=${test.repo},dst=/src,readonly`,
+      ]),
+    );
+    const tree = gitSync(test.repo, "rev-parse", "HEAD^{tree}");
+    const copy = exec.calls.find((call) => call.args.includes(`EXPECTED_TREE=${tree}`))?.args ?? [];
+    expect(copy.at(-1)).toContain('test "$actual" = "$EXPECTED_TREE"');
+    expect(
+      exec.calls.some(
+        (call) => call.args[0] === "cp" && !call.args.some((arg) => arg.startsWith(NAME)),
+      ),
+    ).toBe(false);
+    expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+
+  it("removes the container when the copied tree is not the batch commit", async () => {
+    const test = makeGame();
+    const exec = fakeExec((spec) =>
+      spec.args.some((arg) => arg.startsWith("EXPECTED_TREE="))
+        ? { status: 1, stderr: "", stdout: "" }
+        : gateDocker()(spec),
+    );
+    const context = testContext(test, { exec });
+    const logs = mkdtempSync(join(tmpdir(), "logs-"));
+    const outcome = await runGate(context, {
+      batch: "batch-1",
+      logs,
+      sha: gitSync(test.repo, "rev-parse", "HEAD"),
+      work: test.repo,
+    });
+    expect(outcome).toMatchObject({ ok: false, stage: "install" });
+    expect(exec.calls.some((call) => call.args.at(-1)?.includes("npm ci") === true)).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 
@@ -130,7 +166,7 @@ describe("runGate", () => {
     const outcome = await runGate(context, {
       batch: "batch-1",
       logs,
-      sha: "a".repeat(40),
+      sha: gitSync(test.repo, "rev-parse", "HEAD"),
       work: test.repo,
     });
     expect(outcome).toMatchObject({ ok: false, stage: "full-gate" });
@@ -150,6 +186,13 @@ describe("container rules", () => {
       assertContainerRules(docker("exec", "x", "--mount", "type=bind,src=/a,dst=/b")),
     ).toThrow("writable bind mount");
     expect(() => assertContainerRules(docker("exec", "x", "-v", "/a:/b:ro"))).toThrow("--mount");
+    const dir = mkdtempSync(join(tmpdir(), "bind-"));
+    const bind = `type=bind,src=${dir},dst=/src,readonly`;
+    const run = ["run", "--user", "19001:19001", "-e", "HOME=/tmp", "--mount", bind, "img"];
+    expect(() => assertContainerRules(docker(...run))).toThrow("--group-add");
+    expect(() =>
+      assertContainerRules(docker(...run, "--group-add", String(statSync(dir).gid))),
+    ).not.toThrow();
     expect(bindMount("/a", "/b")).toEqual(["--mount", "type=bind,src=/a,dst=/b,readonly"]);
   });
 });

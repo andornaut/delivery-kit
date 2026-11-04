@@ -1,7 +1,7 @@
 // Test fixtures for the bus: a scratch game-dev tree whose game is a real Git checkout with a
 // bare origin, fake docker, gh and Wrangler children, recorded events and a manual clock.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { type ProjectConfig, validateProjectConfig } from "../config.ts";
@@ -109,6 +109,12 @@ export function assertContainerRules(spec: ExecSpec): void {
       !/,(readonly|ro)(,|$)/.test(arg)
     ) {
       throw new Error(`writable bind mount: ${arg}`);
+    }
+    // A bind is readable only through its checkout's group, so the container must join it.
+    const source =
+      args[index - 1] === "--mount" ? /type=bind,src=([^,]+)/.exec(arg)?.[1] : undefined;
+    if (source !== undefined && !pair("--group-add", String(statSync(source).gid))) {
+      throw new Error(`bind of ${source} needs --group-add ${statSync(source).gid}`);
     }
   });
 }

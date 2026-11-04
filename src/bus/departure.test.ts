@@ -54,7 +54,11 @@ describe("depart", () => {
       expect.arrayContaining(["--label", "game-bus=owner/game", "node:24.21.0"]),
     );
     expect(create).toContain("type=volume,src=delivery-kit-npm-archies-dog-walks,dst=/var/tmp");
-    expect(create.filter((arg) => arg.startsWith("type=bind"))).toEqual([]);
+    // The only bind is the scratch worktree, read-only, read through its group.
+    const binds = create.filter((arg) => arg.startsWith("type=bind"));
+    expect(binds).toEqual([
+      expect.stringMatching(/^type=bind,src=.*\/bus\/batch-\d+,dst=\/src,readonly$/),
+    ]);
     const verbs = docker.map((args) => args.slice(0, 2).join(" "));
     expect(verbs.indexOf("network disconnect")).toBeGreaterThan(
       verbs.findIndex((verb) => verb.startsWith("exec")),

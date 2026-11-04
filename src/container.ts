@@ -1,9 +1,13 @@
 // Container argument rules shared by the gate and verification containers.
+import { statSync } from "node:fs";
 //
 // Every container runs as the dedicated uid 19001, which owns nothing on the host, with
 // HOME=/tmp. Every host bind mount is read-only, and no container writes to the host:
 // outputs, caches and scratch live in the container's own filesystem, tmpfs or named
 // volumes, and the host user copies results out with `docker cp`.
+//
+// Host checkouts are group-readable only (umask 007), so a container that reads one through a
+// read-only bind joins the checkout's group with --group-add; uid 19001 still owns nothing.
 //
 // A named volume mounted at /var/tmp copies that directory's mode (1777) when the volume is
 // first created, so uid 19001 can write the npm cache inside it without a root step.
@@ -37,4 +41,9 @@ export function npmCacheArgs(volume: string): string[] {
     "-e",
     `npm_config_cache=${NPM_CACHE}`,
   ];
+}
+
+/** Read access to a host checkout: join its group, then bind it read-only at `target`. */
+export function checkoutMount(source: string, target: string): string[] {
+  return ["--group-add", String(statSync(source).gid), ...bindMount(source, target)];
 }
