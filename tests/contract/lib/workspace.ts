@@ -188,7 +188,10 @@ export class Workspace {
     // Docker would create a missing bind source as root; consumers keep this cache in state.
     mkdirSync(join(this.state, "npm-cache"));
     this.installFakes();
-    this.setControl(this.realGit ? { git: { real: true } } : {});
+    // CI reports the default required check green unless a case scripts gh; 0.9 calls gh only
+    // when a case configures a GitHub slug, while 1.0 always watches CI before deploying.
+    const gh = { default: [{ conclusion: "success", id: 1, name: "Test", status: "completed" }] };
+    this.setControl(this.realGit ? { gh, git: { real: true } } : { gh });
     this.writeGameDev();
     if (this.realGit) this.initRealGit();
   }

@@ -1,6 +1,6 @@
 // Implementation adapters map abstract CLI operations to command lines. DK_IMPL selects one.
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { bashImplementation } from "./bash-adapter.ts";
@@ -18,6 +18,11 @@ export interface Command {
   argv: string[];
   cwd: string;
   env: Record<string, string>;
+  /**
+   * A log file the command writes instead of stdout (the 1.0 runner's runner.log). A resident
+   * started from it replays the file's new content as stdout data, so cases read one stream.
+   */
+  logFile?: string;
 }
 
 export interface Implementation {
@@ -111,8 +116,22 @@ export function start(command: Command): Resident {
   let stderr = "";
   child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
   child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  let offset = 0;
+  const tail = () => {
+    if (!command.logFile || !existsSync(command.logFile)) return;
+    const content = readFileSync(command.logFile);
+    if (content.length > offset) {
+      child.stdout.emit("data", content.subarray(offset));
+      offset = content.length;
+    }
+  };
+  const tailer = command.logFile ? setInterval(tail, 50) : undefined;
   const done = new Promise<Result>((resolve) =>
-    child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr })),
+    child.on("close", (code, signal) => {
+      if (tailer) clearInterval(tailer);
+      tail();
+      resolve({ code, signal, stdout, stderr });
+    }),
   );
   let finished = false;
   void done.then(() => (finished = true));

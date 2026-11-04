@@ -117,7 +117,7 @@ export const nodeImplementation: Implementation = {
   request: (ws, id) => command(ws, ["request", "--request-id", id]),
   monitorSnapshot: (ws, args) => command(ws, ["monitor-snapshot", ...args]),
   monitorAck: (ws, args) => command(ws, ["monitor-ack", ...args]),
-  run: (ws) => command(ws, ["run"]),
+  run: (ws) => ({ ...command(ws, ["run"]), logFile: join(ws.state, "runner.log") }),
   channel: (ws, args) => ({
     argv: [process.execPath, CLI, "channel", ...args],
     cwd: ws.gameDev,
