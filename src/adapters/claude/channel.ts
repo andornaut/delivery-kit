@@ -206,6 +206,9 @@ export function serve(
         finished = true;
         clearInterval(timer);
         input.removeAllListeners("data");
+        // Release stdin so the process can exit once the consumer stops.
+        input.pause();
+        (input as { destroy?: () => void }).destroy?.();
         resolve(code);
       }
     };
