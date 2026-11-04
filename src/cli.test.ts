@@ -65,7 +65,9 @@ describe("check-config", () => {
 });
 
 describe("dispatcher", () => {
-  it.each(COMMANDS.filter((command) => command !== "check-config"))(
+  const IMPLEMENTED = new Set(["channel", "check-config", "monitor-ack", "monitor-snapshot"]);
+
+  it.each(COMMANDS.filter((command) => !IMPLEMENTED.has(command)))(
     "%s is not implemented in this build",
     async (command) => {
       const { root } = makeFixture();
