@@ -1,42 +1,40 @@
 // Container argument rules shared by the gate and verification containers.
 //
-// Containers run as the invoking user with HOME=/tmp, so nothing they write is root-owned.
-// Docker creates a missing bind source as a root-owned directory, so every writable source
-// (the project npm cache in particular) is created first, and bind mounts use --mount, which
-// fails on a missing source instead of creating it.
-import { mkdirSync } from "node:fs";
+// Every container runs as the dedicated uid 19001, which owns nothing on the host, with
+// HOME=/tmp. Every host bind mount is read-only, and no container writes to the host:
+// outputs, caches and scratch live in the container's own filesystem, tmpfs or named
+// volumes, and the host user copies results out with `docker cp`.
+//
+// A named volume mounted at /var/tmp copies that directory's mode (1777) when the volume is
+// first created, so uid 19001 can write the npm cache inside it without a root step.
 
-export interface UserIds {
-  readonly uid: number;
-  readonly gid: number;
+export const CONTAINER_USER = "19001:19001";
+export const VOLUME_TARGET = "/var/tmp";
+export const NPM_CACHE = `${VOLUME_TARGET}/npm`;
+
+export function userArgs(): string[] {
+  return ["--user", CONTAINER_USER, "-e", "HOME=/tmp"];
 }
 
-export const CACHE_TARGET = "/npmcache";
-
-export function currentUser(): UserIds {
-  return { gid: process.getgid?.() ?? 0, uid: process.getuid?.() ?? 0 };
-}
-
-export function userArgs(user: UserIds): string[] {
-  return ["-u", `${user.uid}:${user.gid}`, "-e", "HOME=/tmp"];
-}
-
-export function bindMount(
-  options: { readonly readonly?: boolean },
-  source: string,
-  target: string,
-): string[] {
+/** A read-only bind mount. There is no writable form. */
+export function bindMount(source: string, target: string): string[] {
   if (/[,"]/.test(source) || /[,"]/.test(target)) {
     throw new Error(`bind mount paths must not contain a comma or quote: ${source}`);
   }
-  return [
-    "--mount",
-    `type=bind,src=${source},dst=${target}${options.readonly === true ? ",readonly" : ""}`,
-  ];
+  return ["--mount", `type=bind,src=${source},dst=${target},readonly`];
 }
 
-/** Create the cache directory (for example `<bus>/npm-cache`), then mount it as npm's cache. */
-export function cacheMount(cacheDir: string): string[] {
-  mkdirSync(cacheDir, { mode: 0o700, recursive: true });
-  return [...bindMount({}, cacheDir, CACHE_TARGET), "-e", `npm_config_cache=${CACHE_TARGET}`];
+/** The per-game named volume holding the gate's npm cache. */
+export function npmVolume(game: string): string {
+  return `delivery-kit-npm-${game}`;
+}
+
+/** Mount a named volume at /var/tmp and point npm's cache inside it. */
+export function npmCacheArgs(volume: string): string[] {
+  return [
+    "--mount",
+    `type=volume,src=${volume},dst=${VOLUME_TARGET}`,
+    "-e",
+    `npm_config_cache=${NPM_CACHE}`,
+  ];
 }

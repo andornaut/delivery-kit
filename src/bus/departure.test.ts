@@ -4,38 +4,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { depart, requestStore } from "./departure.ts";
-import type { ExecSpec } from "./exec.ts";
 import { captureRequest } from "./requests.ts";
 import {
   commitFile,
   fakeExec,
+  gateDocker,
   gitSync,
   makeGame,
-  ok,
   queueBranch,
   recordingEvents,
   testContext,
   type TestGame,
 } from "./testGame.ts";
-
-function mountSource(spec: ExecSpec, target: string): string | undefined {
-  const mount = spec.args.find(
-    (arg) => arg.startsWith("type=bind,") && arg.includes(`,dst=${target}`),
-  );
-  return mount?.match(/src=([^,]+)/)?.[1];
-}
-
-/** docker: install and gate succeed; the gate container builds dist/ in the scratch worktree. */
-function gateDocker(spec: ExecSpec) {
-  if (spec.command === "docker" && spec.args.includes("--network")) {
-    const work = mountSource(spec, "/app");
-    if (work !== undefined) {
-      mkdirSync(join(work, "dist"), { recursive: true });
-    }
-    return ok("lint ok\ntest ok\n");
-  }
-  return ok();
-}
 
 function originMain(test: TestGame): string {
   return gitSync(test.origin, "rev-parse", "main");
@@ -53,7 +33,7 @@ describe("depart", () => {
     const test = setup();
     queueBranch(test, "bus/feature");
     const events = recordingEvents();
-    const exec = fakeExec(gateDocker);
+    const exec = fakeExec(gateDocker());
     const started: string[] = [];
     const context = testContext(test, { events, exec, startCi: (sha) => started.push(sha) });
     expect(await depart(context)).toBe(0);
@@ -66,20 +46,20 @@ describe("depart", () => {
     expect(readFileSync(context.paths.queue, "utf8")).toBe("");
     expect(events.list.map(([kind]) => kind)).toEqual(["scheduled-status", "attempt", "push"]);
     expect(gitSync(test.repo, "branch", "--list", "bus/feature")).toBe("");
-    const [install, gate] = exec.calls;
-    expect(install?.args).toEqual(
-      expect.arrayContaining(["-u", "-e", "HOME=/tmp", "node:24.21.0", "npm ci"]),
+    const docker = exec.calls.map((call) => call.args);
+    const name = docker.find((args) => args[0] === "create")?.[2] ?? "";
+    expect(name).toMatch(/^delivery-kit-gate-archies-dog-walks-batch-\d+$/);
+    const create = docker.find((args) => args[0] === "create") ?? [];
+    expect(create).toEqual(
+      expect.arrayContaining(["--label", "game-bus=owner/game", "node:24.21.0"]),
     );
-    expect(install?.args).not.toContain("none");
-    expect(gate?.args).toEqual(
-      expect.arrayContaining(["--network", "none", "--label", "game-bus=owner/game"]),
+    expect(create).toContain("type=volume,src=delivery-kit-npm-archies-dog-walks,dst=/var/tmp");
+    expect(create.filter((arg) => arg.startsWith("type=bind"))).toEqual([]);
+    const verbs = docker.map((args) => args.slice(0, 2).join(" "));
+    expect(verbs.indexOf("network disconnect")).toBeGreaterThan(
+      verbs.findIndex((verb) => verb.startsWith("exec")),
     );
-    expect(
-      gate?.args.some((arg) =>
-        arg.startsWith(`type=bind,src=${context.paths.npmCache},dst=/npmcache`),
-      ),
-    ).toBe(true);
-    expect(existsSync(context.paths.npmCache)).toBe(true);
+    expect(docker.at(-1)).toEqual(["rm", "--force", name]);
     expect(context.lines.some((line) => line.endsWith("merged"))).toBe(true);
   });
 
@@ -126,8 +106,8 @@ describe("depart", () => {
     const test = setup();
     queueBranch(test, "bus/feature");
     const events = recordingEvents();
-    const exec = fakeExec((spec) =>
-      spec.args.includes("--network") ? { status: 1, stderr: "", stdout: "lint FAIL\n" } : ok(),
+    const exec = fakeExec(
+      gateDocker({ gate: () => ({ status: 1, stderr: "", stdout: "lint FAIL\n" }) }),
     );
     const context = testContext(test, { events, exec });
     const before = originMain(test);
@@ -147,7 +127,7 @@ describe("depart", () => {
     gitSync(test.repo, "checkout", "-q", "main");
     writeFileSync(join(test.game.busDir, "bus-queue"), "bus/b\n", { flag: "a" });
     const events = recordingEvents();
-    const context = testContext(test, { events, exec: fakeExec(gateDocker) });
+    const context = testContext(test, { events, exec: fakeExec(gateDocker()) });
     expect(await depart(context)).toBe(0);
     expect(events.list.map(([kind]) => kind)).toContain("conflict-bus/b");
     expect(gitSync(test.repo, "branch", "--list", "bus/b")).not.toBe("");
@@ -157,12 +137,12 @@ describe("depart", () => {
     const test = setup();
     queueBranch(test, "bus/feature");
     const exec = fakeExec((spec) => {
-      if (spec.args.includes("--network")) {
+      if (spec.args.at(-1)?.startsWith("set -e") === true) {
         gitSync(test.repo, "checkout", "-q", "bus/feature");
         commitFile(test.repo, "later.txt", "later\n");
         gitSync(test.repo, "checkout", "-q", "main");
       }
-      return gateDocker(spec);
+      return gateDocker()(spec);
     });
     const events = recordingEvents();
     const context = testContext(test, { events, exec });
@@ -183,7 +163,7 @@ describe("depart", () => {
     const test = setup("wrangler");
     queueBranch(test, "bus/feature");
     const events = recordingEvents();
-    const exec = fakeExec(gateDocker);
+    const exec = fakeExec(gateDocker());
     const context = testContext(test, { events, exec });
     expect(await depart(context)).toBe(0);
     const sha = originMain(test);
@@ -213,7 +193,7 @@ describe("depart", () => {
     const exec = fakeExec((spec) =>
       spec.command === process.execPath
         ? { status: wranglerStatus, stderr: "", stdout: "" }
-        : gateDocker(spec),
+        : gateDocker()(spec),
     );
     const events = recordingEvents();
     const context = testContext(test, { events, exec });
