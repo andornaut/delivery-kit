@@ -4,7 +4,7 @@ import { rmSync } from "node:fs";
 
 import { afterEach, expect } from "vitest";
 
-import { impl, startRunner } from "../lib/adapter.ts";
+import { execute, impl, startRunner } from "../lib/adapter.ts";
 import {
   contract,
   EXIT_INVALID_CONFIG,
@@ -431,7 +431,8 @@ suite("unblock guards", () => {
         await m.stop();
         registry(["ABCDEFAB-0000-0000-0000-000000000002"]);
         ws.config.reports = { workerParents: ["parent-0"] };
-        const result = await startRunner(ws).done;
+        // Bounded: a runner that starts anyway is killed at the wait ceiling and fails here.
+        const result = await execute(impl.run(ws));
         expect(result.code, result.stderr).toBe(EXIT_INVALID_CONFIG);
         expect(result.stderr).toContain("registry.json");
       }
