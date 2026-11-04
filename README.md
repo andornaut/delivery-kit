@@ -159,9 +159,12 @@ The runner never fetches, checks out or moves a ref in the canonical checkout: i
 Two environment variables are test-only overrides for the contract harness, never configuration.
 `run` and `resource-report` honour them; an invalid value stops the command.
 
-- `DELIVERY_KIT_TEST_CLOCK` names a JSON file `{epoch, realStartMs, speed}`. Virtual time is
-  `epoch` plus the sum of a `clock-offsets` file beside it (one number per line) plus the elapsed
-  wall time times `speed`, and every runner sleep shrinks by `speed`.
+- `DELIVERY_KIT_TEST_CLOCK` names a JSON file `{epoch, realStartMs, speed, maxRealSleep?}`.
+  Virtual time is `epoch` plus the sum of a `clock-offsets` file beside it (one number per line)
+  plus the elapsed wall time times `speed`; both files are re-read on every reading. A runner sleep
+  lasts until virtual time has advanced by its full interval. With `maxRealSleep` (seconds), each
+  real wait is at most that long and the clock is re-read after it, so a stepped clock ends the
+  sleep promptly.
 - `DELIVERY_KIT_TEST_LOADAVG` is a one-minute load average, a decimal number of at least 0 such as
   `0.5`, read in place of the host load. A `loadLimit` of 0 still holds every departure.
 
