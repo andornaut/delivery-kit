@@ -1,6 +1,6 @@
 // Scheduled departures through the resident runner with fake Git, Docker, GitHub and Wrangler
 // (from tests/verify-scripts.py). Every case drives `run` under the virtual clock.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
@@ -20,6 +20,16 @@ import { BASE, SHA, type Workspace } from "../lib/workspace.ts";
 const MONITOR = "00000000-0000-4000-8000-000000000001";
 const EVERY_MINUTE = Array.from({ length: 60 }, (_, m) => String(m).padStart(2, "0"));
 const REPAIR = "bus/ci-repair";
+const WRANGLER = "node_modules/wrangler/bin/wrangler.js";
+
+/** The gate outputs 1.0 copies out of its container with docker cp. */
+function copiedOut(ws: Workspace): string[] {
+  return ws
+    .calls("docker")
+    .filter((call) => call.args[0] === "cp")
+    .map((call) => call.args.at(-2) ?? "")
+    .map((source) => source.slice(source.indexOf(":") + 1));
+}
 
 /** verify-scripts configuration: wrangler deploys, a departure every virtual minute, events kept local. */
 function bus(ws: Workspace, options: { github?: string; reports?: boolean } = {}): void {
@@ -129,6 +139,8 @@ suite("departure", () => {
       const [pendingSha, work] = ws.read("deploy-pending").split("\n");
       expect(pendingSha).toBe(SHA);
       expect(readFileSync(`${work}/.bus-built.sha`, "utf8").trim()).toBe(SHA);
+      // The gated install's Wrangler is in the retained worktree, beside dist/.
+      expect(existsSync(`${work}/${WRANGLER}`)).toBe(true);
       expect(containers(ws).length).toBe(2);
       expect(pushes(ws)).toBe(1);
       const deploy = deploys(ws)[0]!.args;
@@ -145,6 +157,61 @@ suite("departure", () => {
       expect(containers(ws).length).toBe(2);
       expect(pushes(ws)).toBe(1);
       expect(kinds(ws)).toEqual(expect.arrayContaining(["deploy_failure", "deploy_success"]));
+    },
+  );
+
+  contract("a passing gate provides the deployed Wrangler from its own install", async () => {
+    const ws = workspace();
+    bus(ws);
+    impl.offer(ws, ["bus/feature"]);
+    const runner = await departOnce(ws, () => kinds(ws).includes("deploy_success"));
+    await runner.stop();
+    expect(deploys(ws).length).toBe(1);
+    if (impl.name === "node") {
+      expect(copiedOut(ws)).toEqual([
+        "/tmp/gate-logs/.",
+        "/tmp/work/dist/.",
+        "/tmp/work/node_modules/.",
+      ]);
+      // Copied after the gate script and before the deployment.
+      const calls = ws.calls();
+      const gate = calls.findIndex(
+        (call) => call.tool === "docker" && (call.args.at(-1) ?? "").startsWith("set -e"),
+      );
+      const copy = calls.findIndex(
+        (call) =>
+          call.tool === "docker" && (call.args.at(-2) ?? "").endsWith(":/tmp/work/node_modules/."),
+      );
+      const deploy = calls.findIndex((call) => call.tool === "wrangler");
+      expect(gate).toBeGreaterThanOrEqual(0);
+      expect(copy).toBeGreaterThan(gate);
+      expect(deploy).toBeGreaterThan(copy);
+    }
+  });
+
+  contract(
+    "a gated worktree without Wrangler is not deployed and keeps its pending deployment",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      ws.updateControl((c) => (c.docker = { noWrangler: true }));
+      impl.offer(ws, ["bus/feature"]);
+      const runner = await departOnce(
+        ws,
+        () => ws.exists("deploy-pending") && kinds(ws).includes("deploy_failure"),
+      );
+      const result = await runner.stop();
+      const [pendingSha, work] = ws.read("deploy-pending").split("\n");
+      expect(pendingSha).toBe(SHA);
+      expect(existsSync(`${work}/dist`)).toBe(true);
+      expect(existsSync(`${work}/${WRANGLER}`)).toBe(false);
+      expect(deploys(ws)).toEqual([]);
+      expect(kinds(ws)).not.toContain("deploy_success");
+      if (impl.name === "node") {
+        expect(result.stdout).toContain(
+          `deployment of ${SHA} refused: ${WRANGLER} is missing from the gated worktree`,
+        );
+      }
     },
   );
 
@@ -180,6 +247,8 @@ suite("departure", () => {
         expect(pushes(ws)).toBe(0);
         expect(ws.exists("deploy-pending")).toBe(false);
         expect(deploys(ws)).toEqual([]);
+        // 1.0 copies only the gate logs out of a failed gate; 0.9 has no copy-out step.
+        expect(copiedOut(ws).filter((source) => source !== "/tmp/gate-logs/.")).toEqual([]);
         if (QUEUE_MODEL) expect(result.stdout).toContain("kept branch batch-");
         expect(
           ws.calls("git").some((call) => call.args.includes("branch") && call.args.includes("-D")),

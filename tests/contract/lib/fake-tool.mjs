@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 const [, , tool, ...args] = process.argv;
 const dir = process.env.DK_FAKE_DIR;
@@ -133,18 +133,8 @@ function git() {
     case "cherry-pick":
       return behaviour.conflict?.length && tail[0] !== "--abort" ? 1 : 0;
     case "worktree":
-      if (tail[0] === "add") {
-        const work = rest.at(-2);
-        // 1.0 deploys with `node node_modules/wrangler/bin/wrangler.js` from the worktree.
-        const entry = join(work, "node_modules", "wrangler", "bin");
-        mkdirSync(entry, { recursive: true });
-        writeFileSync(
-          join(entry, "wrangler.js"),
-          `import { spawnSync } from "node:child_process";\n` +
-            `const r = spawnSync(process.execPath, [${JSON.stringify(process.argv[1])}, "wrangler", ...process.argv.slice(2)], { stdio: "inherit" });\n` +
-            `process.exit(r.status ?? 1);\n`,
-        );
-      }
+      // `git worktree add` creates the checkout; node_modules/ comes only from an install.
+      if (tail[0] === "add") mkdirSync(rest.at(-2), { recursive: true });
       return 0;
     case "push":
       if (behaviour.pushFail) return 1;
@@ -184,13 +174,31 @@ function writableBinds(argv) {
   return found;
 }
 
+/**
+ * Write the Wrangler entry an install leaves in `nodeModules`. Both implementations deploy with
+ * `node node_modules/wrangler/bin/wrangler.js` from the gated worktree; the entry forwards to the
+ * fake `wrangler`. Only a modelled install provides it: 0.9 installs into its bound worktree,
+ * and 1.0 copies node_modules/ out of a passing gate container.
+ */
+function plantWrangler(nodeModules) {
+  const entry = join(nodeModules, "wrangler", "bin");
+  mkdirSync(entry, { recursive: true });
+  writeFileSync(
+    join(entry, "wrangler.js"),
+    `import { spawnSync } from "node:child_process";\n` +
+      `const r = spawnSync(process.execPath, [${JSON.stringify(process.argv[1])}, "wrangler", ...process.argv.slice(2)], { stdio: "inherit" });\n` +
+      `process.exit(r.status ?? 1);\n`,
+  );
+}
+
 function holdWhile(path) {
   while (path && existsSync(path)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 }
 
 /**
  * The 1.0 gate protocol (src/gate.ts): create, start, exec copy with EXPECTED_TREE, exec install,
- * network disconnect, exec the loopback check, exec the gate script, cp logs and dist out, rm.
+ * network disconnect, exec the loopback check, exec the gate script, cp logs, dist and
+ * node_modules out, rm.
  * Container state lives in DK_FAKE_DIR/containers/<name>.json.
  */
 function gateProtocol(behaviour) {
@@ -258,6 +266,10 @@ function gateProtocol(behaviour) {
     if (from.endsWith("/tmp/work/dist/.")) {
       if (!state.built) return fail("dist/ does not exist");
       writeFileSync(join(to, "index.html"), sha.slice(0, 8));
+    } else if (from.endsWith("/tmp/work/node_modules/.")) {
+      if (!state.built) return fail("node_modules/ is copied only from a passing gate");
+      if (behaviour.noWrangler) return 0;
+      plantWrangler(to);
     }
     return 0;
   }
@@ -342,6 +354,12 @@ function docker() {
     }
   } else if (behaviour.installFail) {
     return 1;
+  } else {
+    // 0.9 installs into the worktree it binds at /app.
+    const mount = args.find((x) => x.endsWith(":/app"));
+    if (mount && !behaviour.noWrangler) {
+      plantWrangler(join(mount.slice(0, -":/app".length), "node_modules"));
+    }
   }
   return 0;
 }
@@ -411,8 +429,15 @@ function sleep() {
 }
 
 function node() {
-  // The Bash deployment runs `node node_modules/wrangler/bin/wrangler.js deploy ...`.
-  if (args[0] && basename(args[0]) === "wrangler.js") return wrangler(args.slice(1));
+  // The Bash deployment runs `node node_modules/wrangler/bin/wrangler.js deploy ...`, which
+  // fails, as Node does, when the install left no such entry in the worktree.
+  if (args[0] && basename(args[0]) === "wrangler.js") {
+    if (!existsSync(resolve(args[0]))) {
+      process.stderr.write(`Error: Cannot find module '${resolve(args[0])}'\n`);
+      return 1;
+    }
+    return wrangler(args.slice(1));
+  }
   passthrough(process.execPath, args);
   return 0;
 }

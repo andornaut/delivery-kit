@@ -2,7 +2,7 @@
 // bare origin, fake docker, gh and Wrangler children, recorded events and a manual clock.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { type ProjectConfig, validateProjectConfig } from "../config.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
@@ -140,11 +140,17 @@ export interface GateFake {
   /** The gate step script's result; defaults to success. */
   readonly gate?: () => ExecResult;
   readonly install?: () => ExecResult;
+  /** The gate container has no node_modules/, as after an install that provides none. */
+  readonly noNodeModules?: boolean;
 }
 
+/** The Wrangler entry a gated install leaves in node_modules/, relative to the worktree. */
+export const FAKE_WRANGLER = "wrangler/bin/wrangler.js";
+
 /**
- * A docker that behaves like the gate container: `docker cp` out of it writes a step log or a
- * built dist/ file into the host destination, as the host user would receive them.
+ * A docker that behaves like the gate container: `docker cp` out of it writes a step log, a
+ * built dist/ file or an installed node_modules/ Wrangler entry into the host destination, as
+ * the host user would receive them.
  */
 export function gateDocker(fake: GateFake = {}): FakeChild {
   return (spec) => {
@@ -158,10 +164,17 @@ export function gateDocker(fake: GateFake = {}): FakeChild {
     if (verb === "exec" && rest.includes("sh") && rest.at(-1)?.includes("npm ci") === true) {
       return fake.install?.() ?? ok();
     }
+    if (verb === "exec" && rest[1] === "test" && rest.at(-1) === "/tmp/work/node_modules") {
+      return fake.noNodeModules === true ? { status: 1, stderr: "", stdout: "" } : ok();
+    }
     if (verb === "cp") {
       const [source = "", destination = ""] = rest.filter((arg) => arg !== "--quiet");
       if (source.endsWith(":/tmp/work/dist/.")) {
         writeFileSync(join(destination, "index.js"), "built\n");
+      } else if (source.endsWith(":/tmp/work/node_modules/.")) {
+        const entry = join(destination, FAKE_WRANGLER);
+        mkdirSync(dirname(entry), { recursive: true });
+        writeFileSync(entry, "// wrangler\n");
       } else if (source.endsWith(":/tmp/gate-logs/.")) {
         writeFileSync(join(destination, "01-lint.log"), "linted\n");
       }

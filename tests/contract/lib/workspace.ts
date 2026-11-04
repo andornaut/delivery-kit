@@ -130,6 +130,8 @@ export interface Control {
     changeApproval?: string;
     advanceClock?: number;
     /** Block the gate while this file exists. */
+    /** The install provides no node_modules/wrangler/bin/wrangler.js. */
+    noWrangler?: boolean;
     blockWhile?: string;
   };
   gh?: { exitCode?: number; default?: unknown[]; checks?: Record<string, unknown[]> };

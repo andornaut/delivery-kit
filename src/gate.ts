@@ -5,9 +5,10 @@
 // read-only; the container copies it into its own /tmp/work and verifies that the copy's tree
 // is the commit's tree, so the gate never writes the checkout and runs on the exact commit.
 // The install step runs with network access, the container is then disconnected from every
-// network, and the gate steps run. The host copies the gate logs and dist/ out with docker cp
-// and removes the container, also after a failure or timeout. The npm cache lives in the
-// game's named volume.
+// network, and the gate steps run. The host copies the gate logs out with docker cp, and, from a
+// passing and verified gate only, dist/ and node_modules/, so the deployment runs the Wrangler
+// locked in the gated commit. The container is removed, also after a failure or timeout. The npm
+// cache lives in the game's named volume.
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -160,7 +161,7 @@ export async function removeLeftoverGates(context: BusContext): Promise<string[]
 }
 
 export interface GateInput {
-  /** The scratch worktree; dist/ is copied back into it. */
+  /** The scratch worktree; dist/ and node_modules/ are copied back into it after a pass. */
   readonly work: string;
   readonly sha: string;
   /** This attempt's gate-logs directory on the host. */
@@ -206,6 +207,9 @@ async function copyIn(context: BusContext, name: string, input: GateInput): Prom
   return copy.status === 0;
 }
 
+/** The build outputs a passing, verified gate copies back into the scratch worktree. */
+export const GATE_OUTPUTS = ["dist", "node_modules"] as const;
+
 async function copyOut(
   context: BusContext,
   name: string,
@@ -213,19 +217,25 @@ async function copyOut(
   built: boolean,
 ): Promise<void> {
   await docker(context, ["cp", "--quiet", `${name}:${GATE_LOGS}/.`, input.logs]);
-  if (
-    built &&
-    (await docker(context, ["exec", name, "test", "-d", `${GATE_WORK}/dist`])).status === 0
-  ) {
-    mkdirSync(join(input.work, "dist"), { recursive: true });
+  if (!built) {
+    return;
+  }
+  for (const output of GATE_OUTPUTS) {
+    const path = `${GATE_WORK}/${output}`;
+    // eslint-disable-next-line no-await-in-loop
+    if ((await docker(context, ["exec", name, "test", "-d", path])).status !== 0) {
+      continue;
+    }
+    mkdirSync(join(input.work, output), { recursive: true });
+    // eslint-disable-next-line no-await-in-loop
     const copied = await docker(context, [
       "cp",
       "--quiet",
-      `${name}:${GATE_WORK}/dist/.`,
-      join(input.work, "dist"),
+      `${name}:${path}/.`,
+      join(input.work, output),
     ]);
     if (copied.status !== 0) {
-      throw new Error(`docker cp of dist/ failed: ${copied.stderr.trim()}`);
+      throw new Error(`docker cp of ${output}/ failed: ${copied.stderr.trim()}`);
     }
   }
 }
@@ -294,13 +304,13 @@ export async function runGate(
   try {
     outcome = await gate(context, name, input);
     if (outcome.ok) {
-      // Checked before dist/ is copied into the worktree, so the copy is not a change.
+      // Checked before the outputs are copied into the worktree, so the copy is not a change.
       const problem = await verify();
       if (problem !== undefined) {
         outcome = failed("full-gate", problem);
       }
     }
-    // Logs are copied out whatever the outcome; dist/ only from a passing, verified gate.
+    // Logs are copied out whatever the outcome; the outputs only from a passing, verified gate.
     await copyOut(context, name, input, outcome.ok);
   } catch (error) {
     if (error instanceof Interrupted) {

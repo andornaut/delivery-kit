@@ -283,8 +283,10 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
 - **Deployment:** with `mode` `wrangler` and a range that needs it, the push records
   `deploy-pending` with its worktree, superseding an older pending deployment. When CI passes and
   the remote `main` is still that SHA, it runs `node_modules/wrangler/bin/wrangler.js deploy
---config wrangler.jsonc --no-bundle` in the gate worktree with the gated `dist/`. A failure keeps
-  the assets and is retried at a later departure.
+--config wrangler.jsonc --no-bundle` in the gate worktree with the gated `dist/`, so the
+  deployment uses the Wrangler locked in the gated commit. A worktree without that entry is not
+  deployed: the runner logs the missing path and keeps the deployment pending. A failure keeps the
+  assets and is retried at a later departure.
 - **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
   rules and receipts. A HEAD that is the last pushed SHA or failed its gate is refused, and a
   request whose HEAD moved before it departs is rejected.
@@ -305,9 +307,10 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
   `NN-<name>.log`;
 - gives install and the steps four hours each.
 
-After a gate the host copies the logs, and `dist/` from a passing gate, out with `docker cp` and
-removes the container, also after a failure or timeout. Git status and the content of every file
-it reports are fingerprinted before and after; a change discards the gate. Leftover gate
+After a gate the host copies the logs out with `docker cp` and removes the container, also after a
+failure or timeout. Git status and the content of every file it reports are fingerprinted before
+and after; a change discards the gate. Only a passing gate whose fingerprint is unchanged also
+copies `dist/` and `node_modules/` into the worktree, before any deployment. Leftover gate
 containers for the game are removed before the next gate.
 
 ### Test overrides

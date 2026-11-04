@@ -14,7 +14,7 @@ const SHA = /^[0-9a-f]{40}$/;
 
 export interface PendingDeploy {
   readonly sha: string;
-  /** The detached gate worktree holding the built dist/. */
+  /** The detached gate worktree holding the gated dist/ and node_modules/. */
   readonly work: string;
 }
 
@@ -101,6 +101,19 @@ async function finishPending(context: BusContext, pending: PendingDeploy): Promi
   }
   if (!assets) {
     context.log(`deployment assets missing or built for another commit: ${sha}`);
+    return false;
+  }
+  let wrangler: boolean;
+  try {
+    wrangler = statSync(join(work, WRANGLER_ENTRY)).isFile();
+  } catch {
+    wrangler = false;
+  }
+  if (!wrangler) {
+    context.log(
+      `deployment of ${sha} refused: ${WRANGLER_ENTRY} is missing from the gated worktree ` +
+        `${work}; the gate's install must provide Wrangler`,
+    );
     return false;
   }
   ensureDir(paths.deployDir);

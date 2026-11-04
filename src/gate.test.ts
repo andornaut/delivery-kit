@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertContainerRules,
+  FAKE_WRANGLER,
   fakeExec,
   gateDocker,
   gitSync,
@@ -61,11 +62,18 @@ describe("runGate", () => {
   const verbs = (exec: { calls: { args: readonly string[] }[] }) =>
     exec.calls.map((call) => call.args[0]);
 
-  it("copies the exact commit in, logs and dist/ out, and removes the container", async () => {
+  it("copies the exact commit in, logs, dist/ and node_modules/ out, and removes the container", async () => {
     const { context, exec, input, logs, test } = setup({});
     expect(await runGate(context, input)).toEqual({ ok: true, output: "lint ok\ntest ok\n" });
     expect(readFileSync(join(logs, "01-lint.log"), "utf8")).toBe("linted\n");
     expect(readFileSync(join(test.repo, "dist", "index.js"), "utf8")).toBe("built\n");
+    expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
+    const copies = exec.calls.filter((call) => call.args[0] === "cp").map((call) => call.args[2]);
+    expect(copies).toEqual([
+      `${NAME}:/tmp/gate-logs/.`,
+      `${NAME}:/tmp/work/dist/.`,
+      `${NAME}:/tmp/work/node_modules/.`,
+    ]);
     const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
     expect(create).toEqual(
       expect.arrayContaining([
@@ -105,14 +113,47 @@ describe("runGate", () => {
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 
-  it("removes the container after a failed install and copies no dist/", async () => {
+  it("removes the container after a failed install and copies no dist/ or node_modules/", async () => {
     const { context, exec, input, test } = setup({
       install: () => ({ status: 1, stderr: "", stdout: "" }),
     });
     expect(await runGate(context, input)).toMatchObject({ ok: false, stage: "install" });
     expect(verbs(exec)).not.toContain("network");
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
+    expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+
+  it("copies no dist/ or node_modules/ out of a failed gate", async () => {
+    const { context, exec, input, test } = setup({
+      gate: () => ({ status: 1, stderr: "", stdout: "test FAIL\n" }),
+    });
+    expect(await runGate(context, input)).toMatchObject({ ok: false, stage: "full-gate" });
+    expect(existsSync(join(test.repo, "dist"))).toBe(false);
+    expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
+    expect(exec.calls.filter((call) => call.args[0] === "cp").map((call) => call.args[2])).toEqual([
+      `${NAME}:/tmp/gate-logs/.`,
+    ]);
+    expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+
+  it("verifies the tree before any output is copied into it", async () => {
+    const { context, input, test } = setup({});
+    const seen: boolean[] = [];
+    const verify = () => {
+      seen.push(existsSync(join(test.repo, "dist")), existsSync(join(test.repo, "node_modules")));
+      return Promise.resolve(undefined);
+    };
+    expect(await runGate(context, input, verify)).toMatchObject({ ok: true });
+    expect(seen).toEqual([false, false]);
+    expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
+  });
+
+  it("copies dist/ alone when the gate container has no node_modules/", async () => {
+    const { context, input, test } = setup({ noNodeModules: true });
+    expect(await runGate(context, input)).toMatchObject({ ok: true });
+    expect(existsSync(join(test.repo, "dist", "index.js"))).toBe(true);
+    expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
   });
 
   it("removes the container after a gate timeout", async () => {
@@ -127,11 +168,12 @@ describe("runGate", () => {
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 
-  it("discards a gate that fails verification, copies no dist/ and removes the container", async () => {
+  it("discards a gate that fails verification, copies no outputs and removes the container", async () => {
     const { context, exec, input, test } = setup({});
     const outcome = await runGate(context, input, () => Promise.resolve("tree changed"));
     expect(outcome).toEqual({ ok: false, reason: "tree changed", stage: "full-gate" });
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
+    expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 

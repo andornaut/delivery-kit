@@ -10,6 +10,7 @@ import type { Exec, ExecResult, ExecSpec } from "./exec.ts";
 import { captureRequest } from "./requests.ts";
 import {
   commitFile,
+  FAKE_WRANGLER,
   fakeExec,
   gateDocker,
   gitSync,
@@ -25,7 +26,7 @@ function originMain(test: TestGame): string {
   return gitSync(test.origin, "rev-parse", "main");
 }
 
-function setup(mode: "none" | "wrangler" = "none") {
+function setup(mode: "none" | "wrangler" = "none", gate: { noNodeModules?: boolean } = {}) {
   const test = makeGame((config) => {
     (config.deploy as Record<string, unknown>).mode = mode;
     delete (config.deploy as Record<string, unknown>).skipPattern;
@@ -39,6 +40,7 @@ function setup(mode: "none" | "wrangler" = "none") {
       return { status: wrangler.status, stderr: "", stdout: "" };
     }
     return gateDocker({
+      ...gate,
       gate: () =>
         failGate.value
           ? { status: 1, stderr: "", stdout: "lint FAIL\n" }
@@ -201,6 +203,8 @@ describe("deployment after CI", () => {
     expect(exec.calls.some((call) => call.command === process.execPath)).toBe(false);
     const [pending, work = ""] = readFileSync(context.paths.deployPending, "utf8").split("\n");
     expect(pending).toBe(head);
+    // The deployment runs the Wrangler the gate installed, copied out of its container.
+    expect(existsSync(join(work, "node_modules", FAKE_WRANGLER))).toBe(true);
     ciStatus(test, head, "success");
     expect(await deployAfterCi(context, head)).toBe(true);
     expect(exec.calls.find((call) => call.command === process.execPath)?.args).toEqual([
@@ -214,9 +218,31 @@ describe("deployment after CI", () => {
       "--message",
       `Scheduled bus ${head}`,
     ]);
+    expect(exec.calls.find((call) => call.command === process.execPath)?.cwd).toBe(work);
     expect(existsSync(join(context.paths.deployDir, `${head}.completed`))).toBe(true);
+    // The worktree is removed with the node_modules/ the gate copied into it.
     expect(existsSync(work)).toBe(false);
     expect(kinds()).toEqual(expect.arrayContaining(["deploy_retry", "deploy_success"]));
+  });
+
+  it("refuses to deploy when the gated worktree has no Wrangler and retains the pending deployment", async () => {
+    const { context, exec, kinds, test } = setup("wrangler", { noNodeModules: true });
+    const head = mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(0);
+    const work = readFileSync(context.paths.deployPending, "utf8").split("\n")[1] ?? "";
+    expect(existsSync(join(work, "dist"))).toBe(true);
+    ciStatus(test, head, "success");
+    expect(await deployAfterCi(context, head)).toBe(false);
+    expect(exec.calls.some((call) => call.command === process.execPath)).toBe(false);
+    expect(context.lines).toContainEqual(
+      expect.stringContaining(
+        `deployment of ${head} refused: node_modules/wrangler/bin/wrangler.js is missing`,
+      ),
+    );
+    expect(kinds()).toContain("deploy_failure");
+    expect(kinds()).not.toContain("deploy_retry");
+    expect(readFileSync(context.paths.deployPending, "utf8").split("\n")[0]).toBe(head);
+    expect(existsSync(work)).toBe(true);
   });
 
   it("retries a failed deployment at the next departure and lets a newer push supersede it", async () => {
