@@ -24,7 +24,8 @@ export function uptimeLine(seconds: number, loads: readonly number[]): string {
 export async function resourceReport(context: BusContext): Promise<string> {
   const lines = [
     clockLine(context.config.schedule.timezone, context.clock.now()),
-    uptimeLine(uptime(), loadavg()),
+    // The one-minute value is the load departures compare, including a test override.
+    uptimeLine(uptime(), [context.loadAverage(), ...loadavg().slice(1)]),
   ];
   const containers = await context
     .exec({

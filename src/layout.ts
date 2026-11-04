@@ -117,7 +117,8 @@ export function validateGameDevConfig(value: unknown): GameDevConfig {
       issues.add("/schema", "must be 1");
     }
     checkTimezone(issues, "/timezone", config.timezone);
-    if (checkArray(issues, "/wakeMinutes", { nonEmpty: true, unique: true }, config.wakeMinutes)) {
+    // An empty list schedules no monitor wake.
+    if (checkArray(issues, "/wakeMinutes", { unique: true }, config.wakeMinutes)) {
       config.wakeMinutes.forEach((minute, index) =>
         checkInteger(issues, `/wakeMinutes/${index}`, { max: 59, min: 0 }, minute),
       );

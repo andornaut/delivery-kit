@@ -52,7 +52,8 @@ unavailable read, and 2 for a usage error.
 
 Committed in game-dev. Every path is relative to game-dev. See `examples/config.json`.
 
-- `timezone` and `wakeMinutes`: the monitor wake schedule.
+- `timezone` and `wakeMinutes`: the monitor wake schedule. An empty `wakeMinutes` schedules no
+  wake.
 - `games.<id>`: `name` (the report name, for example `Archie`), `path` to the game checkout and
   `roles`.
 - `kits.<id>.path` and `sharedRoles`.
@@ -64,10 +65,12 @@ Registry role keys are `<game>/<role>` for each game role, then each shared role
 Committed in each game and owned by its Tech role. See `examples/delivery-kit.json`.
 
 - `git`: `main`, `remote` and the GitHub `owner/name`.
-- `schedule`: departure minutes and timezone.
+- `schedule`: departure minutes and `timezone`, which defaults to the `config.json` timezone.
 - `gate`: `image`, `install` and ordered `steps` (`name`, `run`). Any image and install command
-  are accepted. Dependencies install with network; every step then runs with none.
-- `resources`: `cpus`, `maxWorkers` and `loadLimit`, capped at 4, 4 and 24.
+  are accepted. Dependencies install with network; every step then runs with none. An empty
+  `install` skips the install step, and an empty `steps` list gates with no checks.
+- `resources`: `cpus`, `maxWorkers` and `loadLimit`, capped at 4, 4 and 24. A departure starts
+  only below `loadLimit`, so 0 holds every departure.
 - `ci`: `requiredNames` (check names that must exist and pass for the exact pushed commit),
   `pollSeconds` and `timeoutSeconds`.
 - `deploy`: `mode` is `wrangler` or `none`; `skipPattern` is a regular expression over the pushed
@@ -127,8 +130,8 @@ Tech merges each reviewed feature branch into the game's local `main`, as a real
 fast-forward, and never pushes. Each departure, under `departure.lock`:
 
 1. Reads `refs/heads/main` in the canonical checkout.
-2. Skips when that HEAD is the last pushed SHA or has a `gate-failed/<sha>` record. Nothing new
-   means nothing departs.
+2. Skips when that HEAD is the last pushed SHA or the remote `main`, or has a
+   `gate-failed/<sha>` record. Nothing new means nothing departs.
 3. Gates it on a detached scratch worktree at HEAD, so merge commits are gated as they are.
 4. Pushes with `git push origin <sha>:refs/heads/main`, never forced. A non-fast-forward rejection
    is reported and nothing is pushed.
@@ -150,6 +153,17 @@ The runner never fetches, checks out or moves a ref in the canonical checkout: i
 - **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
   rules and receipts. A HEAD that is already pushed or failed its gate is refused, and a request
   whose HEAD moved before it departs is rejected.
+
+### Test overrides
+
+Two environment variables are test-only overrides for the contract harness, never configuration.
+`run` and `resource-report` honour them; an invalid value stops the command.
+
+- `DELIVERY_KIT_TEST_CLOCK` names a JSON file `{epoch, realStartMs, speed}`. Virtual time is
+  `epoch` plus the sum of a `clock-offsets` file beside it (one number per line) plus the elapsed
+  wall time times `speed`, and every runner sleep shrinks by `speed`.
+- `DELIVERY_KIT_TEST_LOADAVG` is a one-minute load average, a decimal number of at least 0 such as
+  `0.5`, read in place of the host load. A `loadLimit` of 0 still holds every departure.
 
 ## Monitor and harnesses
 

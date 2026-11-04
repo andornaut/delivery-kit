@@ -20,10 +20,15 @@ export interface Events {
   flush(): void;
 }
 
+/** A game's configuration with the schedule timezone resolved from config.json when omitted. */
+export type BusConfig = ProjectConfig & {
+  readonly schedule: ProjectConfig["schedule"] & { readonly timezone: string };
+};
+
 export interface BusContext {
   readonly layout: Layout;
   readonly game: GameLayout;
-  readonly config: ProjectConfig;
+  readonly config: BusConfig;
   readonly paths: BusPaths;
   readonly exec: Exec;
   readonly clock: Clock;
@@ -97,10 +102,14 @@ export function busContext(
 ): BusContext {
   const paths = busPaths(game.busDir);
   const log = options.log ?? fileLog(paths.runnerLog);
+  const schedule = {
+    ...config.schedule,
+    timezone: config.schedule.timezone ?? layout.config.timezone,
+  };
   return {
     base: `${config.git.remote}/${config.git.main}`,
     clock: options.clock ?? systemClock,
-    config,
+    config: { ...config, schedule },
     events: options.events ?? busEvents(game, config.reports.project, log),
     exec: options.exec ?? spawnExec,
     game,

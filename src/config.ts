@@ -24,8 +24,15 @@ export type DeployMode = "none" | "wrangler";
 export interface ProjectConfig {
   readonly schema: 1;
   readonly git: { readonly main: string; readonly remote: string; readonly github: string };
-  readonly schedule: { readonly departures: readonly string[]; readonly timezone: string };
-  /** Any image and any install command: a Node-only image with `npm ci` is as valid as any other. */
+  readonly schedule: {
+    readonly departures: readonly string[];
+    /** Defaults to the game-dev config.json timezone when omitted. */
+    readonly timezone?: string;
+  };
+  /**
+   * Any image and any install command: a Node-only image with `npm ci` is as valid as any other.
+   * An empty install skips the install step; empty steps run a gate with no checks.
+   */
   readonly gate: {
     readonly image: string;
     readonly install: string;
@@ -34,6 +41,7 @@ export interface ProjectConfig {
   readonly resources: {
     readonly cpus: number;
     readonly maxWorkers: number;
+    /** Departures start only below this one-minute load; 0 holds every departure. */
     readonly loadLimit: number;
   };
   readonly ci: {
@@ -68,7 +76,10 @@ export const ROLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(\/[a-z0-9][a-z0-9-]{0
 const INLINE_SECRET_PATTERN =
   /(^|\s)[A-Za-z_]*(SECRET|TOKEN|PASSW|API_?KEY|CREDENTIAL)[A-Za-z_]*=/i;
 
-function checkCommand(issues: Issues, at: string, value: unknown): void {
+function checkCommand(issues: Issues, at: string, value: unknown, allowEmpty = false): void {
+  if (allowEmpty && value === "") {
+    return;
+  }
   if (checkString(issues, at, null, value) && INLINE_SECRET_PATTERN.test(value)) {
     issues.add(
       at,
@@ -86,7 +97,8 @@ function checkGit(issues: Issues, value: unknown): void {
 }
 
 function checkSchedule(issues: Issues, value: unknown): void {
-  if (checkObject(issues, "/schedule", { required: ["departures", "timezone"] }, value)) {
+  const shape = { optional: ["timezone"], required: ["departures"] };
+  if (checkObject(issues, "/schedule", shape, value)) {
     if (
       checkArray(issues, "/schedule/departures", { nonEmpty: true, unique: true }, value.departures)
     ) {
@@ -94,7 +106,9 @@ function checkSchedule(issues: Issues, value: unknown): void {
         checkString(issues, `/schedule/departures/${index}`, MINUTE_PATTERN, minute),
       );
     }
-    checkTimezone(issues, "/schedule/timezone", value.timezone);
+    if (value.timezone !== undefined) {
+      checkTimezone(issues, "/schedule/timezone", value.timezone);
+    }
   }
 }
 
@@ -103,8 +117,8 @@ function checkGate(issues: Issues, value: unknown): void {
     return;
   }
   checkName(issues, "/gate/image", IMAGE_PATTERN, value.image);
-  checkCommand(issues, "/gate/install", value.install);
-  if (!checkArray(issues, "/gate/steps", { nonEmpty: true }, value.steps)) {
+  checkCommand(issues, "/gate/install", value.install, true);
+  if (!checkArray(issues, "/gate/steps", {}, value.steps)) {
     return;
   }
   const names = new Set<string>();
@@ -139,12 +153,12 @@ function checkResources(issues: Issues, value: unknown): void {
   if (
     typeof load !== "number" ||
     !Number.isFinite(load) ||
-    load <= 0 ||
+    load < 0 ||
     load > RESOURCE_LIMITS.loadLimit
   ) {
     issues.add(
       "/resources/loadLimit",
-      `must be a number above 0 and at most ${RESOURCE_LIMITS.loadLimit}`,
+      `must be a number from 0 through ${RESOURCE_LIMITS.loadLimit}`,
     );
   }
 }
