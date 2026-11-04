@@ -128,7 +128,18 @@ function git() {
     case "cherry-pick":
       return behaviour.conflict?.length && tail[0] !== "--abort" ? 1 : 0;
     case "worktree":
-      if (tail[0] === "add") mkdirSync(rest.at(-2), { recursive: true });
+      if (tail[0] === "add") {
+        const work = rest.at(-2);
+        // 1.0 deploys with `node node_modules/wrangler/bin/wrangler.js` from the worktree.
+        const entry = join(work, "node_modules", "wrangler", "bin");
+        mkdirSync(entry, { recursive: true });
+        writeFileSync(
+          join(entry, "wrangler.js"),
+          `import { spawnSync } from "node:child_process";\n` +
+            `const r = spawnSync(process.execPath, [${JSON.stringify(process.argv[1])}, "wrangler", ...process.argv.slice(2)], { stdio: "inherit" });\n` +
+            `process.exit(r.status ?? 1);\n`,
+        );
+      }
       return 0;
     case "push":
       if (behaviour.pushFail) return 1;

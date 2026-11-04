@@ -86,9 +86,27 @@ function env(ws: Workspace): Record<string, string> {
   return base;
 }
 
+/**
+ * 1.0 requires a report recipient that resolves through the registry. A case that names none
+ * (0.9 then reports nowhere) gets the default "monitor" role with a fixture conversation.
+ */
+function ensureRecipient(ws: Workspace): void {
+  if (ws.config.reports?.recipient !== undefined) return;
+  const registry = ws.registry();
+  if (registry.roles.monitor) return;
+  ws.writeRegistry({
+    ...registry,
+    roles: {
+      ...registry.roles,
+      monitor: { conversations: { [registry.harness]: "00000000-0000-4000-8000-0000000000ff" } },
+    },
+  });
+}
+
 function command(ws: Workspace, words: string[]): Command {
   writeJson(ws.configFile, nodeConfig(ws));
   installPackage(ws);
+  ensureRecipient(ws);
   const [verb = "", ...rest] = words;
   return {
     argv: [process.execPath, CLI, verb, "--game", ws.game, ...rest],

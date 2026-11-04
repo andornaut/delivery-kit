@@ -42,8 +42,17 @@ function pushes(ws: Workspace): number {
   return ws.calls("git").filter((call) => call.args.includes("push")).length;
 }
 
+/**
+ * Gate container steps: one install and one full gate per gated tree. 0.9 runs each as its own
+ * `docker run`; 1.0 runs them as `docker exec` steps in one created container.
+ */
 function containers(ws: Workspace) {
-  return ws.calls("docker").filter((call) => call.args[0] !== "ps");
+  return ws.calls("docker").filter((call) => {
+    if (call.args[0] === "run") return true;
+    if (call.args[0] !== "exec") return false;
+    const script = call.args.at(-1) ?? "";
+    return script.startsWith("set -e") || script.startsWith("cd /tmp/work && ");
+  });
 }
 
 function deploys(ws: Workspace) {
