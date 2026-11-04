@@ -132,7 +132,9 @@ function docker() {
   };
   const cpus = args[args.indexOf("--cpus") + 1];
   if (cpus !== String(behaviour.cpus ?? 4)) return fail(`unexpected --cpus ${cpus}`);
-  if (!args.includes(`WORKERS_CI_COMMIT_SHA=${sha}`)) return fail("missing exact commit stamp");
+  // Scripted Git stamps the control SHA; a real repository stamps its own scratch HEAD.
+  const stamp = args.find((x) => x.startsWith("WORKERS_CI_COMMIT_SHA="))?.slice(22) ?? "";
+  if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha) return fail("missing exact commit stamp");
   const user = args.indexOf("-u");
   const ids = `${process.getuid()}:${process.getgid()}`;
   if (user < 0 || args[user + 1] !== ids) return fail("gate must run as the invoking user");
@@ -141,6 +143,10 @@ function docker() {
     args.find((x) => x.endsWith(",dst=/npmcache"))?.split(",").find((x) => x.startsWith("src="))?.slice(4) ??
     args.find((x) => x.endsWith(":/npmcache"))?.slice(0, -":/npmcache".length);
   if (!cache || !existsSync(cache)) return fail("npm cache bind source must exist before mounting");
+  if (behaviour.blockWhile) {
+    // Hold the gate open while the file exists, so a case can act mid-departure.
+    while (existsSync(behaviour.blockWhile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
   if (args.includes("--network")) {
     if (behaviour.gateFail) return 1;
     if (behaviour.moveBase) writeFileSync(remoteHeadFile, "9".repeat(40));
@@ -170,8 +176,10 @@ function gh() {
 }
 
 function wrangler(argv) {
+  const behaviour = control.wrangler ?? {};
   log({ args: argv });
-  return (control.wrangler ?? {}).fail ? 1 : 0;
+  if (behaviour.append) appendFileSync(behaviour.append[0], behaviour.append[1]);
+  return behaviour.fail ? 1 : 0;
 }
 
 function claude() {
@@ -186,6 +194,9 @@ function claude() {
 
 function codex() {
   const behaviour = control.codex ?? {};
+  if (behaviour.blockWhile) {
+    while (existsSync(behaviour.blockWhile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
   if (behaviour.fail) return 1;
   log();
   return 0;

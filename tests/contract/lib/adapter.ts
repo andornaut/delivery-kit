@@ -76,6 +76,10 @@ export interface Resident {
   until(predicate: () => boolean, timeoutMs?: number): Promise<void>;
   /** SIGTERM the runner's process group, then SIGKILL stragglers. */
   stop(): Promise<Result>;
+  /** Signal only the group leader, leaving detached children (CI watchers, flushers) running. */
+  terminateLeader(): Promise<Result>;
+  /** Output captured so far. */
+  output(): { stdout: string; stderr: string };
 }
 
 /** Start a long-running command (the resident runner or the channel consumer) in its own group. */
@@ -114,6 +118,15 @@ export function start(command: Command): Resident {
         }
         await new Promise((r) => setTimeout(r, 50));
       }
+    },
+    output: () => ({ stdout, stderr }),
+    async terminateLeader() {
+      // `exit`, not `close`: surviving children may still hold the output pipes.
+      const exited = new Promise<Result>((resolve) =>
+        child.once("exit", (code, signal) => resolve({ code, signal, stdout, stderr })),
+      );
+      child.kill("SIGTERM");
+      return exited;
     },
     async stop() {
       signalGroup("SIGTERM");

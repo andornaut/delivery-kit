@@ -113,11 +113,13 @@ export interface Control {
     moveBase?: boolean;
     changeApproval?: string;
     advanceClock?: number;
+    /** Block the gate while this file exists. */
+    blockWhile?: string;
   };
   gh?: { exitCode?: number; default?: unknown[]; checks?: Record<string, unknown[]> };
-  wrangler?: { fail?: boolean };
+  wrangler?: { fail?: boolean; append?: [string, string] };
   claude?: { exitCode?: number; agents?: unknown };
-  codex?: { fail?: boolean };
+  codex?: { fail?: boolean; blockWhile?: string };
 }
 
 export interface Call {
@@ -162,7 +164,7 @@ export class Workspace {
     // Docker would create a missing bind source as root; consumers keep this cache in state.
     mkdirSync(join(this.state, "npm-cache"));
     this.installFakes();
-    this.setControl({});
+    this.setControl(this.realGit ? { git: { real: true } } : {});
     this.writeGameDev();
     if (this.realGit) this.initRealGit();
   }
@@ -283,6 +285,16 @@ export class Workspace {
     return join(this.fakeDir, "clock.json");
   }
 
+  /** Current virtual time, as fake `date +%s` reports it. */
+  virtualNow(): number {
+    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as { epoch: number; realStartMs: number; speed: number };
+    const offsetsPath = join(this.fakeDir, "clock-offsets");
+    const offsets = existsSync(offsetsPath)
+      ? readFileSync(offsetsPath, "utf8").split("\n").filter(Boolean).reduce((sum, line) => sum + Number(line), 0)
+      : 0;
+    return Math.floor(clock.epoch + offsets + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
+  }
+
   advanceClock(seconds: number): void {
     appendFileSync(join(this.fakeDir, "clock-offsets"), `${seconds}\n`);
   }
@@ -308,11 +320,32 @@ export class Workspace {
   // Real Git helpers for cases that integrate actual history.
   private initRealGit(): void {
     this.git("init", "-q", "-b", "main");
-    this.git("-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "--allow-empty", "-qm", "fixture");
+    // Games ignore build output, so the gate's dist/ does not change the Git fingerprint.
+    this.commit("fixture", { ".gitignore": "dist/\n" });
   }
 
   git(...args: string[]): string {
     return execFileSync("git", ["-C", this.repo, ...args], { env: this.baseEnv(), encoding: "utf8" }).trim();
+  }
+
+  /** Create a commit on `branch` with plumbing only, leaving every checkout untouched. */
+  commitOnto(branch: string, message: string, files: Record<string, string>): string {
+    const env = this.baseEnv();
+    const run = (args: string[], input?: string) =>
+      execFileSync("git", ["-C", this.repo, ...args], { env, encoding: "utf8", input }).trim();
+    const parent = run(["rev-parse", `refs/heads/${branch}`]);
+    const index = join(this.root, `index-${process.pid}-${Date.now()}`);
+    const indexed = { ...env, GIT_INDEX_FILE: index };
+    execFileSync("git", ["-C", this.repo, "read-tree", parent], { env: indexed });
+    for (const [name, content] of Object.entries(files)) {
+      const blob = run(["hash-object", "-w", "--stdin"], content);
+      execFileSync("git", ["-C", this.repo, "update-index", "--add", "--cacheinfo", `100644,${blob},${name}`], { env: indexed });
+    }
+    const tree = execFileSync("git", ["-C", this.repo, "write-tree"], { env: indexed, encoding: "utf8" }).trim();
+    rmSync(index, { force: true });
+    const commit = run(["commit-tree", tree, "-p", parent, "-m", message]);
+    run(["update-ref", `refs/heads/${branch}`, commit, parent]);
+    return commit;
   }
 
   commit(message: string, files: Record<string, string> = {}): string {
