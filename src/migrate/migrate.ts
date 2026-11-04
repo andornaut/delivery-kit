@@ -253,43 +253,33 @@ function finishLog(unit: Unit, marker: MigrationMarker): string | undefined {
   return undefined;
 }
 
-function referencedCheckpoints(built: BuiltRegistry): Set<string> {
-  const used = new Set<string>();
-  for (const role of Object.values(built.registry.roles)) {
-    if (role.activation?.checkpoint !== undefined) {
-      used.add(role.activation.checkpoint);
-    }
-  }
-  for (const transfer of built.registry.transfers) {
-    used.add(transfer.checkpoint);
-  }
-  return used;
-}
-
-function checkCheckpoints(built: BuiltRegistry, notes: string[], problems: string[]): void {
-  const used = referencedCheckpoints(built);
+/** Never overwrite var/handoffs/: a byte-identical file is skipped, a differing one stops. */
+function checkCheckpoints(
+  layout: Layout,
+  built: BuiltRegistry,
+  notes: string[],
+  problems: string[],
+): void {
   for (const copy of built.checkpoints) {
-    let regular: boolean;
-    try {
-      regular = statSync(copy.from).isFile();
-    } catch {
-      regular = false;
-    }
-    if (regular) {
+    const target = resolve(layout.root, copy.to);
+    if (!exists(target)) {
       continue;
     }
-    if (used.has(copy.to)) {
-      problems.push(
-        `checkpoint ${copy.from} is not a readable file but the registry references it`,
-      );
+    let same: boolean;
+    try {
+      same = readFileSync(target).equals(readFileSync(copy.from));
+    } catch {
+      same = false;
+    }
+    if (same) {
+      notes.push(`checkpoint ${copy.to} already holds ${copy.from}; not copied again`);
     } else {
-      notes.push(`checkpoint ${copy.from} is not a readable file; not copied`);
+      problems.push(`checkpoint ${copy.to} exists with different content from ${copy.from}`);
     }
   }
 }
 
 function copyCheckpoints(layout: Layout, built: BuiltRegistry): void {
-  mkdirSync(layout.handoffsDir, { mode: 0o700, recursive: true });
   for (const copy of built.checkpoints) {
     let data: Buffer;
     try {
@@ -305,6 +295,7 @@ function copyCheckpoints(layout: Layout, built: BuiltRegistry): void {
       }
       continue;
     }
+    mkdirSync(dirname(target), { mode: 0o700, recursive: true });
     writeDurable(target, data);
   }
 }
@@ -348,7 +339,7 @@ function prepareRegistry(
       revision: 1,
       updatedAt: (options.now?.() ?? new Date()).toISOString(),
     });
-    checkCheckpoints(built, notes, problems);
+    checkCheckpoints(layout, built, notes, problems);
     return built;
   } catch (error) {
     problems.push(`registry: ${message(error)}`);

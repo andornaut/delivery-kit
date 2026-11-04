@@ -1,7 +1,7 @@
 // Channel consumer: a stdio MCP server started by the monitor session itself.
 // It delivers each spooled entry once, records `accepted` (delivery, not handling) or
 // `ambiguous` on a failed write, and never resends.
-import { mkdirSync, readdirSync, renameSync, unlinkSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
@@ -57,6 +57,14 @@ function readReceipt(path: string): Json | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Json)
     : undefined;
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function names(directory: string, suffix: string): string[] {
@@ -142,13 +150,18 @@ function deliverLocked(write: LineWriter, busDir: string, monitor: string): bool
   return true;
 }
 
-/** Deliver every pending entry for `monitor` in one bus directory. False once output fails. */
+/**
+ * Deliver every pending entry for `monitor` in one bus directory. False once output fails. A bus
+ * without a spool directory has nothing to deliver and is left as it is: nothing is created.
+ */
 export async function deliverPending(
   write: LineWriter,
   busDir: string,
   monitor: string,
 ): Promise<boolean> {
-  mkdirSync(unblockDir(busDir), { recursive: true });
+  if (!isDirectory(spoolDir(busDir))) {
+    return true;
+  }
   const lock = await holdLockAsync(join(unblockDir(busDir), LOCK_FILE));
   try {
     return deliverLocked(write, busDir, monitor);

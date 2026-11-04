@@ -50,7 +50,9 @@ directory. `--root` comes before the command.
 - `channel`: by default it drains every game's spool (or each `--game`) for the registry's
   `monitor` conversation and requires `harness` to be `claude`. `--monitor UUID` and repeated
   absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
-  `--state-dir` excludes `--game`. `--poll-seconds` defaults to 5.
+  `--state-dir` excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory
+  and drains only spools that already exist, so it can start before `migrate`. Without
+  `--monitor`, an absent registry stops it with exit 1.
 - `monitor-snapshot` and `monitor-ack`: `--recipient` defaults to the `monitor` duty. `--recipient`
   and `--parent` take a role name, or a canonical conversation UUID registered for the active
   harness. With Claude the recipient must be the active route's monitor and every parent a route
@@ -390,10 +392,16 @@ npx delivery-kit migrate --harness claude
   `var/route.migrated.json` record the source digest. A matching marker makes a rerun a no-op; a
   changed source, or a target without a marker, stops and reports. A leftover staging directory is
   discarded.
-- **Registry:** when absent, `var/registry.json` is built from the 0.x registry files and their
-  checkpoints are copied to `var/handoffs/`. `var/registry-provenance.json` records each field's
-  source, every cross-source conflict and every record that has no version 1 field. When the 0.x
-  records name more than one active harness, `--harness` is required.
+- **Registry:** when absent, `var/registry.json` is built from the 0.x registry files.
+  `var/registry-provenance.json` records each field's source, every cross-source conflict and
+  every record that has no version 1 field. When the 0.x records name more than one active
+  harness, `--harness` is required.
+- **Checkpoints:** each checkpoint the 0.x records name is copied to
+  `var/handoffs/<scope>/<name>`, where the scope is `game-dev` or `kits/<kit>`. A named path that
+  is not a readable file is reported and skipped, and the registry omits the reference (a transfer
+  without its checkpoint is not recorded). An existing file in `var/handoffs/` is never
+  overwritten: a byte-identical one is skipped, and a differing one stops the migration before
+  its first write.
 - **Read-only:** the old trees are then made read-only. `migrate` never deletes them.
 - `--game ID` migrates only that game's bus; the monitor state, route and registry need a full run.
 

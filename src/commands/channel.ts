@@ -1,8 +1,9 @@
 // `delivery-kit channel`: the Claude channel consumer, a stdio MCP server that the monitor session
 // launches from game-dev's node_modules. By default it drains every game's spool for the
 // registry monitor. `--monitor UUID` and repeatable `--state-dir STATE/unblock` select them
-// explicitly, as the 0.9.x consumer did.
-import { mkdirSync, realpathSync, statSync, writeSync } from "node:fs";
+// explicitly, as the 0.9.x consumer did. It creates no state directory: only spools that already
+// exist are drained, so a channel started before migrate leaves var/ untouched.
+import { realpathSync, statSync, writeSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -12,7 +13,7 @@ import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { MONITOR_ROLE } from "../monitor/wake.ts";
 import { resolveConversation } from "../registry/resolve.ts";
-import { readRegistry } from "../registry/store.ts";
+import { readRegistry, RegistryMissing } from "../registry/store.ts";
 
 export interface ChannelStreams {
   readonly input: NodeJS.ReadableStream;
@@ -52,15 +53,22 @@ function busDirectories(root: string, stateDirs: string[], games: string[] | und
   if (selected.length !== new Set(selected).size) {
     throw new ChannelUsage("each --game may appear once");
   }
-  const busDirs = selected.map((game) => gameLayout(layout, game).busDir);
-  for (const busDir of busDirs) {
-    mkdirSync(busDir, { recursive: true });
-  }
-  return busDirs;
+  return selected.map((game) => gameLayout(layout, game).busDir);
 }
 
 function registryMonitor(root: string): string {
-  const registry = readRegistry(loadLayout(root));
+  const layout = loadLayout(root);
+  let registry;
+  try {
+    registry = readRegistry(layout);
+  } catch (error) {
+    if (error instanceof RegistryMissing) {
+      throw new Error(
+        `${layout.registryFile} does not exist; run delivery-kit migrate first, or pass --monitor UUID`,
+      );
+    }
+    throw error;
+  }
   if (registry.harness !== "claude") {
     throw new Error("channel requires the claude harness in var/registry.json");
   }

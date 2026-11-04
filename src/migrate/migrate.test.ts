@@ -421,7 +421,7 @@ describe("migrate", () => {
     expect(registry.roles[`${CHIBI}/art`]?.ownership).toBe("inactive");
     expect(registry.roles["game-dev"]).toMatchObject({
       activation: {
-        checkpoint: "var/handoffs/monitor-transfer.json",
+        checkpoint: "var/handoffs/game-dev/monitor-transfer.json",
         marker: "monitor-transfer:claude",
       },
       conversations: { claude: id(31), codex: id(32) },
@@ -434,7 +434,7 @@ describe("migrate", () => {
     });
     expect(registry.transfers).toEqual([
       {
-        checkpoint: "var/handoffs/kit-transfer.md",
+        checkpoint: "var/handoffs/kits/delivery-kit/kit-transfer.md",
         from: "codex",
         marker: "kit-transfer",
         phase: "active-confirmed",
@@ -442,7 +442,12 @@ describe("migrate", () => {
         to: "claude",
       },
     ]);
-    expect(readFileSync(join(layout.handoffsDir, "kit-transfer.md"), "utf8")).toBe("# transfer\n");
+    expect(
+      readFileSync(join(layout.handoffsDir, "kits/delivery-kit/kit-transfer.md"), "utf8"),
+    ).toBe("# transfer\n");
+    expect(registry.roles["delivery-kit"]?.activation?.checkpoint).toBe(
+      "var/handoffs/kits/delivery-kit/monitor-transfer.json",
+    );
 
     const provenance = JSON.parse(
       readFileSync(join(layout.varDir, "registry-provenance.json"), "utf8"),
@@ -703,6 +708,97 @@ describe("migrate route", () => {
     expect((await run(tree, "--game", ARCHIE)).status).toBe(0);
     expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
     expect(writable(tree.route)).toBe(true);
+  });
+});
+
+describe("migrate checkpoints", () => {
+  interface Libraries {
+    "game-dev": Record<string, unknown>;
+    libraries: Record<string, Record<string, unknown>>;
+  }
+
+  function editLibraries(edit: (value: Libraries) => void): void {
+    const value = JSON.parse(readFileSync(tree.libraries, "utf8")) as Libraries;
+    edit(value);
+    writeJson(tree.libraries, value);
+  }
+
+  function handoff(path: string): string {
+    return join(loadLayout(tree.fixture.root).handoffsDir, path);
+  }
+
+  it("copies two same-named checkpoints of different scopes to their own scopes", async () => {
+    const art = join(tree.fixture.base, "art-kit", ".claude", "SOURCE_HELD.json");
+    const kit = join(tree.fixture.base, "delivery-kit", ".claude", "SOURCE_HELD.json");
+    writeJson(art, { kit: "art-kit" });
+    writeJson(kit, { kit: "delivery-kit" });
+    editLibraries((value) => {
+      (value.libraries["art-kit"] as Record<string, unknown>).source_hold_checkpoint = art;
+      (value.libraries["delivery-kit"] as Record<string, unknown>).source_hold_checkpoint = kit;
+    });
+    const dry = await run(tree, "--dry-run");
+    expect(dry.err).toBe("");
+    expect(dry.status).toBe(0);
+    const result = await run(tree);
+    expect(result.err).toBe("");
+    expect(result.status).toBe(0);
+    expect(readFileSync(handoff("kits/art-kit/SOURCE_HELD.json"), "utf8")).toBe(
+      readFileSync(art, "utf8"),
+    );
+    expect(readFileSync(handoff("kits/delivery-kit/SOURCE_HELD.json"), "utf8")).toBe(
+      readFileSync(kit, "utf8"),
+    );
+    expect(existsSync(handoff("SOURCE_HELD.json"))).toBe(false);
+  });
+
+  it("reports and skips a referenced checkpoint that does not exist", async () => {
+    const missing = join(tree.fixture.base, "art-kit", ".claude", "gone", "SOURCE_HELD.json");
+    unlinkSync(join(tree.fixture.root, ".claude", "handoffs", "monitor-transfer.json"));
+    editLibraries((value) => {
+      (value.libraries["art-kit"] as Record<string, unknown>).source_hold_checkpoint = missing;
+    });
+    const dry = await run(tree, "--dry-run");
+    expect(dry.err).toBe("");
+    expect(dry.status).toBe(0);
+    expect(dry.out).toContain(`checkpoint ${missing} (kits/art-kit): not a readable file`);
+    expect(dry.out).toContain("monitor-transfer.json (game-dev): not a readable file");
+    const result = await run(tree);
+    expect(result.err).toBe("");
+    expect(result.status).toBe(0);
+    const registry = readRegistry(loadLayout(tree.fixture.root));
+    expect(registry.roles["game-dev"]?.activation).toEqual({ marker: "monitor-transfer:claude" });
+    expect(existsSync(handoff("kits/art-kit"))).toBe(false);
+    expect(existsSync(handoff("game-dev/monitor-transfer.json"))).toBe(false);
+  });
+
+  it("skips a byte-identical existing checkpoint and leaves live handoffs alone", async () => {
+    put(handoff("kits/delivery-kit/kit-transfer.md"), "# transfer\n");
+    put(handoff("kits/delivery-kit/current.md"), "# live checkpoint\n");
+    const result = await run(tree);
+    expect(result.err).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.out).toContain(
+      "checkpoint var/handoffs/kits/delivery-kit/kit-transfer.md already holds",
+    );
+    expect(readFileSync(handoff("kits/delivery-kit/current.md"), "utf8")).toBe(
+      "# live checkpoint\n",
+    );
+  });
+
+  it("stops before any write when an existing checkpoint differs", async () => {
+    put(handoff("kits/delivery-kit/kit-transfer.md"), "# someone else's\n");
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain(
+      "checkpoint var/handoffs/kits/delivery-kit/kit-transfer.md exists with different content",
+    );
+    const layout = loadLayout(tree.fixture.root);
+    expect(existsSync(layout.registryFile)).toBe(false);
+    expect(existsSync(join(layout.varDir, "games"))).toBe(false);
+    expect(readFileSync(handoff("kits/delivery-kit/kit-transfer.md"), "utf8")).toBe(
+      "# someone else's\n",
+    );
+    expect(writable(tree.archieBus)).toBe(true);
   });
 });
 

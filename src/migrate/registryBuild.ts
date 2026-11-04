@@ -3,6 +3,7 @@
 // Builds the first var/registry.json from the 0.x registry files. Sources are only read. The
 // global libraries.json is authoritative; shared-host.json and each game's session files are
 // fallbacks and cross-checks, and every disagreement is recorded rather than resolved silently.
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -17,6 +18,7 @@ import {
   type Transfer,
   type TransferPhase,
 } from "../registry/schema.ts";
+import { ID_PATTERN } from "../validate.ts";
 
 export interface Source {
   readonly path: string;
@@ -139,16 +141,32 @@ class Builder {
     return relative(this.layout.root, absolute(this.home, path)) || ".";
   }
 
-  /** Map a checkpoint to var/handoffs/<basename>. Two different files with one name stop the build. */
-  checkpoint(path: string): string {
+  /**
+   * Map a checkpoint of `scope` (`game-dev` or `kits/<kit>`) to var/handoffs/<scope>/<basename>.
+   * A path that is not a regular file is reported and skipped (undefined). Two different files
+   * with one name in one scope stop the build.
+   */
+  checkpoint(scope: string, path: string): string | undefined {
     const from = absolute(this.home, path);
-    const to = relative(this.layout.root, join(this.layout.handoffsDir, basename(from)));
-    for (const copy of this.checkpoints.values()) {
-      if (copy.to === to && copy.from !== from) {
-        throw new RegistryBuildError(`checkpoints ${copy.from} and ${from} share the name ${to}`);
-      }
+    let regular: boolean;
+    try {
+      regular = statSync(from).isFile();
+    } catch {
+      regular = false;
     }
-    this.checkpoints.set(from, { from, to });
+    if (!regular) {
+      const note = `checkpoint ${from} (${scope}): not a readable file; not copied`;
+      if (!this.skipped.includes(note)) {
+        this.skipped.push(note);
+      }
+      return undefined;
+    }
+    const to = relative(this.layout.root, join(this.layout.handoffsDir, scope, basename(from)));
+    const existing = this.checkpoints.get(to);
+    if (existing !== undefined && existing.from !== from) {
+      throw new RegistryBuildError(`checkpoints ${existing.from} and ${from} share the name ${to}`);
+    }
+    this.checkpoints.set(to, { from, to });
     return to;
   }
 
@@ -272,6 +290,11 @@ function gameRoles(
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
+/** The var/handoffs/ scope of a shared role: `game-dev` or `kits/<kit>`. */
+function sharedScope(name: string): string {
+  return name === "game-dev" ? "game-dev" : `kits/${name}`;
+}
+
 function libraryRole(
   builder: Builder,
   claims: Map<string, Harness>,
@@ -349,12 +372,13 @@ function libraryRole(
   const marker = text(at(entry, "active_owner", markerKey));
   if (marker !== undefined) {
     const checkpointPath = text(at(entry, "activation_checkpoint"));
-    record.activation =
+    const checkpoint =
       checkpointPath === undefined
-        ? { marker }
-        : { checkpoint: builder.checkpoint(checkpointPath), marker };
+        ? undefined
+        : builder.checkpoint(sharedScope(name), checkpointPath);
+    record.activation = checkpoint === undefined ? { marker } : { checkpoint, marker };
     builder.record(`${field}/activation/marker`, libraries, `${prefix}.active_owner.${markerKey}`);
-    if (checkpointPath !== undefined) {
+    if (checkpoint !== undefined) {
       builder.record(
         `${field}/activation/checkpoint`,
         libraries,
@@ -405,15 +429,26 @@ function transfer(
     );
     return undefined;
   }
-  return { checkpoint: builder.checkpoint(checkpointPath), from, marker, phase, roles: [name], to };
+  const checkpoint = builder.checkpoint(sharedScope(name), checkpointPath);
+  if (checkpoint === undefined) {
+    builder.skipped.push(`${prefix}: not recorded (its checkpoint ${checkpointPath} is missing)`);
+    return undefined;
+  }
+  return { checkpoint, from, marker, phase, roles: [name], to };
 }
 
 function collectCheckpoints(builder: Builder, libraries: Source): void {
-  const owners = [
-    ["game-dev"],
-    ...Object.keys(at(libraries.value, "libraries") ?? {}).map((kit) => ["libraries", kit]),
+  const kits = Object.keys(at(libraries.value, "libraries") ?? {});
+  for (const kit of kits.filter((name) => !ID_PATTERN.test(name))) {
+    builder.skipped.push(`libraries.${kit}: not a kit name; its checkpoints are not copied`);
+  }
+  const owners: [string, string[]][] = [
+    ["game-dev", ["game-dev"]],
+    ...kits
+      .filter((kit) => ID_PATTERN.test(kit))
+      .map((kit): [string, string[]] => [sharedScope(kit), ["libraries", kit]]),
   ];
-  for (const owner of owners) {
+  for (const [scope, owner] of owners) {
     for (const keys of [
       ["activation_checkpoint"],
       ["source_hold_checkpoint"],
@@ -422,15 +457,16 @@ function collectCheckpoints(builder: Builder, libraries: Source): void {
     ]) {
       const path = text(at(libraries.value, ...owner, ...keys));
       if (path !== undefined) {
-        builder.checkpoint(path);
+        builder.checkpoint(scope, path);
       }
     }
   }
+  // game-dev owns the bus operations transfers.
   const operations = at(libraries.value, "game-dev", "bus_operations");
   for (const operation of isObject(operations) ? Object.values(operations) : []) {
     const path = text(at(operation, "checkpoint"));
     if (path !== undefined) {
-      builder.checkpoint(path);
+      builder.checkpoint("game-dev", path);
     }
   }
 }
