@@ -6,7 +6,7 @@ Local scheduled Git delivery with one isolated gate per integrated tree, exact-c
 
 - `bin/delivery-kit`: explicit configuration/state entry point.
 - `examples/`: project configuration and a thin pinned-snapshot runner adapter.
-- `libexec/`: the Bash scheduler, batch preparation, gate, deployment, event outbox and optional Codex triage adapter.
+- `libexec/`: the Bash scheduler, batch preparation, gate, deployment, event outbox and optional Codex and Claude monitor adapters.
 - `scripts/check.sh`: isolated offline verification with fake Git, Docker, deployment, GitHub and native-protocol responses.
 - `scripts/package.sh`: deterministic release archive and source identity from a pinned commit.
 - `scripts/export.sh`: exports one committed source revision to a new local snapshot directory.
@@ -771,3 +771,83 @@ command-execution item with exit zero. The provenance is
 a successful native verification result. The library does not inspect command or
 output semantics or claim direct host verification. Missing verification never
 upgrades a reported closure; absence never establishes closure.
+
+## Claude monitor route (version 2)
+
+A Claude Code monitor uses a version 2 route selected through the existing
+`MONITOR_ROUTE_FILE`, for example
+`MONITOR_ROUTE_FILE=/absolute/path/to/host-project/.claude/monitor/route-claude.json`.
+A version 1 Codex route file stays where it is and keeps its exact resolver,
+output and delivery path. `examples/route-claude.json` shows the schema:
+
+```json
+{
+  "version": 2,
+  "harness": "claude",
+  "host_project_root": "/absolute/path/to/host-project",
+  "state": "active",
+  "monitor": {"session_id": "MONITOR_SESSION_UUID", "name": "monitor", "ownership": "active"},
+  "targets": [{"session_id": "TARGET_SESSION_UUID", "name": "Archie tech", "ownership": "active"}]
+}
+```
+
+The observer selects the resolver by `version` and `harness`; any other pair is
+unsupported and defers monitoring. Each endpoint has exactly `session_id`
+(canonical lowercase UUID), `name` (1 to 64 letters, digits, spaces, `.`, `_` or
+`-`) and `ownership` (`active` or `held`). Unknown keys, conflicting duplicates, a
+monitor that is also a target, or an active route without an active monitor and
+an active target are invalid. A held route may set the monitor `session_id` to
+`null`. Host, nonhost and held handling match version 1.
+
+### Claude adapter
+
+At each configured monitor minute, `claude_adapter.py` holds `STATE/unblock/unblock.lock`
+and reads `claude agents --json` (`CLAUDE_AGENTS_COMMAND` overrides the command;
+`CLAUDE_PYTHON` selects the interpreter, default `/usr/bin/python3`). It matches
+the monitor by `sessionId`. Interactive sessions with `status` `idle` or `busy`
+are available; a missing session, `state: blocked`, any other state or an
+unavailable listing defers. Recipient-bound decision clearance in
+`STATE/unblock/decisions/` is required as for Codex, and `WORKER_PARENT_THREADS`
+must name route members.
+
+An available monitor gets one receipt, `STATE/unblock/<monitor>-<slot>.json`, with
+request ID `uuid5(URL, "hourly-unblock:<monitor>:<slot>")`, written at `sending`
+before the brief is written atomically to `STATE/unblock/claude-spool/<requestId>.json`.
+An existing receipt is never resent: a rerun reports `deduplicated`, and a
+`sending` receipt without its spool entry becomes `ambiguous`. The adapter exits
+zero for `sending`, `deduplicated`, `unchanged` and `busy`.
+
+### Channel consumer
+
+`claude_channel.py` is a stdlib stdio MCP server started by the monitor session
+itself; the runner never starts sessions or connects to them. Add it to the
+monitor's MCP configuration (`examples/claude-channel.mcp.json`) and create or
+resume that session with channels enabled. A custom server is not on the
+approved channel allowlist, so the session needs
+`--dangerously-load-development-channels server:delivery-kit-monitor`, which shows
+a confirmation dialog at startup; `--channels server:delivery-kit-monitor` alone
+loads only allowlisted servers.
+
+After `notifications/initialized` the server polls the spool. Under the same lock
+it claims each entry for its monitor with a `sending` receipt, emits one channel
+notification, then records `accepted` with a UTC `acceptedAt`. A failed write
+records `ambiguous`; a claim left by an interrupted consumer becomes `ambiguous`
+at the next poll. Neither is resent. `accepted` means delivery into the session's
+input, not handling; the monitor records handling separately and reconciles
+ambiguous receipts itself.
+
+The notification shape is isolated in `channel_notification()`:
+method `notifications/claude/channel`, params `content` (string) and `meta`
+(string values, keys matching `[A-Za-z_][A-Za-z0-9_]*`), and the server declares
+`experimental["claude/channel"]` while negotiating a protocol version up to
+`2025-11-25`. This contract is taken from the installed Claude Code client, not
+from published reference documentation; verify it after Claude Code upgrades.
+
+### Claude limitations
+
+Claude sessions expose no queue or question-history API to the runner. The brief
+reports `queue_inventory`, `question_history` and any scoped `worker_health` as
+`unavailable` diagnostics; unavailable never means clear, empty or answered. Game
+role sessions are reached only by the Claude monitor relaying through its own
+cross-session messaging, outside the runner. Bus events are delivered only
+through the Codex path; with a version 2 route they remain in the outbox.

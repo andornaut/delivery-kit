@@ -19,6 +19,7 @@ CI_POLL_SECONDS=${CI_POLL_SECONDS:-60}
 CI_TIMEOUT_SECONDS=${CI_TIMEOUT_SECONDS:-1800}
 CI_REQUIRED_NAMES=${CI_REQUIRED_NAMES:-'AI attributions|Lint|Test'}
 CODEX_PYTHON=${CODEX_PYTHON-/usr/bin/python3}
+CLAUDE_PYTHON=${CLAUDE_PYTHON-/usr/bin/python3}
 WORKER_PARENT_THREADS=${WORKER_PARENT_THREADS-}
 worker_parents_ready() {
   local parent
@@ -139,6 +140,7 @@ export CODEX_PYTHON
 if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then export MONITOR_ROUTE_FILE; fi
 if declare -p CODEX_CONTROL_SOCKET >/dev/null 2>&1; then export CODEX_CONTROL_SOCKET; fi
 if declare -p PROCESS_HEALTH_FILE >/dev/null 2>&1; then export PROCESS_HEALTH_FILE; fi
+if declare -p CLAUDE_AGENTS_COMMAND >/dev/null 2>&1; then export CLAUDE_AGENTS_COMMAND; fi
 bus_dispatch() {
   [ -n "$REPORT_THREAD" ] || return 0
   (
@@ -205,6 +207,32 @@ PYPARENTS
   return 0
 }
 
+# A version 2 Claude route spools one brief per slot for the monitor's channel consumer.
+bus_claude_unblock() {
+  local slot=$1 result parent status=0
+  local parent_args=() parents=()
+  IFS=$' \t\n' read -r -d '' -a parents <<<"$WORKER_PARENT_THREADS" || :
+  for parent in "${parents[@]}"; do parent_args+=(--parent "$parent"); done
+  result=$("$CLAUDE_PYTHON" "$S/claude_adapter.py" unblock --route "$MONITOR_ROUTE_FILE" \
+    --project-root "$REPO" --slot "$slot" --state-dir "$BUS_DIR/unblock" "${parent_args[@]}" 2>/dev/null) || status=$?
+  if [ -n "$result" ]; then
+    printf 'bus: scheduled monitor %s: %s\n' "$slot" "$result"
+  else
+    printf 'bus: scheduled monitor %s unavailable (exit %s); no delivery claimed\n' "$slot" "$status" >&2
+  fi
+  return 0
+}
+
+bus_claude_monitor_tick() {
+  local slot=$1 route_text
+  if ! route_text=$("$CLAUDE_PYTHON" "$S/claude_adapter.py" --monitor-route "$MONITOR_ROUTE_FILE" "$REPO"); then
+    echo 'bus: monitor deferred: MONITOR_ROUTE_FILE is unavailable or invalid; its owner must verify identities and ownership' >&2
+    return 0
+  fi
+  if [ -z "$route_text" ]; then return 0; fi
+  bus_claude_unblock "$slot"
+}
+
 # Compatibility triage remains release-driven only while no route is declared.
 bus_unblock_tick() {
   declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1 && return 0
@@ -258,6 +286,12 @@ bus_monitor_due_ticks() {
   (( allowed )) || return 0
   if [[ $MONITOR_ROUTE_FILE != /* ]]; then
     echo 'bus: monitor deferred: MONITOR_ROUTE_FILE must be an absolute route path' >&2
+    return 0
+  fi
+  # Only a readable version 2 Claude route leaves the unchanged Codex path.
+  if [[ $CLAUDE_PYTHON == /* && -x $CLAUDE_PYTHON ]] \
+    && [ "$("$CLAUDE_PYTHON" "$S/claude_adapter.py" --route-harness "$MONITOR_ROUTE_FILE" 2>/dev/null)" = claude ]; then
+    bus_claude_monitor_tick "$slot"
     return 0
   fi
   codex_python_ready || return 0
