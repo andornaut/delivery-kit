@@ -330,8 +330,11 @@ export function unfinishedCi(context: BusContext): string[] {
         shas.add(name.slice(0, -".status".length));
       }
     }
-  } catch {
-    // No ci/ directory yet.
+  } catch (error) {
+    // No ci/ directory yet; any other failure is not "nothing to resume".
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
   const pushed = readTrimmed(context.paths.lastPushSha);
   if (

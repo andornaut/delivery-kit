@@ -153,13 +153,14 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
     );
     const id = record.snapshot_id as string;
     const queue = (record.queues as Record<string, { id: string }[]>)[recipient] ?? [];
+    const complete = Object.keys(record.errors as Record<string, unknown>).length === 0;
     io.out(
       `${pyJsonDumps(
         ordered([
           ["snapshot_id", id],
           ["path", snapshotPath(unblock, id)],
           ["queue_ids", queue.map((entry) => entry.id)],
-          ["complete", true],
+          ["complete", complete],
           ["harness", "claude"],
           ["history", record.history],
           ["worker_health", record.worker_health],
@@ -170,7 +171,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
         ]),
       )}\n`,
     );
-    return EXIT_OK;
+    return complete ? EXIT_OK : EXIT_INVALID;
   }
   const adapter = adapterFor(io.env, context.layout, context.game, context.registry.harness);
   const record = await locked(unblock, () =>

@@ -1,10 +1,10 @@
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
-import { deliveredDir, spoolMonitorBrief } from "../adapters/claude/spool.ts";
+import { deliveredDir, spoolDir, spoolMonitorBrief } from "../adapters/claude/spool.ts";
 import { slotRequestId } from "../adapters/shared/ids.ts";
 import { digest } from "../adapters/shared/pyjson.ts";
 import { main } from "../cli.ts";
@@ -116,6 +116,19 @@ describe("monitor-snapshot (claude)", () => {
     });
     expect(result.err).toBe("delivery-kit: recipient must be the active route monitor\n");
     expect((await run(fixture, "monitor-snapshot")).code).toBe(EXIT_USAGE);
+  });
+
+  it("reports an unreadable channel spool under the snapshot's errors", async () => {
+    const { fixture } = await delivered();
+    const spool = spoolDir(fixture.game.busDir);
+    rmSync(spool, { force: true, recursive: true });
+    writeFileSync(spool, "");
+    const result = await run(fixture, "monitor-snapshot", "--game", GAME);
+    expect(result.code).toBe(EXIT_INVALID);
+    const output = JSON.parse(result.out) as { complete: boolean; path: string };
+    expect(output.complete).toBe(false);
+    const record = JSON.parse(readFileSync(output.path, "utf8")) as { errors: unknown };
+    expect(record.errors).toEqual({ channel_pending: "channel spool unreadable (ENOTDIR)" });
   });
 
   it("accepts a registered conversation UUID and refuses an unregistered one", async () => {

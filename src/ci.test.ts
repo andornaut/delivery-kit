@@ -159,6 +159,13 @@ describe("watchCi", () => {
     ).toEqual([{ conclusion: "success", name: "Lint", status: "completed" }]);
   });
 
+  it("treats only a missing ci/ directory as nothing to resume", () => {
+    const { context } = setup();
+    expect(unfinishedCi(context)).toEqual([]);
+    writeFileSync(context.paths.ciDir, "");
+    expect(() => unfinishedCi(context)).toThrow(/ENOTDIR/);
+  });
+
   it("resumes a running watch with its original deadline", async () => {
     const { clock, context } = setup();
     mkdirSync(context.paths.ciDir, { recursive: true });

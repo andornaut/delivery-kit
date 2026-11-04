@@ -31,19 +31,23 @@ export interface SnapshotContext {
   readonly unblock: string;
 }
 
-function channelPending(busDir: string): Json[] {
+/** The spool's pending entries; an absent spool has none, any other read failure is an error. */
+function channelPending(busDir: string): { entries: Json[]; error?: string } {
   let names: string[];
   try {
     names = readdirSync(spoolDir(busDir));
-  } catch {
-    return [];
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT"
+      ? { entries: [] }
+      : { entries: [], error: `channel spool unreadable (${code ?? "error"})` };
   }
   const pick = (suffix: string, state: string): Json[] =>
     names
       .filter((name) => name.endsWith(suffix))
       .sort()
       .map((name) => ({ request_id: name.slice(0, -suffix.length), state }));
-  return [...pick(".json", "spooled"), ...pick(".claimed", "claimed")];
+  return { entries: [...pick(".json", "spooled"), ...pick(".claimed", "claimed")] };
 }
 
 /** Claude snapshot: delivered channel entries plus session-reported diagnostics. */
@@ -67,9 +71,10 @@ export function captureClaude(
     retained: retained(context.unblock, recipient, entry),
   }));
   const roles = [recipient, ...route.peers];
+  const pending = channelPending(context.busDir);
   const record: Json = {
-    channel_pending: channelPending(context.busDir),
-    errors: {},
+    channel_pending: pending.entries,
+    errors: pending.error === undefined ? {} : { channel_pending: pending.error },
     harness: "claude",
     history: Object.fromEntries(roles.map((role) => [role, { ...UNAVAILABLE }])),
     question_state: Object.fromEntries(
