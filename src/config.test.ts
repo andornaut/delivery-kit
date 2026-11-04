@@ -29,6 +29,19 @@ describe("validateProjectConfig", () => {
     expect(validateProjectConfig(projectConfig("Archie")).gate.install).toBe("npm ci");
   });
 
+  it("accepts the 0.9 meanings: no install step, no gate steps, a load limit of 0, no timezone", () => {
+    expect(
+      issuesFor((config) => {
+        Object.assign(section(config, "gate"), { install: "", steps: [] });
+        section(config, "resources").loadLimit = 0;
+        delete section(config, "schedule").timezone;
+      }),
+    ).toEqual([]);
+    expect(issuesFor((config) => (section(config, "ci").pollSeconds = 0))[0]).toMatch(
+      /^\/ci\/pollSeconds:/,
+    );
+  });
+
   it("accepts any image string and any install command", () => {
     expect(
       issuesFor((config) => {

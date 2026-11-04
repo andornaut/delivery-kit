@@ -2,6 +2,7 @@
 import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
 import { RunnerRefused, runRunner } from "../bus/runner.ts";
+import { testOptions } from "../bus/testOverrides.ts";
 import { EXIT_OK, type Handler } from "../io.ts";
 
 const USAGE = "usage: delivery-kit run --game ID";
@@ -24,7 +25,7 @@ export const run: Handler = async (io, root, args) => {
   process.once("SIGTERM", onTerm);
   try {
     await runRunner({ signal: controller.signal }, (startCi) =>
-      busContext({ startCi }, layout, game, config),
+      busContext({ ...testOptions(io.env), startCi }, layout, game, config),
     );
   } catch (error) {
     if (error instanceof RunnerRefused) {

@@ -86,6 +86,15 @@ describe("trunk-based departures", () => {
     expect(originMain(test)).toBe(head);
   });
 
+  it("does not depart a HEAD that already equals the remote main", async () => {
+    const { context, creates, events } = setup();
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(0);
+    expect(events.list.map(([kind, , message]) => [kind, message])).toEqual([
+      ["scheduled-status", expect.stringContaining("nothing new on main; no departure.")],
+    ]);
+  });
+
   it("does not depart an unchanged HEAD", async () => {
     const { context, creates, events, test } = setup();
     mergeFastForward(test, "feature");

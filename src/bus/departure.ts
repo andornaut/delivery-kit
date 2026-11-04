@@ -1,7 +1,7 @@
 // One scheduled or requested trunk-based departure, under departure.lock:
 //
 // 1. Read local refs/heads/<main> in the canonical checkout.
-// 2. Skip when that HEAD is the last pushed SHA or its gate already failed.
+// 2. Skip when that HEAD is the last pushed SHA or the remote main, or its gate already failed.
 // 3. Gate it on a detached scratch worktree at HEAD (merge commits included).
 // 4. Push exactly that SHA to the remote main, never forced; a non-fast-forward is reported.
 // 5. Watch CI for that SHA; the deployment runs when CI passes.
@@ -124,12 +124,18 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       `local ${config.git.main} is unreadable (${String(error)})`,
     );
   }
-  const skip = skipReason(paths, head);
+  let remote: string | undefined;
+  try {
+    remote = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
+  } catch (error) {
+    return blocked(context, attempt, "fetch", `the remote main is unreadable (${String(error)})`);
+  }
+  const skip = remote === head ? "remote" : skipReason(paths, head);
   if (skip !== undefined) {
     const detail =
-      skip === "pushed"
-        ? "nothing new on main; no departure."
-        : `the gate already failed for main ${head}; waiting for a fix merged on main.`;
+      skip === "gate-failed"
+        ? `the gate already failed for main ${head}; waiting for a fix merged on main.`
+        : "nothing new on main; no departure.";
     if (scheduled) {
       reportScheduledTick(context, attempt.slot, detail);
     }
@@ -157,18 +163,6 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       "load",
       `load at or above ${config.resources.loadLimit}; main retained`,
     );
-  }
-  let remote: string | undefined;
-  try {
-    remote = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
-  } catch (error) {
-    return blocked(context, attempt, "fetch", `the remote main is unreadable (${String(error)})`);
-  }
-  if (remote === head) {
-    // Already on the remote, for example pushed before a crash recorded it: record and watch.
-    recordPush(context, head);
-    context.startCi(head);
-    return 0;
   }
   if (remote !== undefined) {
     const ancestor = await context.exec({
