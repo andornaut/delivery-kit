@@ -41,8 +41,8 @@ export const run: Handler = async (io, root, args) => {
     );
   } catch (error) {
     if (error instanceof RunnerRefused) {
-      io.out(`${error.message}\n`);
-      return 1;
+      io.err(`delivery-kit: ${error.message}\n`);
+      return EXIT_INVALID;
     }
     throw error;
   } finally {

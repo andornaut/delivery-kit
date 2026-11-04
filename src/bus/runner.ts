@@ -184,17 +184,17 @@ function holdSingleton(context: BusContext, options: RunnerOptions): LockHandle[
   };
   try {
     // Opened without truncation, so a refused duplicate start leaves the holder's token intact.
-    take(context.paths.runnerLock, "bus: a runner is already active");
+    take(context.paths.runnerLock, "a runner is already active");
     const legacy = options.legacyDir ?? legacyBusDir(context.game);
     try {
       held.push(...holdLegacyLocks(legacy));
     } catch (error) {
       if (error instanceof LockBusy) {
-        throw new RunnerRefused(`bus: a 0.x runner still holds ${error.path}`);
+        throw new RunnerRefused(`a 0.x runner still holds ${error.path}`);
       }
       throw error;
     }
-    take(context.paths.loopLock, "bus: another scheduled loop is already running");
+    take(context.paths.loopLock, "another scheduled loop is already running");
   } catch (error) {
     for (const lock of held) {
       lock.release();

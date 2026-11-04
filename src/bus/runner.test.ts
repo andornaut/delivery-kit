@@ -64,7 +64,7 @@ describe("runRunner", () => {
     try {
       await expect(
         runRunner({ cliPath: cliFile(test), signal: new AbortController().signal }, () => context),
-      ).rejects.toThrow(new RunnerRefused("bus: a runner is already active"));
+      ).rejects.toThrow(new RunnerRefused("a runner is already active"));
       expect(readFileSync(context.paths.runnerLock, "utf8")).toBe("holder-token\n");
     } finally {
       release();
@@ -82,7 +82,7 @@ describe("runRunner", () => {
           { cliPath: cliFile(test), legacyDir: legacy, signal: new AbortController().signal },
           () => testContext(test),
         ),
-      ).rejects.toThrow("bus: a 0.x runner still holds");
+      ).rejects.toThrow("a 0.x runner still holds");
     } finally {
       release();
     }

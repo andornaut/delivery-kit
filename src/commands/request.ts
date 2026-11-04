@@ -30,7 +30,7 @@ export const request: Handler = async (io, root, args) => {
     io.out(await captureRequest(store, id));
     return EXIT_OK;
   } catch (error) {
-    io.err(`${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_INVALID;
   }
 };
