@@ -50,6 +50,10 @@ function start(ws: Workspace, speed = 30): Resident {
   return startRunner(ws);
 }
 
+// These cases observe delivery through the 0.9 legacy `codex queue` sink.
+const CODEX_QUEUE_REMOVED =
+  "the codex queue sink is removed; events go only to the registry recipient through the active adapter";
+
 suite("events", () => {
   const workspace = workspaces();
 
@@ -63,7 +67,9 @@ suite("events", () => {
     expect(ws.calls("codex")).toEqual([]);
   });
 
-  contract(
+  retiredOnNode(
+    CODEX_QUEUE_REMOVED,
+    "codex-queue",
     "failed delivery stays durable, retries in order and delivers each event once",
     async () => {
       const ws = workspace();
@@ -94,7 +100,9 @@ suite("events", () => {
     },
   );
 
-  contract(
+  retiredOnNode(
+    CODEX_QUEUE_REMOVED,
+    "codex-queue",
     "completion is reported once, only after CI success and deployment success",
     async () => {
       const ws = workspace();
@@ -136,7 +144,9 @@ suite("events", () => {
     },
   );
 
-  contract(
+  retiredOnNode(
+    CODEX_QUEUE_REMOVED,
+    "codex-queue",
     "quiet pending and retry kinds are never delivered and stale queued noise is suppressed",
     async () => {
       const ws = workspace();
