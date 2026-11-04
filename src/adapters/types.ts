@@ -24,6 +24,7 @@ export interface Availability {
 export interface InventoryEntry {
   readonly queueId: string;
   readonly payload: string;
+  readonly clientUserMessageId?: string;
 }
 
 export interface Inventory {
