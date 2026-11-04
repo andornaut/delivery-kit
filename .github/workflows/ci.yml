@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
       - name: Prepare verification image
         run: docker pull node:24.21.0
       - name: Isolated offline checks and package validation
-        run: bash scripts/check.sh
+        run: npm run verify
       - name: Build the npm release asset offline
-        run: bash scripts/pack.sh "$GITHUB_SHA" "$RUNNER_TEMP/release"
+        run: npm run pack -- "$GITHUB_SHA" "$RUNNER_TEMP/release"
