@@ -1,4 +1,4 @@
-// Question state through `monitor-snapshot` (from tests/test_question_state.py). No route is
+// Question state through `monitor-snapshot`. No route is
 // declared, so the recipient is in scope; native history comes from the fake control socket and
 // owner attestations from STATE/unblock/decisions/<recipient>.json.
 import { expect } from "vitest";

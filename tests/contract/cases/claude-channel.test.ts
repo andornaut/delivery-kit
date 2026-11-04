@@ -1,5 +1,4 @@
-// The stdio MCP channel consumer (from tests/test_claude_adapter.py ChannelTests and
-// MultiProjectChannelTests). The consumer is driven as a Claude Code client drives it.
+// The stdio MCP channel consumer. The consumer is driven as a Claude Code client drives it.
 import { renameSync } from "node:fs";
 import { expect } from "vitest";
 

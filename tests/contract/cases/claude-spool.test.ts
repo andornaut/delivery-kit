@@ -1,5 +1,5 @@
-// Claude monitor slots: receipts, spool bounds and guards (from tests/test_claude_adapter.py
-// SpoolTests and BusWiringTests). Slots are dispatched by the resident observer.
+// Claude monitor slots: receipts, spool bounds and guards. Slots are dispatched by the resident
+// observer.
 import { renameSync, rmSync } from "node:fs";
 import { expect } from "vitest";
 

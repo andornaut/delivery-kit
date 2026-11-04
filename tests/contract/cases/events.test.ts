@@ -1,5 +1,5 @@
 // Bus event outbox durability, retry, deduplication and completion truth through the runner
-// and the legacy Codex queue sink (from tests/verify-events.py).
+// and the legacy Codex queue sink.
 
 import { expect } from "vitest";
 

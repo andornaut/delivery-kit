@@ -1,5 +1,5 @@
 // Scheduled departures through the resident runner with fake Git, Docker, GitHub and Wrangler
-// (from tests/verify-scripts.py). Every case drives `run` under the virtual clock.
+//. Every case drives `run` under the virtual clock.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { expect } from "vitest";
 
@@ -74,7 +74,7 @@ async function departOnce(ws: Workspace, done: () => boolean, speed = 30): Promi
 suite("departure", () => {
   const workspace = workspaces();
 
-  contract("a documentation-only batch skips deployment; a mixed batch deploys", async () => {
+  contract("a push whose every changed path matches skipPattern skips deployment; a mixed push deploys", async () => {
     for (const [files, deployed] of [
       ["README.md\nart/inventory.md", false],
       ["README.md\npublic/art/images/example.png", true],
@@ -263,7 +263,7 @@ suite("departure", () => {
   );
 
   contract(
-    "a high-load departure retains its queue and persists attempt and blocked events",
+    "a high-load departure keeps main unpushed and persists attempt and blocked events",
     async () => {
       const ws = workspace();
       bus(ws);

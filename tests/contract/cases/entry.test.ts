@@ -1,4 +1,4 @@
-// CLI entry, usage and offline configuration validation (from tests/test_entry.py).
+// CLI entry, usage and offline configuration validation.
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";

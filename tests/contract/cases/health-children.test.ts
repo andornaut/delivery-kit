@@ -1,5 +1,5 @@
 // Scoped child (worker) health through `monitor-snapshot --recipient R --parent ...`
-// (from tests/test_child_health.py). R is outside the active route, so only the child
+//. R is outside the active route, so only the child
 // collector makes scoped native calls; parents must be active route members.
 import { expect } from "vitest";
 

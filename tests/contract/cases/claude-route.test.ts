@@ -1,5 +1,5 @@
-// Version 2 Claude route resolution and harness selection (from tests/test_claude_adapter.py
-// RouteTests). Observed through the scheduled brief and monitor-snapshot.
+// Version 2 Claude route resolution and harness selection. Observed through the scheduled brief and
+// monitor-snapshot.
 import { expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";

@@ -22,7 +22,7 @@ export interface ThreadModel {
   items: (params: Params) => Page;
 }
 
-/** The 0.9 Python fixture's two-page queue holding a private payload. */
+/** A two-page queue holding a private payload. */
 export function twoPageQueue(params: Params): Page {
   if (params.cursor) {
     return {

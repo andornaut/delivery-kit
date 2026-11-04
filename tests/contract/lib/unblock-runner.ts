@@ -64,7 +64,7 @@ export function decide(ws: Workspace, recipient: string, record: unknown): void 
   );
 }
 
-/** Real UTC now, for owner attestations that the 0.9 collectors check against wall time. */
+/** Real UTC now, for owner attestations that the collectors check against wall time. */
 export function confirmedAt(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
 }

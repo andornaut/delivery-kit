@@ -1,4 +1,4 @@
-// Runner identity and the read-only status report (from tests/test_status.py).
+// Runner identity and the read-only status report.
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
@@ -95,7 +95,7 @@ suite("status", () => {
     const ws = workspace();
     quiet(ws);
     await (await started(ws)).stop();
-    // A pre-0.9 runner opened the lock with truncation and wrote no token.
+    // A holder that opens the lock with truncation writes no token.
     const holder = await hold(ws.path("runner.lock"), "5>");
     try {
       const result = await report(ws);

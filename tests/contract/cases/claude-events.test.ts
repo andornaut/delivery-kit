@@ -1,5 +1,4 @@
-// Bus events through the Claude channel spool and the Claude report sink (from
-// tests/test_claude_adapter.py EventTests and ReportSinkTests). Events come from a real
+// Bus events through the Claude channel spool and the Claude report sink. Events come from a real
 // scheduled departure blocked by load; the notifier flushes the outbox.
 import { rmSync } from "node:fs";
 import { expect } from "vitest";

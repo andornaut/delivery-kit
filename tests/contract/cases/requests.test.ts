@@ -1,4 +1,4 @@
-// User-authorized one-off requests with real scratch Git (from tests/test_requests.py). A request
+// User-authorized one-off requests with real scratch Git. A request
 // departs the local main HEAD it captured.
 
 import { expect } from "vitest";

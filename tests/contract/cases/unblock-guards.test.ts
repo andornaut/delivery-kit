@@ -1,5 +1,5 @@
 // Recipient decision guards and native question-history proof before any scheduled reminder
-// (from tests/test_unblock.py).
+//.
 import { rmSync } from "node:fs";
 
 import { afterEach, expect } from "vitest";

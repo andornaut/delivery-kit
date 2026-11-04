@@ -1,6 +1,6 @@
-// Scripted native responses and CLI drivers for the question and child health
-// collectors. Each Native class mirrors the Python mock of the original unit test and is
-// served through the fake control socket, so the collectors run inside the real CLI.
+// Scripted native responses and CLI drivers for the question and child health collectors. Each
+// Native class is served through the fake control socket, so the collectors run inside the real
+// CLI.
 import { readFileSync } from "node:fs";
 import { afterEach } from "vitest";
 
@@ -155,7 +155,7 @@ export function iso(epochSeconds: number, zulu = false): string {
 
 export const clone = <T>(value: T): T => structuredClone(value);
 
-// Question state (tests/test_question_state.py Native).
+// Question state.
 export const Q_PRIVATE = "PRIVATE_UNRELATED_BODY";
 
 export function question(item = "question", turn = "current", questions?: unknown): Json {
@@ -239,7 +239,7 @@ export function questionCalls(socket: CodexSocket): RpcCall[] {
   return first < 0 ? [] : socket.calls.slice(first + 1);
 }
 
-// Child health (tests/test_child_health.py Native and ScopedNative).
+// Child health.
 export const CH_PRIVATE = "PRIVATE_NATIVE_BODY";
 export const T = "00000000-0000-0000-0000-000000000003";
 export const CHILD_METHODS = ["thread/list", "thread/read", "thread/turns/list"];

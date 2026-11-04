@@ -1,5 +1,5 @@
 // Scheduled reminder briefs for owner-attested questions and failed worker turns
-// (from tests/test_unblock.py).
+//.
 import { afterEach, expect } from "vitest";
 
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";

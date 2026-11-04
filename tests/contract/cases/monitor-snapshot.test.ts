@@ -1,5 +1,5 @@
 // Public monitor-snapshot inventory, history, question and worker metadata
-// (from tests/test_monitor.py). Assertions read stdout and STATE/unblock/snapshots/<id>.json.
+//. Assertions read stdout and STATE/unblock/snapshots/<id>.json.
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { afterEach, expect } from "vitest";
@@ -23,7 +23,7 @@ const CHILD = "00000000-0000-0000-0000-000000000003";
 const FAILED_TURN = "00000000-0000-0000-0000-000000000004";
 const OTHER = "00000000-0000-0000-0000-000000000099";
 
-/** Python worker_failures(): exact lineage, parent action and latest failed typed turn. */
+/** Worker failures: exact lineage, parent action and latest failed typed turn. */
 export function workerFailures(snap: Json): string[][] {
   const out = new Set<string>();
   for (const [parent, value] of Object.entries((snap.worker_health ?? {}) as Json)) {

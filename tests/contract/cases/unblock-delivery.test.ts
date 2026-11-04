@@ -1,4 +1,4 @@
-// Scheduled Codex monitor reminder delivery through the resident runner (from tests/test_unblock.py).
+// Scheduled Codex monitor reminder delivery through the resident runner.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";

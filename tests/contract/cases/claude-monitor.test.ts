@@ -1,5 +1,5 @@
-// Claude monitor inventory and acknowledgements over delivered channel entries (from
-// tests/test_claude_adapter.py ClaudeMonitorTests). One brief is dispatched and delivered first.
+// Claude monitor inventory and acknowledgements over delivered channel entries. One brief is
+// dispatched and delivered first.
 import { rmSync, writeFileSync } from "node:fs";
 import { expect } from "vitest";
 

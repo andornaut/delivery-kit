@@ -1,5 +1,5 @@
-// Native Codex interpreter selection and capability reporting (from tests/test_native_python.py).
-// The fake control socket stands in for the native server.
+// The routed Codex observer slot and its transport failures. The fake control socket stands in
+// for the native server.
 import { readFileSync } from "node:fs";
 import { afterAll, expect } from "vitest";
 
@@ -45,7 +45,7 @@ async function nativeGame(ws: Workspace, sockets: CodexSocket[]): Promise<CodexS
   return socket;
 }
 
-suite("native interpreter", () => {
+suite("codex observer", () => {
   const workspace = workspaces();
   const sockets: CodexSocket[] = [];
   afterAll(async () => {

@@ -1,5 +1,5 @@
 // Scheduled monitor health across distinct slots, driven through the resident runner's
-// observer (from tests/test_monitor.py). Each slot is one wall-clock minute.
+// observer. Each slot is one wall-clock minute.
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";

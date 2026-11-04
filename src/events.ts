@@ -196,7 +196,7 @@ function pendingEvents(directory: string): BusEvent[] | null {
     try {
       events.push(readEvent(join(directory, name)));
     } catch {
-      // One unreadable event stops the whole flush, as before.
+      // One unreadable event stops the whole flush.
       return null;
     }
   }

@@ -70,7 +70,7 @@ export interface NativeOptions {
   targets?: string[];
 }
 
-/** Queue, history and target state behind the fake socket, mirroring the Python NativeFixture. */
+/** Queue, history and target state behind the fake socket. */
 export class Native {
   readonly socket: CodexSocket;
   queues: Record<string, Entry[]> = { [TECH]: [entry("one"), entry("two")], [ART]: [entry("art")] };

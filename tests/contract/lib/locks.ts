@@ -6,8 +6,8 @@ export interface Holder {
 }
 
 /**
- * Hold `path` with flock on fd 5. `opener` is the Bash redirection: `5<>` keeps the file
- * contents (0.9 runner), `5>` truncates it (pre-0.9 runner), `5>>` appends.
+ * Hold `path` with flock on fd 5. `opener` is the shell redirection: `5<>` keeps the file
+ * contents, `5>` truncates it, `5>>` appends.
  */
 export async function hold(path: string, opener: "5<>" | "5>" | "5>>" = "5<>"): Promise<Holder> {
   const child = spawn(

@@ -1,5 +1,5 @@
 // Bus events for the confirmed Codex monitor, flushed by the resident runner's observer
-// (from tests/test_event_native.py).
+//.
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";

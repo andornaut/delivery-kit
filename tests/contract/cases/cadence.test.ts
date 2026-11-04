@@ -1,6 +1,6 @@
-// Wall-clock monitor cadence on a Codex route, independent of release ticks (from
-// tests/test_monitor_cadence.py). The native boundary is the fake control socket: one
-// connection per dispatched slot, queue reads name the route members, thread/list names parents.
+// Wall-clock monitor cadence on a Codex route, independent of release ticks. The native boundary is
+// the fake control socket: one connection per dispatched slot, queue reads name the route members,
+// thread/list names parents.
 
 import { afterAll, expect } from "vitest";
 

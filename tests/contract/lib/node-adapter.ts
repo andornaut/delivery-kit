@@ -80,8 +80,8 @@ function env(ws: Workspace): Record<string, string> {
 }
 
 /**
- * 1.0 requires a report recipient that resolves through the registry. A case that names none
- * (0.9 then reports nowhere) gets the default "monitor" role with a fixture conversation.
+ * A report recipient must resolve through the registry. A case that names none gets the default
+ * "monitor" role with a fixture conversation.
  */
 function ensureRecipient(ws: Workspace): void {
   if (ws.config.reports?.recipient !== undefined) return;
@@ -144,10 +144,10 @@ interface Endpoint {
 }
 
 /**
- * Translate the case's 0.x route into the 1.0 role-name route (schema 1): IDs become registered
- * role names, the host project becomes a game key, and held targets are dropped (0.9 never
- * delivers to them). A 0.x route that 0.9 rejects becomes one 1.0 rejects too: an unknown
- * shape, a noncanonical ID or a conflicting duplicate is written so the schema check fails.
+ * Translate the case's ID-based route fixture into the role-name route (schema 1): IDs become
+ * registered role names, the host project becomes a game key, and held targets are dropped. An
+ * invalid fixture (an unknown shape, a noncanonical ID or a conflicting duplicate) is written so
+ * the schema check fails.
  */
 function applyRoute(ws: Workspace): void {
   const legacy = ws.legacyRoute as Record<string, unknown> | string | undefined;
@@ -209,7 +209,7 @@ function applyRoute(ws: Workspace): void {
   const active = ids.filter((id) => ownerships.get(id) === "active") as string[];
   let monitorRole: string;
   if (monitorId === undefined) {
-    // A held 0.9 route may name no monitor; 1.0 still names a monitor role, without a conversation.
+    // A held fixture route may name no monitor; the route still names a monitor role.
     monitorRole = "monitor";
     const registry = ws.registry();
     if (!registry.roles.monitor) {
