@@ -98,7 +98,8 @@ suite("departure", () => {
     const deploy = deploys(ws)[0]!.args;
     expect(deploy).toEqual(expect.arrayContaining(["--tag", "--message", "--no-bundle"]));
     ws.updateControl((c) => (c.wrangler = {}));
-    await runner.until(() => !ws.exists("deploy-pending"), 30_000);
+    // The pointer moves before the success event is written; wait for both.
+    await runner.until(() => !ws.exists("deploy-pending") && kinds(ws).includes("deploy_success"), 30_000);
     await runner.stop();
     expect(ws.read("last-deploy.sha").trim()).toBe(SHA);
     expect(ws.exists("deploy", `${SHA}.completed`)).toBe(true);
