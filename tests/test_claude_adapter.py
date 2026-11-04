@@ -371,6 +371,181 @@ class EventTests(Fixture, unittest.TestCase):
         self.assertEqual(len(output.getvalue().splitlines()), 1)
 
 
+class ReportSinkTests(Fixture, unittest.TestCase):
+    def flush(self, extra, route=None):
+        bin_dir = self.root / 'bin'
+        bin_dir.mkdir(exist_ok=True)
+        codex = bin_dir / 'codex'
+        codex.write_text('#!/bin/sh\necho "$@" >> "$CODEX_CALLS"\n')
+        codex.chmod(0o755)
+        environment = {key: value for key, value in os.environ.items() if key not in ('REPORT_THREAD', 'REPORT_SESSION_ID')}
+        environment |= self.env('idle') | {'MONITOR_ROUTE_FILE': str(route or self.route_path), 'CLAUDE_PYTHON': sys.executable,
+                                           'CODEX_CALLS': str(self.root / 'codex-calls'),
+                                           'PATH': str(bin_dir) + os.pathsep + os.environ['PATH']} | extra
+        event = [sys.executable, str(ROOT / 'libexec/event.py'), str(self.root)]
+        if not list((self.root / 'events').glob('*.json')):
+            subprocess.run(event + ['emit', 'attempt', 'sink-key', 'sink message'], env=environment, check=True)
+        subprocess.run(event + ['flush'], env=environment, check=True, timeout=20)
+        return json.loads(next((self.root / 'events').glob('*.json')).read_text())
+
+    def test_report_session_id_spools_to_the_claude_monitor(self):
+        self.assertFalse(self.flush({'REPORT_SESSION_ID': MONITOR, 'REPORT_THREAD': ARCHIE})['sent'])
+        self.assertEqual(len(self.spooled()), 1)
+        self.assertFalse((self.root / 'codex-calls').exists())
+        self.assertEqual(json.loads(self.spooled()[0].read_text())['recipient'], MONITOR)
+
+    def test_report_session_id_never_falls_back_to_codex(self):
+        v1 = self.root / 'route.json'
+        v1.write_text(json.dumps({'version': 1, 'harness': 'codex', 'host_project_root': str(self.root), 'state': 'active',
+                                  'monitor_thread_id': ARCHIE, 'targets': [{'thread_id': CHIBI, 'ownership': 'active'}]}))
+        for route, session in ((v1, MONITOR), (self.route_path, ARCHIE)):
+            with self.subTest(route=route.name, session=session):
+                self.assertFalse(self.flush({'REPORT_SESSION_ID': session}, route)['sent'])
+        self.assertFalse((self.root / 'codex-calls').exists())
+        self.assertEqual(self.spooled(), [])
+
+    def test_configuration_requires_canonical_report_session_id(self):
+        conf = self.root / 'project.conf'
+        base = ''.join(f'{key}={value}\n' for key, value in (
+            ('REPO', self.root), ('MAIN', 'main'), ('REMOTE', ''), ('GH_SLUG', ''), ('DEPARTURES', '00'),
+            ('DEPLOY_SKIP_RE', ''), ('NODE_IMAGE', 'unused'), ('CONTAINER_PREFIX', 'fixture'), ('CPUS', '4'),
+            ('MAX_WORKERS', '4'), ('LOAD_LIMIT', '24'), ('GATE_INSTALL', ''), ('GATE_STEPS', '()'), ('DEPLOY_MODE', 'none')))
+        bus = self.root / 'bus'
+        bus.mkdir()
+        for value, expected in ((MONITOR, 0), ('AAAAAAAA-0000-4000-8000-000000000001', 2), ('not-a-uuid', 2)):
+            conf.write_text(base + f'REPORT_SESSION_ID={value}\n')
+            result = subprocess.run(['bash', str(ROOT / 'bin/delivery-kit'), '--config', str(conf), '--state-dir', str(bus),
+                                     'check-config'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, expected, (value, result.stderr))
+
+
+class MultiProjectChannelTests(Fixture, unittest.TestCase):
+    def test_one_consumer_drains_each_project_state_once(self):
+        other_root = self.root / 'other'
+        other = other_root / 'unblock'
+        (other / 'decisions').mkdir(parents=True)
+        (other / 'decisions' / f'{MONITOR}.json').write_text(json.dumps({'thread_id': MONITOR, 'state': 'clear'}))
+        self.write_route(self.route | {'host_project_root': str(other_root)})
+        self.assertEqual(claude_adapter.run(self.env('idle'), other, str(self.route_path), str(other_root), SLOT)['status'], 'sending')
+        self.write_route(self.route)
+        self.run_slot()
+        output = io.StringIO()
+        for _ in range(2):
+            for state_dir in (self.state, other):
+                claude_channel.deliver_pending(output, state_dir, MONITOR)
+        self.assertEqual(len(output.getvalue().splitlines()), 2)
+        for state_dir in (self.state, other):
+            self.assertEqual(json.loads((state_dir / f'{MONITOR}-{SLOT}.json').read_text())['status'], 'accepted')
+            self.assertEqual(len(list((state_dir / claude_adapter.DELIVERED).glob('*.json'))), 1)
+        command = [sys.executable, str(ROOT / 'libexec/claude_channel.py'), '--monitor', MONITOR,
+                   '--state-dir', str(self.state), '--state-dir', str(self.state)]
+        self.assertEqual(subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True).returncode, 2)
+
+
+class ClaudeMonitorTests(Fixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        import claude_monitor
+        self.subject = claude_monitor
+        self.run_slot()
+        claude_channel.deliver_pending(io.StringIO(), self.state, MONITOR)
+        self.request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'hourly-unblock:{MONITOR}:{SLOT}'))
+
+    def snapshot(self):
+        return self.subject.capture(self.env('idle'), self.state, str(self.route_path), MONITOR)
+
+    def ack(self, snapshot, disposition, reason=None, ids=None):
+        return self.subject.acknowledge(self.state, str(self.route_path), MONITOR, snapshot['snapshot_id'],
+                                        ids or [self.request_id], disposition, reason)
+
+    def test_snapshot_lists_delivered_entries_and_reports_native_state_unavailable(self):
+        snapshot = self.snapshot()
+        self.assertEqual([entry['id'] for entry in snapshot['queues'][MONITOR]], [self.request_id])
+        self.assertEqual(snapshot['queues'][MONITOR][0]['receipt_status'], 'accepted')
+        self.assertEqual({row['status'] for row in snapshot['history'].values()}, {'unavailable'})
+        self.assertEqual({key: value['status'] for key, value in snapshot['question_state'].items()},
+                         {MONITOR: 'unavailable', ARCHIE: 'unavailable'})
+        self.assertEqual(snapshot['question_state'][MONITOR]['session_status'], 'idle')
+        self.assertEqual(snapshot['question_state'][ARCHIE]['session_status'], 'idle')
+        self.assertEqual(snapshot['target_queues'][ARCHIE]['status'], 'unavailable')
+        self.assertEqual(claude_adapter.session_status([{'sessionId': ARCHIE, 'status': 'waiting'}], ARCHIE), 'waiting')
+        self.assertEqual(claude_adapter.session_status([{'sessionId': ARCHIE, 'status': 'Bad value'}], ARCHIE), 'unknown')
+        self.assertEqual(claude_adapter.session_status([], ARCHIE), 'missing')
+        missing = self.subject.capture(self.env('fail'), self.state, str(self.route_path), MONITOR)
+        self.assertEqual(missing['question_state'][MONITOR]['session_status'], 'unavailable')
+        with self.assertRaises(ValueError):
+            self.subject.capture(self.env('idle'), self.state, str(self.route_path), ARCHIE)
+
+    def test_handled_ack_removes_exact_entry_once(self):
+        snapshot = self.snapshot()
+        self.assertEqual(self.ack(snapshot, 'handled'), [{'queue_id': self.request_id, 'state': 'deleted'}])
+        self.assertEqual(self.ack(snapshot, 'handled'), [{'queue_id': self.request_id, 'state': 'deleted'}])
+        self.assertEqual(self.snapshot()['queues'][MONITOR], [])
+        with self.assertRaises(ValueError):
+            self.ack(snapshot, 'superseded')
+        with self.assertRaises(ValueError):
+            self.ack(snapshot, 'handled', ids=['unknown'])
+
+    def test_changed_payload_and_retention_require_exact_unchanged_entry(self):
+        snapshot = self.snapshot()
+        path = self.state / claude_adapter.DELIVERED / f'{self.request_id}.json'
+        original = path.read_text()
+        path.write_text(json.dumps(dict(json.loads(original), text='changed')))
+        self.assertEqual(self.ack(snapshot, 'handled')[0]['state'], 'changed_payload')
+        self.assertTrue(path.exists())
+        path.write_text(original)
+        fresh = self.snapshot()
+        with self.assertRaises(ValueError):
+            self.ack(fresh, 'retained', reason=' ')
+        self.assertEqual(self.ack(fresh, 'retained', reason='waiting on Archie tech')[0]['state'], 'retained')
+        self.assertTrue(self.snapshot()['queues'][MONITOR][0]['retained'])
+        path.write_text(json.dumps(dict(json.loads(original), text='changed again')))
+        self.assertFalse(self.snapshot()['queues'][MONITOR][0]['retained'])
+
+    def test_interrupted_removal_is_ambiguous_then_confirmed_absent(self):
+        snapshot = self.snapshot()
+        from monitor import digest, persist
+        operation = self.state / 'acks' / (digest([MONITOR, snapshot['snapshot_id'], self.request_id]) + '.json')
+        persist(operation, {'recipient': MONITOR, 'snapshot_id': snapshot['snapshot_id'], 'queue_id': self.request_id,
+                            'harness': 'claude', 'disposition': 'handled', 'attempt': 1, 'state': 'deleting',
+                            'attempts': [{'attempt': 1, 'state': 'deleting'}], 'history': []})
+        (self.state / claude_adapter.DELIVERED / f'{self.request_id}.json').unlink()
+        self.assertEqual(self.ack(snapshot, 'handled')[0]['state'], 'confirmed_absent')
+        record = json.loads(operation.read_text())
+        self.assertEqual(record['attempts'][-1]['state'], 'ambiguous')
+        self.assertIn({'attempt': 1, 'state': 'ambiguous'}, record['history'])
+
+    def test_public_cli_selects_claude_monitor_for_a_version_2_route(self):
+        conf = self.root / 'project.conf'
+        conf.write_text(f"""REPO={self.root}
+MAIN=main
+REMOTE=
+GH_SLUG=
+DEPARTURES=00
+DEPLOY_SKIP_RE=
+NODE_IMAGE=unused
+CONTAINER_PREFIX=fixture
+CPUS=4
+MAX_WORKERS=4
+LOAD_LIMIT=24
+GATE_INSTALL=
+GATE_STEPS=()
+DEPLOY_MODE=none
+CLAUDE_PYTHON={sys.executable}
+CLAUDE_AGENTS_COMMAND="{sys.executable} {self.fake} idle"
+MONITOR_ROUTE_FILE={self.route_path}
+""")
+        base = ['bash', str(ROOT / 'bin/delivery-kit'), '--config', str(conf), '--state-dir', str(self.root)]
+        result = subprocess.run(base + ['monitor-snapshot', '--recipient', MONITOR], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        snapshot = json.loads(result.stdout)
+        self.assertEqual((snapshot['harness'], snapshot['queue_ids']), ('claude', [self.request_id]))
+        self.assertNotIn('CODEX', result.stdout + result.stderr)
+        result = subprocess.run(base + ['monitor-ack', '--recipient', MONITOR, '--snapshot', snapshot['snapshot_id'],
+                                        '--queue-id', self.request_id, '--disposition', 'handled'], capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout), {'results': [{'queue_id': self.request_id, 'state': 'deleted'}]})
+
+
 class BusWiringTests(Fixture, unittest.TestCase):
     def shell(self, route, slot, mechanism=ROOT / 'libexec'):
         conf = self.root / 'project.conf'

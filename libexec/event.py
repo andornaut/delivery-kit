@@ -14,7 +14,9 @@ from event_native import monitor_recipient
 root = pathlib.Path(sys.argv[1]) / 'events'
 root.mkdir(exist_ok=True)
 project = os.environ.get('REPORT_PROJECT', 'Game')
-thread = os.environ.get('REPORT_THREAD', '')
+# REPORT_SESSION_ID selects the Claude channel sink exclusively; REPORT_THREAD keeps the Codex sinks.
+claude_sink = bool(os.environ.get('REPORT_SESSION_ID'))
+thread = os.environ.get('REPORT_SESSION_ID') or os.environ.get('REPORT_THREAD', '')
 QUIET_KINDS = {'ci_pending', 'ci_running', 'deploy_pending', 'deploy_retry'}
 
 
@@ -75,7 +77,7 @@ elif sys.argv[2] == 'flush' and thread:
                 continue
             try:
                 route = monitor_recipient(os.environ, thread)
-                if route is None:
+                if route is None or (claude_sink and route != 'claude'):
                     break
                 if route == 'claude':
                     interpreter = os.environ.get('CLAUDE_PYTHON', '/usr/bin/python3')

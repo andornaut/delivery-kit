@@ -10,7 +10,7 @@ import re
 import select
 import sys
 
-from claude_adapter import RECEIPT_KEYS, SPOOL, canonical_session
+from claude_adapter import DELIVERED, RECEIPT_KEYS, SPOOL, canonical_session
 from unblock import persist
 
 SERVER_NAME = 'delivery-kit-monitor'
@@ -104,7 +104,12 @@ def deliver_pending(output, state_dir, monitor):
                 mark(receipt, 'ambiguous', reason='channel write failed; do not resend')
                 persist(path, receipt)
                 return False
-            mark(receipt, 'accepted', acceptedAt=now())
+            accepted_at = now()
+            # The delivered copy is the monitor's acknowledgeable inventory (monitor-ack).
+            (state_dir / DELIVERED).mkdir(mode=0o700, exist_ok=True)
+            persist(state_dir / DELIVERED / claimed.with_suffix('.json').name,
+                    dict(entry, acceptedAt=accepted_at))
+            mark(receipt, 'accepted', acceptedAt=accepted_at)
             persist(path, receipt)
             claimed.unlink()
     return True
@@ -126,7 +131,7 @@ def handle(output, message):
     return False
 
 
-def serve(source, output, state_dir, monitor, poll_seconds):
+def serve(source, output, state_dirs, monitor, poll_seconds):
     initialized = False
     buffer = b''
     while True:
@@ -147,18 +152,20 @@ def serve(source, output, state_dir, monitor, poll_seconds):
                         initialized = handle(output, message) or initialized
                     except (OSError, ValueError):
                         return 1
-        if initialized and not deliver_pending(output, state_dir, monitor):
+        if initialized and not all(deliver_pending(output, state_dir, monitor) for state_dir in state_dirs):
             return 1
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--state-dir', type=Path, required=True)
+    parser.add_argument('--state-dir', type=Path, action='append', required=True,
+                        help='a project STATE/unblock directory; repeat once per project')
     parser.add_argument('--monitor', type=canonical_session, required=True)
     parser.add_argument('--poll-seconds', type=float, default=5.0)
     args = parser.parse_args()
-    if not args.state_dir.is_absolute() or not args.state_dir.is_dir():
-        parser.error('--state-dir must name the existing absolute STATE/unblock directory')
+    if (any(not path.is_absolute() or not path.is_dir() for path in args.state_dir)
+            or len({path.resolve() for path in args.state_dir}) != len(args.state_dir)):
+        parser.error('each --state-dir must name a distinct existing absolute STATE/unblock directory')
     return serve(sys.stdin.buffer, sys.stdout, args.state_dir, args.monitor, args.poll_seconds)
 
 

@@ -877,14 +877,82 @@ Without a running consumer, nothing is deleted and nothing expires. Growth is
 bounded instead: a new monitor slot is `deferred` (`channel consumer has not claimed
 an earlier monitor brief`) while an unclaimed monitor brief for that monitor
 remains, and the ordered outbox keeps at most one pending event entry. The spool
-therefore holds at most one monitor brief and one event. Accepted entries are
-removed on delivery. A `.claimed` file remains only after an interrupted delivery,
+therefore holds at most one monitor brief and one event. Accepted entries leave
+the spool and move to the monitor's acknowledgeable inventory in
+`STATE/unblock/claude-delivered/`, which shrinks only through `monitor-ack`. A
+`.claimed` file remains only after an interrupted delivery,
 beside its `ambiguous` receipt, as evidence for manual reconciliation.
 
-### Claude limitations
+### Claude limitations (0.8.0)
 
 Claude sessions expose no queue or question-history API to the runner. The brief
 reports `queue_inventory`, `question_history` and any scoped `worker_health` as
 `unavailable` diagnostics; unavailable never means clear, empty or answered. Game
 role sessions are reached only by the Claude monitor relaying through its own
 cross-session messaging, outside the runner.
+
+## 0.9.0 all-Claude operation
+
+This minor release is additive: additive public features increment the minor
+version. Codex routes, sinks, snapshots and acknowledgements are unchanged, and
+existing configurations need no edits.
+
+### Configuration
+
+An all-Claude project sets these values; the Codex values below may remain
+during migration but are not read on Claude paths:
+
+```bash
+MONITOR_ROUTE_FILE=/absolute/path/to/host-project/.claude/monitor/route-claude.json
+MONITOR_MINUTES='20 50'
+REPORT_PROJECT=Project
+REPORT_SESSION_ID=MONITOR_SESSION_UUID   # the route monitor session_id
+CLAUDE_PYTHON=/usr/bin/python3           # optional; default shown
+# CLAUDE_AGENTS_COMMAND='claude agents --json'  # optional override
+```
+
+`REPORT_SESSION_ID` selects the Claude report sink exclusively and must be a
+canonical UUID. Events go through the channel spool only when it equals the
+monitor `session_id` of an active version 2 route; otherwise they wait in the
+outbox. It never falls back to `REPORT_THREAD`, Codex native input or the Codex
+queue. With it unset, `REPORT_THREAD` keeps its existing Codex behaviour.
+
+Every project sharing a route uses the same file. Only the host project
+(`host_project_root`) dispatches monitor slots; every project spools its own
+events. One consumer serves all of them: repeat `--state-dir` once per project
+`STATE/unblock` directory. Each state directory needs its own recipient
+clearance marker in `STATE/unblock/decisions/MONITOR_SESSION_UUID.json`, written
+by the monitor.
+
+### Inventory and acknowledgements
+
+With a version 2 route, `monitor-snapshot` and `monitor-ack` use
+`claude_monitor.py`. The recipient must be the active route monitor. Snapshot
+`queue_ids` are the request IDs of delivered channel entries in
+`STATE/unblock/claude-delivered/`, each with its receipt status. Native history,
+role question state, target queues, worker health and process health are
+reported `unavailable`. Each role's `session_status` (the reported `status` or `state`
+token such as `idle`, `busy`, `waiting` or `blocked`, else `missing`, `unknown`
+or `unavailable`) is session-reported state from
+`claude agents --json`; it is a diagnostic, never question clearance. The
+scheduled brief carries the same per-target diagnostics.
+
+`monitor-ack` requires an explicit `handled`, `superseded` or `retained`
+disposition (`retained` with a nonempty reason) for IDs present in the named
+snapshot. Each invocation re-reads the delivered entry: a changed payload is
+`changed_payload`, an absent entry is `confirmed_absent`, `retained` records an
+active retention bound to the exact payload, and `handled` or `superseded`
+removes the entry (`deleted`). Operations are durable in `STATE/unblock/acks/`; an
+interrupted removal is recorded `ambiguous` before reconciliation, and a
+disposition cannot change.
+
+### Codex fields to retire
+
+Keep these working until one clean all-Claude cycle has completed on every
+project (scheduled briefs and events accepted, acknowledgements recorded, no
+ambiguous receipts). Removing them is a later incompatible release:
+
+- `REPORT_THREAD` (replaced by `REPORT_SESSION_ID`)
+- `SESSION_MAP_FILE` and `SHARED_TARGETS_FILE` (replaced by version 2 route targets)
+- `CODEX_PYTHON`, `CODEX_CONTROL_SOCKET` and `CODEX_SHARED_ROLES`
+- version 1 route files, retained until then for rollback

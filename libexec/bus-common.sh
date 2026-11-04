@@ -39,6 +39,11 @@ worker_parents_ready() {
   done
 }
 worker_parents_ready || exit 2
+REPORT_SESSION_ID=${REPORT_SESSION_ID-}
+if [[ -n $REPORT_SESSION_ID && ! $REPORT_SESSION_ID =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+  echo 'bus: REPORT_SESSION_ID must be a canonical Claude session UUID' >&2
+  exit 2
+fi
 if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then
   MONITOR_MINUTES=${MONITOR_MINUTES-'20 50'}
 fi
@@ -136,20 +141,21 @@ start_ci() {
 # Event writes are local and small; delivery never inherits bus locks or output pipes.
 export REPORT_PROJECT=${REPORT_PROJECT:-${GH_SLUG:-Game}}
 export REPORT_THREAD=${REPORT_THREAD:-}
+export REPORT_SESSION_ID
 export CODEX_PYTHON CLAUDE_PYTHON
 if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then export MONITOR_ROUTE_FILE; fi
 if declare -p CODEX_CONTROL_SOCKET >/dev/null 2>&1; then export CODEX_CONTROL_SOCKET; fi
 if declare -p PROCESS_HEALTH_FILE >/dev/null 2>&1; then export PROCESS_HEALTH_FILE; fi
 if declare -p CLAUDE_AGENTS_COMMAND >/dev/null 2>&1; then export CLAUDE_AGENTS_COMMAND; fi
 bus_dispatch() {
-  [ -n "$REPORT_THREAD" ] || return 0
+  [ -n "$REPORT_THREAD$REPORT_SESSION_ID" ] || return 0
   (
     exec 5>&- 6>&- 7>&- 8>&- 9>&-
     nohup python3 "$S/event.py" "$BUS_DIR" flush </dev/null >/dev/null 2>&1 &
   )
 }
 bus_event() {
-  [ -n "$REPORT_THREAD" ] || return 0
+  [ -n "$REPORT_THREAD$REPORT_SESSION_ID" ] || return 0
   python3 "$S/event.py" "$BUS_DIR" emit "$@" || {
     echo 'bus: event persistence failed; operator review required' >&2; return 0;
   }
@@ -205,6 +211,13 @@ PYPARENTS
     printf 'bus: scheduled monitor %s unavailable (exit %s); no delivery claimed\n' "$slot" "$status" >&2
   fi
   return 0
+}
+
+# Only a readable version 2 Claude route leaves the unchanged Codex paths.
+claude_route_selected() {
+  declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1 && [[ $MONITOR_ROUTE_FILE == /* ]] \
+    && [[ $CLAUDE_PYTHON == /* && -x $CLAUDE_PYTHON ]] \
+    && [ "$("$CLAUDE_PYTHON" "$S/claude_adapter.py" --route-harness "$MONITOR_ROUTE_FILE" 2>/dev/null)" = claude ]
 }
 
 # A version 2 Claude route spools one brief per slot for the monitor's channel consumer.
@@ -288,9 +301,7 @@ bus_monitor_due_ticks() {
     echo 'bus: monitor deferred: MONITOR_ROUTE_FILE must be an absolute route path' >&2
     return 0
   fi
-  # Only a readable version 2 Claude route leaves the unchanged Codex path.
-  if [[ $CLAUDE_PYTHON == /* && -x $CLAUDE_PYTHON ]] \
-    && [ "$("$CLAUDE_PYTHON" "$S/claude_adapter.py" --route-harness "$MONITOR_ROUTE_FILE" 2>/dev/null)" = claude ]; then
+  if claude_route_selected; then
     bus_claude_monitor_tick "$slot"
     return 0
   fi

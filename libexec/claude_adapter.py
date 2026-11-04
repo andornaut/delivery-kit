@@ -15,7 +15,9 @@ import uuid
 
 DEFAULT_AGENTS_COMMAND = 'claude agents --json'
 SPOOL = 'claude-spool'
+DELIVERED = 'claude-delivered'
 NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._ -]{0,63}')
+REPORTED = re.compile(r'[a-z_]{1,32}')
 RECEIPT_KEYS = {'monitor': 'requestId', 'event': 'clientUserMessageId'}
 
 
@@ -32,11 +34,36 @@ def pending_entries(spool, kind, recipient):
     return found
 
 
-def monitor_ready(environment, session_id):
+def listing_or_none(environment):
     try:
-        return monitor_availability(agents_listing(environment), session_id)
+        return agents_listing(environment)
     except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def monitor_ready(environment, session_id, entries=None):
+    entries = listing_or_none(environment) if entries is None else entries
+    if entries is None:
         return None, 'claude agents listing unavailable'
+    return monitor_availability(entries, session_id)
+
+
+def session_status(entries, session_id):
+    """Session-reported state only; it never proves question or queue state."""
+    if entries is None:
+        return 'unavailable'
+    reported = [entry.get('state') or entry.get('status') for entry in entries if entry.get('sessionId') == session_id]
+    if not reported:
+        return 'missing'
+    if 'blocked' in reported:
+        return 'blocked'
+    return reported[0] if isinstance(reported[0], str) and REPORTED.fullmatch(reported[0]) else 'unknown'
+
+
+def role_diagnostics(entries, session_ids):
+    return [{'kind': 'question_state', 'session_id': session_id, 'status': 'unavailable',
+             'reason_code': 'claude_session_reported_only', 'session_status': session_status(entries, session_id)}
+            for session_id in session_ids]
 
 
 def canonical_session(value):
@@ -177,7 +204,8 @@ def run(environment, state_dir, route_file, project_root, slot, parents=()):
             state.update(status='deferred', reason='channel consumer has not claimed an earlier monitor brief')
             persist(path, state)
             return state
-        availability, reason = monitor_ready(environment, coordinator)
+        entries = listing_or_none(environment)
+        availability, reason = monitor_ready(environment, coordinator, entries)
         if availability is None:
             state.update(status='deferred', reason=reason)
             persist(path, state)
@@ -186,6 +214,7 @@ def run(environment, state_dir, route_file, project_root, slot, parents=()):
                        for kind in ('queue_inventory', 'question_history')]
         diagnostics += [{'kind': 'worker_health', 'parent': parent, 'status': 'unavailable',
                          'reason_code': 'claude_no_native_api'} for parent in parents]
+        diagnostics += role_diagnostics(entries, route['peers'])
         entry = {'kind': 'monitor', 'requestId': request_id, 'recipient': coordinator, 'slot': slot,
                  'receipt': f'{state_dir.name}/{path.name}', 'text': brief(slot, route, diagnostics)}
         # The receipt precedes the spool entry so an interruption between them is never resent.

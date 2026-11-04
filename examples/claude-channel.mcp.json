@@ -4,8 +4,9 @@
       "command": "/usr/bin/python3",
       "args": [
         "/path/to/snapshot/libexec/claude_channel.py",
-        "--state-dir", "/absolute/path/to/project/bus-state/unblock",
-        "--monitor", "00000000-0000-4000-8000-000000000001"
+        "--monitor", "00000000-0000-4000-8000-000000000001",
+        "--state-dir", "/absolute/path/to/host-project/bus-state/unblock",
+        "--state-dir", "/absolute/path/to/other-project/bus-state/unblock"
       ]
     }
   }

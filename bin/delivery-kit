@@ -47,9 +47,13 @@ case "$command" in
   monitor-snapshot|monitor-ack)
     S=$ROOT/libexec
     . "$S/bus-common.sh"
-    codex_python_ready || exit 2
     action=snapshot
     [[ $command == monitor-ack ]] && action=ack
+    if claude_route_selected; then
+      exec "$CLAUDE_PYTHON" "$S/claude_monitor.py" "$action" --state-dir "$BUS_DIR/unblock" \
+        --route "$MONITOR_ROUTE_FILE" "$@"
+    fi
+    codex_python_ready || exit 2
     exec "$CODEX_PYTHON" "$S/monitor.py" "$action" --state-dir "$BUS_DIR/unblock" \
       --control-socket "${CODEX_CONTROL_SOCKET:-}" "$@"
     ;;
