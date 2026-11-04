@@ -26,11 +26,12 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "tsc",
+    "contract": "node scripts/contract.ts",
     "format": "prettier --write . && eslint --fix .",
     "lint": "prettier --check . && eslint --max-warnings 0 . && markdownlint-cli2",
-    "pack": "bash scripts/pack.sh",
+    "pack": "node scripts/pack.ts",
     "test": "vitest run",
-    "verify": "bash scripts/check.sh"
+    "verify": "node scripts/check.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -260,17 +260,27 @@ acknowledgement, no `ambiguous` receipts) and no process references an old path.
 
 ## Development
 
-- `npm run verify` (`scripts/check.sh`): types, lint, build and tests in offline containers
-  running as uid 19001 in the checkout's group (`--group-add`). The checkout is bound read-only and
-  copied into container scratch, and the npm cache is a named volume populated by one networked
-  step. A changed source fingerprint, ownership change or
-  any file owned by uid or gid 19001 discards the result.
-- `npm run check`: TypeScript only.
-- `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` (`scripts/pack.sh`): builds the release
-  asset from an exact commit, offline in the same container rules, and writes
-  `delivery-kit-VERSION.tgz`, `SOURCE_COMMIT` and `SHA256SUMS`.
+The maintainer scripts are TypeScript under `scripts/`, run directly by Node with only `node:`
+builtins: they run on the host as the invoking user and drive `docker`. `scripts/check.sh`,
+`scripts/pack.sh` and `tests/contract/run.sh` are thin wrappers that `exec` them.
 
-Containers start only below a one-minute load of 24 and use at most four CPUs.
+- `npm run verify` (`scripts/check.ts`): types, lint, build, unit tests and the contract cases in
+  offline containers running as uid 19001 in the checkout's group (`--group-add`). The checkout
+  and its file list are bound read-only and copied into container scratch. The npm cache and the
+  verified v0.9.1 parity release live in a named volume that one networked step populates. The
+  v0.9.1 contract cases gate; the 1.0 bundle's cases gate once `DELIVERY_KIT_CONTRACT_NODE=1` is
+  set and are reported only until then. A changed source fingerprint, ownership or mode change,
+  or any file owned by uid or gid 19001 discards the result.
+- `npm run contract -- [--lock] [VITEST_ARGS]` (`scripts/contract.ts`): the contract harness alone,
+  with the source streamed in as a tar and both implementations gating. `--lock` regenerates
+  `tests/contract/package-lock.json`.
+- `npm run check`: TypeScript only.
+- `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` (`scripts/pack.ts`): builds the release
+  asset from an exact commit, offline under the same container rules with the cache volume
+  read-only, and writes `delivery-kit-VERSION.tgz`, `SOURCE_COMMIT` and `SHA256SUMS`.
+
+`.nvmrc` pins the Node version for both the host scripts and the container image. Containers
+start only below a one-minute load of 24 and use at most four CPUs.
 
 ## Compatibility and releases
 
