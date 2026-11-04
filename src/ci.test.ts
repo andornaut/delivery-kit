@@ -47,8 +47,8 @@ describe("watchCi", () => {
     expect(status()).toBe("success\n");
     expect(readFileSync(join(context.paths.ciDir, `${SHA}.json`), "utf8")).toBe(
       [
-        '[{"conclusion": "success", "name": "Lint", "status": "completed"},',
-        '{"conclusion": "skipped", "name": "Test", "status": "completed"}]\n',
+        '[{"conclusion": "success", "name": "Lint", "required": true, "status": "completed"},',
+        '{"conclusion": "skipped", "name": "Test", "required": true, "status": "completed"}]\n',
       ].join(" "),
     );
     expect(events.list.map(([kind]) => kind)).toEqual(["ci_pending", "ci_success"]);
@@ -76,7 +76,9 @@ describe("watchCi", () => {
     expect(await watchCi(context, SHA, { checks: () => Promise.resolve(runs) })).toBe("success");
     expect(status()).toBe("success\n");
     const recorded = readFileSync(join(context.paths.ciDir, `${SHA}.json`), "utf8");
-    expect(recorded).toContain('"name": "Workers Builds: archies-dog-walks"');
+    expect(recorded).toContain(
+      '"name": "Workers Builds: archies-dog-walks", "required": false, "status": "completed"',
+    );
     expect(recorded).toContain('"name": "Preview"');
   });
 
@@ -92,6 +94,30 @@ describe("watchCi", () => {
       decide([lint, run(2, "Test", "completed", "failure"), run(3, "Test", "queued", null)]),
     ).toBe(undefined);
     expect(decide([run(9, "Other", "completed", "failure")])).toBeUndefined();
+  });
+
+  it("names a required check that never ran and one still running when the watch times out", async () => {
+    const { context, events } = setup();
+    const runs = [run(1, "Lint", "in_progress", null), run(2, "Other", "completed", "success")];
+    expect(await watchCi(context, SHA, { checks: () => Promise.resolve(runs) })).toBe("timeout");
+    const message = events.list.at(-1)?.[2] ?? "";
+    expect(message).toContain("required checks with no run: Test");
+    expect(message).toContain("still incomplete: Lint (in_progress)");
+    const log = readFileSync(join(context.paths.ciDir, `${SHA}.log`), "utf8");
+    expect(log).toContain("required checks with no run: Test; still incomplete: Lint (in_progress)");
+  });
+
+  it("names the failed required runs and not the passing or unrequired ones", async () => {
+    const { context, events } = setup();
+    const runs = [
+      run(1, "Lint", "completed", "timed_out"),
+      run(2, "Test", "completed", "success"),
+      run(3, "Other", "completed", "failure"),
+    ];
+    expect(await watchCi(context, SHA, { checks: () => Promise.resolve(runs) })).toBe("failure");
+    const message = events.list.at(-1)?.[2] ?? "";
+    expect(message).toContain("required runs failed: Lint (timed_out);");
+    expect(message).not.toContain("Other");
   });
 
   it("states the recovery of a timed-out watch", async () => {

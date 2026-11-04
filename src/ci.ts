@@ -97,16 +97,55 @@ export function latestRuns(
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-function encodeRows(rows: ReturnType<typeof latestRuns>): string {
+/** The ci/<sha>.json rows: every latest run, each marked whether it is a required check. */
+function encodeRows(rows: ReturnType<typeof latestRuns>, required: ReadonlySet<string>): string {
   return `[${rows
     .map((row) =>
       [
         `{"conclusion": ${JSON.stringify(row.conclusion)},`,
         `"name": ${JSON.stringify(row.name)},`,
+        `"required": ${String(required.has(row.name))},`,
         `"status": ${JSON.stringify(row.status)}}`,
       ].join(" "),
     )
     .join(", ")}]`;
+}
+
+/** The required checks by state: no run yet, a run not completed, a completed run that failed. */
+export interface RequiredState {
+  readonly missing: readonly string[];
+  readonly incomplete: readonly string[];
+  readonly failed: readonly string[];
+}
+
+export function requiredState(
+  rows: ReturnType<typeof latestRuns>,
+  required: ReadonlySet<string>,
+): RequiredState {
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  const missing: string[] = [];
+  const incomplete: string[] = [];
+  const failed: string[] = [];
+  for (const name of [...required].sort()) {
+    const row = byName.get(name);
+    if (row === undefined) {
+      missing.push(name);
+    } else if (row.status !== "completed") {
+      incomplete.push(`${name} (${row.status})`);
+    } else if (!PASSING.has(row.conclusion ?? "")) {
+      failed.push(`${name} (${row.conclusion ?? "no conclusion"})`);
+    }
+  }
+  return { failed, incomplete, missing };
+}
+
+function listed(names: readonly string[]): string {
+  return names.length === 0 ? "none" : names.join(", ");
+}
+
+/** The timeout diagnosis: which required checks never ran and which are still running. */
+export function timeoutDetail(state: RequiredState): string {
+  return `required checks with no run: ${listed(state.missing)}; still incomplete: ${listed(state.incomplete)}`;
 }
 
 /**
@@ -130,6 +169,11 @@ export function requiredDecision(
   return [...required].every((name) => passed.has(name)) ? "success" : undefined;
 }
 
+interface PollResult {
+  readonly result: CiResult;
+  readonly state: RequiredState;
+}
+
 export interface WatchOptions {
   readonly checks?: CheckSource;
   readonly signal?: AbortSignal;
@@ -151,41 +195,43 @@ async function poll(
   sha: string,
   options: WatchOptions,
   deadline: number,
-): Promise<CiResult> {
+): Promise<PollResult> {
   const { ci } = context.config;
   const logFile = join(context.paths.ciDir, `${sha}.log`);
   const say = (line: string): void => appendFileSync(logFile, `${isoNow(context)} ${line}\n`);
   const required = new Set(ci.requiredNames);
   let last: string | undefined;
+  let state = requiredState([], required);
   while (context.clock.now() < deadline && options.signal?.aborted !== true) {
     try {
       // Sequential polling is the mechanism.
       // eslint-disable-next-line no-await-in-loop
       const rows = latestRuns(await (options.checks ?? githubChecks)(context, sha));
-      const encoded = encodeRows(rows);
+      const encoded = encodeRows(rows, required);
       if (encoded !== last) {
         say(encoded);
         writeDurable(join(context.paths.ciDir, `${sha}.json`), `${encoded}\n`, { mode: 0o644 });
         last = encoded;
       }
+      state = requiredState(rows, required);
       const decision = requiredDecision(rows, required);
       if (decision !== undefined) {
-        return decision;
+        return { result: decision, state };
       }
     } catch (error) {
       say(`${error instanceof Error ? `${error.name} ${error.message}` : String(error)}`);
       if (error instanceof GitHubAuthError) {
-        return "unauthenticated";
+        return { result: "unauthenticated", state };
       }
     }
     // eslint-disable-next-line no-await-in-loop
     await context.clock.sleep(ci.pollSeconds, options.signal);
   }
   if (options.signal?.aborted === true) {
-    return "busy";
+    return { result: "busy", state };
   }
-  say("CI monitor timed out; inspect the commit checks before declaring completion");
-  return "timeout";
+  say(`CI monitor timed out; ${timeoutDetail(state)}`);
+  return { result: "timeout", state };
 }
 
 /**
@@ -213,7 +259,7 @@ export async function watchCi(
       sha,
       `CI monitoring pending/running for pushed ${sha}; completion not confirmed; deployment tracked separately.`,
     );
-    const result = await poll(context, sha, options, deadlineFor(context, sha));
+    const { result, state } = await poll(context, sha, options, deadlineFor(context, sha));
     if (result === "busy") {
       return result;
     }
@@ -229,8 +275,9 @@ export async function watchCi(
         "ci_failure",
         sha,
         [
-          `CI FAILED for pushed ${sha}; monitor stopped on red; deployment state tracked separately;`,
-          "inspect checks and merge a fix on main. No automatic CI rerun.",
+          `CI FAILED for pushed ${sha}: required runs failed: ${listed(state.failed)}; monitor`,
+          "stopped on red; deployment state tracked separately; inspect checks and merge a fix on",
+          "main. No automatic CI rerun.",
         ].join(" "),
       );
     } else if (result === "unauthenticated") {
@@ -249,8 +296,9 @@ export async function watchCi(
         sha,
         [
           `CI status unknown for pushed ${sha}: the watch timed out after`,
-          `${String(context.config.ci.timeoutSeconds)} seconds; completion not confirmed. The`,
-          "next departure resumes the watch, and a pending deployment runs once CI passes.",
+          `${String(context.config.ci.timeoutSeconds)} seconds (${timeoutDetail(state)});`,
+          "completion not confirmed. The next departure resumes the watch, and a pending",
+          "deployment runs once CI passes.",
         ].join(" "),
       );
     }
