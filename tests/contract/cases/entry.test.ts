@@ -34,7 +34,7 @@ function tree(root: string): string[] {
 function minimal(ws: Workspace): void {
   ws.config = {
     schema: 1,
-    git: { main: "main", remote: "", github: "" },
+    git: { main: "main", remote: "origin", github: "" },
     schedule: { departures: ["00"] },
     gate: { image: "unused", install: "", steps: [] },
     resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },

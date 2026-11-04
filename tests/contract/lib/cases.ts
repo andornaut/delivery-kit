@@ -8,6 +8,8 @@
 // - hardened: 1.0 durability ordering (decision 5). Node asserts the hardened behaviour;
 //   Bash asserts the 0.9 legacy behaviour where it differs.
 // - retired: commands removed in 1.0 (decision 6); kept as a skipped, named group.
+// - ciDisabled, localRemote: 0.9 modes 1.0 removes (CI is required; a remote is required).
+//   Bash parity only, retired for Node with the decision as the reason.
 // - queueModel: the 0.9 bus queue, admission, batch and cherry-pick model. 1.0 is trunk-based
 //   (local main HEAD departs), so these run on Bash only and are retired for Node.
 import { afterEach, describe, it } from "vitest";
@@ -41,11 +43,34 @@ export function bashOnly(name: string, body: () => Promise<void> | void): void {
   it.skipIf(impl.name !== "bash")(`[bash-only] ${name}`, body);
 }
 
-export function queueModel(name: string, body: () => Promise<void> | void): void {
+/**
+ * A 0.9 contract a documented 1.0 decision removes: Bash parity only, reported on Node as
+ * `[retired: <reason>]`. `tag` names the case on Bash.
+ */
+export function retiredOnNode(
+  reason: string,
+  tag: string,
+  name: string,
+  body: () => Promise<void> | void,
+): void {
   it.skipIf(impl.name !== "bash")(
-    `${impl.name === "bash" ? "[queue-model]" : "[retired: trunk-based delivery]"} ${name}`,
+    `${impl.name === "bash" ? `[${tag}]` : `[retired: ${reason}]`} ${name}`,
     body,
   );
+}
+
+export function queueModel(name: string, body: () => Promise<void> | void): void {
+  retiredOnNode("trunk-based delivery", "queue-model", name, body);
+}
+
+/** 0.9 disables the CI watch with an empty GitHub slug; 1.0 requires CI. */
+export function ciDisabled(name: string, body: () => Promise<void> | void): void {
+  retiredOnNode("1.0 requires CI", "ci-disabled", name, body);
+}
+
+/** 0.9 integrates into local main without a remote; trunk-based 1.0 always pushes to one. */
+export function localRemote(name: string, body: () => Promise<void> | void): void {
+  retiredOnNode("trunk-based delivery requires a remote", "local-remote", name, body);
 }
 
 /** Assertions on queue, batch or branch artefacts inside an otherwise shared case. */

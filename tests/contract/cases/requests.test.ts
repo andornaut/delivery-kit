@@ -24,11 +24,12 @@ interface RequestRecord {
 
 function setup(
   ws: Workspace,
-  options: { reports?: boolean; mode?: "none" | "wrangler" } = {},
+  options: { reports?: boolean; mode?: "none" | "wrangler"; remote?: string } = {},
 ): void {
   ws.config = {
     schema: 1,
-    git: { main: "main", remote: "", github: "" },
+    // 0.9 integrates these real repositories locally: no remote.
+    git: { main: "main", remote: options.remote ?? "", github: "" },
     schedule: { departures: ["00"], timezone: "UTC" },
     gate: { image: "unused", install: "", steps: [{ name: "test", run: "true" }] },
     resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
@@ -275,7 +276,8 @@ suite("requests", () => {
     "request IDs must be 1 to 64 safe characters and an invalid ID departs nothing",
     async () => {
       const ws = workspace({ realGit: true });
-      setup(ws);
+      // Validation needs no integration; a remote keeps the configuration valid for 1.0.
+      setup(ws, { remote: "origin" });
       for (const id of ["../escape", "-option", "a".repeat(65), ""]) {
         const result = await capture(ws, id);
         expect(result.code, id).not.toBe(0);
@@ -289,7 +291,8 @@ suite("requests", () => {
     "the public request command captures only and refuses invalid or empty requests",
     async () => {
       const ws = workspace({ realGit: true });
-      setup(ws);
+      // Validation needs no integration; a remote keeps the configuration valid for 1.0.
+      setup(ws, { remote: "origin" });
       for (const id of ["../escape", "-option", "a".repeat(65)]) {
         expect((await capture(ws, id)).code).not.toBe(0);
       }

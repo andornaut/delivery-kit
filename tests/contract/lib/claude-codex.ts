@@ -57,7 +57,7 @@ export async function codexGame(
   queues: Record<string, unknown[]> = {},
 ): Promise<CodexSocket> {
   codexRoles(ws);
-  ws.config.git = { main: "main", remote: "", github: "" };
+  ws.config.git = { main: "main", remote: "origin", github: "" };
   ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
   ws.config.reports = { project: "Fixture", recipient: "tech", scheduledTicks: true };

@@ -40,7 +40,7 @@ async function nativeGame(ws: Workspace, sockets: CodexSocket[]): Promise<CodexS
       monitor: { conversations: { codex: MONITOR } },
     },
   });
-  ws.config.git = { main: "main", remote: "", github: "" };
+  ws.config.git = { main: "main", remote: "origin", github: "" };
   ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
   ws.config.reports = { project: "Fixture", recipient: "tech" };

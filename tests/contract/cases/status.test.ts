@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, queueModel, suite, workspaces } from "../lib/cases.ts";
+import { ciDisabled, contract, queueModel, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at } from "../lib/time.ts";
 import { BASH_ROOT } from "../lib/parity.ts";
@@ -32,7 +32,7 @@ function kitVersion(): string {
 function quiet(ws: Workspace, ci = false): void {
   ws.config = {
     schema: 1,
-    git: { main: "main", remote: ci ? "origin" : "", github: ci ? "owner/game" : "" },
+    git: { main: "main", remote: "origin", github: ci ? "owner/game" : "" },
     schedule: { departures: ["00"], timezone: "UTC" },
     gate: { image: "unused", install: "", steps: [] },
     resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
@@ -140,17 +140,25 @@ suite("status", () => {
         "request_started:one",
       ]);
       expect(result.drained).toBe(false);
-      // Without CI configured, an unrecorded pushed SHA is not a blocker.
-      quiet(ws, false);
-      expect((await report(ws)).idle_blockers).toEqual([
-        "active_departure",
-        "deploy_retry_pending",
-        `ci_watch:${"b".repeat(40)}`,
-        "request_started:one",
-      ]);
     } finally {
       await loop.release();
     }
+  });
+
+  ciDisabled("without CI configured, an unrecorded pushed SHA is not a blocker", async () => {
+    const ws = workspace();
+    quiet(ws, false);
+    ws.write("active-departure", "1793556000\n");
+    ws.write("deploy-pending", "a".repeat(40) + "\n");
+    ws.write(`ci/${"b".repeat(40)}.status`, "running\n");
+    ws.write("last-push.sha", "d".repeat(40) + "\n");
+    ws.write("requests/one.json", JSON.stringify({ state: "started" }));
+    expect((await report(ws)).idle_blockers).toEqual([
+      "active_departure",
+      "deploy_retry_pending",
+      `ci_watch:${"b".repeat(40)}`,
+      "request_started:one",
+    ]);
   });
 
   contract("unsent events and a running flush are not drained", async () => {
