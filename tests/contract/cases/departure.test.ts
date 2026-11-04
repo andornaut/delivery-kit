@@ -74,29 +74,32 @@ async function departOnce(ws: Workspace, done: () => boolean, speed = 30): Promi
 suite("departure", () => {
   const workspace = workspaces();
 
-  contract("a push whose every changed path matches skipPattern skips deployment; a mixed push deploys", async () => {
-    for (const [files, deployed] of [
-      ["README.md\nart/inventory.md", false],
-      ["README.md\npublic/art/images/example.png", true],
-    ] as const) {
-      const ws = workspace();
-      bus(ws);
-      ws.updateControl((c) => (c.git = { files }));
-      impl.offer(ws, ["bus/docs"]);
-      const runner = await departOnce(
-        ws,
-        () =>
-          kinds(ws).includes("push") &&
-          kinds(ws).includes(deployed ? "deploy_success" : "deploy_skipped"),
-      );
-      await runner.stop();
-      expect(deploys(ws).length > 0, files).toBe(deployed);
-      if (!deployed) {
-        expect(ws.read("last-deploy-skipped.sha").trim()).toBe(SHA);
-        expect(kinds(ws)).toContain("deploy_skipped");
+  contract(
+    "a push whose every changed path matches skipPattern skips deployment; a mixed push deploys",
+    async () => {
+      for (const [files, deployed] of [
+        ["README.md\nart/inventory.md", false],
+        ["README.md\npublic/art/images/example.png", true],
+      ] as const) {
+        const ws = workspace();
+        bus(ws);
+        ws.updateControl((c) => (c.git = { files }));
+        impl.offer(ws, ["bus/docs"]);
+        const runner = await departOnce(
+          ws,
+          () =>
+            kinds(ws).includes("push") &&
+            kinds(ws).includes(deployed ? "deploy_success" : "deploy_skipped"),
+        );
+        await runner.stop();
+        expect(deploys(ws).length > 0, files).toBe(deployed);
+        if (!deployed) {
+          expect(ws.read("last-deploy-skipped.sha").trim()).toBe(SHA);
+          expect(kinds(ws)).toContain("deploy_skipped");
+        }
       }
-    }
-  });
+    },
+  );
 
   contract(
     "a failed deployment retains the gated build and retries without another gate or push",
@@ -184,19 +187,22 @@ suite("departure", () => {
     },
   );
 
-  contract("a deployment that cannot be staged after a push is reported as deploy_failure", async () => {
-    const ws = workspace();
-    bus(ws);
-    // A directory where the deploy-pending record belongs makes staging fail after the push.
-    mkdirSync(ws.path("deploy-pending"));
-    impl.offer(ws, ["bus/feature"]);
-    const runner = await departOnce(ws, () => kinds(ws).includes("deploy_failure"));
-    await runner.stop();
-    expect(pushes(ws)).toBe(1);
-    const failure = ws.events().find((event) => event.kind === "deploy_failure");
-    expect(String(failure?.message)).toContain(`Deployment of pushed ${SHA} could not be staged`);
-    expect(deploys(ws)).toEqual([]);
-  });
+  contract(
+    "a deployment that cannot be staged after a push is reported as deploy_failure",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      // A directory where the deploy-pending record belongs makes staging fail after the push.
+      mkdirSync(ws.path("deploy-pending"));
+      impl.offer(ws, ["bus/feature"]);
+      const runner = await departOnce(ws, () => kinds(ws).includes("deploy_failure"));
+      await runner.stop();
+      expect(pushes(ws)).toBe(1);
+      const failure = ws.events().find((event) => event.kind === "deploy_failure");
+      expect(String(failure?.message)).toContain(`Deployment of pushed ${SHA} could not be staged`);
+      expect(deploys(ws)).toEqual([]);
+    },
+  );
 
   contract("deployment mode none leaves deployment state and commands untouched", async () => {
     const ws = workspace();

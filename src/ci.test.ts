@@ -104,7 +104,9 @@ describe("watchCi", () => {
     expect(message).toContain("required checks with no run: Test");
     expect(message).toContain("still incomplete: Lint (in_progress)");
     const log = readFileSync(join(context.paths.ciDir, `${SHA}.log`), "utf8");
-    expect(log).toContain("required checks with no run: Test; still incomplete: Lint (in_progress)");
+    expect(log).toContain(
+      "required checks with no run: Test; still incomplete: Lint (in_progress)",
+    );
   });
 
   it("names the failed required runs and not the passing or unrequired ones", async () => {

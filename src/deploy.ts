@@ -238,7 +238,9 @@ export async function stageDeploy(
       sha,
       `Deployment skipped for pushed ${sha}: every changed path matches deploy.skipPattern; CI pending until verified.`,
     );
-    context.log("deploy skipped: every path changed in the pushed range matches deploy.skipPattern");
+    context.log(
+      "deploy skipped: every path changed in the pushed range matches deploy.skipPattern",
+    );
     await removeWorktree(context, pending.work);
     return;
   }
