@@ -290,19 +290,28 @@ suite("departure", () => {
       "ci_failure",
     ],
     [
-      "an unrelated failed workflow",
+      "success despite a failed unrequired run",
       [
         { id: 1, name: "Test", status: "completed", conclusion: "success" },
         { id: 2, name: "Unrelated workflow", status: "completed", conclusion: "failure" },
       ],
-      "failure",
-      "ci_failure",
+      "success",
+      "ci_success",
     ],
     [
-      "a timeout while any run is incomplete",
+      "success while an unrequired run is in progress",
       [
         { id: 1, name: "Test", status: "completed", conclusion: "success" },
         { id: 2, name: "Unrelated workflow", status: "in_progress", conclusion: null },
+      ],
+      "success",
+      "ci_success",
+    ],
+    [
+      "a timeout while a required run is incomplete",
+      [
+        { id: 1, name: "Test", status: "in_progress", conclusion: null },
+        { id: 2, name: "Unrelated workflow", status: "completed", conclusion: "success" },
       ],
       "timeout",
       "ci_timeout",
@@ -310,7 +319,7 @@ suite("departure", () => {
   ] as const;
 
   contract(
-    "the exact-commit CI watch records success, failures, an unrelated failure and a timeout",
+    "the exact-commit CI watch is decided by the required checks alone",
     async () => {
       for (const [title, runs, status, event] of CI_OUTCOMES) {
         const ws = workspace();

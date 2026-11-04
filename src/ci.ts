@@ -109,6 +109,27 @@ function encodeRows(rows: ReturnType<typeof latestRuns>): string {
     .join(", ")}]`;
 }
 
+/**
+ * The result the required checks decide, from the latest run of each name: failure once a
+ * required run completed without passing, success once every required run completed and passed,
+ * otherwise undefined (keep polling). Runs of other names never decide it.
+ */
+export function requiredDecision(
+  rows: ReturnType<typeof latestRuns>,
+  required: ReadonlySet<string>,
+): "failure" | "success" | undefined {
+  const decisive = rows.filter((row) => required.has(row.name));
+  if (decisive.some((row) => row.status === "completed" && !PASSING.has(row.conclusion ?? ""))) {
+    return "failure";
+  }
+  const passed = new Set(
+    decisive
+      .filter((row) => row.status === "completed" && PASSING.has(row.conclusion ?? ""))
+      .map((row) => row.name),
+  );
+  return [...required].every((name) => passed.has(name)) ? "success" : undefined;
+}
+
 export interface WatchOptions {
   readonly checks?: CheckSource;
   readonly signal?: AbortSignal;
@@ -147,13 +168,9 @@ async function poll(
         writeDurable(join(context.paths.ciDir, `${sha}.json`), `${encoded}\n`, { mode: 0o644 });
         last = encoded;
       }
-      if (rows.some((row) => row.status === "completed" && !PASSING.has(row.conclusion ?? ""))) {
-        return "failure";
-      }
-      const names = new Set(rows.map((row) => row.name));
-      const complete = [...required].every((name) => names.has(name));
-      if (rows.length > 0 && complete && rows.every((row) => row.status === "completed")) {
-        return "success";
+      const decision = requiredDecision(rows, required);
+      if (decision !== undefined) {
+        return decision;
       }
     } catch (error) {
       say(`${error instanceof Error ? `${error.name} ${error.message}` : String(error)}`);

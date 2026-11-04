@@ -8,6 +8,7 @@ import {
   type CheckRun,
   GitHubAuthError,
   latestRuns,
+  requiredDecision,
   resumeStoppedCi,
   unfinishedCi,
   watchCi,
@@ -62,6 +63,35 @@ describe("watchCi", () => {
     const pending = () => Promise.resolve([run(1, "Lint", "completed", "success")]);
     expect(await watchCi(slow.context, SHA, { checks: pending })).toBe("timeout");
     expect(slow.events.list.at(-1)?.[0]).toBe("ci_timeout");
+  });
+
+  it("ignores runs whose names are not required, but still records them", async () => {
+    const { context, status } = setup();
+    const runs = [
+      run(1, "Lint", "completed", "success"),
+      run(2, "Test", "completed", "success"),
+      run(3, "Workers Builds: archies-dog-walks", "completed", "failure"),
+      run(4, "Preview", "in_progress", null),
+    ];
+    expect(await watchCi(context, SHA, { checks: () => Promise.resolve(runs) })).toBe("success");
+    expect(status()).toBe("success\n");
+    const recorded = readFileSync(join(context.paths.ciDir, `${SHA}.json`), "utf8");
+    expect(recorded).toContain('"name": "Workers Builds: archies-dog-walks"');
+    expect(recorded).toContain('"name": "Preview"');
+  });
+
+  it("decides from the latest run of each required name alone", () => {
+    const required = new Set(["Lint", "Test"]);
+    const decide = (rows: CheckRun[]) => requiredDecision(latestRuns(rows), required);
+    const lint = run(1, "Lint", "completed", "success");
+    expect(decide([lint])).toBeUndefined();
+    expect(decide([lint, run(2, "Test", "in_progress", null)])).toBeUndefined();
+    expect(decide([lint, run(2, "Test", "completed", "cancelled")])).toBe("failure");
+    expect(decide([lint, run(2, "Test", "completed", "neutral")])).toBe("success");
+    expect(
+      decide([lint, run(2, "Test", "completed", "failure"), run(3, "Test", "queued", null)]),
+    ).toBe(undefined);
+    expect(decide([run(9, "Other", "completed", "failure")])).toBeUndefined();
   });
 
   it("states the recovery of a timed-out watch", async () => {
