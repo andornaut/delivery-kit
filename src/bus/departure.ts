@@ -20,7 +20,7 @@ import {
 import { runGate, treeFingerprint } from "../gate.ts";
 import { holdLockAsync } from "../lock.ts";
 import { type BusContext, loadOk } from "./context.ts";
-import { git } from "./exec.ts";
+import { assertNotInterrupted, git, Interrupted } from "./exec.ts";
 import { type RequestStore, validateRequest } from "./requests.ts";
 import { ensureDir, gateFailedFile, nonEmpty, writeLines } from "./state.ts";
 import { latestScheduledSlot, stamp } from "./time.ts";
@@ -69,6 +69,12 @@ interface Attempt {
   readonly requestId?: string;
 }
 
+function rethrowInterrupted(error: unknown): void {
+  if (error instanceof Interrupted) {
+    throw error;
+  }
+}
+
 function blocked(context: BusContext, attempt: Attempt, stage: string, message: string): number {
   context.log(`${attempt.when} bus: blocked at ${stage}: ${message}`);
   context.events.emit(
@@ -91,7 +97,17 @@ export async function depart(context: BusContext, requestId?: string): Promise<n
       when: stamp(timezone, now),
       ...(requestId === undefined ? {} : { requestId }),
     };
-    return await departLocked(context, attempt);
+    try {
+      return await departLocked(context, attempt);
+    } catch (error) {
+      if (error instanceof Interrupted) {
+        // Stopped by the runner's own shutdown: nothing failed, so nothing is recorded or
+        // reported. A later departure starts this HEAD again.
+        context.log(`${attempt.when} bus: departure stopped by shutdown (${error.message})`);
+        return 1;
+      }
+      throw error;
+    }
   } finally {
     lock.release();
   }
@@ -117,6 +133,7 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
   try {
     head = await mainHead(context.exec, context.game.repo, config.git.main);
   } catch (error) {
+    rethrowInterrupted(error);
     return blocked(
       context,
       attempt,
@@ -128,6 +145,7 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
   try {
     remote = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
   } catch (error) {
+    rethrowInterrupted(error);
     return blocked(context, attempt, "fetch", `the remote main is unreadable (${String(error)})`);
   }
   const skip = remote === head ? "remote" : skipReason(paths, head);
@@ -165,10 +183,13 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
     );
   }
   if (remote !== undefined) {
-    const ancestor = await context.exec({
-      args: ["-C", context.game.repo, "merge-base", "--is-ancestor", remote, head],
-      command: "git",
-    });
+    const ancestor = assertNotInterrupted(
+      "git merge-base",
+      await context.exec({
+        args: ["-C", context.game.repo, "merge-base", "--is-ancestor", remote, head],
+        command: "git",
+      }),
+    );
     // Status 1 means the remote main is known here and is not in local main; other failures
     // (an unknown remote commit) leave the decision to the push itself.
     if (ancestor.status === 1) {
@@ -244,17 +265,20 @@ async function gateAndPush(
     context.log(`${attempt.when}  ${line}`);
   }
   writeLines(join(work, ".bus-built.sha"), head);
-  const push = await context.exec({
-    args: [
-      "-C",
-      game.repo,
-      "push",
-      "--porcelain",
-      config.git.remote,
-      `${head}:refs/heads/${config.git.main}`,
-    ],
-    command: "git",
-  });
+  const push = assertNotInterrupted(
+    "git push",
+    await context.exec({
+      args: [
+        "-C",
+        game.repo,
+        "push",
+        "--porcelain",
+        config.git.remote,
+        `${head}:refs/heads/${config.git.main}`,
+      ],
+      command: "git",
+    }),
+  );
   if (push.status !== 0) {
     await removeWorktree(context, work);
     const output = `${push.stdout}\n${push.stderr}`;

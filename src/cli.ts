@@ -2,6 +2,7 @@
 // DELIVERY_KIT_ROOT or the working directory, in that order.
 import { parseArgs } from "node:util";
 
+import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
 import { migrate } from "./commands/migrate.ts";
 import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
@@ -45,7 +46,8 @@ Commands:
   resource-report         print reporting-only resource information
   migrate                 move 0.x state into var/ (run from game-dev)
   channel                 run the Claude channel consumer
-  monitor-snapshot        capture the monitor review snapshot
+  monitor-snapshot [--parent UUID ...]
+                          capture the monitor review snapshot
   monitor-ack             acknowledge one monitor queue item
   help, --help            print this text
   --version               print the version
@@ -57,7 +59,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function checkGame(layout: Layout, registry: Registry | undefined, game: string): string[] {
+function checkGame(
+  layout: Layout,
+  registry: Registry | undefined,
+  rawRegistry: unknown,
+  game: string,
+): string[] {
   const entry = gameLayout(layout, game);
   let config: ProjectConfig;
   try {
@@ -71,6 +78,7 @@ function checkGame(layout: Layout, registry: Registry | undefined, game: string)
       `${entry.configFile}: /reports/project must be ${entry.name}, the name in config.json`,
     );
   }
+  problems.push(...workerParentProblems(entry.configFile, config, rawRegistry));
   if (registry !== undefined) {
     for (const role of addressedRoles(config)) {
       try {
@@ -94,9 +102,10 @@ function checkConfig(io: Io, root: string, args: string[]): number {
   }
   const problems: string[] = [];
   let registry: Registry | undefined;
+  let rawRegistry: unknown;
   try {
-    const value = readJsonIfExists(layout.registryFile);
-    registry = value === undefined ? undefined : validateRegistry(layout.config, value);
+    rawRegistry = readJsonIfExists(layout.registryFile);
+    registry = rawRegistry === undefined ? undefined : validateRegistry(layout.config, rawRegistry);
   } catch (error) {
     problems.push(errorMessage(error));
   }
@@ -106,7 +115,7 @@ function checkConfig(io: Io, root: string, args: string[]): number {
       io.err(`delivery-kit: unknown game: ${game}\n`);
       return EXIT_USAGE;
     }
-    problems.push(...checkGame(layout, registry, game));
+    problems.push(...checkGame(layout, registry, rawRegistry, game));
   }
   if (problems.length > 0) {
     io.err(problems.map((problem) => `delivery-kit: ${problem}\n`).join(""));
