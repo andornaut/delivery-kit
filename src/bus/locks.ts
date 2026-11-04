@@ -1,6 +1,5 @@
-// Lock probes and guards on files that must not be created: the status probe, the 0.x runner
-// guard and the migration's old-tree locks. lock.ts opens these read-only, so a read-only legacy
-// tree still locks.
+// Lock probes on files that must not be created: the status probe and the migration's old-tree
+// locks. lock.ts opens these read-only, so a read-only legacy tree still locks.
 import { holdLock, LockBusy, type LockHandle, LockMissing } from "../lock.ts";
 
 /**

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -66,23 +66,6 @@ describe("runRunner", () => {
         runRunner({ cliPath: cliFile(test), signal: new AbortController().signal }, () => context),
       ).rejects.toThrow(new RunnerRefused("a runner is already active"));
       expect(readFileSync(context.paths.runnerLock, "utf8")).toBe("holder-token\n");
-    } finally {
-      release();
-    }
-  });
-
-  it("refuses to start while a 0.x runner holds its loop.lock", async () => {
-    const test = makeGame();
-    const legacy = join(test.base, "legacy-bus");
-    mkdirSync(legacy);
-    const release = await holdWithBash(join(legacy, "loop.lock"));
-    try {
-      await expect(
-        runRunner(
-          { cliPath: cliFile(test), legacyDir: legacy, signal: new AbortController().signal },
-          () => testContext(test),
-        ),
-      ).rejects.toThrow("a 0.x runner still holds");
     } finally {
       release();
     }

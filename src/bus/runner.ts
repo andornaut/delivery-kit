@@ -10,7 +10,6 @@ import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { DEFERRED_PREFIX, deliverScheduledWake } from "../monitor/wake.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
-import { holdLegacyLocks, legacyBusDir } from "./legacy.ts";
 import { loadedIdentity, pinGuard, recordPin } from "./pin.ts";
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
@@ -165,12 +164,10 @@ export class RunnerRefused extends Error {}
 export interface RunnerOptions {
   /** The loaded bundle, for the pin guard; defaults to the running script. */
   readonly cliPath?: string;
-  /** 0.x bus directory for the singleton guard; defaults to `<game>/.claude/bus`. */
-  readonly legacyDir?: string;
   readonly signal: AbortSignal;
 }
 
-function holdSingleton(context: BusContext, options: RunnerOptions): LockHandle[] {
+function holdSingleton(context: BusContext): LockHandle[] {
   const held: LockHandle[] = [];
   const take = (path: string, message: string): void => {
     try {
@@ -185,15 +182,6 @@ function holdSingleton(context: BusContext, options: RunnerOptions): LockHandle[
   try {
     // Opened without truncation, so a refused duplicate start leaves the holder's token intact.
     take(context.paths.runnerLock, "a runner is already active");
-    const legacy = options.legacyDir ?? legacyBusDir(context.game);
-    try {
-      held.push(...holdLegacyLocks(legacy));
-    } catch (error) {
-      if (error instanceof LockBusy) {
-        throw new RunnerRefused(`a 0.x runner still holds ${error.path}`);
-      }
-      throw error;
-    }
     take(context.paths.loopLock, "another scheduled loop is already running");
   } catch (error) {
     for (const lock of held) {
@@ -216,7 +204,7 @@ export async function runRunner(
   const tasks = new CiTasks(options.signal);
   const context: BusContext = makeContext((sha) => tasks.start(context, sha));
   ensureDir(context.paths.dir);
-  const locks = holdSingleton(context, options);
+  const locks = holdSingleton(context);
   try {
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));
