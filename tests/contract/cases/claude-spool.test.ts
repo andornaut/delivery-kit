@@ -6,10 +6,11 @@ import { expect } from "vitest";
 import {
   agents,
   ARCHIE,
+  briefTarget,
   CHIBI,
-  clear,
   claudeGame,
   claudeRoute,
+  clear,
   deliver,
   holdLock,
   MONITOR,
@@ -67,7 +68,7 @@ suite("claude monitor slots", () => {
       expect(receipt(ws, slot).requestId).toBe(requestId);
       const entry = ws.readJson<Record<string, string>>(`unblock/claude-spool/${requestId}.json`);
       expect(entry.receipt).toBe(`unblock/${MONITOR}-${slot}.json`);
-      expect(entry.text).toContain(`Archie tech: ${ARCHIE}`);
+      expect(entry.text).toContain(briefTarget(ws, "Archie tech", ARCHIE));
       expect(entry.text).not.toContain(CHIBI);
       expect(entry.text).toContain('"queue_inventory", "status": "unavailable"');
       expect(entry.text).toContain('"question_history", "status": "unavailable"');

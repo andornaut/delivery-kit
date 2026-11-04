@@ -12,6 +12,13 @@ suite("harness", () => {
 
   contract("the fake control socket answers a native snapshot", async () => {
     const ws = workspace();
+    // The snapshot recipient is a registered monitor under a Codex registry.
+    ws.writeRegistry({
+      schema: 1,
+      revision: 1,
+      harness: "codex",
+      roles: { monitor: { conversations: { codex: MONITOR } } },
+    });
     const socket = await new CodexSocket(ws).listen();
     try {
       ws.env.CODEX_CONTROL_SOCKET = socket.path;

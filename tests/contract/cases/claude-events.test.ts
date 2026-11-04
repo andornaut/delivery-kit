@@ -209,18 +209,24 @@ suite("claude bus events", () => {
           (ws) => (ws.config.reports = { project: "Fixture", recipient: "archie-tech" }),
         ],
         ["route held", (ws) => ws.writeRoute(claudeRoute(ws, { state: "held" }))],
-        [
-          "version 1 route",
-          (ws) =>
-            ws.writeRoute({
-              version: 1,
-              harness: "codex",
-              host_project_root: ws.repo,
-              state: "active",
-              monitor_thread_id: ARCHIE,
-              targets: [{ thread_id: CHIBI, ownership: "active" }],
-            }),
-        ],
+        // On Node a converted version 1 route delivers: routes carry no harness
+        // (ROUTES_CARRY_NO_HARNESS), so this sub-case is Bash parity only.
+        ...(impl.name !== "bash"
+          ? []
+          : ([
+              [
+                "version 1 route",
+                (ws) =>
+                  ws.writeRoute({
+                    version: 1,
+                    harness: "codex",
+                    host_project_root: ws.repo,
+                    state: "active",
+                    monitor_thread_id: ARCHIE,
+                    targets: [{ thread_id: CHIBI, ownership: "active" }],
+                  }),
+              ],
+            ] as Array<[string, (ws: Workspace) => void]>)),
       ];
       for (const [name, change] of cases) {
         const ws = workspace();

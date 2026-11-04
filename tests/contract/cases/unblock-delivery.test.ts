@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
-import type { RpcCall } from "../lib/codex-socket.ts";
+import { CodexSocket, type RpcCall } from "../lib/codex-socket.ts";
 import { bashConfig, CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { rpcError, STALE, TECH, ART, GAMEPLAY } from "../lib/unblock-native.ts";
 import { Monitored, wake } from "../lib/unblock-runner.ts";
@@ -133,9 +133,15 @@ suite("unblock delivery", () => {
       await m.start();
       for (const [index, outcome] of outcomes.entries()) {
         m.world.outcomes.push(outcome);
-        const before = m.world.mutations().length;
+        // 1.0 also delivers health events (such as monitor-stuck) natively to the monitor;
+        // only the slot's own requests count here.
+        const slotRequests = () => m.world.mutations().filter((call) => !CodexSocket.isEvent(call));
+        const before = slotRequests().length;
         expect((await m.slot(wake(index))).result?.status).toBe("ambiguous");
-        expect(m.world.mutations().length - before).toBe(1);
+        expect(
+          slotRequests().length - before,
+          JSON.stringify(m.world.mutations().map((c) => c.params.input)),
+        ).toBe(1);
         expect(m.receipt(wake(index)).status).toBe("ambiguous");
       }
     },

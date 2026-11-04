@@ -9,6 +9,8 @@ import type { Workspace } from "./workspace.ts";
 export interface RpcCall {
   method: string;
   params: Record<string, unknown>;
+  /** Index into `connections` of the connection that sent the call. */
+  connection?: number;
   id?: number;
 }
 
@@ -77,6 +79,34 @@ export class CodexSocket {
     return this.on(method, () => replies[Math.min(index++, replies.length - 1)]);
   }
 
+  /** A turn mutation that delivers a bus event (its text carries the `[bus event ID]` suffix). */
+  static isEvent(call: RpcCall): boolean {
+    const input = call.params.input as Array<{ text?: unknown }> | undefined;
+    return (
+      call.method.startsWith("turn/") &&
+      /\[bus event [0-9a-f]{12}\]/.test(String(input?.[0]?.text ?? ""))
+    );
+  }
+
+  /** Turn mutations other than bus event deliveries: the scheduled slot requests. */
+  slotMutations(): RpcCall[] {
+    return this.calls.filter(
+      (call) => call.method.startsWith("turn/") && !CodexSocket.isEvent(call),
+    );
+  }
+
+  /** Connections that delivered a bus event, which 1.0 sends natively to the monitor. */
+  eventConnections(): number[] {
+    return [
+      ...new Set(this.calls.filter(CodexSocket.isEvent).map((call) => call.connection ?? -1)),
+    ];
+  }
+
+  /** Connections other than those that delivered a bus event. */
+  ownConnections(): number {
+    return this.connections.length - this.eventConnections().length;
+  }
+
   methods(): string[] {
     return this.calls.map((call) => call.method);
   }
@@ -97,7 +127,7 @@ export class CodexSocket {
   }
 
   private accept(socket: Socket): void {
-    this.connections.push(Date.now());
+    const connection = this.connections.push(Date.now()) - 1;
     let buffer = Buffer.alloc(0);
     let upgraded = false;
     socket.on("error", () => undefined);
@@ -143,12 +173,12 @@ export class CodexSocket {
           socket.end();
           return;
         }
-        if (opcode === 1) this.dispatch(socket, payload.toString("utf8"));
+        if (opcode === 1) this.dispatch(socket, payload.toString("utf8"), connection);
       }
     });
   }
 
-  private dispatch(socket: Socket, text: string): void {
+  private dispatch(socket: Socket, text: string, connection: number): void {
     const message = JSON.parse(text) as {
       id?: number;
       method?: string;
@@ -157,6 +187,7 @@ export class CodexSocket {
     if (!message.method) return;
     const call: RpcCall = { method: message.method, params: message.params ?? {} };
     if (message.id !== undefined) call.id = message.id;
+    call.connection = connection;
     this.calls.push(call);
     if (message.id === undefined) return;
     const handler = this.handlers.get(message.method);

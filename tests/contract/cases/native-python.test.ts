@@ -132,10 +132,12 @@ suite("native interpreter", () => {
       expect(next.monitor[0]!.result.status).toBe("accepted");
       const duplicate = await tick(ws, fifty);
       expect(duplicate.monitor[0]!.result.status).toBe("deduplicated");
-      const mutations = socket.calls.filter((call) => call.method.startsWith("turn/"));
-      expect(mutations.map((call) => [call.method, call.params.threadId])).toEqual([
-        ["turn/steer", MONITOR],
-      ]);
+      // 1.0 also delivers health events natively to the monitor; only slot requests count.
+      const mutations = socket.slotMutations();
+      expect(
+        mutations.map((call) => [call.method, call.params.threadId]),
+        JSON.stringify(socket.calls.filter(CodexSocket.isEvent).map((c) => c.params.input)),
+      ).toEqual([["turn/steer", MONITOR]]);
       expect(ws.readJson<Json>(`unblock/${MONITOR}-${fifty}.json`).status).toBe("accepted");
       expect(first.stdout + next.stdout + duplicate.stdout).not.toContain(PRIVATE);
     },

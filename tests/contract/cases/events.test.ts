@@ -7,6 +7,7 @@ import { expect } from "vitest";
 import { impl, type Resident, startRunner } from "../lib/adapter.ts";
 import {
   CI_POLL_SECONDS,
+  CODEX_QUEUE_REMOVED,
   contract,
   QUEUE_MODEL,
   queueModel,
@@ -49,10 +50,6 @@ function start(ws: Workspace, speed = 30): Resident {
   ws.setClock(at(59, 58), speed);
   return startRunner(ws);
 }
-
-// These cases observe delivery through the 0.9 legacy `codex queue` sink.
-const CODEX_QUEUE_REMOVED =
-  "the codex queue sink is removed; events go only to the registry recipient through the active adapter";
 
 suite("events", () => {
   const workspace = workspaces();
