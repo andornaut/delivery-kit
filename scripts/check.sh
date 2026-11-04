@@ -36,7 +36,7 @@ PYFINGERPRINT
 }
 before=$(fingerprint)
 result=0
-docker run --rm --network none --cpus 4 --read-only \
+docker run --rm --network none --cpus 4 --read-only -u "$(id -u):$(id -g)" -e HOME=/tmp \
   --mount "type=bind,src=$ROOT,dst=/source,readonly" \
   --tmpfs /tmp:exec,mode=1777 \
   node:24.21.0 bash -c \

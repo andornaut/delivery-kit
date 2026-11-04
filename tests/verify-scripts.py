@@ -66,6 +66,8 @@ args=sys.argv[1:]
 with open(os.environ['CALLS'],'a') as log:log.write('docker '+json.dumps(args)+'\\n')
 assert args[args.index('--cpus')+1]=='4'
 assert 'WORKERS_CI_COMMIT_SHA='+os.environ['SHA'] in args
+assert args[args.index('-u')+1]==f'{os.getuid()}:{os.getgid()}'
+cache=next(x for x in args if x.endswith(',dst=/npmcache'));assert pathlib.Path(cache.split(',')[1][4:]).is_dir()
 if '--network' in args:
  if os.environ.get('GATE_FAIL')=='1':sys.exit(1)
  if os.environ.get('MOVE_BASE')=='1':pathlib.Path(os.environ['REMOTE_HEAD']).write_text('9'*40)

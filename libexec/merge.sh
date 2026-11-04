@@ -26,9 +26,11 @@ STAMP=$BUS_DIR/last-push
 run() {
   local sha
   sha=$(git -C "$W" rev-parse HEAD)
+  # The cache exists before mounting: Docker creates a missing bind source as root.
+  mkdir -p "$BUS_DIR/npm-cache"
   docker run --rm --label "game-bus=$GH_SLUG" --cpus "$CPUS" -u "$(id -u):$(id -g)" -v "$W":/app -w /app --tmpfs /tmp:exec \
     -e HOME=/tmp -e "WORKERS_CI_COMMIT_SHA=$sha" \
-    -v "$BUS_DIR/npm-cache":/npmcache -e npm_config_cache=/npmcache "$@"
+    --mount "type=bind,src=$BUS_DIR/npm-cache,dst=/npmcache" -e npm_config_cache=/npmcache "$@"
 }
 gate_script() {
   local step name log index=0
