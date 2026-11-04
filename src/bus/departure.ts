@@ -69,12 +69,26 @@ function rethrowInterrupted(error: unknown): void {
   }
 }
 
-function blocked(context: BusContext, attempt: Attempt, stage: string, message: string): number {
+/** What clears each block: the call site names it, so the report states its own remedy. */
+const REMEDY = {
+  fix: "a fix merged on main is required",
+  merge: "Tech merges the remote main into local main",
+  operator: "an operator fix is required",
+  retry: "the next departure retries it",
+} as const;
+
+function blocked(
+  context: BusContext,
+  attempt: Attempt,
+  stage: string,
+  message: string,
+  remedy: string,
+): number {
   context.log(`${attempt.when} bus: blocked at ${stage}: ${message}`);
   context.events.emit(
     `blocked-${stage}`,
     attempt.key,
-    `${attempt.when} blocked at ${stage}: ${message}; operator fix or a new merge on main required.`,
+    `${attempt.when} blocked at ${stage}: ${message}; ${remedy}.`,
   );
   return 1;
 }
@@ -135,6 +149,7 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       attempt,
       "main",
       `local ${config.git.main} is unreadable (${String(error)})`,
+      REMEDY.operator,
     );
   }
   let remote: string | undefined;
@@ -142,7 +157,13 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
     remote = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
   } catch (error) {
     rethrowInterrupted(error);
-    return blocked(context, attempt, "fetch", `the remote main is unreadable (${String(error)})`);
+    return blocked(
+      context,
+      attempt,
+      "fetch",
+      `the remote main is unreadable (${String(error)})`,
+      `${REMEDY.retry}; an operator fix is required if the remote stays unreadable`,
+    );
   }
   const skip = remote === head ? "remote" : skipReason(paths, head);
   if (skip !== undefined) {
@@ -176,6 +197,7 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       attempt,
       "load",
       `load at or above ${config.resources.loadLimit}; main retained`,
+      "this clears by itself: the next departure starts once the load is below the limit",
     );
   }
   if (remote !== undefined) {
@@ -205,10 +227,9 @@ function nonFastForward(
     context,
     attempt,
     "push",
-    [
-      `non-fast-forward: the remote main${remote === undefined ? "" : ` ${remote}`} is not in local main ${head};`,
-      "nothing pushed; Tech merges the remote main into local main",
-    ].join(" "),
+    `non-fast-forward: the remote main${remote === undefined ? "" : ` ${remote}`} is not in ` +
+      `local main ${head}; nothing pushed`,
+    REMEDY.merge,
   );
 }
 
@@ -249,7 +270,8 @@ async function gateAndPush(
         attempt,
         "gate",
         `${outcome.reason}; main ${head} was not gated and stays unpushed; no gate-failed record ` +
-          "is written, so the next departure gates it again",
+          "is written",
+        "the next departure gates it again",
       );
     }
     ensureDir(paths.gateFailedDir);
@@ -264,7 +286,8 @@ async function gateAndPush(
       context,
       attempt,
       outcome.stage,
-      `the gate failed for main ${head}; main stays unpushed and this SHA is not gated again; merge a fix on main`,
+      `the gate failed for main ${head}; main stays unpushed and this SHA is not gated again`,
+      REMEDY.fix,
     );
   }
   for (const line of outcome.output.split("\n").filter((row) => row !== "")) {
@@ -296,6 +319,7 @@ async function gateAndPush(
       attempt,
       "push",
       `push of main ${head} failed: ${push.stderr.trim() || "no diagnostic"}`,
+      `${REMEDY.retry}; an operator fix is required if the push keeps failing`,
     );
   }
   recordPush(context, head);

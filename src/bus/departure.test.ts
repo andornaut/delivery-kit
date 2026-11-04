@@ -115,7 +115,7 @@ describe("trunk-based departures", () => {
   });
 
   it("records a failed gate, never re-gates it and departs the fix merged next", async () => {
-    const { context, creates, failGate, kinds, test } = setup();
+    const { context, creates, events, failGate, kinds, test } = setup();
     const before = originMain(test);
     const broken = mergeFastForward(test, "broken");
     failGate.value = true;
@@ -125,6 +125,9 @@ describe("trunk-based departures", () => {
       "full-gate",
     );
     expect(kinds()).toContain("blocked-full-gate");
+    const report = events.list.find(([kind]) => kind === "blocked-full-gate")?.[2] ?? "";
+    expect(report).toContain("a fix merged on main is required");
+    expect(report).not.toContain("operator fix");
     failGate.value = false;
     expect(await depart(context)).toBe(0);
     expect(creates()).toBe(1);
@@ -145,6 +148,7 @@ describe("trunk-based departures", () => {
       expect.any(String),
       expect.stringContaining("Cannot connect to the Docker daemon"),
     ]);
+    expect(events.list.at(-1)?.[2]).toMatch(/the next departure gates it again\.$/);
     dockerDown.value = false;
     expect(await depart(context)).toBe(0);
     expect(creates()).toBe(2);
@@ -167,6 +171,7 @@ describe("trunk-based departures", () => {
       expect.any(String),
       expect.stringContaining("non-fast-forward"),
     ]);
+    expect(events.list.at(-1)?.[2]).toMatch(/Tech merges the remote main into local main\.$/);
     expect(existsSync(join(test.game.busDir, "gate-failed"))).toBe(false);
   });
 
@@ -213,6 +218,8 @@ describe("trunk-based departures", () => {
     expect(await depart(context)).toBe(1);
     expect(originMain(test)).toBe(before);
     expect(events.list.at(-1)?.[0]).toBe("blocked-load");
+    expect(events.list.at(-1)?.[2]).toContain("this clears by itself");
+    expect(events.list.at(-1)?.[2]).not.toContain("operator fix");
   });
 });
 
