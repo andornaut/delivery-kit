@@ -237,8 +237,9 @@ acknowledgement, no `ambiguous` receipts) and no process references an old path.
 ## Development
 
 - `npm run verify` (`scripts/check.sh`): types, lint, build and tests in offline containers
-  running as uid 19001 with no host mount. The source is streamed in as a tar and the npm cache is
-  a named volume populated by one networked step. A changed source fingerprint, ownership change or
+  running as uid 19001 in the checkout's group (`--group-add`). The checkout is bound read-only and
+  copied into container scratch, and the npm cache is a named volume populated by one networked
+  step. A changed source fingerprint, ownership change or
   any file owned by uid or gid 19001 discards the result.
 - `npm run check`: TypeScript only.
 - `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` (`scripts/pack.sh`): builds the release
