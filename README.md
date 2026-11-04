@@ -23,8 +23,8 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 ```
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
-runner runs from that game's own `node_modules`; game-dev's copy runs `migrate`, `check-config`,
-`status`, `channel` and the monitor commands.
+runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
+`channel` and the monitor commands.
 
 ## Commands
 
@@ -39,8 +39,6 @@ directory. `--root` comes before the command.
 | `status --game ID`                                                                                                                                         | Read-only runner identity, singleton, idle and drain report as one JSON line.                                                  |
 | `status --harness claude\|codex`                                                                                                                           | The handoff readiness probe (see [Readiness probe](#readiness-probe)).                                                         |
 | `resource-report --game ID`                                                                                                                                | Reporting-only resource information.                                                                                           |
-| `migrate [--game ID] [--dry-run] [--harness claude\|codex]`                                                                                                | Move 0.9.x state into `var/` (see [Upgrading from 0.9.x](#upgrading-from-09x)).                                                |
-| `migrate --remove-legacy [--dry-run]`                                                                                                                      | Delete the listed 0.9.x scripts once every runner runs from `node_modules`.                                                    |
 | `channel [--game ID]... [--poll-seconds N] [--monitor UUID] [--state-dir DIR]...`                                                                          | The Claude channel consumer, a stdio MCP server the monitor session launches.                                                  |
 | `monitor-snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Capture the monitor review snapshot.                                                                                           |
 | `monitor-ack --game ID [--recipient ROLE] [--parent ROLE]... --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT]` | Acknowledge queue items from that snapshot. `retained` requires a reason.                                                      |
@@ -54,7 +52,7 @@ directory. `--root` comes before the command.
   `monitor` conversation and requires `harness` to be `claude`. `--monitor UUID` and repeated
   absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
   `--state-dir` excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory
-  and drains only spools that already exist, so it can start before `migrate`. Without
+  and drains only spools that already exist, so it can start before any game state. Without
   `--monitor`, an absent registry stops it with exit 1.
 - `monitor-snapshot` and `monitor-ack`: `--recipient` defaults to the `monitor` duty. `--recipient`
   and `--parent` take a role name, or a canonical conversation UUID registered for the active
@@ -131,7 +129,7 @@ own: `transfers` carries the hold, acceptance and activation markers.
 - Every writer holds `var/registry.lock`, rejects a changed `revision`, validates the result,
   writes durably and increments `revision`.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
-  delivery-kit. Apart from `migrate` creating the first registry, the CLI only reads it.
+  delivery-kit. The CLI only reads it.
 
 ### Send-time resolution
 
@@ -142,7 +140,7 @@ Nothing is cached across sends. A missing or null ID is reported `unavailable` f
 never as clearance.
 
 A harness handoff is therefore one `updateRegistry` mutation of `harness`, with no configuration
-edit, runner restart or migration. The other harness's IDs stay in place.
+edit, runner restart or state change. The other harness's IDs stay in place.
 
 Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by conversation
 ID, because a pending question belongs to one conversation. Their owner writes them; delivery-kit
@@ -220,14 +218,12 @@ All mutable state lives in game-dev's ignored `var/`:
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
   `events/`, `requests/`, `unblock/` (the delivery spool), `runner.json`, `runner.identity.json`,
   `resources.log` and `runner.log`.
-- `games/<g>/migrated.json`: the migration marker.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 
 Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
 files under `var/`. Runners read `<game>/delivery-kit.json` and write only to their own
-`var/games/<g>/bus/`. Apart from `migrate`, delivery-kit writes nothing under any `.claude/`
-directory.
+`var/games/<g>/bus/`. delivery-kit writes nothing under any `.claude/` directory.
 
 ## Resident runner
 
@@ -368,88 +364,6 @@ subject last.
   `UnknownRole` or `AmbiguousRole`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.
 
-## Upgrading from 0.9.x
-
-1.0 replaces the Bash and Python mechanisms, `bus.conf` and the per-game state directories.
-Configuration moves into `delivery-kit.json` and `config.json`, Codex and Claude session maps into
-`var/registry.json`, and every state file into `var/`. Delivery is trunk-based: the queue,
-admission, batch merges, cherry-picks and the CI-repair approval are gone, and 1.x ignores the
-`bus-queue`, `bus-queue.lock`, `merge.lock`, `ci-repair-approval*` and Tech `*-queued.json` and
-`*-ready.json` files that migration copies. The other bus files keep their 0.9.x names and
-statuses; request receipts record `head` instead of `entries`.
-
-Before cutover each game Tech pins 1.0, commits `delivery-kit.json` and, if needed, drops non-Node
-tooling from its gate image as its own change.
-
-### Migration
-
-Run from game-dev, with every 0.x runner stopped at an idle boundary:
-
-```bash
-npx delivery-kit migrate --dry-run
-npx delivery-kit migrate --harness claude
-```
-
-- **Preconditions**, checked after taking the old queue, request, delivery and event locks plus
-  `var/registry.lock`: the old `runner.lock` and `loop.lock` are free, `active-departure` is empty,
-  no `ci/*.lock` is held, no request is `started` or `pending`, no spool entry is `.claimed` and
-  there is no `deploy-pending`. No 0.x work may be in flight: each branch still in `bus-queue`
-  and each `batch-*` scratch worktree is listed for Tech to land on `main` or drop. Any failure
-  stops the migration before its first write.
-- **Copy:** each game's `.claude/bus/` goes to `var/games/<g>/bus/` and game-dev's
-  `.claude/monitor/codex/` to `var/game-dev/`, through a staging directory, with symlinks
-  preserved and both sides hashed. Tech's ad hoc records (`*-queued.json`, `*-ready.json`) never
-  block: they are copied and listed as "Tech-owned records, copied, not acted on". Legacy scripts,
-  `bus.conf`, 0.x snapshots, `__pycache__` and `npm-cache` are not copied.
-- **Runner log:** `runner.log`, or Chibi's `codex-bus.log`, moves to `var/games/<g>/bus/runner.log`.
-- **Route:** the route host game's `.claude/monitor/route.json`, whose `host_project_root` must name
-  that game, becomes `var/route.json` in the role-name schema. Each version 1 `monitor_thread_id`
-  and `targets[].thread_id`, or version 2 `session_id`, maps through the registry's conversations
-  to one role; an ID that maps to no role or to several stops the migration and is listed.
-- **Markers:** `var/games/<g>/migrated.json`, `var/game-dev.migrated.json` and
-  `var/route.migrated.json` record the source digest. A matching marker makes a rerun a no-op; a
-  changed source, or a target without a marker, stops and reports. A leftover staging directory is
-  discarded.
-- **Registry:** when absent, `var/registry.json` is built from the 0.x registry files.
-  `var/registry-provenance.json` records each field's source, every cross-source conflict and
-  every record that has no version 1 field. When the 0.x records name more than one active
-  harness, `--harness` is required.
-- **Checkpoints:** each checkpoint the 0.x records name is copied to
-  `var/handoffs/<scope>/<name>`, where the scope is `game-dev` or `kits/<kit>`. A named path that
-  is not a readable file is reported and skipped, and the registry omits the reference (a transfer
-  without its checkpoint is not recorded). An existing file in `var/handoffs/` is never
-  overwritten: a byte-identical one is skipped, and a differing one stops the migration before
-  its first write.
-- **Read-only:** the old trees are then made read-only. `migrate` never deletes them.
-- `--game ID` migrates only that game's bus; the monitor state, route and registry need a full run.
-
-### Removing the 0.9.x scripts
-
-`migrate --remove-legacy` runs only when every game is migrated and each `runner.json` shows a live
-runner loading the game's `node_modules` copy of `dist/cli.js`. It prints every path first and
-deletes only these, in each game's `.claude/bus/`:
-
-- **Archie:** the regular files `batch.sh`, `bus-common.sh`, `bus.sh`, `ci-watch.sh`,
-  `departure.sh`, `merge.sh`, `post-push.sh`, `resource-check.sh`, `resource-report.sh`,
-  `scheduled-once.sh`, `event.py`, `unblock.py` and `runner.sh`.
-- **Chibi:** the symlinks with the same ten `.sh` names plus `event.py` and `unblock.py`, and the
-  regular files `runner.before-monitor-041.sh` and `runner.sh`.
-
-A listed path of the wrong kind stops the removal before anything is deleted. Unlisted paths are
-never deleted.
-
-### Rollback
-
-At an idle boundary: stop the 1.x runner, make the old trees writable, copy back only
-`last-push*`, `ci/`, `deploy/` and post-cutover receipts, then start the preserved 0.x snapshot.
-Queue entries are never copied back, and the old registry files are never modified.
-
-### Convergence
-
-The migration code is removed once both skills use only `config.json` and `var/registry.json`,
-every game has completed one clean 1.x cycle (scheduled departure, CI, deploy, accepted event and
-acknowledgement, no `ambiguous` receipts) and no process references an old path.
-
 ## Development
 
 The maintainer scripts are TypeScript under `scripts/`, run directly by Node with only `node:`
@@ -478,8 +392,8 @@ start only below a one-minute load of 24 and use at most four CPUs.
 
 `VERSION` and `package.json` carry the version, and `pack` refuses a mismatch. The CLI,
 `delivery-kit.json`, `config.json`, the registry schema, the route schema, the registry module API
-and the `var/` layout follow semver: an incompatible change needs a major version and a migration.
-1.0 is incompatible with 0.9.x.
+and the `var/` layout follow semver: an incompatible change needs a major version. 2.0.0 removes
+the `migrate` command; a 0.9.x installation upgrades through 1.0.3 first.
 
 A release is three files from `pack`:
 

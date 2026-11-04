@@ -62,7 +62,6 @@ export interface GameLayout {
   readonly stateDir: string;
   /** var/games/<g>/bus/: the bus state directory (file names in bus/state.ts). */
   readonly busDir: string;
-  readonly migratedFile: string;
 }
 
 export const CONFIG_FILE = "config.json";
@@ -173,7 +172,6 @@ export function gameLayout(layout: Layout, game: string): GameLayout {
     busDir,
     configFile: resolve(repo, PROJECT_CONFIG_FILE),
     id: game,
-    migratedFile: resolve(stateDir, "migrated.json"),
     name: entry.name,
     repo,
     stateDir,

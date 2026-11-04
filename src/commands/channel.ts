@@ -2,7 +2,7 @@
 // launches from game-dev's node_modules. By default it drains every game's spool for the
 // registry monitor. `--monitor UUID` and repeatable `--state-dir STATE/unblock` select them
 // explicitly. It creates no state directory: only spools that already
-// exist are drained, so a channel started before migrate leaves var/ untouched.
+// exist are drained, so a channel started before any game state exists leaves var/ untouched.
 import { realpathSync, statSync, writeSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
@@ -65,7 +65,7 @@ function registryMonitor(root: string): string {
   } catch (error) {
     if (error instanceof RegistryMissing) {
       throw new Error(
-        `${layout.registryFile} does not exist; run delivery-kit migrate first, or pass --monitor UUID`,
+        `${layout.registryFile} does not exist; create the registry first, or pass --monitor UUID`,
         { cause: error },
       );
     }

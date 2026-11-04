@@ -54,19 +54,6 @@ export const SPECS = {
     options: GAME,
     summary: "validate config.json, var/registry.json and each delivery-kit.json",
   },
-  migrate: {
-    forms: [
-      ["game?", "dry-run?", "harness?"],
-      ["remove-legacy", "dry-run?"],
-    ],
-    options: {
-      "dry-run": { type: "boolean" },
-      game: { type: "string" },
-      harness: { type: "string" },
-      "remove-legacy": { type: "boolean" },
-    },
-    summary: "move 0.x state into var/ (run from game-dev)",
-  },
   "monitor-ack": {
     forms: [["game", "snapshot", "queue-id", "disposition", "reason?", "recipient?", "parent?"]],
     options: {

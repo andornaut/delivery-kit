@@ -1,6 +1,6 @@
 // The role-name monitor route, var/route.json schema 1. It names roles only; every send resolves
 // them through var/registry.json for its active harness at that moment, so a harness handoff is
-// one registry change with no route edit, restart or migration.
+// one registry change with no route edit or restart.
 import { existsSync } from "node:fs";
 
 import { readJson } from "../../durable.ts";

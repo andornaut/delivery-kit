@@ -4,7 +4,6 @@ import { parseArgs } from "node:util";
 
 import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
-import { migrate } from "./commands/migrate.ts";
 import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
 import { request } from "./commands/request.ts";
 import { resourceReport } from "./commands/resourceReport.ts";
@@ -29,7 +28,6 @@ export const COMMANDS = [
   "request",
   "status",
   "resource-report",
-  "migrate",
   "channel",
   "monitor-snapshot",
   "monitor-ack",
@@ -135,7 +133,6 @@ function checkConfig(io: Io, root: string, args: string[]): number {
 const HANDLERS: Readonly<Record<Command, Handler>> = {
   channel,
   "check-config": checkConfig,
-  migrate,
   "monitor-ack": monitorAck,
   "monitor-snapshot": monitorSnapshot,
   request,

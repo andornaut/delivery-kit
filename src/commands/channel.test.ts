@@ -66,11 +66,11 @@ describe("channel options", () => {
       [],
     );
     expect(status).toBe(EXIT_INVALID);
-    expect(errors.errors.join("")).toContain("run delivery-kit migrate first");
+    expect(errors.errors.join("")).toContain("create the registry first");
     expect(existsSync(join(fixture.root, "var"))).toBe(false);
   });
 
-  it("serves before migrate without creating any bus directory", async () => {
+  it("serves before any game state exists without creating a bus directory", async () => {
     const fixture = makeFixture();
     const layout = loadLayout(fixture.root);
     createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">);
