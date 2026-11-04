@@ -75,7 +75,13 @@ suite("monitor cadence", () => {
       let stdout = "";
       runner.child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
       try {
-        await runner.until(() => virtualNow(ws) > at(11, 30));
+        // Wait for both release reports, not a fixed span of virtual time: a slow host may
+        // still be writing the second one when the clock passes the window.
+        await runner.until(
+          () =>
+            virtualNow(ws) > at(11, 30) &&
+            ws.events().filter((event) => event.kind === "scheduled-status").length >= 2,
+        );
       } finally {
         await runner.stop();
       }
@@ -253,8 +259,14 @@ suite("monitor cadence", () => {
           socket
             .callsOf("turn/steer")
             .filter((call) => JSON.stringify(call.params).includes("scheduled slot"));
+        // The host's wake at minute 1 writes its slot receipt after its native calls; wait for
+        // it, not for a span of virtual time a slow host can outrun.
+        const receipt = `unblock/${MONITOR}-${at(1)}.json`;
         try {
-          await runner.until(() => steered().length > 0 && virtualNow(ws) > at(2, 30));
+          await runner.until(
+            () =>
+              steered().length > 0 && virtualNow(ws) > at(2, 30) && (!host || ws.exists(receipt)),
+          );
         } finally {
           await runner.stop();
         }
