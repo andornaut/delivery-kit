@@ -92,3 +92,17 @@ describe("dispatcher", () => {
     expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
   });
 });
+
+describe("status --harness", () => {
+  it("reports a missing registry or an unreadable layout as not ready, not as a usage error", async () => {
+    const { base, root } = makeFixture();
+    const absent = await run(root, "status", "--harness", "codex");
+    expect(absent.code).toBe(EXIT_INVALID);
+    expect(absent.out).toBe("");
+    expect(absent.err).toMatch(/^delivery-kit: /);
+    const missing = await run(join(base, "no-game-dev"), "status", "--harness", "claude");
+    expect(missing.code).toBe(EXIT_INVALID);
+    expect(missing.err).toMatch(/^delivery-kit: /);
+    expect((await run(root, "status", "--harness", "other")).code).toBe(EXIT_USAGE);
+  });
+});

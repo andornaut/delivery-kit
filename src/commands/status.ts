@@ -5,8 +5,9 @@ import { resolveGame } from "../bus/command.ts";
 import { busPaths, pyDumps } from "../bus/state.ts";
 import { statusReport } from "../bus/status.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { loadLayout } from "../layout.ts";
+import { type Layout, loadLayout } from "../layout.ts";
 import { harnessReadiness } from "../monitor/readiness.ts";
+import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 
 const USAGE = "usage: delivery-kit status --game ID | --harness claude|codex";
@@ -16,8 +17,17 @@ async function readiness(io: Io, root: string, harness: string | undefined): Pro
     io.err(`${USAGE}\n`);
     return EXIT_USAGE;
   }
-  const layout = loadLayout(root);
-  const report = await harnessReadiness(io.env, layout, readRegistry(layout), harness);
+  let layout: Layout;
+  let registry: Registry;
+  try {
+    layout = loadLayout(root);
+    registry = readRegistry(layout);
+  } catch (error) {
+    // A missing registry or an invalid layout means not ready, not a usage error.
+    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_INVALID;
+  }
+  const report = await harnessReadiness(io.env, layout, registry, harness);
   const ordered = Object.fromEntries([
     ["harness", report.harness],
     [
