@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { validateRoleRoute } from "./adapters/shared/route.ts";
 import { addressedRoles, loadProjectConfig } from "./config.ts";
 import { validateGameDevConfig } from "./layout.ts";
 
@@ -23,6 +24,17 @@ describe("examples", () => {
     const project = loadProjectConfig(join(examples, "delivery-kit.json")).reports.project;
     expect(Object.values(config.games).map((game) => game.name)).toContain(project);
     expect(config.sharedRoles).toContain("game-dev");
+  });
+
+  it("route.json is a valid schema 1 role-name route for config.json", () => {
+    const config = validateGameDevConfig(
+      JSON.parse(readFileSync(join(examples, "config.json"), "utf8")),
+    );
+    const route = validateRoleRoute(
+      config,
+      JSON.parse(readFileSync(join(examples, "route.json"), "utf8")),
+    );
+    expect(route).toMatchObject({ monitor: "game-dev", schema: 1, state: "active" });
   });
 
   it("the channel server runs the packaged CLI", () => {
