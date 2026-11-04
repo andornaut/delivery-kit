@@ -237,7 +237,7 @@ suite("events", () => {
       bus(ws);
       // A zero limit against the real host load forces a load block.
       ws.hostLoad = "real";
-      ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
+      ws.config.resources = { cpus: 4, loadLimit: 0 };
       const gate = join(ws.root, "hold-delivery");
       writeFileSync(gate, "");
       ws.updateControl((c) => (c.codex = { blockWhile: gate }));
@@ -266,7 +266,7 @@ suite("events", () => {
       bus(ws);
       // A zero limit against the real host load forces a load block.
       ws.hostLoad = "real";
-      ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
+      ws.config.resources = { cpus: 4, loadLimit: 0 };
       ws.queue([`bus/${"漢🙂é".repeat(200)}`]);
       const runner = start(ws);
       await runner.until(() => ws.calls("codex").length >= 2);

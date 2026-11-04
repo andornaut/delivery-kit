@@ -42,7 +42,8 @@ export function renderBusConf(ws: Workspace): string {
   set("NODE_IMAGE", c.gate?.image);
   set("CONTAINER_PREFIX", "fixture-");
   set("CPUS", c.resources?.cpus);
-  set("MAX_WORKERS", c.resources?.maxWorkers);
+  // 0.9 requires MAX_WORKERS, which 1.0 removes; a 1.0 configuration renders the 0.9 maximum.
+  if (c.resources !== undefined) set("MAX_WORKERS", c.resources.maxWorkers ?? 4);
   // 0.9 reads the real /proc/loadavg and has no override, so hostLoad "ignore" renders an
   // unbounded limit; "real" passes resources.loadLimit through.
   set("LOAD_LIMIT", ws.hostLoad === "ignore" ? 1000000 : c.resources?.loadLimit);

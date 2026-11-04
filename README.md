@@ -90,8 +90,8 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   are accepted. An empty `install` skips the install step, and an empty `steps` list gates with no
   checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
   rejected.
-- `resources`: `cpus` (1 to 4), `maxWorkers` (1 to 4) and `loadLimit` (0 to 24). A departure
-  starts only below `loadLimit`, so 0 holds every departure.
+- `resources`: `cpus` (1 to 4) and `loadLimit` (0 to 24). A departure starts only below
+  `loadLimit`, so 0 holds every departure.
 - `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
   pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400).
 - `deploy`: `mode` is `wrangler` or `none`; the optional `skipPattern` is a regular expression

@@ -41,6 +41,7 @@ export interface GameConfig {
   git?: { main?: unknown; remote?: unknown; github?: unknown };
   schedule?: { departures?: unknown; timezone?: unknown };
   gate?: { image?: unknown; install?: unknown; steps?: unknown };
+  /** `maxWorkers` is 0.9's MAX_WORKERS; 1.0 rejects it as an unknown key. */
   resources?: { cpus?: unknown; maxWorkers?: unknown; loadLimit?: unknown };
   ci?: { requiredNames?: unknown; pollSeconds?: unknown; timeoutSeconds?: unknown };
   deploy?: { mode?: unknown; skipPattern?: unknown };
@@ -97,7 +98,7 @@ export function defaultConfig(): GameConfig {
         { name: "build", run: "build" },
       ],
     },
-    resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24 },
     ci: { requiredNames: ["Test"] },
     deploy: { mode: "wrangler", skipPattern: "(\\.md$|^art/|^gameplay/)" },
     reports: {},
@@ -129,9 +130,9 @@ export interface Control {
     moveBase?: boolean;
     changeApproval?: string;
     advanceClock?: number;
-    /** Block the gate while this file exists. */
     /** The install provides no node_modules/wrangler/bin/wrangler.js. */
     noWrangler?: boolean;
+    /** Block the gate while this file exists. */
     blockWhile?: string;
   };
   gh?: { exitCode?: number; default?: unknown[]; checks?: Record<string, unknown[]> };

@@ -72,6 +72,11 @@ describe("validateProjectConfig", () => {
       "/gate/install",
     ],
     ["unknown keys", (c: Json) => (c.repo = "../game"), "/repo"],
+    [
+      "the removed maxWorkers key",
+      (c: Json) => (section(c, "resources").maxWorkers = 4),
+      "/resources/maxWorkers",
+    ],
     ["more than four CPUs", (c: Json) => (section(c, "resources").cpus = 5), "/resources/cpus"],
     [
       "a load limit above 24",

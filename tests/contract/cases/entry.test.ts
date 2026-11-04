@@ -10,6 +10,7 @@ import {
   bashOnly,
   contract,
   EXIT_INVALID_CONFIG,
+  MAX_WORKERS_REMOVED,
   suite,
   workspaces,
 } from "../lib/cases.ts";
@@ -44,7 +45,7 @@ function minimal(ws: Workspace): void {
     git: { main: "main", remote: "origin", github: "" },
     schedule: { departures: ["00"] },
     gate: { image: "unused", install: "", steps: [] },
-    resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24 },
     deploy: { mode: "none", skipPattern: "" },
     reports: {},
   };
@@ -253,17 +254,34 @@ suite("entry", () => {
     const ws = workspace();
     minimal(ws);
     const before = ws.list();
-    for (const key of ["cpus", "maxWorkers"] as const) {
-      for (const value of [0, -1, 5, 1.5, "invalid", "2+2", "", "04"]) {
-        ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24, [key]: value };
-        const result = await execute(impl.checkConfig(ws));
-        expect(result.code, `${key}=${value} ${result.stderr}`).toBe(EXIT_INVALID_CONFIG);
-      }
-      for (const value of [1, 4]) {
-        ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24, [key]: value };
-        const result = await execute(impl.checkConfig(ws));
-        expect(result.code, `${key}=${value} ${result.stderr}`).toBe(0);
-      }
+    for (const value of [0, -1, 5, 1.5, "invalid", "2+2", "", "04"]) {
+      ws.config.resources = { cpus: value, loadLimit: 24 };
+      const result = await execute(impl.checkConfig(ws));
+      expect(result.code, `cpus=${value} ${result.stderr}`).toBe(EXIT_INVALID_CONFIG);
+    }
+    for (const value of [1, 4]) {
+      ws.config.resources = { cpus: value, loadLimit: 24 };
+      const result = await execute(impl.checkConfig(ws));
+      expect(result.code, `cpus=${value} ${result.stderr}`).toBe(0);
+    }
+    expect(ws.list()).toEqual(before);
+    expect(ws.calls()).toEqual([]);
+  });
+
+  contract("resources.maxWorkers is an unknown key in 1.0", async () => {
+    const ws = workspace();
+    minimal(ws);
+    const before = ws.list();
+    ws.config.resources = { cpus: 4, loadLimit: 24 };
+    const result = await execute(impl.checkConfig(ws));
+    if (MAX_WORKERS_REMOVED) {
+      expect(result.code, result.stderr).toBe(EXIT_INVALID_CONFIG);
+      expect(`${result.stdout}${result.stderr}`).toContain("/resources/maxWorkers: unknown key");
+    } else {
+      // 0.9 requires MAX_WORKERS from 1 through 4.
+      expect(result.code, result.stderr).toBe(0);
+      ws.config.resources = { cpus: 4, maxWorkers: 5, loadLimit: 24 };
+      expect((await execute(impl.checkConfig(ws))).code).toBe(EXIT_INVALID_CONFIG);
     }
     expect(ws.list()).toEqual(before);
     expect(ws.calls()).toEqual([]);

@@ -35,7 +35,7 @@ function quiet(ws: Workspace, ci = false): void {
     git: { main: "main", remote: "origin", github: ci ? "owner/game" : "" },
     schedule: { departures: ["00"], timezone: "UTC" },
     gate: { image: "unused", install: "", steps: [] },
-    resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24 },
     deploy: { mode: "none", skipPattern: "" },
     reports: {},
   };

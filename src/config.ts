@@ -40,7 +40,6 @@ export interface ProjectConfig {
   };
   readonly resources: {
     readonly cpus: number;
-    readonly maxWorkers: number;
     /** Departures start only below this one-minute load; 0 holds every departure. */
     readonly loadLimit: number;
   };
@@ -60,8 +59,8 @@ export interface ProjectConfig {
   };
 }
 
-/** The resource ceiling every gate observes: at most four CPUs and workers, start below load 24. */
-export const RESOURCE_LIMITS = { cpus: 4, loadLimit: 24, maxWorkers: 4 } as const;
+/** The resource ceiling every gate observes: at most four CPUs, start below load 24. */
+export const RESOURCE_LIMITS = { cpus: 4, loadLimit: 24 } as const;
 
 const BRANCH_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,128}$/;
 const GITHUB_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -137,18 +136,10 @@ function checkGate(issues: Issues, value: unknown): void {
 }
 
 function checkResources(issues: Issues, value: unknown): void {
-  if (
-    !checkObject(issues, "/resources", { required: ["cpus", "maxWorkers", "loadLimit"] }, value)
-  ) {
+  if (!checkObject(issues, "/resources", { required: ["cpus", "loadLimit"] }, value)) {
     return;
   }
   checkInteger(issues, "/resources/cpus", { max: RESOURCE_LIMITS.cpus, min: 1 }, value.cpus);
-  checkInteger(
-    issues,
-    "/resources/maxWorkers",
-    { max: RESOURCE_LIMITS.maxWorkers, min: 1 },
-    value.maxWorkers,
-  );
   const load = value.loadLimit;
   if (
     typeof load !== "number" ||

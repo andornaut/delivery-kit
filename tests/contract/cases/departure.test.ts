@@ -379,7 +379,7 @@ suite("departure", () => {
       bus(ws);
       // A zero limit against the real host load forces a load block.
       ws.hostLoad = "real";
-      ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
+      ws.config.resources = { cpus: 4, loadLimit: 0 };
       impl.offer(ws, ["bus/queued"]);
       const runner = await departOnce(ws, () => kinds(ws).includes("blocked-load"));
       await runner.stop();

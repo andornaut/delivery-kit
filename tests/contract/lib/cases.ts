@@ -69,6 +69,9 @@ export const NO_VERSION_2_ROUTE = "1.0 has no version 2 route schema";
 /** The fastest CI poll: 0 in 0.9; 1.0 rejects 0, and 1 second runs fast under the test clock. */
 export const CI_POLL_SECONDS = impl.name === "bash" ? 0 : 1;
 
+/** 1.0 removes resources.maxWorkers; 0.9 requires MAX_WORKERS from 1 through 4. */
+export const MAX_WORKERS_REMOVED = impl.name !== "bash";
+
 /** check-config's exit status for invalid configuration: 2 in 0.9, EXIT_INVALID (1) in 1.0. */
 export const EXIT_INVALID_CONFIG = impl.name === "bash" ? 2 : 1;
 
