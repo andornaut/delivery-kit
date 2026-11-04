@@ -1,4 +1,4 @@
-// The isolated gate for one integrated tree (merge.sh run and gate_script).
+// The isolated gate for one integrated tree.
 //
 // One container per batch, named deterministically and labelled with its game, runs as uid
 // 19001 with no host mount. The host copies the exact commit in (git archive, docker cp),
@@ -48,7 +48,7 @@ export function gateScript(steps: readonly GateStep[]): string {
 
 /**
  * Digest of Git status plus the content of every file it reports, tracked and untracked, never
- * ignored stores (bus-common.sh fingerprint). Compared before and after the gate.
+ * ignored stores. Compared before and after the gate.
  */
 export async function treeFingerprint(context: BusContext, work: string): Promise<string> {
   // Untrimmed: a porcelain row may begin with a space.

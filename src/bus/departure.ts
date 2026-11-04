@@ -1,4 +1,4 @@
-// One scheduled or requested departure (departure.sh depart). A nonempty queue is one gated
+// One scheduled or requested departure. A nonempty queue is one gated
 // push and deployment; queue reads and consumption happen under bus-queue.lock.
 import { deployPendingExists, retryDeploy } from "../deploy.ts";
 import { holdLockAsync } from "../lock.ts";
@@ -15,7 +15,7 @@ export function requestStore(context: BusContext): RequestStore {
   return { exec: context.exec, paths: context.paths, repo: context.game.repo };
 }
 
-/** bus-common.sh bus_report_scheduled_tick: one deduplicated report per departure slot. */
+/** One deduplicated report per departure slot. */
 export function reportScheduledTick(context: BusContext, slot: number, detail: string): void {
   if (!context.config.reports.scheduledTicks) {
     return;
@@ -27,7 +27,7 @@ export function reportScheduledTick(context: BusContext, slot: number, detail: s
   );
 }
 
-/** bus-common.sh bus_report_due_ticks: the observer's detail for a departure slot. */
+/** The observer's detail for a departure slot. */
 export function slotDetail(context: BusContext): string {
   const { paths } = context;
   if (nonEmpty(paths.activeDeparture)) {

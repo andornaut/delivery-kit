@@ -1,5 +1,4 @@
-// Red-CI push blocking and the one-shot repair approval (bus-common.sh ci_not_red,
-// repair_approved and repair_tree_matches).
+// Red-CI push blocking and the one-shot repair approval.
 // CLEANUP (added 2026-10-30): remove the repair protocol after its consumed approval is archived.
 // Approval is data, never shell input. A consumed marker rejects later copies of the file.
 import { existsSync, lstatSync } from "node:fs";

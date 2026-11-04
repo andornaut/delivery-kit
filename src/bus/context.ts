@@ -30,11 +30,11 @@ export interface BusContext {
   readonly events: Events;
   /** One runner log line; the runner appends it to bus/runner.log. */
   readonly log: (line: string) => void;
-  /** `<remote>/<main>`, the integration base (bus-common.sh BASE). */
+  /** `<remote>/<main>`, the integration base. */
   readonly base: string;
   /** Load average source, injectable for tests. */
   readonly loadAverage: () => number;
-  /** Start the in-runner CI watch for a pushed SHA (bus-common.sh start_ci). */
+  /** Start the in-runner CI watch for a pushed SHA. */
   readonly startCi: (sha: string) => void;
 }
 
@@ -112,12 +112,12 @@ export function busContext(
   };
 }
 
-// The one-minute load average, as bus-common.sh load_ok reads it from /proc/loadavg.
+// The one-minute load average from /proc/loadavg.
 function defaultLoad(): number {
   return loadavg()[0] ?? 0;
 }
 
-/** bus-common.sh load_ok: the one-minute load is below the configured limit. */
+/** True when the one-minute load is below the configured limit. */
 export function loadOk(context: BusContext): boolean {
   return context.loadAverage() < context.config.resources.loadLimit;
 }

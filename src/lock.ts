@@ -2,9 +2,9 @@
 //
 // The process opens the lock file and passes that descriptor to `flock FD` as its fd 3. flock(2)
 // locks belong to the open file description, so the lock stays held after the flock child exits
-// and is released when this process closes its descriptor or exits. That is the same lock Bash
-// (`exec 9>file; flock 9`) and Python (`fcntl.flock`) take on the same file, so all three
-// exclude each other. Node opens files close-on-exec, so spawned children never inherit a lock.
+// and is released when this process closes its descriptor or exits. That is the same lock a shell
+// takes with `exec 9>file; flock 9`, so the two exclude each other. Node opens files
+// close-on-exec, so spawned children never inherit a lock.
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, constants, openSync } from "node:fs";
 

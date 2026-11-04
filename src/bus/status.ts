@@ -1,4 +1,4 @@
-// Runner self-attested identity and a read-only singleton, idle and drain report (status.py).
+// Runner self-attested identity and a read-only singleton, idle and drain report.
 // Only the runner writes its identity, while it holds runner.lock. The report never reads
 // /proc: the singleton test is a non-blocking flock on the same lock files.
 import { randomUUID } from "node:crypto";
@@ -23,7 +23,7 @@ function nowNs(): bigint {
   return BigInt(Date.now()) * 1_000_000n;
 }
 
-/** status.py record: write runner.identity.json, then bind its token into runner.lock. */
+/** Write runner.identity.json, then bind its token into runner.lock. */
 export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<string, unknown> {
   const started = input.startedNs ?? nowNs();
   const token = `${input.pid}:${started}:${randomUUID()}`;
@@ -95,7 +95,7 @@ export interface StatusReport {
   readonly [key: string]: unknown;
 }
 
-/** status.py report. `ciEnabled` requires a CI record for the last push. */
+/** The status report. `ciEnabled` requires a CI record for the last push. */
 export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const identity = readIdentity(paths);

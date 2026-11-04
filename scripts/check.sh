@@ -3,7 +3,6 @@
 # No host path is mounted: the source tree is streamed into container scratch as a tar, and
 # the npm cache is a named volume. A first container populates that volume with network
 # access; every check then runs with no network. Nothing is written back to the host.
-# The 0.9.x Bash and Python suite runs alongside the TypeScript checks until its removal.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 . "$root/scripts/runtime.sh"
@@ -69,7 +68,7 @@ echo 'delivery-kit: populating the npm cache volume in a container'
 '
 
 require_load
-echo 'delivery-kit: checking types, lint, build, tests and the 0.9.x suite offline'
+echo 'delivery-kit: checking types, lint, build and tests offline'
 source_tar | "${container[@]}" --network none "$image" bash -ec '
   mkdir /tmp/check
   tar -x -C /tmp/check
@@ -79,11 +78,5 @@ source_tar | "${container[@]}" --network none "$image" bash -ec '
   npm run lint
   npm run build
   npm test -- --maxWorkers=4
-  for path in bin/* libexec/*.sh scripts/*.sh; do bash -n "$path"; done
-  python3 tests/verify-scripts.py
-  python3 tests/verify-events.py
-  python3 tests/verify-events.py --delivery-only
-  python3 tests/verify-events.py --quiet-only
-  python3 tests/verify-once.py
-  python3 -m unittest discover -s tests -p "test_*.py"
+  for path in scripts/*.sh; do bash -n "$path"; done
 '

@@ -58,7 +58,7 @@ function minutes(departures: readonly string[]): number[] {
   return departures.map((departure) => Number.parseInt(departure, 10)).sort((a, b) => a - b);
 }
 
-/** Seconds until the next departure minute after `now` (departure.sh until_next). */
+/** Seconds until the next departure minute after `now`. */
 export function untilNext(timezone: string, departures: readonly string[], now: number): number {
   const { minute, second } = zonedParts(timezone, now);
   const position = minute * 60 + second;
@@ -67,7 +67,7 @@ export function untilNext(timezone: string, departures: readonly string[], now: 
   return next === undefined ? 3600 - position + (sorted[0] ?? 0) : next - position;
 }
 
-/** The most recent departure slot at or before `now` (bus-common.sh bus_latest_scheduled_slot). */
+/** The most recent departure slot at or before `now`. */
 export function latestScheduledSlot(
   timezone: string,
   departures: readonly string[],

@@ -1,4 +1,4 @@
-// Reporting-only resource information (resource-report.sh). Worktrees, branches and containers
+// Reporting-only resource information. Worktrees, branches and containers
 // are never removed here.
 import { appendFileSync } from "node:fs";
 import { loadavg, uptime } from "node:os";

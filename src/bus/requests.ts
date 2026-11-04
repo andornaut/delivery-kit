@@ -1,4 +1,4 @@
-// Durable user-authorized one-off request receipts (request.py). Callers that validate hold
+// Durable user-authorized one-off request receipts. Callers that validate hold
 // bus-queue.lock; every operation also holds requests/requests.lock.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -183,7 +183,7 @@ export function finishRequest(store: RequestStore, id: string, exit: number): Pr
   });
 }
 
-/** The pinned tip of `branch` in a request record (batch.sh pinned_tip). */
+/** The pinned tip of `branch` in a request record. */
 export function pinnedTip(record: RequestRecord, branch: string): string {
   const tip = new Map(record.entries).get(branch);
   if (tip === undefined) {

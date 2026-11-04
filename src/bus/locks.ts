@@ -18,7 +18,7 @@ export function holdExistingLock(path: string): LockHandle | undefined {
   }
 }
 
-/** status.py lock_held: true when another holder has the lock; never creates the file. */
+/** True when another holder has the lock; never creates the file. */
 export function lockHeld(path: string): boolean {
   try {
     holdExistingLock(path)?.release();

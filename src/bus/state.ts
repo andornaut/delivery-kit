@@ -82,7 +82,7 @@ export function readText(path: string): string | undefined {
   }
 }
 
-/** Trimmed file text, or undefined when unreadable (status.py read_text). */
+/** Trimmed file text, or undefined when unreadable. */
 export function readTrimmed(path: string): string | undefined {
   return readText(path)?.trim();
 }
@@ -107,7 +107,7 @@ export function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
-/** Python json.dumps(value, sort_keys=True): ", " and ": " separators and ASCII escapes. */
+/** The 0.9.x record encoding: sorted keys, ", " and ": " separators and ASCII escapes. */
 export function pyDumps(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(pyDumps).join(", ")}]`;

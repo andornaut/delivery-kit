@@ -7,38 +7,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { holdLock, holdLockAsync, LockBusy, lockIsFree, LockMissing, withLock } from "./lock.ts";
 
-// CLEANUP (added 2026-11-03): the Python holder covers 0.9.x interoperation; remove it with the
-// Python mechanisms once every game runs 1.x.
+// A Bash holder stands in for every external flock(1) user, including the 0.9.x runner.
 const HOLDERS = {
   bash: ["bash", "-c", 'exec 9>>"$1"; flock 9; echo held; exec sleep 60', "holder"],
-  python: [
-    "python3",
-    "-c",
-    [
-      "import fcntl, sys, time",
-      "f = open(sys.argv[1], 'a')",
-      "fcntl.flock(f, fcntl.LOCK_EX)",
-      "print('held', flush=True)",
-      "time.sleep(60)",
-    ].join("\n"),
-  ],
 } as const;
 
 const PROBES = {
   bash: (path: string) => spawnSync("flock", ["-n", "-E", "3", path, "true"]).status,
-  python: (path: string) =>
-    spawnSync("python3", [
-      "-c",
-      [
-        "import fcntl, sys",
-        "f = open(sys.argv[1], 'a')",
-        "try:",
-        "    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)",
-        "except BlockingIOError:",
-        "    sys.exit(3)",
-      ].join("\n"),
-      path,
-    ]).status,
 };
 
 const children: ChildProcess[] = [];
@@ -73,7 +48,7 @@ function exited(child: ChildProcess): Promise<void> {
   });
 }
 
-describe.each(["bash", "python"] as const)("interoperation with a %s flock holder", (kind) => {
+describe.each(["bash"] as const)("interoperation with a %s flock holder", (kind) => {
   it("is excluded while the external holder runs and acquires once it exits", async () => {
     const path = lockPath();
     const holder = await startHolder(kind, path);

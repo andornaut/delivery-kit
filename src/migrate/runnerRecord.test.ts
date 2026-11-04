@@ -16,9 +16,9 @@ const cliPath = (): string => join(game.repo, "node_modules/@andornaut/delivery-
 function probe(overrides: Partial<ProcessProbe> = {}): ProcessProbe {
   return {
     alive: () => true,
-    argv: () => ["node", join(game.repo, "node_modules/.bin/delivery-kit"), "run"],
+    argv: () => ["node", join(game.repo, "node_modules", ".bin", "delivery-kit"), "run"],
     realpath: (path) =>
-      path.endsWith("/.bin/delivery-kit")
+      path.endsWith(join(".bin", "delivery-kit"))
         ? cliPath()
         : path.includes("node_modules")
           ? path

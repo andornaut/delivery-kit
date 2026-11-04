@@ -1,4 +1,4 @@
-// The resident runner for one game (runner.sh and bus.sh): singleton locks, identity, the
+// The resident runner for one game: singleton locks, identity, the
 // serialized scheduled and requested departure loop, the 60 s observer, the 1800 s resource
 // sampler and the in-runner CI watches. No timer outlives the process.
 import { realpathSync } from "node:fs";
@@ -88,7 +88,7 @@ export interface LoopHooks {
   readonly beforeDeparture?: () => void;
 }
 
-/** bus.sh: serialized scheduled and requested departures until `signal` aborts. */
+/** Serialized scheduled and requested departures until `signal` aborts. */
 export async function departureLoop(
   context: BusContext,
   hooks: LoopHooks,
@@ -198,7 +198,7 @@ function sourceCommit(toolRoot: string): string | null {
   return readTrimmed(join(toolRoot, "SOURCE_COMMIT")) ?? null;
 }
 
-/** runner.sh: hold the singleton locks, record identity and pin, then run until aborted. */
+/** Hold the singleton locks, record identity and pin, then run until aborted. */
 export async function runRunner(
   options: RunnerOptions,
   makeContext: (startCi: (sha: string) => void) => BusContext,

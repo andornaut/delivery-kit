@@ -29,9 +29,7 @@ export interface Unit {
 
 export const RUNNER_LOG = "runner.log";
 
-// Bus locks from the 0.9.x sources: bus-queue.lock (departure.sh:33), requests/requests.lock
-// (request.py:56), unblock/unblock.lock and unblock/monitor.lock (unblock.py:409, monitor.py:43),
-// events/state.lock and events/dispatch.lock (event.py:55,68).
+// The 0.9.x bus locks: queue, one-off requests, monitor delivery and events.
 const BUS_LOCKS = [
   "bus-queue.lock",
   "requests/requests.lock",

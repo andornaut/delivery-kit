@@ -28,7 +28,7 @@ function store(): RequestStore & { file: (id: string) => string; test: TestGame 
 }
 
 describe("one-off requests", () => {
-  it("captures the ordered queue with exact tips in request.py's format, once per ID", async () => {
+  it("captures the ordered queue with exact tips in the 0.9.x record format, once per ID", async () => {
     const requests = store();
     const first = queueBranch(requests.test, "bus/one");
     const second = queueBranch(requests.test, "bus/two");

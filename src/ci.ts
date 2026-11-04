@@ -1,4 +1,4 @@
-// Exact-commit CI monitoring (ci-watch.sh), run as an in-runner task. A replacement runner
+// Exact-commit CI monitoring, run as an in-runner task. A replacement runner
 // resumes every watch whose ci/<sha>.status is still running, keeping the original deadline.
 import { appendFileSync, readdirSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";

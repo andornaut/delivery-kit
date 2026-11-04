@@ -1,4 +1,4 @@
-// Bus events: durable enqueue with sha256(kind:key) dedupe and bounded delivery (event.py).
+// Bus events: durable enqueue with sha256(kind:key) dedupe and bounded delivery.
 //
 // emitEvent records an event once under events/state.lock and tracks per-SHA CI and deployment
 // state, adding a `complete` event when a pushed commit has CI success and a finished deployment.

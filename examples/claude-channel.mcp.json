@@ -1,16 +1,8 @@
 {
   "mcpServers": {
     "delivery-kit-monitor": {
-      "command": "/usr/bin/python3",
-      "args": [
-        "/path/to/snapshot/libexec/claude_channel.py",
-        "--monitor",
-        "00000000-0000-4000-8000-000000000001",
-        "--state-dir",
-        "/absolute/path/to/host-project/bus-state/unblock",
-        "--state-dir",
-        "/absolute/path/to/other-project/bus-state/unblock"
-      ]
+      "command": "npx",
+      "args": ["--no-install", "delivery-kit", "--root", "/absolute/path/to/game-dev", "channel"]
     }
   }
 }

@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "timezone": "America/Toronto",
+  "wakeMinutes": [20, 50],
+  "games": {
+    "archies-dog-walks": {
+      "name": "Archie",
+      "path": "../archies-dog-walks",
+      "roles": ["art", "gameplay", "tech"]
+    },
+    "chibis-way-home": {
+      "name": "Chibi",
+      "path": "../chibis-way-home",
+      "roles": ["art", "gameplay", "tech"]
+    }
+  },
+  "kits": {
+    "art-kit": { "path": "../art-kit" },
+    "delivery-kit": { "path": "../delivery-kit" },
+    "game-kit": { "path": "../game-kit" }
+  },
+  "sharedRoles": ["game-dev", "art-kit", "delivery-kit", "game-kit"]
+}

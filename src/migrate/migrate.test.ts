@@ -117,10 +117,10 @@ function buildTree(): Tree {
   writeJson(join(archieBus, "requests/one.json"), { id: "one", state: "finished" });
   writeJson(join(archieBus, "unblock/claude-spool/brief.json"), { text: "pending" });
   put(join(archieBus, "npm-cache/_cacache/index"), "cache\n");
-  put(join(archieBus, "__pycache__/event.cpython.pyc"), "bytecode");
+  put(join(archieBus, "__pycache__/event.pyc"), "bytecode");
   put(join(archieBus, "tests/wiring.py"), "# nested scripts are state\n");
   link(join(archieBus, "last-push.link"), "last-push.sha");
-  link(join(archieBus, "check/venv/bin/python"), "/usr/bin/python3");
+  link(join(archieBus, "check/venv/bin/node"), "/usr/bin/node");
   chmodSync(join(archieBus, "feature-ready.json"), 0o640);
 
   for (const name of ["batch.sh", "bus-common.sh", "event.py", "unblock.py"]) {
@@ -128,7 +128,7 @@ function buildTree(): Tree {
   }
   put(join(chibiBus, "runner.sh"), "#!/bin/sh\n");
   put(join(chibiBus, "runner.before-monitor-041.sh"), "#!/bin/sh\n");
-  put(join(chibiBus, "bus.conf.before-python312"), "MAIN=main\n");
+  put(join(chibiBus, "bus.conf.before-upgrade"), "MAIN=main\n");
   put(join(chibiBus, "codex-bus.log"), "chibi runner log\n");
   put(join(chibiBus, "delivery-kit-rollback-1/bus.conf"), "MAIN=main\n");
   put(join(chibiBus, "active-departure"));
@@ -326,7 +326,7 @@ describe("migrate", () => {
       "check",
       "check/venv",
       "check/venv/bin",
-      "check/venv/bin/python",
+      "check/venv/bin/node",
       "ci",
       `ci/${SHA}.lock`,
       `ci/${SHA}.status`,
@@ -354,7 +354,7 @@ describe("migrate", () => {
     expect(readFileSync(join(archie.busDir, "runner.log"), "utf8")).toBe("current runner log\n");
     expect(readFileSync(join(archie.busDir, "codex-bus.log"), "utf8")).toBe("older log\n");
     expect(readlinkSync(join(archie.busDir, "last-push.link"))).toBe("last-push.sha");
-    expect(readlinkSync(join(archie.busDir, "check/venv/bin/python"))).toBe("/usr/bin/python3");
+    expect(readlinkSync(join(archie.busDir, "check/venv/bin/node"))).toBe("/usr/bin/node");
     expect(statSync(join(archie.busDir, "feature-ready.json")).mode & 0o777).toBe(0o640);
     expect(existsSync(join(tree.archieBus, "runner.log"))).toBe(false);
 
@@ -750,7 +750,7 @@ describe("migrate --remove-legacy", () => {
     expect(readdirSync(tree.chibiBus).sort()).toEqual(
       [
         "active-departure",
-        "bus.conf.before-python312",
+        "bus.conf.before-upgrade",
         "delivery-kit-rollback-1",
         "release-approved.json",
       ].sort(),

@@ -1,4 +1,4 @@
-// Gate one scratch batch, push it, then deploy the same build (merge.sh).
+// Gate one scratch batch, push it, then deploy the same build.
 import { mkdirSync, mkdtempSync, renameSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -27,7 +27,7 @@ export interface MergeInput {
 
 class Blocked extends Error {}
 
-/** merge.sh. Returns true once the exact gated SHA is pushed; deployment is tracked separately. */
+/** Returns true once the exact gated SHA is pushed; deployment is tracked separately. */
 export async function mergeBatch(context: BusContext, input: MergeInput): Promise<boolean> {
   let stage = "preparation";
   try {

@@ -1,4 +1,4 @@
-// Combine queued branches in a private scratch worktree, then gate and push once (batch.sh).
+// Combine queued branches in a private scratch worktree, then gate and push once.
 import { join } from "node:path";
 
 import { readPending } from "../deploy.ts";
@@ -106,7 +106,7 @@ async function landed(
   }
 }
 
-/** batch.sh: true when the batch was gated and pushed. */
+/** True when the batch was gated and pushed. */
 export async function runBatch(context: BusContext, input: BatchInput): Promise<boolean> {
   const mergeLock = await holdLockAsync(context.paths.mergeLock);
   try {

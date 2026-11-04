@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "git": { "main": "main", "remote": "origin", "github": "owner/game" },
+  "schedule": { "departures": ["00"], "timezone": "America/Toronto" },
+  "gate": {
+    "image": "node:24.21.0",
+    "install": "npm ci",
+    "steps": [
+      { "name": "check", "run": "npm run check" },
+      { "name": "lint", "run": "npm run lint" },
+      { "name": "test", "run": "npm test -- --maxWorkers=4" },
+      { "name": "build", "run": "npm run build" }
+    ]
+  },
+  "resources": { "cpus": 4, "maxWorkers": 4, "loadLimit": 24 },
+  "ci": {
+    "requiredNames": ["AI attributions", "Lint", "Test"],
+    "pollSeconds": 60,
+    "timeoutSeconds": 1800
+  },
+  "deploy": { "mode": "wrangler", "skipPattern": "\\.md$" },
+  "reports": {
+    "project": "Archie",
+    "scheduledTicks": true,
+    "recipient": "monitor",
+    "workerParents": ["monitor"]
+  }
+}

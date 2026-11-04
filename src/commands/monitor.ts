@@ -67,7 +67,7 @@ function scope(
   };
 }
 
-/** The recipient must be the active route monitor (claude_monitor.py:scope). */
+/** The recipient must be the active route monitor. */
 function claudeRoute(
   layout: Layout,
   recipient: string,

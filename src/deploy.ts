@@ -1,4 +1,4 @@
-// Deployment of already-gated assets (post-push.sh). A failed deployment keeps its pending
+// Deployment of already-gated assets. A failed deployment keeps its pending
 // pointer and worktree, and is retried only at a later departure.
 import { existsSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -132,7 +132,7 @@ async function finishPending(context: BusContext, pending: PendingDeploy): Promi
   return false;
 }
 
-/** post-push.sh --retry. True when nothing is pending or the retry deployed and cleaned up. */
+/** Retry a pending deployment. True when nothing is pending or the retry deployed and cleaned up. */
 export async function retryDeploy(context: BusContext): Promise<boolean> {
   const pending = readPending(context);
   if (pending === undefined) {
@@ -148,7 +148,7 @@ export async function retryDeploy(context: BusContext): Promise<boolean> {
   return true;
 }
 
-/** post-push.sh --stage after a successful push. */
+/** Stage and deploy after a successful push. */
 export async function stageDeploy(
   context: BusContext,
   pending: PendingDeploy,

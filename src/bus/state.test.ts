@@ -4,7 +4,7 @@ import { readQueue } from "./queue.ts";
 import { pyDumps } from "./state.ts";
 
 describe("pyDumps", () => {
-  it("matches Python json.dumps(sort_keys=True)", () => {
+  it("matches the 0.9.x sorted-key record encoding", () => {
     expect(
       pyDumps({ state: "pending", id: "a", entries: [["bus/x", "f".repeat(4)]], none: null }),
     ).toBe('{"entries": [["bus/x", "ffff"]], "id": "a", "none": null, "state": "pending"}');

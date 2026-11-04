@@ -28,6 +28,7 @@
     "check": "tsc",
     "format": "prettier --write . && eslint --fix .",
     "lint": "prettier --check . && eslint --max-warnings 0 . && markdownlint-cli2",
+    "pack": "bash scripts/pack.sh",
     "test": "vitest run",
     "verify": "bash scripts/check.sh"
   },
