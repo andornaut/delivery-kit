@@ -61,6 +61,7 @@ for gid in $(stat -c %g -- "$root" "$list" | sort -u); do groups+=(--group-add "
 container=(
   docker run --rm --read-only --cpus 4
   --user 19001:19001 -e HOME=/tmp "${groups[@]}" -e npm_config_cache=/var/tmp/npm
+  -e DK_PARITY_DIR=/var/tmp/parity -e "DELIVERY_KIT_CONTRACT_NODE=${DELIVERY_KIT_CONTRACT_NODE:-0}"
   --mount "type=bind,src=$root,dst=/source,readonly"
   --mount "type=bind,src=$list,dst=/source.list,readonly"
   --mount "type=volume,src=$volume,dst=/var/tmp"
@@ -69,16 +70,22 @@ container=(
 )
 
 require_load
-echo 'delivery-kit: populating the npm cache volume in a container'
+echo 'delivery-kit: populating the npm cache and contract parity volume in a container'
 "${container[@]}" "$image" sh -ec '
-  mkdir /tmp/fetch
+  mkdir -p /tmp/fetch/tests/contract/lib
   cp /source/package.json /source/package-lock.json /tmp/fetch/
+  cd /source/tests/contract
+  cp package.json package-lock.json /tmp/fetch/tests/contract/
+  cp lib/parity.ts lib/parity-install.ts /tmp/fetch/tests/contract/lib/
   cd /tmp/fetch
   npm ci --prefer-offline --ignore-scripts --no-audit --no-fund
+  cd tests/contract
+  npm ci --prefer-offline --ignore-scripts --no-audit --no-fund
+  node lib/parity-install.ts
 '
 
 require_load
-echo 'delivery-kit: checking types, lint, build and tests offline'
+echo 'delivery-kit: checking types, lint, build, tests and contract cases offline'
 "${container[@]}" --network none "$image" bash -ec '
   mkdir /tmp/check
   tar -C /source --null -T /source.list -cf - | tar -x -C /tmp/check
@@ -88,5 +95,16 @@ echo 'delivery-kit: checking types, lint, build and tests offline'
   npm run lint
   npm run build
   npm test -- --maxWorkers=4
-  for path in scripts/*.sh; do bash -n "$path"; done
+  for path in scripts/*.sh tests/contract/run.sh; do bash -n "$path"; done
+  # CLI contract cases: the v0.9.1 parity release gates; the 1.0 bundle gates once
+  # DELIVERY_KIT_CONTRACT_NODE=1 is set, and until then its results are reported only.
+  cd tests/contract
+  npm ci --offline --ignore-scripts --no-audit --no-fund
+  npx tsc
+  DK_IMPL=bash npx vitest run --maxWorkers=4
+  if [ "$DELIVERY_KIT_CONTRACT_NODE" = 1 ]; then
+    DK_IMPL=node npx vitest run --maxWorkers=4
+  else
+    DK_IMPL=node npx vitest run --maxWorkers=4 || echo "delivery-kit: Node contract cases failed (reported only)"
+  fi
 '

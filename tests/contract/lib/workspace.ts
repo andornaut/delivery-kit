@@ -327,6 +327,7 @@ export class Workspace {
       DK_FAKE_DIR: this.fakeDir,
       // The fake gate checks the selected implementation's container contract.
       DK_IMPL: process.env.DK_IMPL ?? "bash",
+      DK_FAKE_CHECKOUT: this.repo,
       LANG: "C.UTF-8",
       GIT_AUTHOR_NAME: "Fixture",
       GIT_AUTHOR_EMAIL: "fixture@example.invalid",

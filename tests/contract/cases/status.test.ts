@@ -7,6 +7,7 @@ import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at } from "../lib/time.ts";
+import { BASH_ROOT } from "../lib/parity.ts";
 import { KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 interface Report {
@@ -23,7 +24,7 @@ interface Report {
 }
 
 function kitVersion(): string {
-  if (impl.name === "bash") return readFileSync(join(KIT_ROOT, "VERSION"), "utf8").trim();
+  if (impl.name === "bash") return readFileSync(join(BASH_ROOT, "VERSION"), "utf8").trim();
   return (JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as { version: string }).version;
 }
 

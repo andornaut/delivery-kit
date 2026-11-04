@@ -2,7 +2,7 @@
 // `node fake-tool.mjs <tool> ...args`. Behaviour is read from DK_FAKE_DIR/control.json on
 // every invocation, so a case can change it while a resident runner keeps running.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const [, , tool, ...args] = process.argv;
@@ -177,6 +177,10 @@ function docker() {
     // 1.0 gate: a fixed unprivileged user and read-only binds; outputs leave by `docker cp`.
     const user = args.indexOf("--user");
     if (user < 0 || args[user + 1] !== "19001:19001") return fail("gate must run as --user 19001:19001");
+    // Checkouts are group-readable only, so the gate joins the checkout's group.
+    const group = args.indexOf("--group-add");
+    const gid = String(statSync(process.env.DK_FAKE_CHECKOUT).gid);
+    if (group < 0 || args[group + 1] !== gid) return fail(`gate must pass --group-add ${gid} (the checkout gid)`);
     const writable = writableBinds(args);
     if (writable.length) return fail(`writable bind mount: ${writable.join(" ")}`);
   } else {

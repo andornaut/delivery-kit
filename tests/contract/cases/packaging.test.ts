@@ -1,4 +1,4 @@
-// 0.9 source archive packaging (from tests/test_package.py). 1.0 replaces package.sh with an
+// 0.9 source archive packaging (from tests/test_package.py), run on the v0.9.1 release tree. 1.0 replaces package.sh with an
 // npm pack script owned by P2, so this contract runs against the Bash release only, and
 // scheduled-once is retired (decision 6).
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -7,7 +7,7 @@ import { expect } from "vitest";
 
 import { execute } from "../lib/adapter.ts";
 import { bashOnly, retired, suite, workspaces } from "../lib/cases.ts";
-import { KIT_ROOT } from "../lib/workspace.ts";
+import { BASH_ROOT } from "../lib/parity.ts";
 
 suite("packaging", () => {
   const workspace = workspaces();
@@ -17,12 +17,12 @@ suite("packaging", () => {
     const source = join(ws.root, "source");
     mkdirSync(source);
     for (const name of ["bin", "examples", "libexec", "scripts", "tests"]) {
-      cpSync(join(KIT_ROOT, name), join(source, name), {
+      cpSync(join(BASH_ROOT, name), join(source, name), {
         recursive: true,
         filter: (path) => !path.includes("__pycache__") && !path.includes("node_modules"),
       });
     }
-    for (const name of ["README.md", "VERSION", "LICENSE"]) cpSync(join(KIT_ROOT, name), join(source, name));
+    for (const name of ["README.md", "VERSION", "LICENSE"]) cpSync(join(BASH_ROOT, name), join(source, name));
     // Packaging uses the real Git; the fakes stay off PATH.
     const env = { ...ws.baseEnv(), PATH: "/usr/local/bin:/usr/bin:/bin" };
     const sh = async (script: string, ...args: string[]) => {

@@ -6,7 +6,8 @@ import { expect } from "vitest";
 
 import { cli, execute, impl } from "../lib/adapter.ts";
 import { bashConfig, bashOnly, contract, suite, workspaces } from "../lib/cases.ts";
-import { KIT_ROOT, type Workspace } from "../lib/workspace.ts";
+import { BASH_ROOT } from "../lib/parity.ts";
+import type { Workspace } from "../lib/workspace.ts";
 
 const FIRST = "00000000-0000-0000-0000-000000000001";
 const SECOND = "abcdefab-1234-5678-9012-abcdefabcdef";
@@ -142,16 +143,17 @@ suite("entry", () => {
     const interpreter = join(ws.root, "native-python");
     execFileSync("sh", [
       "-c",
-      `printf '#!/usr/bin/python3\\nimport json,sys\\nprint(json.dumps(sys.argv[1:]))\\n' > "$1"; chmod +x "$1"`,
+      `printf '#!%s\\nconsole.log(JSON.stringify(process.argv.slice(2)))\\n' "$2" > "$1"; chmod +x "$1"`,
       "x",
       interpreter,
+      process.execPath,
     ]);
     ws.legacyConf = `CODEX_PYTHON="${interpreter}"\nWORKER_PARENT_THREADS=${second}\n`;
     for (const parents of [[], ["--parent", FIRST, "--parent", second]]) {
       const result = await cli(ws, ["monitor-snapshot", "--recipient", FIRST, ...parents]);
       expect(result.code, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual([
-        join(KIT_ROOT, "libexec/monitor.py"),
+        join(BASH_ROOT, "libexec/monitor.py"),
         "snapshot",
         "--state-dir",
         ws.path("unblock"),
@@ -179,7 +181,7 @@ suite("entry", () => {
     minimal(ws);
     const source = join(ws.root, "source");
     mkdirSync(source);
-    for (const name of ["bin", "libexec", "scripts"]) cpSync(join(KIT_ROOT, name), join(source, name), { recursive: true });
+    for (const name of ["bin", "libexec", "scripts"]) cpSync(join(BASH_ROOT, name), join(source, name), { recursive: true });
     // Export uses the real Git; fakes stay off PATH for this packaging step.
     const env = { ...ws.baseEnv(), PATH: "/usr/local/bin:/usr/bin:/bin" };
     const git = (...args: string[]) => execFileSync("/usr/bin/git", ["-C", source, ...args], { env, encoding: "utf8" }).trim();

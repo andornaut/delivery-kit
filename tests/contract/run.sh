@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Contract harness in isolated containers, following scripts/check.sh: uid 19001, no host
-# mount, the source streamed in as a tar and the npm cache in a named volume. A first container
-# populates the cache with network access; the build and both implementations' cases then run
-# with no network. Nothing is written back to the host.
+# Contract harness in isolated containers, following scripts/check.sh: uid 19001 in the
+# checkout's group, no host mount, the source streamed in as a tar, and the npm cache and the
+# verified v0.9.1 parity release (lib/parity.ts) in a named volume. A first container fills the
+# volume with network access; the build and both implementations' cases then run with no
+# network. Nothing is written back to the host.
 # Usage: run.sh [--lock] [vitest args]
 #   --lock  regenerate tests/contract/package-lock.json; the file leaves through stdout.
 set -euo pipefail
@@ -13,7 +14,8 @@ volume=${DELIVERY_KIT_NPM_VOLUME:-delivery-kit-npm-check}
 
 container=(
   docker run -i --rm --read-only --cpus 4
-  --user 19001:19001 -e HOME=/tmp -e npm_config_cache=/var/tmp/npm
+  --user 19001:19001 --group-add "$(stat -c %g "$root")" -e HOME=/tmp
+  -e npm_config_cache=/var/tmp/npm -e DK_PARITY_DIR=/var/tmp/parity
   --mount "type=volume,src=$volume,dst=/var/tmp"
   --tmpfs /tmp:exec,mode=1777
   -w /tmp
@@ -58,12 +60,14 @@ finish() {
 trap finish EXIT
 
 require_load
-echo 'contract: populating the npm cache volume (network)'
-(cd -- "$root" && tar -cf - package.json package-lock.json tests/contract/package.json tests/contract/package-lock.json) \
+echo 'contract: populating the npm cache and parity release volume (network)'
+(cd -- "$root" && tar -cf - package.json package-lock.json tests/contract/package.json \
+  tests/contract/package-lock.json tests/contract/lib/parity.ts tests/contract/lib/parity-install.ts) \
   | "${container[@]}" "$image" sh -ec '
   mkdir /tmp/fetch && tar -x -C /tmp/fetch
   cd /tmp/fetch && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
   cd tests/contract && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
+  node lib/parity-install.ts
 '
 
 require_load
