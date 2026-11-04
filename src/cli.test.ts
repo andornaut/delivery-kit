@@ -7,10 +7,13 @@ import { loadLayout } from "./layout.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
 
-function run(root: string, ...argv: string[]): { code: number; out: string; err: string } {
+async function run(
+  root: string,
+  ...argv: string[]
+): Promise<{ code: number; out: string; err: string }> {
   let out = "";
   let err = "";
-  const code = main(
+  const code = await main(
     { cwd: "/nonexistent", env: {}, err: (text) => (err += text), out: (text) => (out += text) },
     ["--root", root, ...argv],
   );
@@ -25,58 +28,58 @@ function withRegistry(root: string): void {
 }
 
 describe("check-config", () => {
-  it("accepts config.json and every game before a registry exists", () => {
+  it("accepts config.json and every game before a registry exists", async () => {
     const { root } = makeFixture();
-    const result = run(root, "check-config");
+    const result = await run(root, "check-config");
     expect(result).toMatchObject({ code: EXIT_OK, err: "" });
     expect(result.out).toContain("archies-dog-walks, chibis-way-home; registry absent");
   });
 
-  it("resolves addressed role names against the registry", () => {
+  it("resolves addressed role names against the registry", async () => {
     const { base, root } = makeFixture();
     withRegistry(root);
-    expect(run(root, "check-config").out).toContain("registry revision 1");
+    expect((await run(root, "check-config")).out).toContain("registry revision 1");
     const config = projectConfig("Chibi");
     (config.reports as Record<string, unknown>).workerParents = [
       "coordinator",
       "chibis-way-home/tech",
     ];
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
-    const result = run(root, "check-config");
+    const result = await run(root, "check-config");
     expect(result.code).toBe(EXIT_INVALID);
     expect(result.err).toContain("no registered role or duty named chibis-way-home/tech");
   });
 
-  it("rejects a project name that differs from config.json and limits checks with --game", () => {
+  it("rejects a project name that differs from config.json and limits checks with --game", async () => {
     const { base, root } = makeFixture();
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));
-    expect(run(root, "check-config").err).toContain("/reports/project must be Chibi");
-    expect(run(root, "check-config", "--game", "archies-dog-walks").code).toBe(EXIT_OK);
-    expect(run(root, "check-config", "--game", "nope").code).toBe(EXIT_USAGE);
+    expect((await run(root, "check-config")).err).toContain("/reports/project must be Chibi");
+    expect((await run(root, "check-config", "--game", "archies-dog-walks")).code).toBe(EXIT_OK);
+    expect((await run(root, "check-config", "--game", "nope")).code).toBe(EXIT_USAGE);
   });
 
-  it("reports a missing config.json as invalid", () => {
+  it("reports a missing config.json as invalid", async () => {
     const { base } = makeFixture();
-    expect(run(base, "check-config").code).toBe(EXIT_INVALID);
+    expect((await run(base, "check-config")).code).toBe(EXIT_INVALID);
   });
 });
 
 describe("dispatcher", () => {
   it.each(COMMANDS.filter((command) => command !== "check-config"))(
     "%s is not implemented in this build",
-    (command) => {
+    async (command) => {
       const { root } = makeFixture();
-      expect(run(root, command)).toMatchObject({
+      expect(await run(root, command)).toMatchObject({
         code: EXIT_USAGE,
         err: `delivery-kit: ${command} is not implemented in this build\n`,
       });
     },
   );
 
-  it("prints usage for help and rejects unknown commands", () => {
+  it("prints usage for help and rejects unknown commands", async () => {
     const { root } = makeFixture();
-    expect(run(root, "--help")).toMatchObject({ code: EXIT_OK });
-    expect(run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
-    expect(run(root, "check-config", "--unknown").code).toBe(EXIT_USAGE);
+    expect(await run(root, "--help")).toMatchObject({ code: EXIT_OK });
+    expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
+    expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
   });
 });

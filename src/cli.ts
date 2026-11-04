@@ -2,19 +2,24 @@
 // DELIVERY_KIT_ROOT or the working directory, in that order.
 import { parseArgs } from "node:util";
 
+import { channel } from "./commands/channel.ts";
+import { migrate } from "./commands/migrate.ts";
+import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
+import { request } from "./commands/request.ts";
+import { resourceReport } from "./commands/resourceReport.ts";
+import { run } from "./commands/run.ts";
+import { status } from "./commands/status.ts";
 import { addressedRoles, loadProjectConfig, type ProjectConfig } from "./config.ts";
 import { readJsonIfExists } from "./durable.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 import { gameLayout, type Layout, loadLayout } from "./layout.ts";
 import { resolveRole } from "./registry/resolve.ts";
 import { type Registry, validateRegistry } from "./registry/schema.ts";
 
 declare const __DK_VERSION__: string;
 
+export { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
-
-export const EXIT_OK = 0;
-export const EXIT_INVALID = 1;
-export const EXIT_USAGE = 2;
 
 export const COMMANDS = [
   "run",
@@ -47,15 +52,6 @@ Commands:
 
 game-dev is --root, else DELIVERY_KIT_ROOT, else the working directory.
 `;
-
-export interface Io {
-  readonly env: NodeJS.ProcessEnv;
-  readonly cwd: string;
-  readonly out: (text: string) => void;
-  readonly err: (text: string) => void;
-}
-
-type Handler = (io: Io, root: string, args: string[]) => number;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -126,26 +122,19 @@ function checkConfig(io: Io, root: string, args: string[]): number {
   return EXIT_OK;
 }
 
-function notImplemented(command: Command): Handler {
-  return (io) => {
-    io.err(`delivery-kit: ${command} is not implemented in this build\n`);
-    return EXIT_USAGE;
-  };
-}
-
 const HANDLERS: Readonly<Record<Command, Handler>> = {
-  channel: notImplemented("channel"),
+  channel,
   "check-config": checkConfig,
-  migrate: notImplemented("migrate"),
-  "monitor-ack": notImplemented("monitor-ack"),
-  "monitor-snapshot": notImplemented("monitor-snapshot"),
-  request: notImplemented("request"),
-  "resource-report": notImplemented("resource-report"),
-  run: notImplemented("run"),
-  status: notImplemented("status"),
+  migrate,
+  "monitor-ack": monitorAck,
+  "monitor-snapshot": monitorSnapshot,
+  request,
+  "resource-report": resourceReport,
+  run,
+  status,
 };
 
-export function main(io: Io, argv: readonly string[]): number {
+export async function main(io: Io, argv: readonly string[]): Promise<number> {
   const args = [...argv];
   let root = io.env.DELIVERY_KIT_ROOT ?? io.cwd;
   if (args[0] === "--root") {
@@ -170,7 +159,7 @@ export function main(io: Io, argv: readonly string[]): number {
     return EXIT_USAGE;
   }
   try {
-    return HANDLERS[command as Command](io, root, rest);
+    return await HANDLERS[command as Command](io, root, rest);
   } catch (error) {
     io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;

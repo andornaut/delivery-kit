@@ -2,7 +2,7 @@
 // The bundled dist/cli.js entry point.
 import { main } from "./cli.ts";
 
-process.exitCode = main(
+process.exitCode = await main(
   {
     cwd: process.cwd(),
     env: process.env,
