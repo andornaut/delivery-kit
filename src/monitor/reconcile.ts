@@ -1,7 +1,7 @@
 // Scheduled reminder reconciliation over one snapshot: which queue IDs, owner-attested
 // questions, stalled processes and failed worker turns still need a reminder, the bounded brief
 // that carries them, and the guarded send. State lives in `<unblock>/health/<recipient>.json`
-// and the slot receipt, with the 0.9.x keys.
+// and the slot receipt; their keys are persisted game state.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -661,7 +661,7 @@ export interface ReconcileTarget {
 }
 
 /**
- * unblock.py reconcile: persist and return the slot receipt for one captured snapshot, sending at
+ * Reconcile: persist and return the slot receipt for one captured snapshot, sending at
  * most one reminder (plus one stale-turn refresh) when the inventory is new and the guards allow.
  */
 export async function reconcileSlot(

@@ -1,7 +1,8 @@
-// Python json.dumps output (default separators, ensure_ascii), so briefs, receipts, events and
-// digests stay byte-identical with the 0.9.x monitor digest, Claude briefs and persisted records.
+// Python json.dumps output (default separators, ensure_ascii). Briefs, receipts, events, state
+// records and monitor digests use this encoding, so persisted records and the digests that key
+// existing acknowledgements and retentions stay byte-identical.
 //
-// JSON.parse cannot tell 1 from 1.0, so an integral float read back from a 0.9.x file is
+// JSON.parse cannot tell 1 from 1.0, so an integral float read back from a persisted record is
 // written as an integer. Python reads both as equal numbers, so digests of parsed values and
 // every comparison still agree; only a byte-level rewrite of such a value differs.
 import { createHash } from "node:crypto";

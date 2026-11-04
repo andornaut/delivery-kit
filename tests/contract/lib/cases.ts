@@ -1,5 +1,9 @@
 // Case tags shared by every contract file.
 //
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
+// The bash-only tags (bashConfig, bashOnly, retiredOnNode and its wrappers, QUEUE_MODEL, the
+// hardened bash body) and the impl.name === "bash" constants.
+//
 // - contract: runs on both implementations with identical assertions.
 // - bashConfig: the input exists only in Bash bus.conf syntax (0.9 legacy keys or shell
 //   quoting); the Node implementation takes delivery-kit.json and the registry instead.

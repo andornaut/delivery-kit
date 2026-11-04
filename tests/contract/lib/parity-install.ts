@@ -1,3 +1,4 @@
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
 // Install the verified 0.9.1 parity release into DK_PARITY_DIR. Run with network access in the
 // first container step: `node lib/parity-install.ts`. Reuses an earlier verified install.
 import { execFileSync } from "node:child_process";

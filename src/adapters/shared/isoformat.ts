@@ -1,5 +1,5 @@
-// datetime.fromisoformat() for UTC timestamps, following the CPython 3.12 C parser, so every
-// timestamp a 0.9.x collector accepted is accepted here.
+// datetime.fromisoformat() for UTC timestamps, following the CPython 3.12 C parser: the accepted
+// timestamp grammar of native collector input.
 
 function digit(character: string | undefined): boolean {
   return character !== undefined && character.length === 1 && character >= "0" && character <= "9";

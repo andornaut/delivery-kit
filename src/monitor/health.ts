@@ -182,7 +182,7 @@ function degradedValue(value: Json): boolean {
 }
 
 /**
- * monitor.py record_health: update and persist the recipient's health record for this slot's
+ * Update and persist the recipient's health record for this slot's
  * outcome and return the printed health fields.
  */
 export function recordHealth(
@@ -273,7 +273,7 @@ export function recordHealth(
   } else if (sourceStatus === "disabled") {
     processStatus = "disabled";
   }
-  // Insertion order follows monitor.py; the printed line selects its own order.
+  // The printed line selects its own key order.
   const health: Json = Object.fromEntries([
     ["process_health_status", processStatus],
     ["question_state_status", questionsDegraded ? "degraded" : "ok"],

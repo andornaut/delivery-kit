@@ -24,6 +24,9 @@ import {
   sourceList,
 } from "./guards.ts";
 
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
+// The bash parity release install (parity.ts, parity-install.ts) in POPULATE, and the
+// DK_IMPL=bash contract run in CHECK.
 const POPULATE = `
   mkdir -p /tmp/fetch/tests/contract/lib
   cp /source/package.json /source/package-lock.json /tmp/fetch/

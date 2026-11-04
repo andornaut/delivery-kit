@@ -62,7 +62,7 @@ export async function queueEntries(client: RpcClient, recipient: string): Promis
 
 /**
  * The inventory payload: the text of a single plain text input, which with the client message ID
- * rebuilds the exact 0.9.x payload signature input; any other input shape as its Python JSON form.
+ * rebuilds the exact payload signature input; any other input shape as its Python JSON form.
  */
 export function queuePayload(entry: QueueEntry): string {
   const [first, ...rest] = entry.input;

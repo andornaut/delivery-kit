@@ -48,7 +48,7 @@ export function zonedParts(timezone: string, epoch: number): ZonedParts {
   };
 }
 
-/** `%Y-%m-%d %H:%M %Z`, the stamp the 0.9.x departure reports use. */
+/** `%Y-%m-%d %H:%M %Z`: the stamp that opens departure report and log lines. */
 export function stamp(timezone: string, epoch: number): string {
   const p = zonedParts(timezone, epoch);
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${String(p.minute).padStart(2, "0")} ${p.zone}`;

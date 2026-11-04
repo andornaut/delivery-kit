@@ -92,7 +92,7 @@ function scope(
     throw new UsageError("duplicate parent");
   }
   const members = registry.harness === "codex" ? codexMembers(layout, registry) : undefined;
-  // Worker parents must belong to the active route before any native call (monitor.py:141-161).
+  // Worker parents must belong to the active route before any native call.
   if (
     registry.harness === "codex" &&
     resolvedParents.length > 0 &&
@@ -120,7 +120,10 @@ function claudeRoute(layout: Layout, registry: Registry, recipient: string): Act
   return active;
 }
 
-/** CLI output keeps the 0.9.x key order, which sort-keys would otherwise rewrite. */
+/**
+ * Snapshot output keys keep this fixed order, which consumers parse; an object literal would be
+ * rewritten by the sort-keys lint rule.
+ */
 function ordered(pairs: readonly (readonly [string, unknown])[]): Record<string, unknown> {
   return Object.fromEntries(pairs);
 }

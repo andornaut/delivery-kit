@@ -51,6 +51,9 @@ export interface Implementation {
   channel(ws: Workspace, args: string[]): Command;
 }
 
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
+// The bash implementation, DK_IMPL selection and the bash clock pause in startRunner; Node becomes
+// the only implementation.
 export const IMPL_NAME = (process.env.DK_IMPL ?? "bash") as "bash" | "node";
 if (IMPL_NAME !== "bash" && IMPL_NAME !== "node")
   throw new Error(`DK_IMPL must be bash or node, not ${IMPL_NAME}`);

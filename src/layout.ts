@@ -60,7 +60,7 @@ export interface GameLayout {
   readonly configFile: string;
   /** var/games/<g>/ */
   readonly stateDir: string;
-  /** var/games/<g>/bus/: the bus layout, unchanged from 0.9.x. */
+  /** var/games/<g>/bus/: the bus state directory (file names in bus/state.ts). */
   readonly busDir: string;
   readonly npmCacheDir: string;
   readonly processHealthFile: string;

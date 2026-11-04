@@ -1,7 +1,7 @@
 // `delivery-kit channel`: the Claude channel consumer, a stdio MCP server that the monitor session
 // launches from game-dev's node_modules. By default it drains every game's spool for the
 // registry monitor. `--monitor UUID` and repeatable `--state-dir STATE/unblock` select them
-// explicitly, as the 0.9.x consumer did. It creates no state directory: only spools that already
+// explicitly. It creates no state directory: only spools that already
 // exist are drained, so a channel started before migrate leaves var/ untouched.
 import { realpathSync, statSync, writeSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";

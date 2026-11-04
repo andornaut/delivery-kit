@@ -448,6 +448,8 @@ export class Workspace {
       HOME: this.home,
       XDG_STATE_HOME: this.xdgState,
       DK_FAKE_DIR: this.fakeDir,
+      // CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed
+      // one clean departure cycle.
       // The fake gate checks the selected implementation's container contract.
       DK_IMPL: process.env.DK_IMPL ?? "bash",
       LANG: "C.UTF-8",

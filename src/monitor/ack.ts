@@ -67,7 +67,10 @@ function attempts(operation: Json): Json[] {
   return operation.attempts as Json[];
 }
 
-/** A Codex entry keeps its native client message ID, so its signature is the 0.9.x digest. */
+/**
+ * A Codex entry keeps its native client message ID as its signature input, so the digest matches
+ * the acknowledgement and retention records already in game state.
+ */
 export function nativeEntry(entry: InventoryEntry): QueueEntry {
   return {
     ...queueEntry(entry.queueId, entry.payload),

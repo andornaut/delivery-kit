@@ -1,4 +1,5 @@
-// The bus state layout under var/games/<g>/bus/. Kept files keep their 0.9.x names.
+// The bus state layout under var/games/<g>/bus/. File names and encodings are persisted game
+// state.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -103,7 +104,10 @@ export function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
-/** The 0.9.x record encoding: sorted keys, ", " and ": " separators and ASCII escapes. */
+/**
+ * The bus record encoding (request records, `status` output): sorted keys, ", " and ": "
+ * separators and ASCII escapes.
+ */
 export function pyDumps(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(pyDumps).join(", ")}]`;

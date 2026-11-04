@@ -1,3 +1,4 @@
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
 // Bash 0.9.x adapter: renders delivery-kit.json plus the game-dev layout into bus.conf and
 // runs the verified v0.9.1 release's bin/delivery-kit (lib/parity.ts) with --config and
 // --state-dir. The state directory is the same

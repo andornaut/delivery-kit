@@ -30,6 +30,9 @@ const LOCK = `
   cat package-lock.json
 `;
 
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
+// The bash parity release install in POPULATE and POPULATE_FILES, and the DK_IMPL=bash run in
+// CASES.
 const POPULATE = `
   mkdir /tmp/fetch && tar -x -C /tmp/fetch
   cd /tmp/fetch && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null

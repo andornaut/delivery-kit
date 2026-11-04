@@ -22,7 +22,7 @@ const QUESTION_BOUND = 32768;
 /** CollectionClient: one shared deadline and call budget across the collectors. */
 export class BudgetClient implements RpcClient {
   private readonly client: RpcClient;
-  /** Read by collectors that stop early, as the Python collectors read client.deadline. */
+  /** Read by collectors that stop early. */
   readonly deadline: number;
   callsUsed = 0;
   reasonCode: string | null = null;
@@ -92,7 +92,7 @@ function boundQuestions(owner: string, value: Json): void {
     if (!isRecord(question)) {
       continue;
     }
-    // Python insertion order: owner, level, then the fields.
+    // Key order: owner, level, then the fields.
     const content = Object.fromEntries([
       ["owner", owner],
       ["level", "escalation"],

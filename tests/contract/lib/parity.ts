@@ -1,3 +1,4 @@
+// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
 // The released 0.9.1 Bash implementation the bash adapter runs for parity. It is installed
 // inside the networked container step by parity-install.ts and verified by digest; nothing of it
 // is committed here. DK_PARITY_DIR names where it lives (a named-volume path in the container).

@@ -48,12 +48,12 @@ export interface CollectRequest {
   readonly priorProcess?: unknown;
   /**
    * The active monitor route's coordinator and peers, or null when no active route declares
-   * them. Question and process collection never reaches outside it (monitor.py:222-236,387-398).
+   * them. Question and process collection never reaches outside it.
    */
   readonly routeMembers?: readonly string[] | null;
 }
 
-/** Snapshot capabilities in the 0.9.x snapshot field names. */
+/** Snapshot capabilities, keyed by the snapshot record field names. */
 export interface Collected {
   readonly history: CollectorRecord;
   readonly question_state: CollectorRecord;

@@ -1,5 +1,5 @@
 // Monitor state shared by snapshots and acknowledgements, under a game's bus `unblock/`
-// directory with the 0.9.x file names.
+// directory. File names and record keys are persisted game state.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 

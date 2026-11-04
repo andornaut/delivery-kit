@@ -170,7 +170,7 @@ function capture(wake: Wake, client: RpcClient | null, deadline: number): Promis
   );
 }
 
-/** unblock.py run: one slot under the non-blocking unblock lock, over one native connection. */
+/** One slot under the non-blocking unblock lock, over one native connection. */
 async function runSlot(wake: Wake): Promise<Json> {
   const { coordinator, slot, unblock } = wake;
   const health = { emit: wake.emit, unblock };

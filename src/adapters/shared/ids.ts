@@ -1,5 +1,6 @@
 // Request IDs are RFC 4122 version 5 UUIDs in the URL namespace, byte-identical to Python's
-// uuid.uuid5(uuid.NAMESPACE_URL, name), so 0.9.x receipts deduplicate against 1.x ones.
+// uuid.uuid5(uuid.NAMESPACE_URL, name), so a request deduplicates against receipts already in
+// game state.
 import { createHash } from "node:crypto";
 
 export const NAMESPACE_URL = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";

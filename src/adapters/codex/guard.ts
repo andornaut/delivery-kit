@@ -56,7 +56,7 @@ function pyStr(value: unknown): string {
   return String(value);
 }
 
-/** A rendered prompt or a question tool call, as the 0.9.x guard classified items. */
+/** A rendered prompt or a question tool call. */
 export function questionItem(item: Record<string, unknown>): boolean {
   if (item.type === "agentMessage") {
     // Omitted questions default to null in the native schema.
