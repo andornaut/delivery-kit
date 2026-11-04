@@ -35,8 +35,12 @@ export const contract = it;
  */
 export const RECEIVE_TIMEOUT_LATCHES = impl.name !== "bash";
 
-export function bashConfig(name: string, body: () => Promise<void> | void): void {
-  it.skipIf(impl.name !== "bash")(`[bash-config] ${name}`, body);
+export function bashConfig(
+  name: string,
+  body: () => Promise<void> | void,
+  timeoutMs?: number,
+): void {
+  it.skipIf(impl.name !== "bash")(`[bash-config] ${name}`, body, timeoutMs);
 }
 
 export function bashOnly(name: string, body: () => Promise<void> | void): void {

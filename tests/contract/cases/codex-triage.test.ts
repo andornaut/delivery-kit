@@ -64,62 +64,66 @@ suite("codex triage", () => {
     return { recipients: Object.keys(snapshot.queues), output };
   }
 
-  bashConfig("shared roles respect host, harness, coordinator and ownership guards", async () => {
-    const ws = workspace();
-    const m = await legacy(ws);
-    const mapping = { codex: { tech: TECH, art: ART, gameplay: GAMEPLAY } };
-    const config = {
-      version: 1,
-      harness: "codex",
-      host_coordinator_thread_id: TECH,
-      host_project_root: ws.repo,
-      targets: [
-        { role: "custom-library", ownership: "active", thread_id: LIBRARY },
-        { role: "custom-library", ownership: "active", thread_id: LIBRARY },
-        { role: "custom-library", ownership: "held", thread_id: OTHER },
-        { role: "custom-library", ownership: "active", thread_id: "invalid" },
-        { role: "custom-library", ownership: "active", thread_id: TECH },
-        { role: "unselected", ownership: "active", thread_id: OTHER },
-      ],
-    };
-    const paths = files(ws, mapping, config);
-    const conf = (roles: string, targets = paths.targets) =>
-      `CODEX_SHARED_ROLES='${roles}'\nSESSION_MAP_FILE='${paths.map}'\nSHARED_TARGETS_FILE='${targets}'\n`;
-    ws.legacyConf = conf("custom-library");
-    await m.start();
-    let hour = -1;
-    expect((await depart(m, hour++)).recipients).toEqual([TECH, ART, GAMEPLAY, LIBRARY]);
-    for (const change of [
-      { harness: "other" },
-      { host_project_root: join(ws.repo, "other") },
-      { host_coordinator_thread_id: ART },
-      { version: true },
-    ]) {
-      writeFileSync(paths.targets, JSON.stringify({ ...config, ...change }));
-      expect((await depart(m, hour++)).recipients, JSON.stringify(change)).toEqual([
-        TECH,
-        ART,
-        GAMEPLAY,
-      ]);
-    }
-    writeFileSync(paths.targets, JSON.stringify(config));
-    for (const roles of [
-      { tech: ART, art: ART, gameplay: GAMEPLAY },
-      { tech: TECH, art: ART, gameplay: ART },
-    ]) {
-      writeFileSync(paths.map, JSON.stringify({ codex: roles }));
-      const tick = await depart(m, hour++);
-      expect(tick.recipients).toBeUndefined();
-      expect(tick.output).toContain("project session map invalid");
-    }
-    writeFileSync(paths.map, JSON.stringify(mapping));
-    for (const legacyConf of [conf(""), conf("custom-library", "")]) {
-      await m.stop();
-      ws.legacyConf = legacyConf;
+  bashConfig(
+    "shared roles respect host, harness, coordinator and ownership guards",
+    async () => {
+      const ws = workspace();
+      const m = await legacy(ws);
+      const mapping = { codex: { tech: TECH, art: ART, gameplay: GAMEPLAY } };
+      const config = {
+        version: 1,
+        harness: "codex",
+        host_coordinator_thread_id: TECH,
+        host_project_root: ws.repo,
+        targets: [
+          { role: "custom-library", ownership: "active", thread_id: LIBRARY },
+          { role: "custom-library", ownership: "active", thread_id: LIBRARY },
+          { role: "custom-library", ownership: "held", thread_id: OTHER },
+          { role: "custom-library", ownership: "active", thread_id: "invalid" },
+          { role: "custom-library", ownership: "active", thread_id: TECH },
+          { role: "unselected", ownership: "active", thread_id: OTHER },
+        ],
+      };
+      const paths = files(ws, mapping, config);
+      const conf = (roles: string, targets = paths.targets) =>
+        `CODEX_SHARED_ROLES='${roles}'\nSESSION_MAP_FILE='${paths.map}'\nSHARED_TARGETS_FILE='${targets}'\n`;
+      ws.legacyConf = conf("custom-library");
       await m.start();
-      expect((await depart(m, -1)).recipients).toEqual([TECH, ART, GAMEPLAY]);
-    }
-  });
+      let hour = -1;
+      expect((await depart(m, hour++)).recipients).toEqual([TECH, ART, GAMEPLAY, LIBRARY]);
+      for (const change of [
+        { harness: "other" },
+        { host_project_root: join(ws.repo, "other") },
+        { host_coordinator_thread_id: ART },
+        { version: true },
+      ]) {
+        writeFileSync(paths.targets, JSON.stringify({ ...config, ...change }));
+        expect((await depart(m, hour++)).recipients, JSON.stringify(change)).toEqual([
+          TECH,
+          ART,
+          GAMEPLAY,
+        ]);
+      }
+      writeFileSync(paths.targets, JSON.stringify(config));
+      for (const roles of [
+        { tech: ART, art: ART, gameplay: GAMEPLAY },
+        { tech: TECH, art: ART, gameplay: ART },
+      ]) {
+        writeFileSync(paths.map, JSON.stringify({ codex: roles }));
+        const tick = await depart(m, hour++);
+        expect(tick.recipients).toBeUndefined();
+        expect(tick.output).toContain("project session map invalid");
+      }
+      writeFileSync(paths.map, JSON.stringify(mapping));
+      for (const legacyConf of [conf(""), conf("custom-library", "")]) {
+        await m.stop();
+        ws.legacyConf = legacyConf;
+        await m.start();
+        expect((await depart(m, -1)).recipients).toEqual([TECH, ART, GAMEPLAY]);
+      }
+    },
+    180_000,
+  );
 
   bashConfig(
     "host-matching library targets are deduplicated and held targets excluded",
@@ -148,6 +152,7 @@ suite("codex triage", () => {
       );
       expect((await depart(m, 0)).recipients).toEqual([TECH, ART, GAMEPLAY]);
     },
+    180_000,
   );
 
   bashConfig(
@@ -171,23 +176,28 @@ suite("codex triage", () => {
       expect(m.socket.connections).toEqual([]);
       expect(ws.exists("unblock/snapshots")).toBe(false);
     },
+    180_000,
   );
 
-  bashConfig("a monitor route rejects a relative project root even while held", async () => {
-    const ws = workspace();
-    const m = await Monitored.routed(ws, { state: "held", monitor_thread_id: null, targets: [] });
-    open.push(m);
-    ws.legacyConf = "REPO=.\n";
-    await m.start();
-    const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
-    expect(output).toContain("MONITOR_ROUTE_FILE is unavailable or invalid");
-    await m.stop();
-    ws.legacyConf = "";
-    ws.writeRoute(codexRoute(ws, { state: "held", monitor_thread_id: null, targets: [] }));
-    await m.start();
-    await m.jump(wake(0), () => true);
-    await sleep(1500);
-    expect(m.text()).not.toContain("monitor deferred");
-    expect(m.socket.connections).toEqual([]);
-  });
+  bashConfig(
+    "a monitor route rejects a relative project root even while held",
+    async () => {
+      const ws = workspace();
+      const m = await Monitored.routed(ws, { state: "held", monitor_thread_id: null, targets: [] });
+      open.push(m);
+      ws.legacyConf = "REPO=.\n";
+      await m.start();
+      const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
+      expect(output).toContain("MONITOR_ROUTE_FILE is unavailable or invalid");
+      await m.stop();
+      ws.legacyConf = "";
+      ws.writeRoute(codexRoute(ws, { state: "held", monitor_thread_id: null, targets: [] }));
+      await m.start();
+      await m.jump(wake(0), () => true);
+      await sleep(1500);
+      expect(m.text()).not.toContain("monitor deferred");
+      expect(m.socket.connections).toEqual([]);
+    },
+    180_000,
+  );
 });

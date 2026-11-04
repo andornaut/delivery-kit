@@ -131,7 +131,8 @@ export class Monitored {
   async jump(
     epoch: number,
     predicate: (output: string) => boolean,
-    timeoutMs = 20_000,
+    // A slot runs the native helper, whose own deadline is 25 seconds; leave room under load.
+    timeoutMs = 45_000,
   ): Promise<string> {
     // A departure still finishing when the clock jumps would cross the slot, which the loop
     // never replays; wait for the previous one to end first.
