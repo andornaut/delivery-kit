@@ -36,9 +36,9 @@ const INVENTORY_UNAVAILABLE =
 export interface CodexOptions {
   /** Overrides CODEX_CONTROL_SOCKET. */
   readonly controlSocket?: string;
-  /** Bound on one adapter call's native exchange, in milliseconds (event_native.py:117). */
+  /** Bound on one adapter call's native exchange, in milliseconds. */
   readonly deadlineMs?: number;
-  /** Bound on one snapshot collection, in milliseconds (unblock.py:425). */
+  /** Bound on one snapshot collection, in milliseconds. */
   readonly collectDeadlineMs?: number;
   readonly env?: NodeJS.ProcessEnv;
 }

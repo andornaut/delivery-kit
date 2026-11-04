@@ -1,4 +1,4 @@
-// Snapshot collectors over one native connection (monitor.py:capture, 164-266, 383-449). History
+// Snapshot collectors over one native connection. History
 // is read first; the question, worker and process collectors then share a 256-call budget and a
 // deadline reserved five seconds before the connection's own. Every failure is a diagnostic,
 // never clearance.

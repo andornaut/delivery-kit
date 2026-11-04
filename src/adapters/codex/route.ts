@@ -1,4 +1,4 @@
-// The guarded Codex monitor route (codex_adapter.py:53-85). Reading it infers no ownership and
+// The guarded Codex monitor route. Reading it infers no ownership and
 // makes no native connection; an invalid route defers monitoring rather than falling back.
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";

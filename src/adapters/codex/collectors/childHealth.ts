@@ -1,5 +1,5 @@
-// Bounded read-only child failure evidence for explicitly scoped parents (child_health.py), and
-// the monitor's worker_health wrapper (monitor.py:164-193). This module performs no delivery,
+// Bounded read-only child failure evidence for explicitly scoped parents, and
+// the monitor's worker_health wrapper. This module performs no delivery,
 // persistence, scheduling or lifecycle mutation.
 import { performance } from "node:perf_hooks";
 
@@ -162,7 +162,7 @@ class Budget {
 
 /**
  * Python `value in set`: a dict or list value raises TypeError (unhashable), which the callers
- * report as an unavailable read (child_health.py:91,125).
+ * report as an unavailable read.
  */
 function member(values: ReadonlySet<string>, value: unknown): value is string {
   if (typeof value === "object" && value !== null) {
@@ -397,7 +397,7 @@ function applyPage(stream: Stream, page: unknown): boolean {
 }
 
 /**
- * Safe worker health keyed by canonical exact parent UUID (child_health.py:221-320).
+ * Safe worker health keyed by canonical exact parent UUID.
  *
  * Round-robin inventory pages cover active and archived direct children only. Validated inventory
  * metadata supplies each child's initial observation. One newest-turn read observes a child; only
@@ -564,8 +564,8 @@ function collectorUnavailable(reasonCode: string): Record<string, unknown> {
 }
 
 /**
- * monitor.py:164-193 for parents the caller has already scoped, under a deadline the caller has
- * already reserved. A collector failure marks every parent unavailable, never omitted.
+ * The monitor's worker health for parents the caller has already scoped, under a deadline the
+ * caller has already reserved. A collector failure marks every parent unavailable, never omitted.
  */
 export async function workerHealth(
   client: RpcClient,

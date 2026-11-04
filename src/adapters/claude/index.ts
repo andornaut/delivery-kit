@@ -38,7 +38,7 @@ export interface DeliveredEntry {
   readonly receiptStatus: unknown;
 }
 
-/** Delivered channel entries for `recipient`, keyed by request ID (claude_monitor.py:delivered). */
+/** Delivered channel entries for `recipient`, keyed by request ID. */
 export function deliveredEntries(busDir: string, recipient: string): Map<string, DeliveredEntry> {
   const directory = deliveredDir(busDir);
   const entries = new Map<string, DeliveredEntry>();

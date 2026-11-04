@@ -1,5 +1,5 @@
 // Recipient decision guard: a recipient-bound clearance record, verified against native question
-// history by exact turn and item IDs (unblock.py:117-221). Unknown or incomplete history defers.
+// history by exact turn and item IDs. Unknown or incomplete history defers.
 import { decisionClear, type DecisionRecord, decisionRecord } from "../shared/decisions.ts";
 import { isRecord, sameJson } from "../shared/pyjson.ts";
 import type { RpcClient } from "./rpc.ts";
@@ -49,14 +49,14 @@ export function clearanceUnchanged(
   );
 }
 
-function pythonStr(value: unknown): string {
+function pyStr(value: unknown): string {
   if (value === null || value === undefined) {
     return "None";
   }
   return String(value);
 }
 
-/** A rendered prompt or a question tool call, as unblock.py:144-151 classifies items. */
+/** A rendered prompt or a question tool call, as the 0.9.x guard classified items. */
 export function questionItem(item: Record<string, unknown>): boolean {
   if (item.type === "agentMessage") {
     // Omitted questions default to null in the native schema.
@@ -66,9 +66,9 @@ export function questionItem(item: Record<string, unknown>): boolean {
   if (item.type === "dynamicToolCall" || item.type === "functionCallOutput") {
     let tool = "";
     if ("tool" in item) {
-      tool = pythonStr(item.tool);
+      tool = pyStr(item.tool);
     } else if ("name" in item) {
-      tool = pythonStr(item.name);
+      tool = pyStr(item.name);
     }
     const normalized = tool.toLowerCase().replaceAll("_", "");
     return QUESTION_TOOLS.some((name) => normalized.includes(name));

@@ -1,4 +1,4 @@
-// Recipient-bound user-decision clearance (unblock.py:118-145). The marker is written by the
+// Recipient-bound user-decision clearance. The marker is written by the
 // recipient's owner; delivery-kit only reads it. A missing or invalid marker is never clearance.
 import { join } from "node:path";
 

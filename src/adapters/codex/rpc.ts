@@ -1,6 +1,6 @@
 // JSON-RPC over a WebSocket on the local Codex control socket, using only node: builtins.
 //
-// unblock.py:72-99 connects websocket-client to ws://localhost/ over the Unix socket, sends
+// It connects to ws://localhost/ over the Unix socket, sends
 // `initialize` and the `initialized` notification, then matches responses by request id. Server
 // notifications and server-initiated requests belong to the existing client and are skipped.
 import { createHash, randomBytes } from "node:crypto";
@@ -11,7 +11,7 @@ import { isRecord } from "../shared/pyjson.ts";
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
-/** Each socket wait is bounded as well as the whole exchange (unblock.py:51,61). */
+/** Each socket wait is bounded as well as the whole exchange. */
 const STEP_MS = 5000;
 
 export const OPCODE = { binary: 2, close: 8, ping: 9, pong: 10, text: 1 } as const;

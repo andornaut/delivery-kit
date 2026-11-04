@@ -1,5 +1,5 @@
-// The only Claude Code channel contract dependency (claude_channel.py:channel_notification and
-// initialize_result). It is taken from the installed Claude Code client, not from published
+// The only Claude Code channel contract dependency: the channel notification and the initialize
+// result. It is taken from the installed Claude Code client, not from published
 // reference documentation: method notifications/claude/channel with string `content` and
 // string-valued `meta` keys matching [A-Za-z_][A-Za-z0-9_]*, the experimental claude/channel
 // capability, and a protocol version the client treats as legacy (it skips channel

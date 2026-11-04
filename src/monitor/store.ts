@@ -1,5 +1,5 @@
 // Monitor state shared by snapshots and acknowledgements, under a game's bus `unblock/`
-// directory with the 0.9.x file names (monitor.py:17-46, 608-618).
+// directory with the 0.9.x file names.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -42,7 +42,7 @@ export function snapshotPath(unblock: string, snapshotId: string): string {
   return join(unblock, "snapshots", `${snapshotId}.json`);
 }
 
-/** Durable write with 0600 files and 0700 directories, as monitor.py:persist. */
+/** Durable write with 0600 files and 0700 directories. */
 export function persist(path: string, value: unknown): void {
   mkdirSync(join(path, ".."), { mode: 0o700, recursive: true });
   writeJsonDurable(path, value);

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { gameLayout, type Layout, loadLayout } from "../../layout.ts";
 import { makeFixture } from "../../testFixtures.ts";
 import { NAMESPACE_URL, uuid5 } from "../shared/ids.ts";
-import { pythonDigest, pythonJson } from "../shared/pyjson.ts";
+import { dumpsDigest, dumpsJson } from "../shared/pyjson.ts";
 import { BudgetClient, codexAdapter, historyRefs } from "./index.ts";
 import { connectControl } from "./rpc.ts";
 import {
@@ -119,10 +119,10 @@ describe("Python-compatible identifiers and JSON", () => {
 
   it("matches json.dumps(sort_keys=True) bytes and digests", () => {
     const value = ["cm-1", [{ type: "text", text: "café \u007f\n" }], { b: 1, a: null, c: true }];
-    expect(pythonJson(value)).toBe(
+    expect(dumpsJson(value)).toBe(
       '["cm-1", [{"text": "caf\\u00e9 \\u007f\\n", "type": "text"}], {"a": null, "b": 1, "c": true}]',
     );
-    expect(pythonDigest(value)).toBe(
+    expect(dumpsDigest(value)).toBe(
       "8ec4570b8524d2a3e59df46f82e03d48a0067b4a6f23ecedc9932225753c5703",
     );
   });

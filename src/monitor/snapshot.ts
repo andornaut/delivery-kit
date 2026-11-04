@@ -1,4 +1,4 @@
-// Monitor review snapshots (monitor.py:capture, claude_monitor.py:capture). The inventory comes
+// Monitor review snapshots. The inventory comes
 // from the active harness adapter; every capability the harness cannot report is `unavailable`,
 // which is never clearance.
 import { randomUUID } from "node:crypto";
@@ -95,7 +95,7 @@ function processManifest(busDir: string): string | undefined {
   return existsSync(path) ? path : undefined;
 }
 
-/** The coordinator's prior process observations (monitor.py:372-380), or null. */
+/** The coordinator's prior process observations, or null. */
 function priorProcess(
   context: SnapshotContext,
   manifest: string | undefined,

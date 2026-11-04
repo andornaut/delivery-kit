@@ -1,5 +1,5 @@
 // Slot briefs and bus events for a Claude monitor go through a spool that the monitor's own
-// channel consumer drains (claude_adapter.py). The receipt is always written at `sending`
+// channel consumer drains. The receipt is always written at `sending`
 // before its spool entry, so an interruption between the two is never resent.
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -167,7 +167,7 @@ function unavailableDiagnostics(
   ];
 }
 
-/** One brief per monitor slot (claude_adapter.py:run). */
+/** One brief per monitor slot. */
 export function spoolMonitorBrief(
   env: NodeJS.ProcessEnv,
   busDir: string,
@@ -248,7 +248,7 @@ export function spoolMonitorBrief(
 }
 
 /**
- * event_native.deliver semantics with the spool as transport (claude_adapter.py:spool_event).
+ * event_native.deliver semantics with the spool as transport.
  * True only once the consumer has recorded `accepted`; the outbox marks the event sent then.
  */
 export function spoolEvent(

@@ -1,11 +1,11 @@
 // Guarded native input: turn/steer into a busy turn or turn/start on an idle thread, never an
-// interrupt (unblock.py:224-243). The receipt is persisted as `sending` before the request, so an
-// interrupted send becomes `ambiguous` and is never resent (event_native.py:31-99).
+// interrupt. The receipt is persisted as `sending` before the request, so an
+// interrupted send becomes `ambiguous` and is never resent.
 import { existsSync } from "node:fs";
 
 import { readJson, writeDurable } from "../../durable.ts";
 import { decisionClear, decisionRecord } from "../shared/decisions.ts";
-import { isRecord, type PyJson, pythonJson, sameJson } from "../shared/pyjson.ts";
+import { dumpsJson, isRecord, type PyJson, sameJson } from "../shared/pyjson.ts";
 import type { DeliveryReceipt, DeliveryStatus } from "../types.ts";
 import { clearanceUnchanged, nativeQuestionsClear } from "./guard.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
@@ -91,7 +91,7 @@ export interface ReceiptState {
 }
 
 export function persistReceipt(path: string, state: ReceiptState): void {
-  writeDurable(path, `${pythonJson(state as PyJson)}\n`);
+  writeDurable(path, `${dumpsJson(state as PyJson)}\n`);
 }
 
 function receipt(requestId: string, status: DeliveryStatus, reason?: string): DeliveryReceipt {

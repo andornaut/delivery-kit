@@ -1,5 +1,5 @@
 // datetime.fromisoformat() for UTC timestamps, following the CPython 3.12 C parser, so every
-// timestamp a 0.9.x collector accepted is accepted here (question_state.py, process_health.py:44-53).
+// timestamp a 0.9.x collector accepted is accepted here.
 
 function digit(character: string | undefined): boolean {
   return character !== undefined && character.length === 1 && character >= "0" && character <= "9";
@@ -238,8 +238,8 @@ export function utcTimestamp(value: string): number | null {
 }
 
 /**
- * _stamp() in process_health.py and the attestation check in question_state.py: epoch seconds of
- * a timestamp ending in Z or +00:00 that parses with a zero UTC offset, else null.
+ * The process-health stamp and the question attestation check: epoch seconds of a timestamp
+ * ending in Z or +00:00 that parses with a zero UTC offset, else null.
  */
 export function utcStamp(value: unknown): number | null {
   if (typeof value !== "string" || !(value.endsWith("Z") || value.endsWith("+00:00"))) {

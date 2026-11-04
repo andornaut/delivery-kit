@@ -1,4 +1,4 @@
-// Version 2 Claude monitor route (claude_adapter.py:route_harness and resolve_route_v2).
+// Version 2 Claude monitor route.
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 

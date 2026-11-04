@@ -1,4 +1,4 @@
-// Channel consumer (claude_channel.py): a stdio MCP server started by the monitor session itself.
+// Channel consumer: a stdio MCP server started by the monitor session itself.
 // It delivers each spooled entry once, records `accepted` (delivery, not handling) or
 // `ambiguous` on a failed write, and never resends.
 import { mkdirSync, readdirSync, renameSync, unlinkSync } from "node:fs";

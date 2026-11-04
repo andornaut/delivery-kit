@@ -1,4 +1,4 @@
-// Snapshot-bound acknowledgements (monitor.py:acknowledge, claude_monitor.py:acknowledge).
+// Snapshot-bound acknowledgements.
 // Each invocation re-reads the current inventory: a changed payload is `changed_payload`, an
 // absent entry `confirmed_absent`, `retained` binds an active retention to the exact payload,
 // and `handled` or `superseded` removes the entry through the adapter (`deleted`). A durable

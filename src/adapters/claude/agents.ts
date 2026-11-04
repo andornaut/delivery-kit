@@ -1,4 +1,4 @@
-// Session-reported Claude state from `claude agents --json` (claude_adapter.py:agents_listing).
+// Session-reported Claude state from `claude agents --json`.
 // Interactive sessions report `status` (idle or busy); background sessions report `state`.
 // This is session-reported state only: it never proves question or queue state.
 import { spawnSync } from "node:child_process";

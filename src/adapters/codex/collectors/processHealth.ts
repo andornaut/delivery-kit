@@ -1,5 +1,5 @@
-// Read-only health for optional, nonsecret, exact owner-registered jobs (process_health.py), and
-// the monitor's bounded manifest reader around it (monitor.py:356-449).
+// Read-only health for optional, nonsecret, exact owner-registered jobs, and
+// the monitor's bounded manifest reader around it.
 //
 // The owner manifest supplies runtime identity and progress attestations. Scoped native command
 // metadata corroborates invocation references, never host liveness. Only owners close resources:
@@ -11,7 +11,7 @@ import { performance } from "node:perf_hooks";
 
 import { isCanonicalUuid } from "../../shared/ids.ts";
 import { utcStamp } from "../../shared/isoformat.ts";
-import { isRecord, type PyJson, pythonJson, sameJson } from "../../shared/pyjson.ts";
+import { dumpsJson, isRecord, type PyJson, sameJson } from "../../shared/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 const MAX_BYTES = 1048576;
@@ -242,7 +242,7 @@ function same(left: unknown, right: unknown): boolean {
   return sameJson(left ?? null, right ?? null);
 }
 
-/** Epoch seconds of a UTC ISO timestamp, or null when it is not one (process_health.py:44-53). */
+/** Epoch seconds of a UTC ISO timestamp, or null when it is not one. */
 function stamp(value: unknown): number | null {
   return utcStamp(value);
 }
@@ -945,8 +945,8 @@ export function processSample(allowedParents: readonly string[], sample: unknown
     return false;
   }
   try {
-    // json.dumps escapes non-ASCII, as pythonJson does; key order does not change the length.
-    return Buffer.byteLength(pythonJson(sample as PyJson), "utf8") <= MAX_SAMPLE_BYTES;
+    // json.dumps escapes non-ASCII, as dumpsJson does; key order does not change the length.
+    return Buffer.byteLength(dumpsJson(sample as PyJson), "utf8") <= MAX_SAMPLE_BYTES;
   } catch {
     return false;
   }

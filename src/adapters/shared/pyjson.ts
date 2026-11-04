@@ -1,6 +1,5 @@
 // Python json.dumps output (default separators, ensure_ascii), so briefs, receipts, events and
-// digests stay byte-identical with 0.9.x: monitor.py:608 digest, claude_adapter.py:brief and
-// every persist() in unblock.py and event.py.
+// digests stay byte-identical with the 0.9.x monitor digest, Claude briefs and persisted records.
 //
 // JSON.parse cannot tell 1 from 1.0, so an integral float read back from a 0.9.x file is
 // written as an integer. Python reads both as equal numbers, so digests of parsed values and
@@ -47,7 +46,7 @@ function compareCodePoints(left: string, right: string): number {
   return a.length - b.length;
 }
 
-/** A value pythonJson can write: JSON plus bigint for nanosecond integers. */
+/** A value dumpsJson can write: JSON plus bigint for nanosecond integers. */
 export type PyJson =
   | null
   | boolean
@@ -109,7 +108,7 @@ export function pyJsonDumps(value: unknown, sortKeys = false): string {
 }
 
 /** json.dumps(value, sort_keys=True) as persist() writes it: state files and receipts. */
-export function pythonJson(value: PyJson): string {
+export function dumpsJson(value: PyJson): string {
   return dump(value, { floats: true, omitUndefined: true, sortKeys: true });
 }
 
@@ -119,8 +118,8 @@ export function digest(value: unknown): string {
 }
 
 /** digest() over the persisted form, accepting floats and bigint. */
-export function pythonDigest(value: PyJson): string {
-  return createHash("sha256").update(pythonJson(value), "utf8").digest("hex");
+export function dumpsDigest(value: PyJson): string {
+  return createHash("sha256").update(dumpsJson(value), "utf8").digest("hex");
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,5 +128,5 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Structural equality of two parsed JSON values, as Python compares dicts and lists. */
 export function sameJson(left: unknown, right: unknown): boolean {
-  return pythonJson(left as PyJson) === pythonJson(right as PyJson);
+  return dumpsJson(left as PyJson) === dumpsJson(right as PyJson);
 }

@@ -25,12 +25,12 @@ export function uuid5(namespace: string, name: string): string {
   ].join("-");
 }
 
-/** Slot request ID shared by the Claude spool and the Codex steer (unblock.py:308). */
+/** Slot request ID shared by the Claude spool and the Codex steer. */
 export function slotRequestId(coordinator: string, slot: number): string {
   return uuid5(NAMESPACE_URL, `hourly-unblock:${coordinator}:${slot}`);
 }
 
-/** Event request ID shared by both harnesses (event_native.py:31). */
+/** Event request ID shared by both harnesses. */
 export function eventRequestId(eventId: string, recipient: string): string {
   return uuid5(NAMESPACE_URL, `bus-event:${eventId}:${recipient}`);
 }

@@ -12,7 +12,7 @@ import { join, resolve } from "node:path";
 import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
 import { eventRequestId } from "./adapters/shared/ids.ts";
-import { type PyJson, pythonJson } from "./adapters/shared/pyjson.ts";
+import { dumpsJson, type PyJson } from "./adapters/shared/pyjson.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
 import { loadProjectConfig } from "./config.ts";
 import { readJson, writeDurable } from "./durable.ts";
@@ -97,7 +97,7 @@ function nowNanoseconds(): bigint {
 }
 
 function writeState(path: string, value: PyJson): void {
-  writeDurable(path, `${pythonJson(value)}\n`);
+  writeDurable(path, `${dumpsJson(value)}\n`);
 }
 
 function enqueue(

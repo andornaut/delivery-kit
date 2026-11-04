@@ -4,8 +4,8 @@ import { eventRequestId, NAMESPACE_DNS, slotRequestId, uuid5 } from "../shared/i
 import { digest, pyJsonDumps } from "../shared/pyjson.ts";
 
 describe("uuid5", () => {
-  it("matches Python uuid.uuid5", () => {
-    expect(uuid5(NAMESPACE_DNS, "python.org")).toBe("886313e1-3b8a-5372-9b90-0c9aee199e5d");
+  it("matches the RFC 4122 name-based SHA-1 UUID", () => {
+    expect(uuid5(NAMESPACE_DNS, "www.example.com")).toBe("2ed6657d-e927-568b-95e1-2665a8aea6a2");
     expect(slotRequestId("00000000-0000-4000-8000-000000000001", 1793556000)).toBe(
       "7aa61266-bcb0-5efd-8eb2-7738245eef18",
     );

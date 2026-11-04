@@ -1,7 +1,7 @@
 // Native queue inventory (thread/queue/list), history references (thread/items/list) and the
-// native half of an explicit acknowledgement (thread/queue/delete), from monitor.py:50-138,768-866.
+// native half of an explicit acknowledgement (thread/queue/delete).
 // Durable acknowledgement and retention records stay with the monitor that owns the snapshot.
-import { isRecord, type PyJson, pythonJson, sameJson } from "../shared/pyjson.ts";
+import { dumpsJson, isRecord, type PyJson, sameJson } from "../shared/pyjson.ts";
 import { NATIVE_ITEM_TYPES, questionItem } from "./guard.ts";
 import { NativeTimeout, type RpcClient, RpcError } from "./rpc.ts";
 
@@ -75,7 +75,7 @@ export function queuePayload(entry: QueueEntry): string {
   ) {
     return first.text;
   }
-  return pythonJson(entry.input);
+  return dumpsJson(entry.input);
 }
 
 export interface HistoryReference {

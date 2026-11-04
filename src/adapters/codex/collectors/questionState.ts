@@ -1,5 +1,5 @@
 // Bounded read-only question references and exact owner-attested pending proof
-// (question_state.py).
+//.
 //
 // Rendered questions expose title/options only. Tool arguments and outputs remain opaque. History
 // cannot establish exact unresolved requests, cancellation or UI visibility. This collector never
@@ -349,7 +349,7 @@ function readPage(
       throw new PageError("item_schema_unavailable");
     }
     if (typeof item.type === "object" && item.type !== null) {
-      // An unhashable type raises TypeError in the Python set lookup (question_state.py:158).
+      // An unhashable type raises TypeError in the Python set lookup.
       throw new TypeError("unhashable item type");
     }
     if (typeof item.type !== "string" || !NATIVE_ITEM_TYPES.has(item.type)) {

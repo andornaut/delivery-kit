@@ -1,5 +1,4 @@
-// Scheduled monitor wake for a due slot (bus-common.sh:bus_monitor_due_ticks, unblock.py and
-// claude_adapter.py:run). The adapter follows the registry's active harness; the monitor and
+// Scheduled monitor wake for a due slot. The adapter follows the registry's active harness; the monitor and
 // worker parents are role names resolved through the registry. The result is the one-line JSON
 // status the runner logs, or an empty string when this project does not dispatch the slot.
 import { existsSync } from "node:fs";
@@ -98,7 +97,7 @@ async function codexWake(
   });
 }
 
-/** Full version 1 route validation before any native call (bus-common.sh:264-268). */
+/** Full version 1 route validation before any native call. */
 async function codexScope(
   layout: Layout,
   game: GameLayout,
