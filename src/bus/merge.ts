@@ -123,16 +123,20 @@ async function merge(
   writeLines(join(logs, "commit.sha"), sha);
   context.log(`gate logs: ${logs}`);
   at("full-gate");
-  const outcome = await runGate(context, work, sha, logs);
+  const outcome = await runGate(
+    context,
+    { batch: basename(input.branch), logs, sha, work },
+    async () =>
+      (await treeFingerprint(context, work)) === before
+        ? undefined
+        : "gate discarded: Git status or reported-file fingerprints changed during checks",
+  );
   if (!outcome.ok) {
     at(outcome.stage);
     fail(context, outcome.reason);
   }
   for (const line of outcome.output.split("\n").filter((row) => row !== "")) {
     context.log(line);
-  }
-  if ((await treeFingerprint(context, work)) !== before) {
-    fail(context, "gate discarded: Git status or reported-file fingerprints changed during checks");
   }
   writeLines(join(work, ".bus-built.sha"), sha);
   at("prepush-validation");

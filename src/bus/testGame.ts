@@ -86,6 +86,33 @@ export type FakeChild = (spec: ExecSpec) => ExecResult | Promise<ExecResult>;
 
 export const ok = (stdout = ""): ExecResult => ({ status: 0, stderr: "", stdout });
 
+/**
+ * The container rules every docker call must follow: create and run use uid 19001 with
+ * HOME=/tmp, every bind mount is read-only and there is no -v shorthand.
+ */
+export function assertContainerRules(spec: ExecSpec): void {
+  const { args } = spec;
+  const pair = (flag: string, value: string): boolean =>
+    args.some((arg, index) => arg === flag && args[index + 1] === value);
+  if (["create", "run"].includes(args[0] ?? "")) {
+    if (!pair("--user", "19001:19001") || !pair("-e", "HOME=/tmp")) {
+      throw new Error(`docker ${args[0]} must run as --user 19001:19001 with HOME=/tmp`);
+    }
+  }
+  if (args.some((arg) => arg === "-v" || arg === "--volume")) {
+    throw new Error("docker must use --mount, never -v");
+  }
+  args.forEach((arg, index) => {
+    if (
+      args[index - 1] === "--mount" &&
+      arg.includes("type=bind") &&
+      !/,(readonly|ro)(,|$)/.test(arg)
+    ) {
+      throw new Error(`writable bind mount: ${arg}`);
+    }
+  });
+}
+
 /** Real git; docker, gh and Wrangler go to `fake`, which records every call. */
 export function fakeExec(fake: FakeChild): Exec & { calls: ExecSpec[] } {
   const calls: ExecSpec[] = [];
@@ -94,10 +121,47 @@ export function fakeExec(fake: FakeChild): Exec & { calls: ExecSpec[] } {
       return spawnExec(spec);
     }
     calls.push(spec);
+    if (spec.command === "docker") {
+      assertContainerRules(spec);
+    }
     return fake(spec);
   }) as Exec & { calls: ExecSpec[] };
   exec.calls = calls;
   return exec;
+}
+
+export interface GateFake {
+  /** The gate step script's result; defaults to success. */
+  readonly gate?: () => ExecResult;
+  readonly install?: () => ExecResult;
+}
+
+/**
+ * A docker that behaves like the gate container: `docker cp` out of it writes a step log or a
+ * built dist/ file into the host destination, as the host user would receive them.
+ */
+export function gateDocker(fake: GateFake = {}): FakeChild {
+  return (spec) => {
+    const [verb, ...rest] = spec.args;
+    if (spec.command !== "docker") {
+      return ok();
+    }
+    if (verb === "exec" && rest.at(-1)?.startsWith("set -e") === true) {
+      return fake.gate?.() ?? ok("lint ok\ntest ok\n");
+    }
+    if (verb === "exec" && rest.includes("sh") && rest.at(-1)?.includes("npm ci") === true) {
+      return fake.install?.() ?? ok();
+    }
+    if (verb === "cp") {
+      const [source = "", destination = ""] = rest.filter((arg) => arg !== "--quiet");
+      if (source.endsWith(":/tmp/work/dist/.")) {
+        writeFileSync(join(destination, "index.js"), "built\n");
+      } else if (source.endsWith(":/tmp/gate-logs/.")) {
+        writeFileSync(join(destination, "01-lint.log"), "linted\n");
+      }
+    }
+    return ok();
+  };
 }
 
 export interface TestGame {
