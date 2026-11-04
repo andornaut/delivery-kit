@@ -4,6 +4,7 @@
 import { appendFileSync, readdirSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
+import { SHA_PATTERN } from "./adapters/shared/ids.ts";
 import type { BusContext } from "./bus/context.ts";
 import { ciStatusFile, ensureDir, readTrimmed, writeLines } from "./bus/state.ts";
 import { writeDurable } from "./durable.ts";
@@ -270,7 +271,7 @@ export function unfinishedCi(context: BusContext): string[] {
   const pushed = readTrimmed(context.paths.lastPushSha);
   if (
     pushed !== undefined &&
-    /^[0-9a-f]{40}$/.test(pushed) &&
+    SHA_PATTERN.test(pushed) &&
     readTrimmed(ciStatusFile(context.paths, pushed)) === undefined
   ) {
     shas.add(pushed);

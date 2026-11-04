@@ -2,9 +2,8 @@
 // registry's active harness, to a canonical lowercase conversation UUID, and no two parents may
 // share one. Problems name the delivery-kit.json field, read from the raw registry so a registry
 // that fails its own validation still points at the parent that caused it.
+import { CANONICAL_UUID } from "../adapters/shared/ids.ts";
 import type { ProjectConfig } from "../config.ts";
-
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 type Json = Record<string, unknown>;
 

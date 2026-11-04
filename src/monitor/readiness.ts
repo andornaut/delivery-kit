@@ -11,6 +11,7 @@ import { readRoleRoute } from "../adapters/shared/route.ts";
 import type { Layout } from "../layout.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
+import { MONITOR_ROLE } from "./wake.ts";
 
 export interface RoleReadiness {
   readonly role: string;
@@ -63,7 +64,7 @@ function adapterStatus(env: NodeJS.ProcessEnv, harness: Harness): Promise<string
 function routeRoles(layout: Layout, registry: Registry): string[] | null {
   try {
     const route = readRoleRoute(layout);
-    return route === null ? [resolveRole(registry, "monitor")] : [route.monitor, ...route.targets];
+    return route === null ? [resolveRole(registry, MONITOR_ROLE)] : [route.monitor, ...route.targets];
   } catch {
     return null;
   }

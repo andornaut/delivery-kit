@@ -4,13 +4,13 @@
 import { existsSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { SHA_PATTERN } from "./adapters/shared/ids.ts";
 import type { BusContext } from "./bus/context.ts";
 import { gitOk, WRANGLER_ENTRY } from "./bus/exec.ts";
 import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "./bus/state.ts";
 import { remoteMain } from "./bus/trunk.ts";
 import { fsyncDirectory } from "./durable.ts";
 
-const SHA = /^[0-9a-f]{40}$/;
 
 export interface PendingDeploy {
   readonly sha: string;
@@ -60,7 +60,7 @@ export async function removeWorktree(context: BusContext, work: string): Promise
 }
 
 function failureEvent(context: BusContext, sha: string): void {
-  if (SHA.test(sha)) {
+  if (SHA_PATTERN.test(sha)) {
     context.events.emit(
       "deploy_failure",
       sha,

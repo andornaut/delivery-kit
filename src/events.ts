@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 
 import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
-import { eventRequestId } from "./adapters/shared/ids.ts";
+import { eventRequestId, SHA_PATTERN } from "./adapters/shared/ids.ts";
 import { dumpsJson, type PyJson } from "./adapters/shared/pyjson.ts";
 import { readRoleRoute, type RoleRoute } from "./adapters/shared/route.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
@@ -38,7 +38,6 @@ export const QUIET_KINDS: ReadonlySet<string> = new Set([
 /** Delivered text, suffix included, stays within this many UTF-8 bytes. */
 export const DELIVERY_BUDGET = 900;
 const CLEAN_LIMIT = 1800;
-const SHA_PATTERN = /^[0-9a-f]{40}$/;
 
 export interface BusEvent {
   [key: string]: PyJson | undefined;

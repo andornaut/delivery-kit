@@ -3,6 +3,7 @@
 import { join } from "node:path";
 
 import { readJsonIfExists } from "../../durable.ts";
+import { CANONICAL_UUID } from "./ids.ts";
 
 const FIELDS = [
   "question_turn_id",
@@ -10,7 +11,6 @@ const FIELDS = [
   "answer_turn_id",
   "answer_item_id",
 ] as const;
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export type DecisionRecord = Readonly<Record<string, unknown>>;
 
