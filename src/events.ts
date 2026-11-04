@@ -11,7 +11,8 @@ import { join, resolve } from "node:path";
 
 import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
-import { type PyJson, pythonJson, uuid5Url } from "./adapters/codex/json.ts";
+import { eventRequestId } from "./adapters/shared/ids.ts";
+import { type PyJson, pythonJson } from "./adapters/shared/pyjson.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
 import { loadProjectConfig } from "./config.ts";
 import { readJson, writeDurable } from "./durable.ts";
@@ -296,7 +297,7 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
         writeState(path, event);
         continue;
       }
-      const requestId = uuid5Url(`bus-event:${event.id}:${target.recipient}`);
+      const requestId = eventRequestId(event.id, target.recipient);
       // Events deliver one at a time in creation order and stop at the first refusal.
       // eslint-disable-next-line no-await-in-loop
       const receipt = await target.adapter.deliver(

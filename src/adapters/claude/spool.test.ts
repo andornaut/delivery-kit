@@ -12,8 +12,8 @@ import {
   SLOT,
   TECH,
 } from "../../monitor/fixtures.ts";
+import { eventRequestId, slotRequestId } from "../shared/ids.ts";
 import { deliverPending } from "./channel.ts";
-import { eventRequestId, slotRequestId } from "./ids.ts";
 import { resolveRouteV2 } from "./route.ts";
 import { spoolDir, spoolEvent, spoolMonitorBrief } from "./spool.ts";
 

@@ -9,12 +9,9 @@ import { type AgentEntry, roleDiagnostics } from "../adapters/claude/agents.ts";
 import { deliveredEntries } from "../adapters/claude/index.ts";
 import type { ResolvedRoute } from "../adapters/claude/route.ts";
 import { spoolDir } from "../adapters/claude/spool.ts";
-import {
-  type CollectRequest,
-  type HarnessCollectors,
-  unavailableCollected,
-} from "../adapters/codex/collect.ts";
-import type { HarnessAdapter } from "../adapters/types.ts";
+import { unavailableCollected } from "../adapters/codex/collect.ts";
+import type { CollectRequest, HarnessAdapter } from "../adapters/types.ts";
+import { nativeEntry } from "./ack.ts";
 import {
   type Json,
   persist,
@@ -120,13 +117,6 @@ function priorProcess(
   }
 }
 
-function collectorsOf(adapter: HarnessAdapter): HarnessCollectors | undefined {
-  const collectors = (adapter as { readonly collectors?: unknown }).collectors;
-  return typeof collectors === "object" && collectors !== null
-    ? (collectors as HarnessCollectors)
-    : undefined;
-}
-
 /**
  * Codex snapshot: the adapter's native queue inventory for each recipient, then the history,
  * question, worker and process collectors when the adapter provides them.
@@ -150,10 +140,7 @@ export async function captureCodex(
         "queue inventory unavailable or incomplete; retry snapshot before reconciliation";
       return;
     }
-    queues[recipient] = inventory.entries.map((entry) => ({
-      ...queueEntry(entry.queueId, entry.payload),
-      clientUserMessageId: entry.clientUserMessageId ?? entry.queueId,
-    }));
+    queues[recipient] = inventory.entries.map((entry) => nativeEntry(entry));
   });
   const manifest = processManifest(context.busDir);
   const request: CollectRequest = {
@@ -165,7 +152,7 @@ export async function captureCodex(
     ...optional("processManifest", manifest),
     ...optional("priorProcess", priorProcess(context, manifest, recipients)),
   };
-  const collectors = collectorsOf(adapter);
+  const collectors = adapter.collectors;
   const collected =
     collectors === undefined
       ? unavailableCollected("collector_not_ported", request)

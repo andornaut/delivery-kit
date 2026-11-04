@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 import { readJson } from "../../durable.ts";
-import { isCanonicalUuid } from "./ids.ts";
+import { isCanonicalUuid } from "../shared/ids.ts";
 
 export type RouteHarness = "claude" | "codex";
 

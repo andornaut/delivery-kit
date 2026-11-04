@@ -3,10 +3,10 @@
 import { parseArgs } from "node:util";
 
 import { listingOrNull } from "../adapters/claude/agents.ts";
-import { canonicalUuid } from "../adapters/claude/ids.ts";
-import { pyJsonDumps } from "../adapters/claude/pyjson.ts";
 import { resolveRouteV2 } from "../adapters/claude/route.ts";
 import { unblockDir } from "../adapters/claude/spool.ts";
+import { canonicalUuid } from "../adapters/shared/ids.ts";
+import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import type { Disposition } from "../adapters/types.ts";
 import { readJson } from "../durable.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";

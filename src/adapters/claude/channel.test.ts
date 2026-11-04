@@ -13,8 +13,8 @@ import { describe, expect, it } from "vitest";
 
 import { gameLayout } from "../../layout.ts";
 import { type ClaudeFixture, claudeFixture, MONITOR, SLOT, TECH } from "../../monitor/fixtures.ts";
+import { slotRequestId } from "../shared/ids.ts";
 import { deliverPending, handle, serve } from "./channel.ts";
-import { slotRequestId } from "./ids.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
 import { resolveRouteV2 } from "./route.ts";
 import { deliveredDir, spoolDir, spoolMonitorBrief } from "./spool.ts";

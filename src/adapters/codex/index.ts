@@ -4,35 +4,25 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { performance } from "node:perf_hooks";
 
 import type { Layout } from "../../layout.ts";
+import { NAMESPACE_URL, uuid5 } from "../shared/ids.ts";
+import { isRecord, type PyJson } from "../shared/pyjson.ts";
 import type {
   Availability,
+  CollectRequest,
   DeliveryReceipt,
   Disposition,
   HarnessAdapter,
+  HarnessCollectors,
   Inventory,
 } from "../types.ts";
-import {
-  collectAll,
-  type CollectRequest,
-  type HarnessCollectors,
-  unavailableCollected,
-} from "./collect.ts";
+import { collectAll, unavailableCollected } from "./collect.ts";
 import { acknowledgeEntry, type AckOutcome, queueEntries, queuePayload } from "./inventory.ts";
-import { isRecord, type PyJson, uuid5Url } from "./json.ts";
 import { connectControl, type RpcClient } from "./rpc.ts";
 import { deliverReceipt } from "./steer.ts";
 
-export {
-  BudgetClient,
-  collectAll,
-  type Collected,
-  type CollectRequest,
-  type HarnessCollectors,
-  unavailableCollected,
-} from "./collect.ts";
-export { decisionClear, decisionRecord, nativeQuestionsClear, questionItem } from "./guard.ts";
+export { BudgetClient, collectAll, unavailableCollected } from "./collect.ts";
+export { nativeQuestionsClear, questionItem } from "./guard.ts";
 export { acknowledgeEntry, historyRefs, queueEntries, queuePayload } from "./inventory.ts";
-export { isCanonicalUuid, pythonDigest, pythonJson, uuid5Url } from "./json.ts";
 export { resolveRoute, RouteError, type RouteScope } from "./route.ts";
 export { connectControl, RpcError } from "./rpc.ts";
 export { deliverReceipt, selectTarget } from "./steer.ts";
@@ -150,7 +140,7 @@ export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexA
       disposition: Disposition,
       reason?: string,
     ): Promise<DeliveryReceipt> {
-      const requestId = uuid5Url(`queue-ack:${conversationId}:${queueId}`);
+      const requestId = uuid5(NAMESPACE_URL, `queue-ack:${conversationId}:${queueId}`);
       if (disposition === "retained" && (reason === undefined || reason.trim() === "")) {
         return { reason: "retention requires a nonempty reason", requestId, status: "rejected" };
       }

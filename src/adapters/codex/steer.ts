@@ -4,14 +4,10 @@
 import { existsSync } from "node:fs";
 
 import { readJson, writeDurable } from "../../durable.ts";
+import { decisionClear, decisionRecord } from "../shared/decisions.ts";
+import { isRecord, type PyJson, pythonJson, sameJson } from "../shared/pyjson.ts";
 import type { DeliveryReceipt, DeliveryStatus } from "../types.ts";
-import {
-  clearanceUnchanged,
-  decisionClear,
-  decisionRecord,
-  nativeQuestionsClear,
-} from "./guard.ts";
-import { isRecord, type PyJson, pythonJson, sameJson } from "./json.ts";
+import { clearanceUnchanged, nativeQuestionsClear } from "./guard.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 
 const CLEARANCE_MISSING = "recipient-bound user-decision clearance missing, invalid or pending";

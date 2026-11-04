@@ -1,8 +1,8 @@
 // Native queue inventory (thread/queue/list), history references (thread/items/list) and the
 // native half of an explicit acknowledgement (thread/queue/delete), from monitor.py:50-138,768-866.
 // Durable acknowledgement and retention records stay with the monitor that owns the snapshot.
+import { isRecord, type PyJson, pythonJson, sameJson } from "../shared/pyjson.ts";
 import { NATIVE_ITEM_TYPES, questionItem } from "./guard.ts";
-import { isRecord, type PyJson, pythonJson, sameJson } from "./json.ts";
 import { NativeTimeout, type RpcClient, RpcError } from "./rpc.ts";
 
 export interface QueueEntry {

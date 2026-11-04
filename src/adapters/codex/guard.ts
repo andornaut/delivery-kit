@@ -1,9 +1,7 @@
 // Recipient decision guard: a recipient-bound clearance record, verified against native question
 // history by exact turn and item IDs (unblock.py:117-221). Unknown or incomplete history defers.
-import { join } from "node:path";
-
-import { readJson } from "../../durable.ts";
-import { isCanonicalUuid, isRecord, sameJson } from "./json.ts";
+import { decisionClear, type DecisionRecord, decisionRecord } from "../shared/decisions.ts";
+import { isRecord, sameJson } from "../shared/pyjson.ts";
 import type { RpcClient } from "./rpc.ts";
 
 export const NATIVE_ITEM_TYPES: ReadonlySet<string> = new Set([
@@ -32,61 +30,11 @@ const QUESTION_TOOLS = ["requestuserinput", "askuserquestion", "elicitation"];
 
 export type NativeItem = Record<string, unknown> & { readonly id: string; readonly type: string };
 
-const RESOLUTION_FIELDS = [
-  "question_turn_id",
-  "question_item_id",
-  "answer_turn_id",
-  "answer_item_id",
-] as const;
-
 interface Resolution {
   readonly question_turn_id: string;
   readonly question_item_id: string;
   readonly answer_turn_id: string;
   readonly answer_item_id: string;
-}
-
-export type DecisionRecord = Record<string, unknown>;
-
-/** The recipient's decisions/<id>.json marker, or null when it is missing or malformed. */
-export function decisionRecord(unblockDir: string, recipient: string): DecisionRecord | null {
-  if (!isCanonicalUuid(recipient)) {
-    return null;
-  }
-  let marker: unknown;
-  try {
-    marker = readJson(join(unblockDir, "decisions", `${recipient}.json`));
-  } catch {
-    return null;
-  }
-  if (!isRecord(marker) || marker.thread_id !== recipient) {
-    return null;
-  }
-  const resolutions = "resolutions" in marker ? marker.resolutions : [];
-  if (!Array.isArray(resolutions)) {
-    return null;
-  }
-  const seen = new Set<string>();
-  for (const resolution of resolutions as unknown[]) {
-    if (
-      !isRecord(resolution) ||
-      RESOLUTION_FIELDS.some(
-        (field) => typeof resolution[field] !== "string" || resolution[field] === "",
-      )
-    ) {
-      return null;
-    }
-    const reference = JSON.stringify([resolution.question_turn_id, resolution.question_item_id]);
-    if (seen.has(reference)) {
-      return null;
-    }
-    seen.add(reference);
-  }
-  return marker;
-}
-
-export function decisionClear(unblockDir: string, recipient: string): boolean {
-  return decisionRecord(unblockDir, recipient)?.state === "clear";
 }
 
 /** True while the clearance read before a send still matches the current record. */

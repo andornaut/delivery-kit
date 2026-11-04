@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 
 import { readJsonIfExists } from "../../durable.ts";
 import type { GameLayout } from "../../layout.ts";
+import { eventRequestId } from "../shared/ids.ts";
 import type {
   Availability,
   DeliveryReceipt,
@@ -15,7 +16,6 @@ import type {
   InventoryEntry,
 } from "../types.ts";
 import { listingOrNull, monitorAvailability } from "./agents.ts";
-import { eventRequestId } from "./ids.ts";
 import { deliveredDir, type Json, readEntry, spoolEvent } from "./spool.ts";
 
 const STATUSES: readonly DeliveryStatus[] = [

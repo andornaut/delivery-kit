@@ -33,10 +33,42 @@ export interface Inventory {
   readonly reason?: string;
 }
 
+export type CollectorRecord = Readonly<Record<string, unknown>>;
+
+/** What a snapshot asks the harness collectors for. */
+export interface CollectRequest {
+  /** The bus unblock directory holding recipient decisions. */
+  readonly unblockDir: string;
+  readonly recipients: readonly string[];
+  readonly parents: readonly string[];
+  readonly slot: number | null;
+  readonly historyCursor: string | null;
+  /** The process-health manifest; undefined disables process collection. */
+  readonly processManifest?: string;
+  readonly priorProcess?: unknown;
+}
+
+/** Snapshot capabilities in the 0.9.x snapshot field names. */
+export interface Collected {
+  readonly history: CollectorRecord;
+  readonly question_state: CollectorRecord;
+  readonly worker_health: CollectorRecord;
+  readonly process_health: CollectorRecord;
+  readonly process_health_source: CollectorRecord;
+  readonly collection_budget: CollectorRecord;
+}
+
+/** Native history, question, worker and process collection over one harness connection. */
+export interface HarnessCollectors {
+  collect(request: CollectRequest): Promise<Collected>;
+}
+
 export type Disposition = "handled" | "retained" | "superseded";
 
 export interface HarnessAdapter {
   readonly harness: "claude" | "codex";
+  /** Absent when the harness has no native collectors: every capability is then unavailable. */
+  readonly collectors?: HarnessCollectors;
   status(conversationId: string): Promise<Availability>;
   deliver(
     receiptPath: string,

@@ -4,7 +4,7 @@
 // and `handled` or `superseded` removes the entry through the adapter (`deleted`). A durable
 // operation records every attempt; an interrupted removal becomes `ambiguous` first.
 /* eslint-disable require-atomic-updates -- every operation runs under monitor.lock, one item at a time */
-import type { Disposition, HarnessAdapter } from "../adapters/types.ts";
+import type { Disposition, HarnessAdapter, InventoryEntry } from "../adapters/types.ts";
 import {
   ackPath,
   type Json,
@@ -59,6 +59,14 @@ function attempts(operation: Json): Json[] {
   return operation.attempts as Json[];
 }
 
+/** A Codex entry keeps its native client message ID, so its signature is the 0.9.x digest. */
+export function nativeEntry(entry: InventoryEntry): QueueEntry {
+  return {
+    ...queueEntry(entry.queueId, entry.payload),
+    clientUserMessageId: entry.clientUserMessageId ?? entry.queueId,
+  };
+}
+
 async function current(
   adapter: HarnessAdapter,
   recipient: string,
@@ -67,9 +75,7 @@ async function current(
   if (inventory.status !== "available") {
     throw new AckError(inventory.reason ?? "inventory unavailable");
   }
-  return new Map(
-    inventory.entries.map((entry) => [entry.queueId, queueEntry(entry.queueId, entry.payload)]),
-  );
+  return new Map(inventory.entries.map((entry) => [entry.queueId, nativeEntry(entry)]));
 }
 
 function deactivate(path: string, state: string, snapshotId: string): void {

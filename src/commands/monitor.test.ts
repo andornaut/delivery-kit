@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
-import { slotRequestId } from "../adapters/claude/ids.ts";
-import { digest } from "../adapters/claude/pyjson.ts";
 import { resolveRouteV2 } from "../adapters/claude/route.ts";
 import { deliveredDir, spoolMonitorBrief } from "../adapters/claude/spool.ts";
+import { slotRequestId } from "../adapters/shared/ids.ts";
+import { digest } from "../adapters/shared/pyjson.ts";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../io.ts";
 import {

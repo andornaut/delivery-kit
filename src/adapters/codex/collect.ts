@@ -4,41 +4,16 @@
 // never clearance.
 import { performance } from "node:perf_hooks";
 
+import { decisionRecord } from "../shared/decisions.ts";
+import { isRecord } from "../shared/pyjson.ts";
+import type { Collected, CollectRequest } from "../types.ts";
 import { workerHealth } from "./collectors/childHealth.ts";
 import { processHealth } from "./collectors/processHealth.ts";
 import { collectQuestionState } from "./collectors/questionState.ts";
-import { decisionRecord } from "./guard.ts";
 import { historyRefs } from "./inventory.ts";
-import { isRecord } from "./json.ts";
 import { NativeTimeout, type RpcClient } from "./rpc.ts";
 
-export type Json = Record<string, unknown>;
-
-export interface CollectRequest {
-  /** The bus unblock directory holding recipient decisions. */
-  readonly unblockDir: string;
-  readonly recipients: readonly string[];
-  readonly parents: readonly string[];
-  readonly slot: number | null;
-  readonly historyCursor: string | null;
-  /** The process-health manifest; undefined disables process collection. */
-  readonly processManifest?: string;
-  readonly priorProcess?: unknown;
-}
-
-export interface Collected {
-  readonly history: Json;
-  readonly question_state: Json;
-  readonly worker_health: Json;
-  readonly process_health: Json;
-  readonly process_health_source: Json;
-  readonly collection_budget: Json;
-}
-
-/** Optional HarnessAdapter extension; without it every collector is unavailable. */
-export interface HarnessCollectors {
-  collect(request: CollectRequest): Promise<Collected>;
-}
+type Json = Record<string, unknown>;
 
 export const MAX_COLLECTION_CALLS = 256;
 const RESERVE_MS = 5000;

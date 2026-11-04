@@ -2,7 +2,7 @@
 // recipient's owner; delivery-kit only reads it. A missing or invalid marker is never clearance.
 import { join } from "node:path";
 
-import { readJsonIfExists } from "../durable.ts";
+import { readJsonIfExists } from "../../durable.ts";
 
 const FIELDS = [
   "question_turn_id",

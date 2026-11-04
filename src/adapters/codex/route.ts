@@ -4,7 +4,8 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 import { readJson } from "../../durable.ts";
-import { isCanonicalUuid, isRecord } from "./json.ts";
+import { isCanonicalUuid } from "../shared/ids.ts";
+import { isRecord } from "../shared/pyjson.ts";
 
 export type RouteScope =
   | { readonly status: "nonhost" }

@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { gameLayout, type Layout, loadLayout } from "../../layout.ts";
 import { makeFixture } from "../../testFixtures.ts";
+import { NAMESPACE_URL, uuid5 } from "../shared/ids.ts";
+import { pythonDigest, pythonJson } from "../shared/pyjson.ts";
 import { BudgetClient, codexAdapter, historyRefs } from "./index.ts";
-import { pythonDigest, pythonJson, uuid5Url } from "./json.ts";
 import { connectControl } from "./rpc.ts";
 import {
   type FakeControl,
@@ -106,12 +107,12 @@ function receiptOf(context: Setup): Record<string, unknown> {
   return JSON.parse(readFileSync(context.receipt, "utf8")) as Record<string, unknown>;
 }
 
-const REQUEST = uuid5Url(`hourly-unblock:${MONITOR}:1793757000`);
+const REQUEST = uuid5(NAMESPACE_URL, `hourly-unblock:${MONITOR}:1793757000`);
 
 describe("Python-compatible identifiers and JSON", () => {
   it("derives uuid5 request IDs exactly as uuid.uuid5(NAMESPACE_URL, ...)", () => {
     expect(REQUEST).toBe("1b46490f-6992-563e-aa4e-5de4399e6d56");
-    expect(uuid5Url(`bus-event:${"a".repeat(64)}:${MONITOR}`)).toBe(
+    expect(uuid5(NAMESPACE_URL, `bus-event:${"a".repeat(64)}:${MONITOR}`)).toBe(
       "749c82df-1ea3-5f1b-b902-03c8e9ebd25d",
     );
   });
@@ -305,7 +306,7 @@ describe("codexAdapter.deliver", () => {
   it("refuses a receipt bound to another request", async () => {
     const context = await setup({});
     await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
-    const other = uuid5Url("other");
+    const other = uuid5(NAMESPACE_URL, "other");
     const result = await adapter(context).deliver(context.receipt, other, MONITOR, "review");
     expect(result.status).toBe("blocked");
   });

@@ -9,7 +9,9 @@ import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { isCanonicalUuid, isRecord, type PyJson, pythonJson, sameJson } from "../json.ts";
+import { isCanonicalUuid } from "../../shared/ids.ts";
+import { utcStamp } from "../../shared/isoformat.ts";
+import { isRecord, type PyJson, pythonJson, sameJson } from "../../shared/pyjson.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
 
 const MAX_BYTES = 1048576;
@@ -102,8 +104,6 @@ const SAMPLE_EVIDENCE_KEYS: ReadonlySet<string> = new Set([
 const OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 /** The datetime.fromisoformat extended calendar form, restricted to a UTC offset. */
-const UTC_STAMP =
-  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2})(?::(\d{2})(?::(\d{2})(?:[.,](\d+))?)?)?(?:Z|\+00:00)$/;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
 /** Injectable clocks and bounds. The defaults are the production values. */
@@ -242,32 +242,9 @@ function same(left: unknown, right: unknown): boolean {
   return sameJson(left ?? null, right ?? null);
 }
 
-/** Epoch seconds of a UTC ISO timestamp, or null when it is not one. */
+/** Epoch seconds of a UTC ISO timestamp, or null when it is not one (process_health.py:44-53). */
 function stamp(value: unknown): number | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const match = UTC_STAMP.exec(value);
-  if (match === null) {
-    return null;
-  }
-  const [, year, month, day, hour, minute = "0", second = "0", fraction = ""] = match;
-  const date = new Date(0);
-  date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
-  if (
-    Number(year) < 1 ||
-    date.getUTCMonth() !== Number(month) - 1 ||
-    date.getUTCDate() !== Number(day) ||
-    Number(hour) > 23 ||
-    Number(minute) > 59 ||
-    Number(second) > 59
-  ) {
-    return null;
-  }
-  date.setUTCHours(Number(hour), Number(minute), Number(second), 0);
-  // Digits beyond microseconds are truncated, as fromisoformat does.
-  const micro = Number(fraction.slice(0, 6).padEnd(6, "0"));
-  return (date.getTime() * 1000 + micro) / 1e6;
+  return utcStamp(value);
 }
 
 /** datetime.fromtimestamp(seconds, timezone.utc).isoformat() */

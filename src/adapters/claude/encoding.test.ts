@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { eventRequestId, NAMESPACE_DNS, slotRequestId, uuid5 } from "./ids.ts";
-import { digest, pyJsonDumps } from "./pyjson.ts";
+import { eventRequestId, NAMESPACE_DNS, slotRequestId, uuid5 } from "../shared/ids.ts";
+import { digest, pyJsonDumps } from "../shared/pyjson.ts";
 
 describe("uuid5", () => {
   it("matches Python uuid.uuid5", () => {

@@ -7,7 +7,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { performance } from "node:perf_hooks";
 
-import { isRecord } from "./json.ts";
+import { isRecord } from "../shared/pyjson.ts";
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;

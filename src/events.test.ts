@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, type Mock, vi } from "vitest";
 
-import { uuid5Url } from "./adapters/codex/json.ts";
+import { eventRequestId } from "./adapters/shared/ids.ts";
 import type { DeliveryReceipt } from "./adapters/types.ts";
 import {
   clean,
@@ -132,7 +132,7 @@ describe("flushEventsWith", () => {
     expect(adapter.deliver).toHaveBeenNthCalledWith(
       1,
       join(eventsDir(game), "native", `${first}-${CLAUDE_GAME_DEV}.json`),
-      uuid5Url(`bus-event:${first}:${CLAUDE_GAME_DEV}`),
+      eventRequestId(first, CLAUDE_GAME_DEV),
       CLAUDE_GAME_DEV,
       `Archie bus: first [bus event ${first.slice(0, 12)}]`,
       { event_id: first },

@@ -3,7 +3,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { digest } from "../adapters/claude/pyjson.ts";
+import { digest } from "../adapters/shared/pyjson.ts";
 import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
 import { withLock } from "../lock.ts";
 

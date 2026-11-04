@@ -5,17 +5,17 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { slotRequestId } from "../adapters/claude/ids.ts";
-import { pyJsonDumps } from "../adapters/claude/pyjson.ts";
 import { resolveRouteV2, routeHarness } from "../adapters/claude/route.ts";
 import { spoolMonitorBrief, unblockDir } from "../adapters/claude/spool.ts";
 import { resolveRoute, type RouteScope } from "../adapters/codex/route.ts";
+import { decisionClear } from "../adapters/shared/decisions.ts";
+import { slotRequestId } from "../adapters/shared/ids.ts";
+import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import { loadProjectConfig } from "../config.ts";
 import { readJson } from "../durable.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { resolveConversation } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
-import { decisionClear } from "./decisions.ts";
 import { codexAdapter } from "./harnesses.ts";
 import { readRecord } from "./store.ts";
 
