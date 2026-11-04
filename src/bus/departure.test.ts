@@ -34,10 +34,14 @@ function setup(mode: "none" | "wrangler" = "none", gate: { noNodeModules?: boole
   const events = recordingEvents();
   const started: string[] = [];
   const failGate = { value: false };
+  const dockerDown = { value: false };
   const wrangler = { status: 0 };
   const exec = fakeExec((spec) => {
     if (spec.command === process.execPath) {
       return { status: wrangler.status, stderr: "", stdout: "" };
+    }
+    if (dockerDown.value && spec.command === "docker" && spec.args[0] === "create") {
+      return { status: 1, stderr: "Cannot connect to the Docker daemon\n", stdout: "" };
     }
     return gateDocker({
       ...gate,
@@ -50,7 +54,7 @@ function setup(mode: "none" | "wrangler" = "none", gate: { noNodeModules?: boole
   const context = testContext(test, { events, exec, startCi: (sha) => started.push(sha) });
   const kinds = (): string[] => events.list.map(([kind]) => kind);
   const creates = (): number => exec.calls.filter((call) => call.args[0] === "create").length;
-  return { context, creates, events, exec, failGate, kinds, started, test, wrangler };
+  return { context, creates, dockerDown, events, exec, failGate, kinds, started, test, wrangler };
 }
 
 function ciStatus(test: TestGame, sha: string, value: string): void {
@@ -128,6 +132,23 @@ describe("trunk-based departures", () => {
     expect(await depart(context)).toBe(0);
     expect(originMain(test)).toBe(fixed);
     expect(gitSync(test.repo, "merge-base", "--is-ancestor", broken, fixed)).toBe("");
+  });
+
+  it("reports an unavailable Docker as blocked-gate, records nothing and gates again next time", async () => {
+    const { context, creates, dockerDown, events, test } = setup();
+    const head = mergeFastForward(test, "feature");
+    dockerDown.value = true;
+    expect(await depart(context)).toBe(1);
+    expect(existsSync(join(test.game.busDir, "gate-failed"))).toBe(false);
+    expect(events.list.at(-1)).toEqual([
+      "blocked-gate",
+      expect.any(String),
+      expect.stringContaining("Cannot connect to the Docker daemon"),
+    ]);
+    dockerDown.value = false;
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(2);
+    expect(originMain(test)).toBe(head);
   });
 
   it("reports a non-fast-forward rejection and pushes nothing", async () => {

@@ -171,20 +171,60 @@ export interface GateInput {
   readonly departure: string;
 }
 
+/**
+ * A `step` failure is install or a gate step exiting non-zero inside the running container: the
+ * departure records gate-failed for the SHA. An `infrastructure` failure (Docker, the image, the
+ * container, its network, a copy or the fingerprint check) records nothing, so the next
+ * departure gates the same SHA again.
+ */
 export type GateOutcome =
   | { readonly ok: true; readonly output: string }
-  | { readonly ok: false; readonly stage: "full-gate" | "install"; readonly reason: string };
+  | {
+      readonly ok: false;
+      readonly failure: "step";
+      readonly stage: "full-gate" | "install";
+      readonly reason: string;
+    }
+  | { readonly ok: false; readonly failure: "infrastructure"; readonly reason: string };
+
+/** `docker exec` exits 125 when Docker itself fails, before or around the command. */
+const DOCKER_EXEC_ERROR = 125;
 
 function failed(stage: "full-gate" | "install", reason: string): GateOutcome {
-  return { ok: false, reason, stage };
+  return { failure: "step", ok: false, reason, stage };
+}
+
+function blockedGate(reason: string): GateOutcome {
+  return { failure: "infrastructure", ok: false, reason };
+}
+
+/** The first line of a Docker diagnostic, or the exit status when it printed none. */
+function diagnostic(result: ExecResult): string {
+  const line = `${result.stderr}\n${result.stdout}`
+    .split("\n")
+    .map((row) => row.trim())
+    .find((row) => row !== "");
+  return line ?? (result.status === null ? "no exit status" : `exit ${String(result.status)}`);
 }
 
 function timedOut(result: ExecResult): boolean {
   return result.status === null;
 }
 
-// Copy the read-only checkout (without its .git link) and confirm the copy is the commit's tree.
+/** Tools the gate image provides besides sh, for the copy, the loopback check and step logs. */
+export const GATE_TOOLS = ["git", "tar", "ls", "tail"] as const;
+/** COPY_SCRIPT exit statuses: a required tool is missing (named on stdout), or the tree differs. */
+const MISSING_TOOL = 3;
+const TREE_MISMATCH = 4;
+
+// Probe the image's tools, copy the read-only checkout (without its .git link) and confirm the
+// copy is the commit's tree.
 const COPY_SCRIPT = [
+  [
+    `for tool in ${GATE_TOOLS.join(" ")}; do`,
+    `command -v "$tool" >/dev/null 2>&1 || { echo "$tool"; exit ${MISSING_TOOL}; };`,
+    "done",
+  ].join(" "),
   `mkdir -p ${GATE_WORK} ${GATE_LOGS}`,
   `tar -C ${GATE_SOURCE} --exclude=./.git -cf - . | tar -x -C ${GATE_WORK}`,
   `cd ${GATE_WORK}`,
@@ -192,10 +232,15 @@ const COPY_SCRIPT = [
   "git add -A -f",
   "actual=$(git write-tree)",
   "rm -rf .git",
-  'test "$actual" = "$EXPECTED_TREE"',
+  `{ test "$actual" = "$EXPECTED_TREE" || exit ${TREE_MISMATCH}; }`,
 ].join(" && ");
 
-async function copyIn(context: BusContext, name: string, input: GateInput): Promise<boolean> {
+/** Copy the checkout in; the reason it could not, or undefined. */
+async function copyIn(
+  context: BusContext,
+  name: string,
+  input: GateInput,
+): Promise<string | undefined> {
   const tree = await git(context.exec, input.work, ["rev-parse", `${input.sha}^{tree}`]);
   const copy = await docker(context, [
     "exec",
@@ -206,7 +251,17 @@ async function copyIn(context: BusContext, name: string, input: GateInput): Prom
     "-c",
     COPY_SCRIPT,
   ]);
-  return copy.status === 0;
+  if (copy.status === 0) {
+    return undefined;
+  }
+  if (copy.status === MISSING_TOOL) {
+    const tool = copy.stdout.trim() || "required tool";
+    return `the gate image ${context.config.gate.image} has no ${tool}; it needs sh, ${GATE_TOOLS.join(", ")}`;
+  }
+  if (copy.status === TREE_MISMATCH) {
+    return "gate container copy of the checkout does not match the departure commit";
+  }
+  return `copying the checkout into the gate container failed: ${diagnostic(copy)}`;
 }
 
 /** The build outputs a passing, verified gate copies back into the scratch worktree. */
@@ -245,17 +300,17 @@ async function copyOut(
 async function gate(context: BusContext, name: string, input: GateInput): Promise<GateOutcome> {
   const { gate: settings } = context.config;
   const timeoutMs = GATE_TIMEOUT_SECONDS * 1000;
-  if ((await docker(context, createArgs(context, name, input))).status !== 0) {
-    return failed("install", "gate container could not be created");
+  const created = await docker(context, createArgs(context, name, input));
+  if (created.status !== 0) {
+    return blockedGate(`docker create of the gate container failed: ${diagnostic(created)}`);
   }
-  if (
-    (await docker(context, ["start", name])).status !== 0 ||
-    !(await copyIn(context, name, input))
-  ) {
-    return failed(
-      "install",
-      "gate container copy of the checkout does not match the departure commit",
-    );
+  const started = await docker(context, ["start", name]);
+  if (started.status !== 0) {
+    return blockedGate(`docker start of the gate container failed: ${diagnostic(started)}`);
+  }
+  const copyProblem = await copyIn(context, name, input);
+  if (copyProblem !== undefined) {
+    return blockedGate(copyProblem);
   }
   if (settings.install !== "") {
     const log = join(input.logs, "install.log");
@@ -265,12 +320,18 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
       log,
       timeoutMs,
     );
+    if (install.status === DOCKER_EXEC_ERROR) {
+      return blockedGate(`docker exec of the install step failed; see ${log}`);
+    }
     if (install.status !== 0) {
       return failed("install", `install ${timedOut(install) ? "TIMED OUT" : "FAIL"}; see ${log}`);
     }
   }
   // Every gate step runs without network: disconnect, then confirm only loopback remains.
-  await docker(context, ["network", "disconnect", "bridge", name]);
+  const detached = await docker(context, ["network", "disconnect", "bridge", name]);
+  if (detached.status !== 0) {
+    return blockedGate(`docker network disconnect failed: ${diagnostic(detached)}`);
+  }
   const offline = await docker(context, [
     "exec",
     name,
@@ -279,7 +340,7 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
     'test "$(ls /sys/class/net)" = lo',
   ]);
   if (offline.status !== 0) {
-    return failed("full-gate", "gate container still has a network interface; gate not run");
+    return blockedGate("gate container still has a network interface; gate not run");
   }
   const result = await docker(
     context,
@@ -287,6 +348,9 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
     undefined,
     timeoutMs,
   );
+  if (result.status === DOCKER_EXEC_ERROR) {
+    return blockedGate(`docker exec of the gate steps failed: ${diagnostic(result)}`);
+  }
   if (result.status !== 0) {
     const detail = timedOut(result) ? "gate TIMED OUT" : `${result.stdout}${result.stderr}`.trim();
     return failed("full-gate", detail);
@@ -305,14 +369,14 @@ export async function runGate(
 ): Promise<GateOutcome> {
   await removeLeftoverGates(context);
   const name = gateContainerName(context.game.id, input.departure);
-  let outcome: GateOutcome = failed("install", "gate did not start");
+  let outcome: GateOutcome = blockedGate("gate did not start");
   try {
     outcome = await gate(context, name, input);
     if (outcome.ok) {
       // Checked before the outputs are copied into the worktree, so the copy is not a change.
       const problem = await verify();
       if (problem !== undefined) {
-        outcome = failed("full-gate", problem);
+        outcome = blockedGate(problem);
       }
     }
     // Logs are copied out whatever the outcome; the outputs only from a passing, verified gate.
@@ -321,10 +385,10 @@ export async function runGate(
     if (error instanceof Interrupted) {
       throw error;
     }
-    outcome = failed(
-      outcome.ok ? "full-gate" : outcome.stage,
-      error instanceof Error ? error.message : String(error),
-    );
+    // A step failure stays one; anything thrown around it (a docker cp, a git read) is not.
+    if (outcome.ok || outcome.failure === "infrastructure") {
+      outcome = blockedGate(error instanceof Error ? error.message : String(error));
+    }
   } finally {
     await docker(context, ["rm", "--force", name]);
   }

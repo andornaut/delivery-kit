@@ -244,6 +244,17 @@ async function gateAndPush(
       ? undefined
       : "gate discarded: Git status or reported-file fingerprints changed during checks",
   );
+  if (!outcome.ok && outcome.failure === "infrastructure") {
+    context.log(outcome.reason);
+    await removeWorktree(context, work);
+    return blocked(
+      context,
+      attempt,
+      "gate",
+      `${outcome.reason}; main ${head} was not gated and stays unpushed; no gate-failed record ` +
+        "is written, so the next departure gates it again",
+    );
+  }
   if (!outcome.ok) {
     ensureDir(paths.gateFailedDir);
     writeLines(

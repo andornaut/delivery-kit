@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { ExecResult } from "./bus/exec.ts";
 import {
   assertContainerRules,
   FAKE_WRANGLER,
@@ -97,7 +98,7 @@ describe("runGate", () => {
     const test = makeGame();
     const exec = fakeExec((spec) =>
       spec.args.some((arg) => arg.startsWith("EXPECTED_TREE="))
-        ? { status: 1, stderr: "", stdout: "" }
+        ? { status: 4, stderr: "", stdout: "" }
         : gateDocker()(spec),
     );
     const context = testContext(test, { exec });
@@ -108,16 +109,105 @@ describe("runGate", () => {
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
       work: test.repo,
     });
-    expect(outcome).toMatchObject({ ok: false, stage: "install" });
+    expect(outcome).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason: "gate container copy of the checkout does not match the departure commit",
+    });
     expect(exec.calls.some((call) => call.args.at(-1)?.includes("npm ci") === true)).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+
+  const DOCKER_FAILURES: readonly [string, ExecResult, string][] = [
+    [
+      "create",
+      { status: 1, stderr: "Error: No such image: node:24\n", stdout: "" },
+      "docker create of the gate container failed: Error: No such image: node:24",
+    ],
+    [
+      "start",
+      { status: 1, stderr: "", stdout: "" },
+      "docker start of the gate container failed: exit 1",
+    ],
+    [
+      "network",
+      { status: 1, stderr: "Error: network bridge not found\n", stdout: "" },
+      "docker network disconnect failed: Error: network bridge not found",
+    ],
+  ];
+  for (const [verb, result, reason] of DOCKER_FAILURES) {
+    it(`reports a failed docker ${verb} as an infrastructure failure`, async () => {
+      const test = makeGame();
+      const exec = fakeExec((spec) => (spec.args[0] === verb ? result : gateDocker()(spec)));
+      const context = testContext(test, { exec });
+      const outcome = await runGate(context, {
+        departure: "departure-1",
+        logs: mkdtempSync(join(tmpdir(), "logs-")),
+        sha: gitSync(test.repo, "rev-parse", "HEAD"),
+        work: test.repo,
+      });
+      expect(outcome).toEqual({ failure: "infrastructure", ok: false, reason });
+      const ranSteps = exec.calls.some((call) => call.args.at(-1)?.startsWith("set -e") === true);
+      expect(ranSteps).toBe(false);
+      expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+    });
+  }
+
+  it("names the tool the gate image lacks", async () => {
+    const test = makeGame();
+    const exec = fakeExec((spec) =>
+      spec.args.some((arg) => arg.startsWith("EXPECTED_TREE="))
+        ? { status: 3, stderr: "", stdout: "tail\n" }
+        : gateDocker()(spec),
+    );
+    const context = testContext(test, { exec });
+    const outcome = await runGate(context, {
+      departure: "departure-1",
+      logs: mkdtempSync(join(tmpdir(), "logs-")),
+      sha: gitSync(test.repo, "rev-parse", "HEAD"),
+      work: test.repo,
+    });
+    expect(outcome).toMatchObject({ failure: "infrastructure", ok: false });
+    expect(outcome.ok ? "" : outcome.reason).toBe(
+      `the gate image ${context.config.gate.image} has no tail; it needs sh, git, tar, ls, tail`,
+    );
+  });
+
+  it("reports a Docker error around the gate steps and a failed output copy as infrastructure", async () => {
+    const gone = setup({ gate: () => ({ status: 125, stderr: "daemon gone\n", stdout: "" }) });
+    expect(await runGate(gone.context, gone.input)).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason: "docker exec of the gate steps failed: daemon gone",
+    });
+    const test = makeGame();
+    const exec = fakeExec((spec) =>
+      spec.args[0] === "cp" && spec.args.some((arg) => arg.endsWith(":/tmp/work/dist/."))
+        ? { status: 1, stderr: "no space left on device\n", stdout: "" }
+        : gateDocker()(spec),
+    );
+    const outcome = await runGate(testContext(test, { exec }), {
+      departure: "departure-1",
+      logs: mkdtempSync(join(tmpdir(), "logs-")),
+      sha: gitSync(test.repo, "rev-parse", "HEAD"),
+      work: test.repo,
+    });
+    expect(outcome).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason: "docker cp of dist/ failed: no space left on device",
+    });
   });
 
   it("removes the container after a failed install and copies no dist/ or node_modules/", async () => {
     const { context, exec, input, test } = setup({
       install: () => ({ status: 1, stderr: "", stdout: "" }),
     });
-    expect(await runGate(context, input)).toMatchObject({ ok: false, stage: "install" });
+    expect(await runGate(context, input)).toMatchObject({
+      failure: "step",
+      ok: false,
+      stage: "install",
+    });
     expect(verbs(exec)).not.toContain("network");
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
@@ -128,7 +218,11 @@ describe("runGate", () => {
     const { context, exec, input, test } = setup({
       gate: () => ({ status: 1, stderr: "", stdout: "test FAIL\n" }),
     });
-    expect(await runGate(context, input)).toMatchObject({ ok: false, stage: "full-gate" });
+    expect(await runGate(context, input)).toMatchObject({
+      failure: "step",
+      ok: false,
+      stage: "full-gate",
+    });
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.filter((call) => call.args[0] === "cp").map((call) => call.args[2])).toEqual([
@@ -161,6 +255,7 @@ describe("runGate", () => {
       gate: () => ({ status: null, stderr: "", stdout: "" }),
     });
     expect(await runGate(context, input)).toEqual({
+      failure: "step",
       ok: false,
       reason: "gate TIMED OUT",
       stage: "full-gate",
@@ -171,7 +266,7 @@ describe("runGate", () => {
   it("discards a gate that fails verification, copies no outputs and removes the container", async () => {
     const { context, exec, input, test } = setup({});
     const outcome = await runGate(context, input, () => Promise.resolve("tree changed"));
-    expect(outcome).toEqual({ ok: false, reason: "tree changed", stage: "full-gate" });
+    expect(outcome).toEqual({ failure: "infrastructure", ok: false, reason: "tree changed" });
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
@@ -211,7 +306,11 @@ describe("runGate", () => {
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
       work: test.repo,
     });
-    expect(outcome).toMatchObject({ ok: false, stage: "full-gate" });
+    expect(outcome).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason: "gate container still has a network interface; gate not run",
+    });
     expect(exec.calls.some((call) => call.args.at(-1)?.startsWith("set -e") === true)).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
