@@ -173,6 +173,7 @@ suite("requests", () => {
       ws.git("worktree", "add", "-q", "-b", "batch-retained", work, "main");
       mkdirSync(join(work, "dist"));
       writeFileSync(join(work, ".bus-built.sha"), head + "\n");
+      ws.plantWrangler(work);
       ws.write("deploy-pending", `${head}\n${work}\nbatch-retained\n`);
       ws.updateControl((c) => (c.wrangler = { append: [ws.path("bus-queue"), "main\n"] }));
       ws.setClock(at(1), 60);

@@ -539,6 +539,19 @@ export class Workspace {
     return existsSync(this.path(...parts));
   }
 
+  /** The Wrangler entry a passing gate's install leaves in a retained deployment worktree. */
+  plantWrangler(work: string): void {
+    const entry = join(work, "node_modules", "wrangler", "bin");
+    mkdirSync(entry, { recursive: true });
+    const script = join(HERE, "fake-tool.mjs");
+    writeFileSync(
+      join(entry, "wrangler.js"),
+      `import { spawnSync } from "node:child_process";\n` +
+        `const r = spawnSync(process.execPath, [${JSON.stringify(script)}, "wrangler", ...process.argv.slice(2)], { stdio: "inherit" });\n` +
+        `process.exit(r.status ?? 1);\n`,
+    );
+  }
+
   write(name: string, content: string): void {
     mkdirSync(dirname(this.path(name)), { recursive: true });
     writeFileSync(this.path(name), content);
