@@ -7,16 +7,24 @@ import time
 import uuid
 
 from codex_adapter import control_socket_available, resolve_route
+from claude_adapter import resolve_route_v2, route_harness
 from unblock import connect, decision_clear, decision_record, persist, RpcError, target
 
 
 def monitor_recipient(environment, recipient):
-    """Return True for native, False for queue, or None for deferred routing."""
+    """Return True for native, False for queue, 'claude' for the channel spool, or None for deferred routing."""
     route_file = environment.get('MONITOR_ROUTE_FILE')
     if route_file is None:
         return False
     try:
         route = json.loads(Path(route_file).read_text())
+        if route_harness(route) == 'claude':
+            # Claude sessions have no queue, so only the active monitor receives events.
+            resolved = resolve_route_v2(route_file, route['host_project_root'])
+            monitor = route['monitor']['session_id']
+            if monitor is None or monitor != recipient or resolved.get('status') != 'active':
+                return None
+            return 'claude'
         resolved = resolve_route(route_file, route['host_project_root'])
         monitor = route['monitor_thread_id']
         if monitor is None:

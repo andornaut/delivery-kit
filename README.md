@@ -828,9 +828,11 @@ approved channel allowlist, so the session needs
 a confirmation dialog at startup; `--channels server:delivery-kit-monitor` alone
 loads only allowlisted servers.
 
-After `notifications/initialized` the server polls the spool. Under the same lock
-it claims each entry for its monitor with a `sending` receipt, emits one channel
-notification, then records `accepted` with a UTC `acceptedAt`. A failed write
+Pass `--state-dir STATE/unblock`; spool entries name their receipts relative to
+`STATE`. After `notifications/initialized` the server polls the spool. Under the
+same lock it claims each entry for its monitor with a `sending` receipt, emits one
+channel notification, then records `accepted` with a UTC `acceptedAt` and removes
+the claimed entry. A failed write
 records `ambiguous`; a claim left by an interrupted consumer becomes `ambiguous`
 at the next poll. Neither is resent. `accepted` means delivery into the session's
 input, not handling; the monitor records handling separately and reconciles
@@ -838,10 +840,35 @@ ambiguous receipts itself.
 
 The notification shape is isolated in `channel_notification()`:
 method `notifications/claude/channel`, params `content` (string) and `meta`
-(string values, keys matching `[A-Za-z_][A-Za-z0-9_]*`), and the server declares
+(`request_id`, `kind` (`monitor` or `event`) and `slot` or `event_id`; string
+values, keys matching `[A-Za-z_][A-Za-z0-9_]*`), and the server declares
 `experimental["claude/channel"]` while negotiating a protocol version up to
 `2025-11-25`. This contract is taken from the installed Claude Code client, not
 from published reference documentation; verify it after Claude Code upgrades.
+
+### Bus events
+
+With an active version 2 route, outbox events addressed to the monitor
+`session_id` use the same spool and consumer. The receipt stays at
+`STATE/events/native/EVENT_ID-RECIPIENT_UUID.json` with `clientUserMessageId`
+`uuid5(URL, "bus-event:<id>:<recipient>")` and a `claude-channel` attempt. Decision
+clearance and an available monitor listing are required; otherwise the receipt is
+`deferred` and retried at the next flush. The receipt is written at `sending`
+before the spool entry. The outbox `sent` flag is set only after the consumer
+records `accepted`, so later events wait in order behind a pending one. A `sending`
+receipt without its spool entry becomes `ambiguous`; ambiguous and rejected events
+are never resent and need manual reconciliation. Claude sessions have no queue, so
+events for any other recipient, or under a held route, defer.
+
+### Spool retention
+
+Without a running consumer, nothing is deleted and nothing expires. Growth is
+bounded instead: a new monitor slot is `deferred` (`channel consumer has not claimed
+an earlier monitor brief`) while an unclaimed monitor brief for that monitor
+remains, and the ordered outbox keeps at most one pending event entry. The spool
+therefore holds at most one monitor brief and one event. Accepted entries are
+removed on delivery. A `.claimed` file remains only after an interrupted delivery,
+beside its `ambiguous` receipt, as evidence for manual reconciliation.
 
 ### Claude limitations
 
@@ -849,5 +876,4 @@ Claude sessions expose no queue or question-history API to the runner. The brief
 reports `queue_inventory`, `question_history` and any scoped `worker_health` as
 `unavailable` diagnostics; unavailable never means clear, empty or answered. Game
 role sessions are reached only by the Claude monitor relaying through its own
-cross-session messaging, outside the runner. Bus events are delivered only
-through the Codex path; with a version 2 route they remain in the outbox.
+cross-session messaging, outside the runner.

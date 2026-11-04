@@ -77,7 +77,13 @@ elif sys.argv[2] == 'flush' and thread:
                 route = monitor_recipient(os.environ, thread)
                 if route is None:
                     break
-                if route:
+                if route == 'claude':
+                    interpreter = os.environ.get('CLAUDE_PYTHON', '/usr/bin/python3')
+                    if not pathlib.Path(interpreter).is_absolute() or not os.access(interpreter, os.X_OK):
+                        break
+                    command = [interpreter, str(pathlib.Path(__file__).with_name('claude_adapter.py')), 'event',
+                               str(root.parent), str(path), thread, delivery_message(event)]
+                elif route:
                     interpreter = os.environ.get('CODEX_PYTHON', '/usr/bin/python3')
                     if not pathlib.Path(interpreter).is_absolute() or not os.access(interpreter, os.X_OK):
                         break

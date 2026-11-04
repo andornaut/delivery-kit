@@ -6,21 +6,24 @@ from datetime import datetime, timezone
 import fcntl
 import json
 from pathlib import Path
+import re
 import select
 import sys
 
-from claude_adapter import SPOOL, canonical_session
+from claude_adapter import RECEIPT_KEYS, SPOOL, canonical_session
 from unblock import persist
 
 SERVER_NAME = 'delivery-kit-monitor'
 LEGACY_PROTOCOLS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
+RECEIPT = re.compile(r'(?:unblock|events/native)/[A-Za-z0-9_-]+\.json')
 
 
 def channel_notification(entry):
     """The only Claude channel contract dependency: method, content and string-valued meta."""
+    meta = {'request_id': entry['requestId'], 'kind': entry['kind']}
+    meta.update({key: str(entry[key]) for key in ('slot', 'event_id') if key in entry})
     return {'jsonrpc': '2.0', 'method': 'notifications/claude/channel',
-            'params': {'content': entry['text'],
-                       'meta': {'request_id': entry['requestId'], 'slot': str(entry['slot'])}}}
+            'params': {'content': entry['text'], 'meta': meta}}
 
 
 def initialize_result(params):
@@ -42,10 +45,22 @@ def now():
 
 
 def receipt_for(state_dir, entry):
+    """Receipts are named relative to STATE, the parent of STATE/unblock."""
     name = entry.get('receipt')
-    if not isinstance(name, str) or Path(name).name != name or not name.endswith('.json'):
+    if (entry.get('kind') not in RECEIPT_KEYS or not isinstance(name, str)
+            or not RECEIPT.fullmatch(name)):
         raise ValueError('invalid receipt reference')
-    return state_dir / name
+    return state_dir.parent / name
+
+
+def matches(receipt, entry):
+    return receipt.get(RECEIPT_KEYS[entry['kind']]) == entry['requestId'] and receipt.get('status') == 'sending'
+
+
+def mark(receipt, status, **fields):
+    receipt.update(status=status, **fields)
+    if isinstance(receipt.get('attempts'), list) and receipt['attempts']:
+        receipt['attempts'][-1].update(status=status)
 
 
 def reconcile_claims(state_dir):
@@ -55,8 +70,8 @@ def reconcile_claims(state_dir):
             entry = json.loads(claimed.read_text())
             path = receipt_for(state_dir, entry)
             receipt = json.loads(path.read_text())
-            if receipt.get('requestId') == entry['requestId'] and receipt.get('status') == 'sending':
-                receipt.update(status='ambiguous', reason='channel delivery interrupted; do not resend')
+            if matches(receipt, entry):
+                mark(receipt, 'ambiguous', reason='channel delivery interrupted; do not resend')
                 persist(path, receipt)
         except (OSError, ValueError, TypeError, KeyError):
             continue
@@ -76,7 +91,7 @@ def deliver_pending(output, state_dir, monitor):
                     continue
                 path = receipt_for(state_dir, entry)
                 receipt = json.loads(path.read_text())
-                if receipt.get('requestId') != entry['requestId'] or receipt.get('status') != 'sending':
+                if not matches(receipt, entry):
                     continue
                 message = channel_notification(entry)
                 claimed = pending.with_suffix('.claimed')
@@ -86,10 +101,10 @@ def deliver_pending(output, state_dir, monitor):
             try:
                 write_message(output, message)
             except (OSError, ValueError):
-                receipt.update(status='ambiguous', reason='channel write failed; do not resend')
+                mark(receipt, 'ambiguous', reason='channel write failed; do not resend')
                 persist(path, receipt)
                 return False
-            receipt.update(status='accepted', acceptedAt=now())
+            mark(receipt, 'accepted', acceptedAt=now())
             persist(path, receipt)
             claimed.unlink()
     return True

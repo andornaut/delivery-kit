@@ -136,21 +136,35 @@ class RouteTests(Fixture, unittest.TestCase):
 class SpoolTests(Fixture, unittest.TestCase):
     def test_idle_and_busy_spool_once_with_slot_request_id(self):
         for slot, mode in ((SLOT, 'idle'), (SLOT + 1800, 'busy')):
+            for pending in self.spooled():
+                pending.replace(pending.with_suffix('.claimed'))
             state = self.run_slot(mode, slot)
             self.assertEqual(state['status'], 'sending')
             self.assertEqual(state['monitor_session_status'], mode)
             request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'hourly-unblock:{MONITOR}:{slot}'))
             self.assertEqual(self.receipt(slot)['requestId'], request_id)
             entry = json.loads((self.state / claude_adapter.SPOOL / f'{request_id}.json').read_text())
-            self.assertEqual(entry['receipt'], f'{MONITOR}-{slot}.json')
+            self.assertEqual(entry['receipt'], f'unblock/{MONITOR}-{slot}.json')
             self.assertIn(f'Archie tech: {ARCHIE}', entry['text'])
             self.assertNotIn(CHIBI, entry['text'])
             self.assertIn('"queue_inventory", "status": "unavailable"', entry['text'])
             self.assertIn('"question_history", "status": "unavailable"', entry['text'])
-        self.assertEqual(len(self.spooled()), 2)
-        rerun = self.run_slot('idle')
+        self.assertEqual(len(self.spooled()), 1)
+        rerun = self.run_slot('idle', SLOT + 1800)
         self.assertEqual(rerun, {'status': 'deduplicated', 'previousStatus': 'sending', 'reason': None})
-        self.assertEqual(len(self.spooled()), 2)
+        self.assertEqual(len(self.spooled()), 1)
+
+    def test_unclaimed_brief_bounds_spool_across_slots(self):
+        self.assertEqual(self.run_slot()['status'], 'sending')
+        for slot in range(SLOT + 1800, SLOT + 1800 * 6, 1800):
+            state = self.run_slot(slot=slot)
+            self.assertEqual(state['status'], 'deferred')
+            self.assertIn('earlier monitor brief', state['reason'])
+        self.assertEqual(len(self.spooled()), 1)
+        self.assertEqual(self.receipt()['status'], 'sending')
+        claude_channel.deliver_pending(io.StringIO(), self.state, MONITOR)
+        self.assertEqual(self.receipt()['status'], 'accepted')
+        self.assertEqual(self.run_slot(slot=SLOT + 1800 * 6)['status'], 'sending')
 
     def test_missing_blocked_unknown_and_unavailable_defer_without_spool(self):
         for slot, mode, reason in ((SLOT, 'missing', 'missing'), (SLOT + 1, 'blocked', 'blocked'),
@@ -223,6 +237,9 @@ class ChannelTests(Fixture, unittest.TestCase):
 
     def test_consumer_emits_exactly_once_per_request_id_across_restarts(self):
         self.run_slot()
+        output = io.StringIO()
+        claude_channel.deliver_pending(output, self.state, MONITOR)
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
         self.run_slot(slot=SLOT + 1800)
         process = self.start()
         messages = self.messages(process, 1.0)
@@ -230,8 +247,8 @@ class ChannelTests(Fixture, unittest.TestCase):
         self.assertEqual(initialize['result']['capabilities'], {'experimental': {'claude/channel': {}}})
         self.assertEqual(initialize['result']['protocolVersion'], '2025-06-18')
         channel = [message for message in messages if message.get('method') == 'notifications/claude/channel']
-        self.assertEqual(sorted(message['params']['meta']['slot'] for message in channel), [str(SLOT), str(SLOT + 1800)])
-        self.assertEqual(len({message['params']['meta']['request_id'] for message in channel}), 2)
+        self.assertEqual([message['params']['meta']['slot'] for message in channel], [str(SLOT + 1800)])
+        self.assertEqual(channel[0]['params']['meta']['kind'], 'monitor')
         for slot in (SLOT, SLOT + 1800):
             receipt = self.receipt(slot)
             self.assertEqual(receipt['status'], 'accepted')
@@ -270,6 +287,88 @@ class ChannelTests(Fixture, unittest.TestCase):
         self.assertTrue(claude_channel.deliver_pending(output, self.state, MONITOR))
         self.assertEqual(output.getvalue(), '')
         self.assertEqual(self.receipt(SLOT + 1)['status'], 'ambiguous')
+
+
+class EventTests(Fixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.event = {'id': 'e' * 64}
+        self.receipts = self.root / 'events' / 'native'
+        self.receipts.mkdir(parents=True)
+        self.path = self.receipts / f"{'e' * 64}-{MONITOR}.json"
+        self.environment = self.env('idle') | {'MONITOR_ROUTE_FILE': str(self.route_path)}
+
+    def spool_event(self, mode='idle'):
+        return claude_adapter.spool_event(self.env(mode), self.root, self.path, MONITOR, self.event, 'PRIVATE_EVENT')
+
+    def event_receipt(self):
+        return json.loads(self.path.read_text())
+
+    def test_monitor_recipient_selects_claude_only_for_active_monitor(self):
+        import event_native
+        self.assertEqual(event_native.monitor_recipient(self.environment, MONITOR), 'claude')
+        self.assertIsNone(event_native.monitor_recipient(self.environment, ARCHIE))
+        self.write_route(self.route | {'state': 'held'})
+        self.assertIsNone(event_native.monitor_recipient(self.environment, MONITOR))
+
+    def test_event_spooled_once_deduplicated_and_accepted_by_consumer(self):
+        self.assertFalse(self.spool_event())
+        request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"bus-event:{'e' * 64}:{MONITOR}"))
+        receipt = self.event_receipt()
+        self.assertEqual((receipt['status'], receipt['clientUserMessageId'], receipt['attempts']),
+                         ('sending', request_id, [{'method': 'claude-channel', 'status': 'sending'}]))
+        self.assertNotIn('PRIVATE_EVENT', self.path.read_text())
+        self.assertEqual([path.name for path in self.spooled()], [f'{request_id}.json'])
+        self.assertFalse(self.spool_event())
+        self.assertEqual(len(self.spooled()), 1)
+        output = io.StringIO()
+        self.assertTrue(claude_channel.deliver_pending(output, self.state, MONITOR))
+        lines = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]['params']['content'], 'PRIVATE_EVENT')
+        self.assertEqual(lines[0]['params']['meta'], {'request_id': request_id, 'kind': 'event', 'event_id': 'e' * 64})
+        receipt = self.event_receipt()
+        self.assertEqual((receipt['status'], receipt['attempts'][-1]['status']), ('accepted', 'accepted'))
+        self.assertTrue(self.spool_event())
+        self.assertTrue(self.spool_event())
+        self.assertEqual(self.spooled(), [])
+        claude_channel.deliver_pending(output, self.state, MONITOR)
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
+
+    def test_interrupted_event_send_becomes_ambiguous_without_resend(self):
+        self.assertFalse(self.spool_event())
+        self.spooled()[0].unlink()
+        self.assertFalse(self.spool_event())
+        receipt = self.event_receipt()
+        self.assertEqual((receipt['status'], receipt['attempts'][-1]['status']), ('ambiguous', 'ambiguous'))
+        self.assertFalse(self.spool_event())
+        self.assertEqual(self.spooled(), [])
+
+    def test_missing_monitor_or_clearance_defers_without_spool(self):
+        self.assertFalse(self.spool_event('missing'))
+        self.assertEqual(self.event_receipt()['status'], 'deferred')
+        (self.state / 'decisions' / f'{MONITOR}.json').write_text(json.dumps({'thread_id': MONITOR, 'state': 'pending'}))
+        self.assertFalse(self.spool_event())
+        self.assertEqual(self.spooled(), [])
+        self.clear()
+        self.assertFalse(self.spool_event())
+        self.assertEqual(len(self.spooled()), 1)
+
+    def test_outbox_flush_routes_monitor_events_through_spool(self):
+        environment = os.environ | self.environment | {'REPORT_THREAD': MONITOR, 'CLAUDE_PYTHON': sys.executable}
+        event = [sys.executable, str(ROOT / 'libexec/event.py'), str(self.root)]
+        subprocess.run(event + ['emit', 'attempt', 'fixture-key', 'fixture message'], env=environment, check=True)
+        for _ in range(2):
+            subprocess.run(event + ['flush'], env=environment, check=True, timeout=20)
+        self.assertEqual(len(self.spooled()), 1)
+        outbox = next((self.root / 'events').glob('*.json'))
+        self.assertFalse(json.loads(outbox.read_text())['sent'])
+        output = io.StringIO()
+        claude_channel.deliver_pending(output, self.state, MONITOR)
+        self.assertIn('fixture message', output.getvalue())
+        subprocess.run(event + ['flush'], env=environment, check=True, timeout=20)
+        self.assertTrue(json.loads(outbox.read_text())['sent'])
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
 
 
 class BusWiringTests(Fixture, unittest.TestCase):

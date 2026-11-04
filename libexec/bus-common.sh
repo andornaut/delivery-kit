@@ -136,7 +136,7 @@ start_ci() {
 # Event writes are local and small; delivery never inherits bus locks or output pipes.
 export REPORT_PROJECT=${REPORT_PROJECT:-${GH_SLUG:-Game}}
 export REPORT_THREAD=${REPORT_THREAD:-}
-export CODEX_PYTHON
+export CODEX_PYTHON CLAUDE_PYTHON
 if declare -p MONITOR_ROUTE_FILE >/dev/null 2>&1; then export MONITOR_ROUTE_FILE; fi
 if declare -p CODEX_CONTROL_SOCKET >/dev/null 2>&1; then export CODEX_CONTROL_SOCKET; fi
 if declare -p PROCESS_HEALTH_FILE >/dev/null 2>&1; then export PROCESS_HEALTH_FILE; fi
