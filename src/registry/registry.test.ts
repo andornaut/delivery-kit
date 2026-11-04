@@ -1,12 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import { type Layout, loadLayout } from "../layout.ts";
-import { lockIsFree } from "../lock.ts";
+import { holdLock, LockBusy, LockError, lockIsFree } from "../lock.ts";
 import {
   CLAUDE_GAME_DEV,
   CLAUDE_TECH,
@@ -208,6 +208,45 @@ catch (error) { if (error instanceof registry.LockBusy) process.exit(3); throw e
       layout.root,
     ]);
     expect(holder.status).toBe(3);
+  });
+
+  it("writes under a registry lock the caller already holds", () => {
+    const fixture = makeFixture();
+    const layout = loadLayout(fixture.root);
+    mkdirSync(layout.varDir, { recursive: true });
+    const held = holdLock(layout.registryLock);
+    try {
+      const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
+      // A second descriptor waits on the caller's own lock.
+      expect(() => createRegistry(layout, input, { timeoutSeconds: 1 })).toThrow(LockBusy);
+      createRegistry(layout, input, { held, timeoutSeconds: 1 });
+      const updated = updateRegistry(
+        layout,
+        1,
+        (draft) => {
+          draft.harness = "codex";
+        },
+        { held, timeoutSeconds: 1 },
+      );
+      expect(updated).toMatchObject({ harness: "codex", revision: 2 });
+      expect(lockIsFree(layout.registryLock)).toBe(false);
+    } finally {
+      held.release();
+    }
+    expect(lockIsFree(layout.registryLock)).toBe(true);
+  });
+
+  it("rejects a held lock that is not var/registry.lock", () => {
+    const layout = setup();
+    const other = holdLock(join(layout.varDir, "other.lock"));
+    try {
+      expect(() =>
+        updateRegistry(layout, 1, () => undefined, { held: other, timeoutSeconds: 1 }),
+      ).toThrow(LockError);
+      expect(readRegistry(layout).revision).toBe(1);
+    } finally {
+      other.release();
+    }
   });
 });
 

@@ -6,12 +6,13 @@
 import { lstatSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { holdExistingLock } from "../bus/locks.ts";
 import { fsyncDirectory, readJsonIfExists, writeDurable, writeJsonDurable } from "../durable.ts";
 import { gameLayout, type Layout } from "../layout.ts";
-import { holdLock, LockBusy } from "../lock.ts";
+import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { type Harness, validateRegistry } from "../registry/schema.ts";
 import { createRegistry } from "../registry/store.ts";
-import { type HeldLock, holdExistingLock } from "./legacyLock.ts";
+import { isMarker, type MigrationMarker } from "./marker.ts";
 import { buildRegistry, type BuiltRegistry, type RegistrySources } from "./registryBuild.ts";
 import {
   LEGACY_PATHS,
@@ -19,6 +20,7 @@ import {
   type PlannedRemoval,
   removePlanned,
 } from "./removeLegacy.ts";
+import { copyRoute, describeRoute, planRoute, type RoutePlan } from "./route.ts";
 import { type ProcessProbe, runnerFromNodeModules } from "./runnerRecord.ts";
 import {
   copyEntries,
@@ -56,27 +58,6 @@ export interface MigrateOptions {
   readonly now?: () => Date;
   /** Read the 0.x registry files. Called only when var/registry.json is absent. */
   readonly readSources: () => RegistrySources;
-}
-
-export interface MovedLog {
-  readonly from: string;
-  readonly to: string;
-  readonly sha256: string;
-}
-
-export interface MigrationMarker {
-  readonly schema: 1;
-  readonly unit: string;
-  readonly source: string;
-  readonly target: string;
-  readonly migratedAt: string;
-  /** treeDigest of the copied source entries, without the moved log. */
-  readonly sourceDigest: string;
-  readonly targetDigest: string;
-  readonly entries: number;
-  readonly bytes: number;
-  readonly excluded: readonly string[];
-  readonly log: MovedLog | null;
 }
 
 export const PROVENANCE_FILE = "registry-provenance.json";
@@ -119,17 +100,6 @@ function recordingExclude(base: Exclude, extra: string | undefined, excluded: st
     }
     return skip;
   };
-}
-
-function isMarker(value: unknown): value is MigrationMarker {
-  const marker = value as Partial<MigrationMarker> | undefined;
-  return (
-    typeof marker === "object" &&
-    marker !== null &&
-    marker.schema === 1 &&
-    typeof marker.source === "string" &&
-    typeof marker.sourceDigest === "string"
-  );
 }
 
 function planUnit(unit: Unit, problems: string[]): Plan | undefined {
@@ -192,7 +162,7 @@ function planUnit(unit: Unit, problems: string[]): Plan | undefined {
   };
 }
 
-function holdUnitLocks(held: HeldLock[], unit: Unit, problems: string[]): void {
+function holdUnitLocks(held: LockHandle[], unit: Unit, problems: string[]): void {
   for (const lock of unit.locks) {
     const path = join(unit.source, lock);
     try {
@@ -389,8 +359,8 @@ export function runMigration(reporter: Reporter, layout: Layout, options: Migrat
   }
   const problems: string[] = [];
   const notes: string[] = [];
-  const held: HeldLock[] = [];
-  let registryLock: { release(): void } | undefined;
+  const held: LockHandle[] = [];
+  let registryLock: LockHandle | undefined;
   try {
     if (!options.dryRun) {
       mkdirSync(layout.varDir, { mode: 0o700, recursive: true });
@@ -408,8 +378,13 @@ export function runMigration(reporter: Reporter, layout: Layout, options: Migrat
     const plans = units
       .map((unit) => planUnit(unit, problems))
       .filter((plan): plan is Plan => plan !== undefined);
+    const route: RoutePlan | undefined =
+      options.game === undefined ? planRoute(layout, notes, problems) : undefined;
     const built = prepareRegistry(layout, options, notes, problems);
     reporter.out(plans.map(describe).join(""));
+    if (route !== undefined) {
+      reporter.out(describeRoute(route));
+    }
     if (built !== undefined) {
       reporter.out(
         `registry: build ${layout.registryFile} (harness ${built.registry.harness}, ${
@@ -441,12 +416,15 @@ export function runMigration(reporter: Reporter, layout: Layout, options: Migrat
         reporter.out(`note: ${kept}\n`);
       }
     }
+    if (route?.kind === "copy") {
+      copyRoute(now(), route);
+    }
     if (built !== undefined) {
       copyCheckpoints(layout, built);
-      // createRegistry takes var/registry.lock itself; a second descriptor would wait on this one.
-      registryLock?.release();
-      registryLock = undefined;
-      const registry = createRegistry(layout, built.registry, { now });
+      const registry = createRegistry(layout, built.registry, {
+        now,
+        ...(registryLock === undefined ? {} : { held: registryLock }),
+      });
       writeJsonDurable(join(layout.varDir, PROVENANCE_FILE), {
         conflicts: built.conflicts,
         fields: built.provenance,
@@ -460,6 +438,10 @@ export function runMigration(reporter: Reporter, layout: Layout, options: Migrat
     for (const [unit] of markers) {
       const changed = removeWriteBits(unit.source);
       reporter.out(`${unit.id}: ${unit.source} is read-only (${changed} entries changed)\n`);
+    }
+    if (route !== undefined) {
+      removeWriteBits(route.source);
+      reporter.out(`route: ${route.source} is read-only\n`);
     }
     return 0;
   } catch (error) {

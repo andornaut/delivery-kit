@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 import { type DurableStage, readJsonIfExists, tempPrefix, writeJsonDurable } from "../durable.ts";
 import type { Layout } from "../layout.ts";
-import { withLock } from "../lock.ts";
+import { LockError, type LockHandle, withLock } from "../lock.ts";
 import { type Registry, type RegistryDraft, validateRegistry } from "./schema.ts";
 
 export interface UpdateOptions {
@@ -13,6 +13,11 @@ export interface UpdateOptions {
   readonly now?: () => Date;
   /** Test hook passed to the durable write. */
   readonly onStage?: (stage: DurableStage, tempPath: string) => void;
+  /**
+   * var/registry.lock as the caller already holds it. The write runs under that lock instead of
+   * taking a second descriptor, which would wait on the caller's own lock.
+   */
+  readonly held?: LockHandle;
 }
 
 export class RegistryMissing extends Error {
@@ -75,6 +80,13 @@ function removeStaleTemps(path: string): void {
 
 function lockAndWrite<T>(layout: Layout, options: UpdateOptions, write: () => T): T {
   mkdirSync(layout.varDir, { mode: 0o700, recursive: true });
+  if (options.held !== undefined) {
+    if (options.held.path !== layout.registryLock) {
+      throw new LockError(options.held.path, `is not ${layout.registryLock}`);
+    }
+    removeStaleTemps(layout.registryFile);
+    return write();
+  }
   return withLock(
     layout.registryLock,
     () => {

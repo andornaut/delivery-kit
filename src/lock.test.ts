@@ -1,11 +1,11 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { holdLock, holdLockAsync, LockBusy, lockIsFree, withLock } from "./lock.ts";
+import { holdLock, holdLockAsync, LockBusy, lockIsFree, LockMissing, withLock } from "./lock.ts";
 
 // CLEANUP (added 2026-11-03): the Python holder covers 0.9.x interoperation; remove it with the
 // Python mechanisms once every game runs 1.x.
@@ -90,6 +90,42 @@ describe.each(["bash", "python"] as const)("interoperation with a %s flock holde
     expect(PROBES[kind](path)).toBe(3);
     lock.release();
     expect(PROBES[kind](path)).toBe(0);
+  });
+});
+
+describe("read-only locks", () => {
+  it("locks a read-only file in a read-only directory and excludes other holders", async () => {
+    const path = lockPath();
+    writeFileSync(path, "");
+    chmodSync(path, 0o444);
+    chmodSync(join(path, ".."), 0o555);
+    try {
+      const lock = holdLock(path, { nonBlocking: true, readOnly: true });
+      expect(PROBES.bash(path)).toBe(3);
+      expect(() => holdLock(path, { nonBlocking: true, readOnly: true })).toThrow(LockBusy);
+      lock.release();
+      // A 0.x holder in a read-only tree can only open the file for reading too.
+      const holder = spawn(
+        "bash",
+        ["-c", 'exec 9<"$1"; flock 9; echo held; exec sleep 60', "x", path],
+        {
+          stdio: ["ignore", "pipe", "inherit"],
+        },
+      );
+      children.push(holder);
+      await new Promise((resolve) => {
+        holder.stdout.once("data", resolve);
+      });
+      expect(() => holdLock(path, { nonBlocking: true, readOnly: true })).toThrow(LockBusy);
+    } finally {
+      chmodSync(join(path, ".."), 0o755);
+    }
+  });
+
+  it("fails with LockMissing and creates nothing when the file is absent", () => {
+    const path = lockPath();
+    expect(() => holdLock(path, { readOnly: true })).toThrow(LockMissing);
+    expect(existsSync(path)).toBe(false);
   });
 });
 

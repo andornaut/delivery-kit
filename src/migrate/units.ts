@@ -4,8 +4,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { lockHeld } from "../bus/locks.ts";
 import { type GameLayout, type Layout } from "../layout.ts";
-import { existingLockIsFree } from "./legacyLock.ts";
 import type { Entry, EntryKind, Exclude } from "./tree.ts";
 
 export interface Unit {
@@ -139,7 +139,7 @@ export function blockers(unit: Unit, entries: readonly Entry[]): string[] {
   const problems: string[] = [];
   for (const entry of entries) {
     if (entry.kind === "file" && /^ci\/[^/]+\.lock$/.test(entry.path)) {
-      if (!existingLockIsFree(join(unit.source, entry.path))) {
+      if (lockHeld(join(unit.source, entry.path))) {
         problems.push(`${entry.path} is held: a CI watch is running`);
       }
     }

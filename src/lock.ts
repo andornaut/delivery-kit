@@ -13,6 +13,11 @@ export interface LockOptions {
   readonly nonBlocking?: boolean;
   /** Fail with LockBusy after waiting this many seconds. Ignored when nonBlocking. */
   readonly timeoutSeconds?: number;
+  /**
+   * Open the lock file read-only and never create it; a missing file fails with LockMissing.
+   * flock(2) works on a read-only descriptor, so this locks files in read-only trees.
+   */
+  readonly readOnly?: boolean;
 }
 
 export interface LockHandle {
@@ -41,6 +46,13 @@ export class LockError extends Error {
   }
 }
 
+export class LockMissing extends LockError {
+  constructor(path: string) {
+    super(path, "lock file does not exist");
+    this.name = "LockMissing";
+  }
+}
+
 // flock exits with this code when -n or -w fails, distinguishing contention from errors.
 const CONFLICT_EXIT = 75;
 const LOCK_FD = "3";
@@ -56,8 +68,19 @@ function flockArgs(options: LockOptions): string[] {
   return args;
 }
 
-function openLockFile(path: string): number {
-  return openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND, 0o600);
+function openLockFile(path: string, options: LockOptions): number {
+  if (options.readOnly !== true) {
+    return openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND, 0o600);
+  }
+  try {
+    return openSync(path, constants.O_RDONLY);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new LockMissing(path);
+    }
+    throw new LockError(path, `cannot open (${code ?? "error"})`);
+  }
 }
 
 function handle(path: string, fd: number): LockHandle {
@@ -86,7 +109,7 @@ function settle(path: string, fd: number, status: number | null, detail: string)
 
 /** Acquire an exclusive lock, blocking the event loop while waiting. */
 export function holdLock(path: string, options: LockOptions = {}): LockHandle {
-  const fd = openLockFile(path);
+  const fd = openLockFile(path, options);
   const result = spawnSync("flock", flockArgs(options), {
     stdio: ["ignore", "ignore", "pipe", fd],
   });
@@ -96,7 +119,7 @@ export function holdLock(path: string, options: LockOptions = {}): LockHandle {
 
 /** Acquire an exclusive lock without blocking the event loop while waiting. */
 export function holdLockAsync(path: string, options: LockOptions = {}): Promise<LockHandle> {
-  const fd = openLockFile(path);
+  const fd = openLockFile(path, options);
   return new Promise((resolve, reject) => {
     const child = spawn("flock", flockArgs(options), { stdio: ["ignore", "ignore", "pipe", fd] });
     const stderr: Buffer[] = [];

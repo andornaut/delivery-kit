@@ -50,6 +50,7 @@ interface Tree {
   readonly chibiBus: string;
   readonly monitor: string;
   readonly libraries: string;
+  readonly route: string;
 }
 
 function libraryEntry(name: string, claude: number, codex: number, checkpoint?: string): unknown {
@@ -127,6 +128,9 @@ function buildTree(): Tree {
   writeJson(join(chibiBus, "release-approved.json"), { approved: true });
 
   writeJson(join(monitor, "current-state.json"), { slot: "20" });
+  const route = join(base, ARCHIE, ".claude", "monitor", "route.json");
+  writeJson(route, { host_project_root: join(base, ARCHIE), state: "active", version: 1 });
+  chmodSync(route, 0o600);
   writeJson(join(monitor, "acks/one.json"), { ack: true });
   put(join(monitor, "delivery-kit/0123abc/README.md"), "snapshot\n");
   put(join(monitor, "__pycache__/monitor.pyc"), "bytecode");
@@ -223,6 +227,7 @@ function buildTree(): Tree {
     fixture,
     libraries,
     monitor,
+    route,
   };
 }
 
@@ -435,6 +440,19 @@ describe("migrate", () => {
       expect(writable(path)).toBe(false);
     }
     expect(readFileSync(tree.libraries, "utf8")).toBe(before);
+
+    expect(readFileSync(layout.routeFile, "utf8")).toBe(readFileSync(tree.route, "utf8"));
+    expect(statSync(layout.routeFile).mode & 0o777).toBe(0o600);
+    expect(
+      JSON.parse(readFileSync(join(layout.varDir, "route.migrated.json"), "utf8")),
+    ).toMatchObject({
+      entries: 1,
+      schema: 1,
+      source: tree.route,
+      target: layout.routeFile,
+      unit: "route",
+    });
+    expect(writable(tree.route)).toBe(false);
   });
 
   it("is a no-op when the marker matches", async () => {
@@ -445,6 +463,7 @@ describe("migrate", () => {
     expect(second.err).toBe("");
     expect(second.status).toBe(0);
     expect(second.out).toContain(`${ARCHIE}: already migrated`);
+    expect(second.out).toContain("route: already migrated");
     expect(second.out).toContain("exists; not rebuilt");
     expect(readFileSync(layout.registryFile, "utf8")).toBe(registry);
   });
@@ -486,6 +505,56 @@ describe("migrate", () => {
     expect(existsSync(gameLayout(layout, ARCHIE).busDir)).toBe(false);
     expect(existsSync(layout.registryFile)).toBe(false);
     expect(writable(tree.archieBus)).toBe(true);
+  });
+});
+
+describe("migrate route", () => {
+  it("stops when the route changed after migration", async () => {
+    expect((await run(tree)).status).toBe(0);
+    chmodSync(tree.route, 0o600);
+    writeJson(tree.route, { host_project_root: join(tree.fixture.base, ARCHIE), version: 2 });
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain("route: ");
+    expect(result.err).toContain("changed since it was migrated");
+  });
+
+  it("stops on var/route.json without a marker", async () => {
+    put(join(tree.fixture.root, "var", "route.json"), "{}\n");
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain("route.json exists without");
+    expect(writable(tree.route)).toBe(true);
+  });
+
+  it("stops when more than one game has a route", async () => {
+    writeJson(join(tree.fixture.base, CHIBI, ".claude", "monitor", "route.json"), {
+      host_project_root: join(tree.fixture.base, CHIBI),
+    });
+    const result = await run(tree, "--dry-run");
+    expect(result.status).toBe(1);
+    expect(result.err).toContain("more than one game");
+  });
+
+  it("stops when the route names another host", async () => {
+    writeJson(tree.route, { host_project_root: join(tree.fixture.base, CHIBI), version: 1 });
+    const result = await run(tree, "--dry-run");
+    expect(result.status).toBe(1);
+    expect(result.err).toContain("host_project_root does not name");
+  });
+
+  it("notes a missing route and continues", async () => {
+    removeOwnedTree(join(tree.fixture.base, ARCHIE, ".claude", "monitor"));
+    const result = await run(tree);
+    expect(result.status).toBe(0);
+    expect(result.out).toContain("route: no game has .claude/monitor/route.json");
+    expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
+  });
+
+  it("leaves the route alone with --game", async () => {
+    expect((await run(tree, "--game", ARCHIE)).status).toBe(0);
+    expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
+    expect(writable(tree.route)).toBe(true);
   });
 });
 
