@@ -29,6 +29,8 @@ export function sockets(): (ws: Workspace) => Promise<CodexSocket> {
     const socket = await new CodexSocket(ws).listen();
     open.push(socket);
     ws.env.CODEX_CONTROL_SOCKET = socket.path;
+    // The fake Codex control socket serves a Codex registry on 1.0.
+    if (process.env.DK_IMPL === "node") ws.writeRegistry({ ...ws.registry(), harness: "codex" });
     socket.on("thread/queue/list", { data: [], nextCursor: null });
     socket.on("thread/items/list", { data: [], nextCursor: null });
     return socket;
