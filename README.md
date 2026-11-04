@@ -18,7 +18,7 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v1.0.2/delivery-kit-1.0.2.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v1.0.3/delivery-kit-1.0.3.tgz"
 }
 ```
 
@@ -291,9 +291,12 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   `docker cp` fails or the worktree fingerprint changes, the departure reports `blocked-gate` with
   the cause, writes no `gate-failed` record and gates the same SHA again at the next departure.
 - **CI:** polls the check runs of the exact pushed commit through the existing `gh` login, or the
-  public GitHub API (User-Agent `delivery-kit`) when `gh` is not installed. The latest run of each
-  name counts. Any completed run that is not `success`, `neutral` or `skipped` fails it; it passes
-  once every `requiredNames` check exists and every run has completed. A watch that reaches
+  public GitHub API (User-Agent `delivery-kit`) when `gh` is not installed. Only the runs named in
+  `requiredNames` decide the result, from the latest run of each name: the watch fails once a
+  required run completes with a conclusion other than `success`, `neutral` or `skipped`, and
+  passes once every required run has completed and passed. Runs of other names, such as a
+  third-party integration's check, are recorded in `ci/<sha>.json` and the log but never fail or
+  hold the watch. `requiredNames` must not be empty. A watch that reaches
   `timeoutSeconds` reports the status as unknown (`ci_timeout`), and a refused GitHub
   authentication stops the watch with `ci_auth_failed`. The next departure restarts either watch,
   so a pending deployment still runs once CI passes.
@@ -420,9 +423,6 @@ npx delivery-kit migrate --harness claude
 - **Read-only:** the old trees are then made read-only. `migrate` never deletes them.
 - `--game ID` migrates only that game's bus; the monitor state, route and registry need a full run.
 
-Until convergence a 1.x runner also takes the old `runner.lock` and `loop.lock`, so a 0.x runner
-cannot start beside it.
-
 ### Removing the 0.9.x scripts
 
 `migrate --remove-legacy` runs only when every game is migrated and each `runner.json` shows a live
@@ -459,13 +459,12 @@ shipped. The repository has no other shell or Python.
 
 - `npm run verify` (`scripts/check.ts`): types, lint, build, unit tests and the contract cases in
   offline containers running as uid 19001 in the checkout's group (`--group-add`). The checkout
-  and its file list are bound read-only and copied into container scratch. The npm cache and the
-  verified v0.9.1 parity release live in a named volume that one networked step populates. The
-  contract cases gate on both the v0.9.1 parity release and the 1.0 bundle. A changed source
-  fingerprint, ownership or mode change, or any file owned by uid or gid 19001 discards the
-  result.
+  and its file list are bound read-only and copied into container scratch. The npm cache lives in
+  a named volume that one networked step populates. The contract cases run the built bundle. A
+  changed source fingerprint, ownership or mode change, or any file owned by uid or gid 19001
+  discards the result.
 - `npm run contract -- [--lock] [VITEST_ARGS]` (`scripts/contract.ts`): the contract harness alone,
-  with the source streamed in as a tar and both implementations gating. `--lock` regenerates
+  with the source streamed in as a tar. `--lock` regenerates
   `tests/contract/package-lock.json`.
 - `npm run check`: TypeScript only.
 - `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` (`scripts/pack.ts`): builds the
