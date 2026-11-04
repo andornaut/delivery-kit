@@ -9,6 +9,7 @@ import { slotRequestId } from "../adapters/claude/ids.ts";
 import { pyJsonDumps } from "../adapters/claude/pyjson.ts";
 import { resolveRouteV2, routeHarness } from "../adapters/claude/route.ts";
 import { spoolMonitorBrief, unblockDir } from "../adapters/claude/spool.ts";
+import { resolveRoute, type RouteScope } from "../adapters/codex/route.ts";
 import { loadProjectConfig } from "../config.ts";
 import { readJson } from "../durable.ts";
 import type { GameLayout, Layout } from "../layout.ts";
@@ -31,22 +32,6 @@ function line(outcome: Readonly<Record<string, unknown>>): string {
   return pyJsonDumps(printed);
 }
 
-function codexTargets(route: unknown): string[] {
-  const targets = (route as { targets?: unknown }).targets;
-  if (!Array.isArray(targets)) {
-    return [];
-  }
-  return targets
-    .filter(
-      (target): target is { thread_id: string } =>
-        typeof target === "object" &&
-        target !== null &&
-        (target as Record<string, unknown>).ownership === "active" &&
-        typeof (target as Record<string, unknown>).thread_id === "string",
-    )
-    .map((target) => target.thread_id);
-}
-
 function reminder(slot: number, queues: Readonly<Record<string, readonly string[]>>): string {
   const inventory = Object.entries(queues)
     .map(([thread, ids]) => `${thread}: ${ids.length > 0 ? ids.join(",") : "none"}`)
@@ -65,7 +50,7 @@ function reminder(slot: number, queues: Readonly<Record<string, readonly string[
 async function codexWake(
   layout: Layout,
   game: GameLayout,
-  route: unknown,
+  peers: readonly string[],
   monitor: string,
   slot: number,
 ): Promise<string> {
@@ -86,7 +71,7 @@ async function codexWake(
     });
   }
   const adapter = codexAdapter(layout);
-  const recipients = [monitor, ...codexTargets(route).filter((target) => target !== monitor)];
+  const recipients = [monitor, ...peers];
   const inventories = await Promise.all(
     recipients.map((recipient) => adapter.inventory(recipient)),
   );
@@ -113,6 +98,35 @@ async function codexWake(
   });
 }
 
+/** Full version 1 route validation before any native call (bus-common.sh:264-268). */
+async function codexScope(
+  layout: Layout,
+  game: GameLayout,
+  monitor: string,
+  slot: number,
+): Promise<string> {
+  let scope: RouteScope;
+  try {
+    scope = resolveRoute(game.repo, layout.routeFile);
+  } catch {
+    return line({
+      reason:
+        "monitor route is unavailable or invalid; its owner must verify identities and ownership",
+      status: "deferred",
+    });
+  }
+  if (scope.status !== "active") {
+    return "";
+  }
+  if (scope.coordinator !== monitor) {
+    return line({
+      reason: "monitor route identity differs from the registry monitor",
+      status: "deferred",
+    });
+  }
+  return codexWake(layout, game, scope.peers, monitor, slot);
+}
+
 export async function deliverScheduledWake(
   layout: Layout,
   game: GameLayout,
@@ -135,7 +149,7 @@ export async function deliverScheduledWake(
       });
     }
     if (registry.harness === "codex") {
-      return await codexWake(layout, game, route, monitor, slot);
+      return await codexScope(layout, game, monitor, slot);
     }
     const resolved = resolveRouteV2(layout.routeFile, game.repo);
     if (resolved.status !== "active") {
