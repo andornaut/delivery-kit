@@ -18,7 +18,7 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v1.0.3/delivery-kit-1.0.3.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.0.0/delivery-kit-2.0.0.tgz"
 }
 ```
 
@@ -58,7 +58,8 @@ directory. `--root` comes before the command.
   and `--parent` take a role name, or a canonical conversation UUID registered for the active
   harness. With Claude the recipient must be the active route's monitor and every parent a route
   member; with Codex every parent must belong to the active route. `--history-cursor` applies to
-  Codex.
+  Codex. An unreadable Claude channel spool is reported under the snapshot's `errors`, with
+  `complete` false and exit 1; only a missing spool counts as empty.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
 read or a refused runner start, and 2 for a usage error or an unexpected failure. `run` exits 130
@@ -201,7 +202,11 @@ cannot be read. Run it before flipping `harness`.
   set to an absolute path, with the same receipt rules. Without it Codex delivery is deferred.
 
 `CLAUDE_BIN` overrides the `claude` executable. Events dedupe on `sha256(kind:key)`, and every
-`blocked-*` kind shares one identity, so a changed block reason is not reported again. Events are
+`blocked-*` kind shares one identity, so a changed block reason is not reported again. Each
+`blocked-*` report states its own remedy: `blocked-load` clears by itself, `blocked-gate` is gated
+again at the next departure, `blocked-fetch` and a failed push are retried, a red gate needs a fix
+merged on main, a non-fast-forward needs Tech to merge the remote `main`, and an unreadable local
+`main` needs an operator fix. Events are
 delivered in creation order and marked sent only after the adapter accepts them; the first
 refusal stops a flush and the next flush resumes there.
 
@@ -292,8 +297,10 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   required run completes with a conclusion other than `success`, `neutral` or `skipped`, and
   passes once every required run has completed and passed. Runs of other names, such as a
   third-party integration's check, are recorded in `ci/<sha>.json` and the log but never fail or
-  hold the watch. `requiredNames` must not be empty. A watch that reaches
-  `timeoutSeconds` reports the status as unknown (`ci_timeout`), and a refused GitHub
+  hold the watch. `requiredNames` must not be empty. `ci/<sha>.json` marks each run `required`. A
+  failure names the failed required runs, and a timeout names the required checks with no run and
+  those still incomplete. A watch that reaches `timeoutSeconds` reports the status as unknown
+  (`ci_timeout`), and a refused GitHub
   authentication stops the watch with `ci_auth_failed`. The next departure restarts either watch,
   so a pending deployment still runs once CI passes.
 - **Deployment:** with `mode` `wrangler` and a range that needs it, the push records
@@ -302,7 +309,8 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
 --config wrangler.jsonc --no-bundle` in the gate worktree with the gated `dist/`, so the
   deployment uses the Wrangler locked in the gated commit. A worktree without that entry is not
   deployed: the runner logs the missing path and keeps the deployment pending. A failure keeps the
-  assets and is retried at a later departure.
+  assets and is retried at a later departure. A deployment that cannot be staged after its push
+  is reported as `deploy_failure` with the cause, so a pushed SHA never goes undeployed silently.
 - **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
   rules and receipts. A HEAD that is the last pushed SHA or failed its gate is refused, and a
   request whose HEAD moved before it departs is rejected.
