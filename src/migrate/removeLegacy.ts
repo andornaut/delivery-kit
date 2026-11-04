@@ -29,10 +29,15 @@ const BUS_SCRIPTS = [
   "scheduled-once.sh",
 ] as const;
 
-/** Per game, the legacy entries in <game>/.claude/bus. */
+/**
+ * Per game, the legacy entries in <game>/.claude/bus. Each runner.sh launched a 0.x runner; the
+ * removal gate (both games' runners running from node_modules) is what shows it was replaced.
+ */
 export const LEGACY_PATHS: Readonly<Record<string, readonly LegacyPath[]>> = {
   "archies-dog-walks": [
     ...BUS_SCRIPTS.map((name) => ({ kind: "file" as const, name })),
+    { kind: "file", name: "event.py" },
+    { kind: "file", name: "unblock.py" },
     { kind: "file", name: "runner.sh" },
   ],
   "chibis-way-home": [
@@ -40,6 +45,7 @@ export const LEGACY_PATHS: Readonly<Record<string, readonly LegacyPath[]>> = {
     { kind: "symlink", name: "event.py" },
     { kind: "symlink", name: "unblock.py" },
     { kind: "file", name: "runner.before-monitor-041.sh" },
+    { kind: "file", name: "runner.sh" },
   ],
 };
 

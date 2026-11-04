@@ -82,7 +82,14 @@ function buildTree(): Tree {
   const chibiBus = join(base, CHIBI, ".claude", "bus");
   const monitor = join(root, ".claude", "monitor", "codex");
 
-  for (const name of ["batch.sh", "bus-common.sh", "runner.sh", "event.py", "unblock.py"]) {
+  for (const name of [
+    "batch.sh",
+    "bus-common.sh",
+    "resource-check.sh",
+    "runner.sh",
+    "event.py",
+    "unblock.py",
+  ]) {
     put(join(archieBus, name), `#!/bin/sh\n# ${name}\n`);
   }
   put(join(archieBus, "bus-common.sh.map-migration-backup"), "backup\n");
@@ -709,19 +716,45 @@ describe("migrate --remove-legacy", () => {
     expect(runRemoveLegacy(dry.reporter, layout, realProbe(true), true)).toBe(0);
     expect(dry.out.join("")).toContain(`delete: ${join(tree.archieBus, "batch.sh")}`);
     expect(dry.out.join("")).toContain(`absent: ${join(tree.archieBus, "merge.sh")}`);
+    expect(dry.out.join("")).toContain(`delete: ${join(tree.archieBus, "resource-check.sh")}`);
     expect(existsSync(join(tree.archieBus, "batch.sh"))).toBe(true);
 
     const { out, reporter } = capture();
     expect(runRemoveLegacy(reporter, layout, realProbe(true), false)).toBe(0);
-    expect(out.join("")).toContain("removed 8 legacy paths");
+    expect(out.join("")).toContain("removed 12 legacy paths");
+    // Unlisted entries stay: configuration, logs, backups, nested scripts and state.
     expect(readdirSync(tree.archieBus).sort()).toEqual(
-      expect.arrayContaining(["bus.conf", "event.py", "unblock.py", "codex-bus.log"]),
+      [
+        "active-departure",
+        "bus-common.sh.map-migration-backup",
+        "bus-queue",
+        "bus-queue.lock",
+        "bus.conf",
+        "check",
+        "ci",
+        "codex-bus.log",
+        "events",
+        "feature-queued.json",
+        "feature-ready.json",
+        "last-push.link",
+        "last-push.sha",
+        "loop.lock",
+        "npm-cache",
+        "requests",
+        "runner.lock",
+        "tests",
+        "unblock",
+        "__pycache__",
+      ].sort(),
     );
-    expect(existsSync(join(tree.archieBus, "runner.sh"))).toBe(false);
     expect(readdirSync(tree.chibiBus).sort()).toEqual(
-      expect.arrayContaining(["runner.sh", "bus.conf.before-python312"]),
+      [
+        "active-departure",
+        "bus.conf.before-python312",
+        "delivery-kit-rollback-1",
+        "release-approved.json",
+      ].sort(),
     );
-    expect(existsSync(join(tree.chibiBus, "event.py"))).toBe(false);
     expect(writable(tree.archieBus)).toBe(false);
   });
 
