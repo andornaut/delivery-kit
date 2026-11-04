@@ -50,10 +50,7 @@ describe("dist/cli.js", () => {
     };
     expect(execFileSync(cli, ["--version"], { encoding: "utf8" })).toBe(`${version}\n`);
     const run = spawnSync(cli, ["run"], { encoding: "utf8" });
-    expect([run.status, run.stderr]).toEqual([
-      2,
-      "delivery-kit: run is not implemented in this build\n",
-    ]);
+    expect([run.status, run.stderr]).toEqual([2, "usage: delivery-kit run --game ID\n"]);
   });
 });
 

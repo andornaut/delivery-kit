@@ -65,18 +65,12 @@ describe("check-config", () => {
 });
 
 describe("dispatcher", () => {
-  const IMPLEMENTED = new Set(["channel", "check-config", "monitor-ack", "monitor-snapshot"]);
-
-  it.each(COMMANDS.filter((command) => !IMPLEMENTED.has(command)))(
-    "%s is not implemented in this build",
-    async (command) => {
-      const { root } = makeFixture();
-      expect(await run(root, command)).toMatchObject({
-        code: EXIT_USAGE,
-        err: `delivery-kit: ${command} is not implemented in this build\n`,
-      });
-    },
-  );
+  it.each(COMMANDS)("%s has a handler", async (command) => {
+    const { root } = makeFixture();
+    expect((await run(root, command, "--help-unknown-option")).err).not.toContain(
+      "not implemented",
+    );
+  });
 
   it("prints usage for help and rejects unknown commands", async () => {
     const { root } = makeFixture();

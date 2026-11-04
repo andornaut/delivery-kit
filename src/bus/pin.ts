@@ -60,6 +60,7 @@ export function recordPin(context: BusContext, loaded: PinIdentity, cliPath: str
       cliSha256: loaded.cliSha256,
       integrity: loaded.integrity,
       pid: process.pid,
+      schema: 1,
       startedAt: new Date(context.clock.now() * 1000).toISOString(),
       version: loaded.version,
     },
