@@ -1,67 +1,75 @@
 #!/usr/bin/env bash
-# Contract harness in isolated containers. Every container runs as 19001:19001 with HOME=/tmp;
-# every host mount is read-only. The npm cache and all scratch stay in container paths. The 1.0 bundle is built inside the container from the
-# read-only checkout. Usage: run.sh [--lock] [vitest args]
-#   --lock  regenerate tests/contract/package-lock.json (network); the file leaves by stdout.
+# Contract harness in isolated containers, following scripts/check.sh: uid 19001, no host
+# mount, the source streamed in as a tar and the npm cache in a named volume. A first container
+# populates the cache with network access; the build and both implementations' cases then run
+# with no network. Nothing is written back to the host.
+# Usage: run.sh [--lock] [vitest args]
+#   --lock  regenerate tests/contract/package-lock.json; the file leaves through stdout.
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-HARNESS=$ROOT/tests/contract
-IMAGE=node:24.21.0
-IDS=19001:19001
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+. "$root/scripts/runtime.sh"
+image=$(node_check_image "$root")
+volume=${DELIVERY_KIT_NPM_VOLUME:-delivery-kit-npm-check}
 
-require_load() {
-  local load
-  read -r load _ </proc/loadavg
-  awk -v value="$load" 'BEGIN { exit !(value < 24) }' || { echo 'contract: load must be below 24' >&2; exit 1; }
-}
-
-fingerprint() {
-  {
-    git -C "$ROOT" status --porcelain=v1 -z
-    git -C "$ROOT" ls-files -co --exclude-standard -z | sort -z | while IFS= read -r -d '' path; do
-      if [[ -L $ROOT/$path ]]; then printf '%s link %s\n' "$path" "$(readlink "$ROOT/$path")"
-      elif [[ -f $ROOT/$path ]]; then printf '%s %s %s\n' "$path" "$(stat -c %a "$ROOT/$path")" "$(sha256sum <"$ROOT/$path")"
-      else printf '%s missing\n' "$path"; fi
-    done
-  } | sha256sum | cut -d' ' -f1
-}
-
-# The checkout is group-readable only (umask 007); the supplementary group grants read access.
-# No host path is writable: /tmp is the container's own layer, and the npm cache moves from the
-# install container to the check container with `docker cp`.
-options=(--cpus 4 --user "$IDS" --group-add "$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npmcache
-  --mount "type=bind,src=$ROOT,dst=/source,readonly")
-containers=()
-cleanup() { (( ${#containers[@]} )) && docker rm -f "${containers[@]}" >/dev/null 2>&1 || true; }
-trap cleanup EXIT
+container=(
+  docker run -i --rm --read-only --cpus 4
+  --user 19001:19001 -e HOME=/tmp -e npm_config_cache=/var/tmp/npm
+  --mount "type=volume,src=$volume,dst=/var/tmp"
+  --tmpfs /tmp:exec,mode=1777
+  -w /tmp
+)
 
 if [[ ${1:-} == --lock ]]; then
   require_load
-  lock=$(docker run --rm "${options[@]}" "$IMAGE" sh -ec \
-    'cp -r /source/tests/contract /tmp/h; cd /tmp/h; rm -rf node_modules; npm install --package-lock-only --ignore-scripts --no-audit --no-fund >&2; cat package-lock.json')
-  printf '%s\n' "$lock" >"$HARNESS/package-lock.json"
+  lock=$( (cd -- "$root/tests/contract" && tar -cf - package.json) | "${container[@]}" "$image" sh -ec '
+    mkdir /tmp/h && tar -x -C /tmp/h && cd /tmp/h
+    npm install --package-lock-only --ignore-scripts --no-audit --no-fund >&2
+    cat package-lock.json
+  ')
+  printf '%s\n' "$lock" >"$root/tests/contract/package-lock.json"
   exit 0
 fi
 
-before=$(fingerprint)
+host_owners() {
+  find "$root" -path "$root/.git" -prune -o -printf '%U:%G %m %p\0' | sort -z | sha256sum
+}
+
+source_tar() {
+  (cd -- "$root" && git ls-files --cached --others --exclude-standard -z \
+    | tar --null --ignore-failed-read -T - -cf - 2>/dev/null)
+}
+
+before=$(source_fingerprint "$root")
+owners_before=$(host_owners)
+finish() {
+  local result=$? after
+  trap - EXIT
+  after=$(source_fingerprint "$root") || { echo 'contract: cannot verify source fingerprints' >&2; exit 1; }
+  if [[ $before != "$after" || $owners_before != "$(host_owners)" ]]; then
+    echo 'contract: source content or ownership changed during checks; discard results' >&2
+    exit 1
+  fi
+  if [[ -n $(find "$root" \( -uid 19001 -o -gid 19001 -o -uid 0 \) -print -quit) ]]; then
+    echo 'contract: a file owned by root or uid/gid 19001 exists in the checkout' >&2
+    exit 1
+  fi
+  exit "$result"
+}
+trap finish EXIT
+
 require_load
-echo 'contract: populating the npm cache (network)'
-install=$(docker create "${options[@]}" "$IMAGE" sh -ec '
-  mkdir -p /tmp/root /tmp/h
-  cp /source/package.json /source/package-lock.json /tmp/root/
-  cp /source/tests/contract/package.json /source/tests/contract/package-lock.json /tmp/h/
-  cd /tmp/root && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
-  cd /tmp/h && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
-')
-containers+=("$install")
-docker start -a "$install"
+echo 'contract: populating the npm cache volume (network)'
+(cd -- "$root" && tar -cf - package.json package-lock.json tests/contract/package.json tests/contract/package-lock.json) \
+  | "${container[@]}" "$image" sh -ec '
+  mkdir /tmp/fetch && tar -x -C /tmp/fetch
+  cd /tmp/fetch && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
+  cd tests/contract && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
+'
 
 require_load
 echo 'contract: build, type check and cases offline'
-check=$(docker create "${options[@]}" --network none -e "DK_VITEST_ARGS=$*" "$IMAGE" bash -ec '
-  mkdir /tmp/check
-  tar -C /source --exclude=./.git --exclude=./.claude --exclude=./node_modules --exclude=./dist \
-    --exclude=./tests/contract/node_modules -cf - . | tar -C /tmp/check -xf -
+source_tar | "${container[@]}" --network none -e "DK_VITEST_ARGS=$*" "$image" bash -ec '
+  mkdir /tmp/check && tar -x -C /tmp/check
   cd /tmp/check
   npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null
   npm run build >/dev/null
@@ -74,16 +82,4 @@ check=$(docker create "${options[@]}" --network none -e "DK_VITEST_ARGS=$*" "$IM
   echo "contract: DK_IMPL=node"
   DK_IMPL=node npx vitest run --maxWorkers=4 $DK_VITEST_ARGS || status=1
   exit "$status"
-')
-containers+=("$check")
-docker cp "$install:/tmp/npmcache" - | docker cp -a - "$check:/tmp/"
-result=0
-docker start -a "$check" || result=$?
-
-after=$(fingerprint)
-[[ $before == "$after" ]] || { echo 'contract: source changed during checks; discard results' >&2; exit 1; }
-if [[ -n $(find "$ROOT" -xdev \( -uid 0 -o -uid 19001 \) -print -quit) ]]; then
-  echo 'contract: files owned by root or the container user found in the checkout' >&2
-  exit 1
-fi
-exit "$result"
+'
