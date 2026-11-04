@@ -236,9 +236,9 @@ export async function stageDeploy(
     context.events.emit(
       "deploy_skipped",
       sha,
-      `Deployment skipped for pushed ${sha}: documentation/art-source exclusions; CI pending until verified.`,
+      `Deployment skipped for pushed ${sha}: every changed path matches deploy.skipPattern; CI pending until verified.`,
     );
-    context.log("deploy skipped: the pushed range matches documentation/art-source exclusions");
+    context.log("deploy skipped: every path changed in the pushed range matches deploy.skipPattern");
     await removeWorktree(context, pending.work);
     return;
   }
