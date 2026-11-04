@@ -5,6 +5,7 @@ import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
 import {
+  CASE_TIMEOUT_MS,
   CI_POLL_SECONDS,
   contract,
   hardened,
@@ -230,10 +231,10 @@ suite("departure", () => {
     expect(result.stdout).toContain(`deployment disabled for ${SHA}`);
   });
 
-  for (const failure of ["gateFail", "installFail"] as const) {
-    contract(
-      `a failed ${failure === "gateFail" ? "gate" : "install"} never pushes, stages deployment or deletes the batch branch`,
-      async () => {
+  contract(
+    "a failed gate or install never pushes, stages deployment or deletes the batch branch",
+    async () => {
+      for (const failure of ["gateFail", "installFail"] as const) {
         const ws = workspace();
         bus(ws);
         ws.updateControl((c) => (c.docker = { [failure]: true }));
@@ -244,18 +245,21 @@ suite("departure", () => {
         if (QUEUE_MODEL)
           await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
         const result = await runner.stop();
-        expect(pushes(ws)).toBe(0);
-        expect(ws.exists("deploy-pending")).toBe(false);
-        expect(deploys(ws)).toEqual([]);
+        expect(pushes(ws), failure).toBe(0);
+        expect(ws.exists("deploy-pending"), failure).toBe(false);
+        expect(deploys(ws), failure).toEqual([]);
         // 1.0 copies only the gate logs out of a failed gate; 0.9 has no copy-out step.
-        expect(copiedOut(ws).filter((source) => source !== "/tmp/gate-logs/.")).toEqual([]);
-        if (QUEUE_MODEL) expect(result.stdout).toContain("kept branch batch-");
-        expect(
-          ws.calls("git").some((call) => call.args.includes("branch") && call.args.includes("-D")),
-        ).toBe(false);
-      },
-    );
-  }
+        const outputs = copiedOut(ws).filter((source) => source !== "/tmp/gate-logs/.");
+        expect(outputs, failure).toEqual([]);
+        if (QUEUE_MODEL) expect(result.stdout, failure).toContain("kept branch batch-");
+        const deleted = ws
+          .calls("git")
+          .some((call) => call.args.includes("branch") && call.args.includes("-D"));
+        expect(deleted, failure).toBe(false);
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 
   for (const [title, setup, rejectedAtDeparture] of [
     [
@@ -401,7 +405,7 @@ suite("departure", () => {
     expect(ws.calls("git").some((call) => call.args.includes("worktree"))).toBe(false);
   });
 
-  for (const [title, runs, status, event] of [
+  const CI_OUTCOMES = [
     [
       "success",
       [{ id: 1, name: "Test", status: "completed", conclusion: "success" }],
@@ -432,30 +436,35 @@ suite("departure", () => {
       "timeout",
       "ci_timeout",
     ],
-  ] as const) {
-    contract(`the exact-commit CI watch records ${title}`, async () => {
-      const ws = workspace();
-      bus(ws, { github: "fixture/project" });
-      ws.config.deploy = { mode: "none", skipPattern: "" };
-      ws.config.ci = { requiredNames: ["Test"], pollSeconds: CI_POLL_SECONDS, timeoutSeconds: 1 };
-      ws.updateControl((c) => (c.gh = { checks: { [SHA]: [...runs] } }));
-      impl.offer(ws, ["bus/feature"]);
-      const runner = await departOnce(
-        ws,
-        () =>
-          ws.exists("ci", `${SHA}.status`) &&
-          ws.read("ci", `${SHA}.status`).trim() === status &&
-          kinds(ws).includes(event),
-      );
-      await runner.stop();
-      expect(
-        ws
+  ] as const;
+
+  contract(
+    "the exact-commit CI watch records success, failures, an unrelated failure and a timeout",
+    async () => {
+      for (const [title, runs, status, event] of CI_OUTCOMES) {
+        const ws = workspace();
+        bus(ws, { github: "fixture/project" });
+        ws.config.deploy = { mode: "none", skipPattern: "" };
+        ws.config.ci = { requiredNames: ["Test"], pollSeconds: CI_POLL_SECONDS, timeoutSeconds: 1 };
+        ws.updateControl((c) => (c.gh = { checks: { [SHA]: [...runs] } }));
+        impl.offer(ws, ["bus/feature"]);
+        const runner = await departOnce(
+          ws,
+          () =>
+            ws.exists("ci", `${SHA}.status`) &&
+            ws.read("ci", `${SHA}.status`).trim() === status &&
+            kinds(ws).includes(event),
+        );
+        await runner.stop();
+        const exact = ws
           .calls("gh")
-          .every((call) => call.args.some((arg) => arg.includes(`/commits/${SHA}/check-runs`))),
-      ).toBe(true);
-      expect(ws.calls("gh").length).toBeGreaterThan(0);
-    });
-  }
+          .every((call) => call.args.some((arg) => arg.includes(`/commits/${SHA}/check-runs`)));
+        expect(exact, title).toBe(true);
+        expect(ws.calls("gh").length, title).toBeGreaterThan(0);
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 
   contract("a detached CI watch does not hold the runner, loop or merge locks", async () => {
     const ws = workspace();
