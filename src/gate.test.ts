@@ -51,14 +51,14 @@ describe("runGate", () => {
     const context = testContext(test, { exec });
     const logs = mkdtempSync(join(tmpdir(), "logs-"));
     const input = {
-      batch: "batch-1",
+      departure: "departure-1",
       logs,
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
       work: test.repo,
     };
     return { context, exec, input, logs, test };
   }
-  const NAME = "delivery-kit-gate-archies-dog-walks-batch-1";
+  const NAME = "delivery-kit-gate-archies-dog-walks-departure-1";
   const verbs = (exec: { calls: { args: readonly string[] }[] }) =>
     exec.calls.map((call) => call.args[0]);
 
@@ -93,7 +93,7 @@ describe("runGate", () => {
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 
-  it("removes the container when the copied tree is not the batch commit", async () => {
+  it("removes the container when the copied tree is not the departure commit", async () => {
     const test = makeGame();
     const exec = fakeExec((spec) =>
       spec.args.some((arg) => arg.startsWith("EXPECTED_TREE="))
@@ -103,7 +103,7 @@ describe("runGate", () => {
     const context = testContext(test, { exec });
     const logs = mkdtempSync(join(tmpdir(), "logs-"));
     const outcome = await runGate(context, {
-      batch: "batch-1",
+      departure: "departure-1",
       logs,
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
       work: test.repo,
@@ -178,7 +178,7 @@ describe("runGate", () => {
   });
 
   it("removes containers a stopped runner left behind before creating its own", async () => {
-    const { context, exec, input } = setup({}, "delivery-kit-gate-archies-dog-walks-batch-0\n");
+    const { context, exec, input } = setup({}, "delivery-kit-gate-archies-dog-walks-departure-0\n");
     await runGate(context, input);
     expect(exec.calls[0]?.args).toEqual([
       "ps",
@@ -191,7 +191,7 @@ describe("runGate", () => {
     expect(exec.calls[1]?.args).toEqual([
       "rm",
       "--force",
-      "delivery-kit-gate-archies-dog-walks-batch-0",
+      "delivery-kit-gate-archies-dog-walks-departure-0",
     ]);
     expect(exec.calls[2]?.args[0]).toBe("create");
   });
@@ -206,7 +206,7 @@ describe("runGate", () => {
     const context = testContext(test, { exec });
     const logs = mkdtempSync(join(tmpdir(), "logs-"));
     const outcome = await runGate(context, {
-      batch: "batch-1",
+      departure: "departure-1",
       logs,
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
       work: test.repo,

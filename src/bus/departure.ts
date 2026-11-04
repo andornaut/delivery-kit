@@ -239,7 +239,7 @@ async function gateAndPush(
   writeLines(join(logs, "commit.sha"), head);
   context.log(`${attempt.when} bus departs with main ${head}; gate logs: ${logs}`);
   const before = await treeFingerprint(context, work);
-  const outcome = await runGate(context, { batch: short, logs, sha: head, work }, async () =>
+  const outcome = await runGate(context, { departure: short, logs, sha: head, work }, async () =>
     (await treeFingerprint(context, work)) === before
       ? undefined
       : "gate discarded: Git status or reported-file fingerprints changed during checks",

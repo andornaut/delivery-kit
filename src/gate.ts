@@ -97,8 +97,8 @@ export async function treeFingerprint(context: BusContext, work: string): Promis
 }
 
 /** The deterministic container name of one departure's gate, keyed by its short HEAD SHA. */
-export function gateContainerName(game: string, batch: string): string {
-  return `delivery-kit-gate-${game}-${batch}`;
+export function gateContainerName(game: string, departure: string): string {
+  return `delivery-kit-gate-${game}-${departure}`;
 }
 
 export function createArgs(context: BusContext, name: string, input: GateInput): string[] {
@@ -167,7 +167,8 @@ export interface GateInput {
   readonly sha: string;
   /** This attempt's gate-logs directory on the host. */
   readonly logs: string;
-  readonly batch: string;
+  /** The short departure SHA that names the gate container. */
+  readonly departure: string;
 }
 
 export type GateOutcome =
@@ -251,7 +252,7 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
     (await docker(context, ["start", name])).status !== 0 ||
     !(await copyIn(context, name, input))
   ) {
-    return failed("install", "gate container copy of the checkout does not match the batch commit");
+    return failed("install", "gate container copy of the checkout does not match the departure commit");
   }
   if (settings.install !== "") {
     const log = join(input.logs, "install.log");
@@ -300,7 +301,7 @@ export async function runGate(
   verify: () => Promise<string | undefined> = () => Promise.resolve(undefined),
 ): Promise<GateOutcome> {
   await removeLeftoverGates(context);
-  const name = gateContainerName(context.game.id, input.batch);
+  const name = gateContainerName(context.game.id, input.departure);
   let outcome: GateOutcome = failed("install", "gate did not start");
   try {
     outcome = await gate(context, name, input);
