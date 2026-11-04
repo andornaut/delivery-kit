@@ -189,9 +189,9 @@ delivery-kit writes only `operations.*.lastAdoption`; the skills own every other
 1.0 replaces the Bash and Python mechanisms, `bus.conf` and the per-game state directories.
 Configuration moves into `delivery-kit.json` and `config.json`, Codex and Claude session maps into
 `var/registry.json`, and every state file into `var/`. Delivery becomes trunk-based: the queue,
-admission and ready records, batch merges, cherry-picks and the CI-repair approval are gone, and
-1.x ignores `bus-queue`, `bus-queue.lock`, `merge.lock` and the `ci-repair-approval*` files that
-migration copies. The other bus files keep their 0.9.x names and statuses; request receipts now
+admission, batch merges, cherry-picks and the CI-repair approval are gone, and 1.x ignores the
+`bus-queue`, `bus-queue.lock`, `merge.lock`, `ci-repair-approval*` and Tech `*-queued.json` and
+`*-ready.json` files that migration copies. The other bus files keep their 0.9.x names and statuses; request receipts now
 record `head` instead of `entries`.
 
 ### Migration
@@ -206,12 +206,14 @@ npx delivery-kit migrate --harness claude
 - **Preconditions**, checked after taking the old queue, request, delivery and event locks plus
   `var/registry.lock`: the old `runner.lock` and `loop.lock` are free, `active-departure` is empty,
   no `ci/*.lock` is held, no request is `started` or `pending`, no spool entry is `.claimed` and
-  there is no `deploy-pending`. The 0.x queue must be empty: no branch in `bus-queue` and no
-  admitted (`*-queued.json`) or ready (`*-ready.json`) record; each one is listed for Tech to land
-  on `main` or drop. Any failure stops the migration before its first write.
+  there is no `deploy-pending`. No 0.x work may be in flight: each branch still in `bus-queue`
+  and each `batch-*` scratch worktree is listed for Tech to land on `main` or drop. Any failure
+  stops the migration before its first write.
 - **Copy:** each game's `.claude/bus/` goes to `var/games/<g>/bus/` and game-dev's
   `.claude/monitor/codex/` to `var/game-dev/`, through a staging directory, with symlinks
-  preserved and both sides hashed. Legacy scripts, `bus.conf`, 0.x snapshots, `__pycache__` and `npm-cache` are not.
+  preserved and both sides hashed. Tech's ad hoc records (`*-queued.json`, `*-ready.json`) never
+  block: they are copied and listed as "Tech-owned records, copied, not acted on". Legacy scripts,
+  `bus.conf`, 0.x snapshots, `__pycache__` and `npm-cache` are not copied.
 - **Runner log:** `runner.log`, or Chibi's `codex-bus.log`, moves to `var/games/<g>/bus/runner.log`.
 - **Route:** the route host game's `.claude/monitor/route.json` is copied to `var/route.json` when
   its `host_project_root` names that game.

@@ -40,6 +40,7 @@ import {
   monitorUnit,
   RUNNER_LOCKS,
   RUNNER_LOG,
+  techRecords,
   type Unit,
 } from "./units.ts";
 
@@ -318,6 +319,12 @@ function describe(plan: Plan): string {
     `  excluded: ${plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")}`,
     `  runner log: ${plan.log === undefined ? "none" : `${plan.log.from} -> ${RUNNER_LOG} (moved)`}`,
   ];
+  if (plan.unit.bus) {
+    const records = techRecords(plan.entries);
+    lines.push(
+      `  Tech-owned records, copied, not acted on: ${records.length === 0 ? "none" : records.join(", ")}`,
+    );
+  }
   return `${lines.join("\n")}\n`;
 }
 

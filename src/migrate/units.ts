@@ -129,12 +129,23 @@ function nonEmptyFile(path: string): boolean {
   }
 }
 
-// Tech's 0.x admission and ready records beside the queue.
-const ADMISSION_PATTERN = /^[^/]+-(queued|ready)\.json$/;
+// Tech's ad hoc admission and ready records beside the queue. They are history, often for
+// packages that already landed: migrate copies them and lists them, and never acts on them.
+const TECH_RECORD_PATTERN = /^[^/]+-(queued|ready)\.json$/;
+// A 0.x batch scratch worktree exists only while a batch is integrating or gating.
+const BATCH_SCRATCH_PATTERN = /^batch-\d+$/;
+
+/** The top-level Tech-owned *-queued.json and *-ready.json records, sorted. */
+export function techRecords(entries: readonly Entry[]): string[] {
+  return entries
+    .filter((entry) => entry.kind === "file" && TECH_RECORD_PATTERN.test(entry.path))
+    .map((entry) => entry.path)
+    .sort();
+}
 
 /**
- * 1.x delivers local main and has no queue, so the 0.x queue must be empty: no queued branch,
- * admitted record or ready record. Each entry is listed for Tech to land or drop first.
+ * 1.x delivers local main and has no queue, so no 0.x work may be in flight: no branch still in
+ * bus-queue and no batch scratch worktree. Each is listed for Tech to land on main or drop.
  */
 export function queueBlockers(unit: Unit, entries: readonly Entry[]): string[] {
   const problems: string[] = [];
@@ -148,10 +159,8 @@ export function queueBlockers(unit: Unit, entries: readonly Entry[]): string[] {
     problems.push(`bus-queue: ${branch} is queued; 1.x delivers local main and has no queue`);
   }
   for (const entry of entries) {
-    const match = entry.kind === "file" ? ADMISSION_PATTERN.exec(entry.path) : null;
-    if (match !== null) {
-      const kind = match[1] === "queued" ? "admitted" : "ready";
-      problems.push(`${entry.path}: ${kind} 0.x queue entry; land it on main or drop it first`);
+    if (entry.kind === "dir" && BATCH_SCRATCH_PATTERN.test(entry.path)) {
+      problems.push(`${entry.path}: a 0.x batch scratch worktree exists; a batch is in progress`);
     }
   }
   return problems;

@@ -111,6 +111,8 @@ function buildTree(): Tree {
     put(join(archieBus, name));
   }
   put(join(archieBus, "last-push.sha"), `${SHA}\n`);
+  writeJson(join(archieBus, "feature-queued.json"), { branch: "bus/feature" });
+  writeJson(join(archieBus, "feature-ready.json"), { branch: "bus/feature" });
   put(join(archieBus, `ci/${SHA}.status`), "success\n");
   writeJson(join(archieBus, "requests/one.json"), { id: "one", state: "finished" });
   writeJson(join(archieBus, "unblock/claude-spool/brief.json"), { text: "pending" });
@@ -332,6 +334,8 @@ describe("migrate", () => {
       "events",
       "events/dispatch.lock",
       "events/state.lock",
+      "feature-queued.json",
+      "feature-ready.json",
       "last-push.link",
       "last-push.sha",
       "loop.lock",
@@ -348,6 +352,15 @@ describe("migrate", () => {
       "unblock/unblock.lock",
     ]);
     expect(readFileSync(join(archie.busDir, "runner.log"), "utf8")).toBe("current runner log\n");
+    // Tech-owned records alone never block: they are copied unchanged and listed.
+    for (const name of ["feature-queued.json", "feature-ready.json"]) {
+      expect(readFileSync(join(archie.busDir, name))).toEqual(
+        readFileSync(join(tree.archieBus, name)),
+      );
+    }
+    expect(result.out).toContain(
+      "Tech-owned records, copied, not acted on: feature-queued.json, feature-ready.json",
+    );
     expect(readFileSync(join(archie.busDir, "codex-bus.log"), "utf8")).toBe("older log\n");
     expect(readlinkSync(join(archie.busDir, "last-push.link"))).toBe("last-push.sha");
     expect(readlinkSync(join(archie.busDir, "check/venv/bin/node"))).toBe("/usr/bin/node");
@@ -604,14 +617,9 @@ describe("migrate preconditions", () => {
       "bus-queue: bus/feature is queued",
     ],
     [
-      "an admitted queue entry exists",
-      (t) => writeJson(join(t.archieBus, "feature-queued.json"), { branch: "bus/feature" }),
-      "feature-queued.json: admitted 0.x queue entry",
-    ],
-    [
-      "a ready queue entry exists",
-      (t) => writeJson(join(t.archieBus, "feature-ready.json"), { branch: "bus/feature" }),
-      "feature-ready.json: ready 0.x queue entry",
+      "a 0.x batch scratch worktree exists",
+      (t) => put(join(t.archieBus, "batch-1700000000", "file.txt"), "scratch\n"),
+      "batch-1700000000: a 0.x batch scratch worktree exists",
     ],
     [
       "a request is pending",
@@ -750,6 +758,8 @@ describe("migrate --remove-legacy", () => {
         "ci",
         "codex-bus.log",
         "events",
+        "feature-queued.json",
+        "feature-ready.json",
         "last-push.link",
         "last-push.sha",
         "loop.lock",
