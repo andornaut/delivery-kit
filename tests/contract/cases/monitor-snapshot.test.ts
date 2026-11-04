@@ -11,8 +11,10 @@ import {
   entry,
   health,
   type Json,
+  launchItem,
   mode,
   Native,
+  processJob,
   snapshot,
   TECH,
   writeCodexRoute,
@@ -24,44 +26,6 @@ const CHILD = "00000000-0000-0000-0000-000000000003";
 const FAILED_TURN = "00000000-0000-0000-0000-000000000004";
 const OTHER = "00000000-0000-0000-0000-000000000099";
 
-
-export function processJob(owner: string, confirmedAt: string): Json {
-  return {
-    owner_parent_id: owner,
-    worker_id: null,
-    kind: "process",
-    job_id: "job-1",
-    start_identity: "start-1",
-    invocation: { thread_id: owner, turn_id: "launch-turn", item_id: "launch-item" },
-    owner_evidence: {
-      confirmed_by: owner,
-      confirmed_at: confirmedAt,
-      identity_verified: true,
-      provenance: "owner_attested",
-      state: "running",
-      confirmed_stalled: true,
-      episode_id: "episode-1",
-    },
-  };
-}
-
-export function launchItem(native: Native): void {
-  native.socket.on("thread/items/read", {
-    data: [
-      {
-        turnId: "launch-turn",
-        item: {
-          id: "launch-item",
-          type: "commandExecution",
-          status: "completed",
-          exitCode: 0,
-          command: "PRIVATE_COMMAND",
-          aggregatedOutput: "PRIVATE_COMMAND",
-        },
-      },
-    ],
-  });
-}
 
 /** Python worker_failures(): exact lineage, parent action and latest failed typed turn. */
 export function workerFailures(snap: Json): string[][] {

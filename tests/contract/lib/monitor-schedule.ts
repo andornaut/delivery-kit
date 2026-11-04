@@ -1,6 +1,7 @@
 // Step the resident runner's monitor observer one wall-clock minute at a time.
 // The virtual clock is effectively frozen (speed 0.001) and every minute is a wake minute,
-// so each advance of 60 seconds dispatches exactly one scheduled monitor slot.
+// so each advance of 60 seconds dispatches exactly one scheduled monitor slot. Real-time mode
+// runs the clock at wall speed for collectors that compare slots with the real time.
 import { type Resident, startRunner } from "./adapter.ts";
 import { at, sleep } from "./time.ts";
 import type { Workspace } from "./workspace.ts";
@@ -16,11 +17,14 @@ export class MonitorSchedule {
   private lines: string[] = [];
   private now: number;
 
+  private readonly realtime: boolean;
+
   constructor(
     private readonly ws: Workspace,
-    start = at(0, 30),
+    options: { start?: number; realtime?: boolean } = {},
   ) {
-    this.now = start;
+    this.realtime = options.realtime ?? false;
+    this.now = this.realtime ? Math.floor(Date.now() / 1000) : (options.start ?? at(0, 30));
     // Every minute is a wake minute; the only departure minute is never reached by a case.
     ws.updateGameDevConfig({ wakeMinutes: Array.from({ length: 60 }, (_, minute) => minute) });
     ws.config.schedule = { departures: ["59"], timezone: "America/Toronto" };
@@ -28,7 +32,7 @@ export class MonitorSchedule {
   }
 
   async start(): Promise<void> {
-    this.ws.setClock(this.now, 0.001);
+    this.ws.setClock(this.now, this.realtime ? 1 : 0.001);
     this.runner = startRunner(this.ws);
     let buffer = "";
     const collect = (chunk: Buffer) => {
@@ -46,9 +50,17 @@ export class MonitorSchedule {
 
   /** Advance one minute and wait for that slot's scheduled monitor result. */
   async slot(timeoutMs = 30_000): Promise<SlotOutput> {
-    this.now += 60;
-    this.ws.advanceClock(60);
-    const slot = this.now - (this.now % 60);
+    let slot: number;
+    if (this.realtime) {
+      // The next wall-clock minute after the previous slot.
+      slot = this.now - (this.now % 60) + 60;
+      this.now = slot;
+      timeoutMs = Math.max(timeoutMs, 90_000);
+    } else {
+      this.now += 60;
+      this.ws.advanceClock(60);
+      slot = this.now - (this.now % 60);
+    }
     const prefix = `bus: scheduled monitor ${slot}`;
     let line: string | undefined;
     await this.runner!.until(() => (line = this.lines.find((row) => row.startsWith(prefix))) !== undefined, timeoutMs);
