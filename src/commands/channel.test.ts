@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { claudeFixture, MONITOR } from "../monitor/fixtures.ts";
-import { createRegistry } from "../registry/store.ts";
 import type { Registry } from "../registry/schema.ts";
+import { createRegistry } from "../registry/store.ts";
 import { makeFixture, registryInput } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
 
@@ -80,7 +80,9 @@ describe("channel options", () => {
       "0.05",
     ]);
     input.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
     input.end();
     expect(await done).toBe(EXIT_OK);
     expect(existsSync(join(layout.varDir, "games"))).toBe(false);

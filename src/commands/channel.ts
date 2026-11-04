@@ -65,6 +65,7 @@ function registryMonitor(root: string): string {
     if (error instanceof RegistryMissing) {
       throw new Error(
         `${layout.registryFile} does not exist; run delivery-kit migrate first, or pass --monitor UUID`,
+        { cause: error },
       );
     }
     throw error;
