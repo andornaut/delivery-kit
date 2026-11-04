@@ -5,7 +5,15 @@ import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { bashConfig, CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
+import {
+  bashConfig,
+  CASE_TIMEOUT_MS,
+  CODEX_QUEUE_REMOVED,
+  contract,
+  retiredOnNode,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { sleep } from "../lib/time.ts";
 import { ART, rpcError, STALE, TECH } from "../lib/unblock-native.ts";
 import { codexRoute, Monitored } from "../lib/unblock-runner.ts";
@@ -219,7 +227,9 @@ suite("codex events", () => {
     CASE_TIMEOUT_MS,
   );
 
-  contract(
+  retiredOnNode(
+    CODEX_QUEUE_REMOVED,
+    "codex-queue",
     "monitor routing needs no dispatch host; other recipients and no route keep the Codex queue",
     async () => {
       const native = await reporter();
@@ -343,7 +353,9 @@ suite("codex events", () => {
     },
   );
 
-  contract(
+  retiredOnNode(
+    CODEX_QUEUE_REMOVED,
+    "codex-queue",
     "a non-monitor reporter keeps the Codex queue under active, held and absent routes",
     async () => {
       for (const state of ["active", "held", "absent"]) {

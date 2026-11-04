@@ -25,7 +25,7 @@ import {
   WORKER_PARENTS_ROUTE_MESSAGE,
   workspaces,
 } from "../lib/cases.ts";
-import type { CodexSocket } from "../lib/codex-socket.ts";
+import { CodexSocket } from "../lib/codex-socket.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -309,7 +309,11 @@ suite("monitor cadence", () => {
       ws.updateGameDevConfig({ wakeMinutes: [10] });
       const ten = await tick(ws, at(10));
       expect(ten.monitor.map((row) => row.slot)).toEqual([at(10)]);
-      expect(socket.connections).toHaveLength(1);
+      // 1.0 delivers health events natively to the monitor on their own connections.
+      expect(
+        socket.ownConnections(),
+        JSON.stringify(socket.calls.filter(CodexSocket.isEvent).map((c) => c.params.input)),
+      ).toBe(1);
     },
     CASE_TIMEOUT_MS,
   );

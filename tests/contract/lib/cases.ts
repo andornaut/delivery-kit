@@ -59,6 +59,13 @@ export const WORKER_PARENTS_ROUTE_MESSAGE =
     ? "WORKER_PARENT_THREADS requires parents in the active monitor route"
     : "workerParents requires parents in the active monitor route";
 
+/** Retirement reasons for documented 1.0 decisions, shared by every case that cites them. */
+export const CODEX_QUEUE_REMOVED =
+  "the codex queue sink is removed; events go only to the registry recipient through the active adapter";
+export const ROUTES_CARRY_NO_HARNESS =
+  "routes carry no harness; the registry's active harness selects the adapter";
+export const NO_VERSION_2_ROUTE = "1.0 has no version 2 route schema";
+
 /** The fastest CI poll: 0 in 0.9; 1.0 rejects 0, and 1 second runs fast under the test clock. */
 export const CI_POLL_SECONDS = impl.name === "bash" ? 0 : 1;
 
@@ -86,10 +93,12 @@ export function retiredOnNode(
   tag: string,
   name: string,
   body: () => Promise<void> | void,
+  timeoutMs?: number,
 ): void {
   it.skipIf(impl.name !== "bash")(
     `${impl.name === "bash" ? `[${tag}]` : `[retired: ${reason}]`} ${name}`,
     body,
+    timeoutMs,
   );
 }
 

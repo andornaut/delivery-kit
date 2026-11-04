@@ -3,10 +3,20 @@
 import { expect } from "vitest";
 
 import { cli, impl } from "../lib/adapter.ts";
-import { ARCHIE, CHIBI, claudeGame, claudeRoute, MONITOR, tick } from "../lib/claude-fixture.ts";
+import {
+  ARCHIE,
+  briefTarget,
+  CHIBI,
+  claudeGame,
+  claudeRoute,
+  MONITOR,
+  tick,
+} from "../lib/claude-fixture.ts";
 import {
   CASE_TIMEOUT_MS,
   contract,
+  NO_VERSION_2_ROUTE,
+  retiredOnNode,
   ROUTE_INVALID_MESSAGE,
   suite,
   workspaces,
@@ -32,7 +42,7 @@ suite("claude route", () => {
       expect(result.monitor[0]!.result.status).toBe("sending");
       const [entry] = ws.list("unblock", "claude-spool");
       const text = ws.readJson<{ text: string }>(`unblock/claude-spool/${entry}`).text;
-      expect(text.split(`Archie tech: ${ARCHIE}`)).toHaveLength(2);
+      expect(text.split(briefTarget(ws, "Archie tech", ARCHIE))).toHaveLength(2);
       expect(text).not.toContain(CHIBI);
       for (const change of [
         { host_project_root: `${ws.repo}/other` },
@@ -51,7 +61,9 @@ suite("claude route", () => {
     },
   );
 
-  contract(
+  retiredOnNode(
+    NO_VERSION_2_ROUTE,
+    "version-2-route",
     "invalid version 2 routes are rejected by snapshot and defer the observer",
     async () => {
       const ws = workspace();
