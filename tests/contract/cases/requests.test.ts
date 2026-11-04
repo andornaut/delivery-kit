@@ -271,16 +271,19 @@ suite("requests", () => {
     },
   );
 
-  contract("request IDs must be 1 to 64 safe characters and an invalid ID departs nothing", async () => {
-    const ws = workspace({ realGit: true });
-    setup(ws);
-    for (const id of ["../escape", "-option", "a".repeat(65), ""]) {
-      const result = await capture(ws, id);
-      expect(result.code, id).not.toBe(0);
-    }
-    expect(ws.list("requests").filter((name) => name.endsWith(".json"))).toEqual([]);
-    expect(containers(ws)).toEqual([]);
-  });
+  contract(
+    "request IDs must be 1 to 64 safe characters and an invalid ID departs nothing",
+    async () => {
+      const ws = workspace({ realGit: true });
+      setup(ws);
+      for (const id of ["../escape", "-option", "a".repeat(65), ""]) {
+        const result = await capture(ws, id);
+        expect(result.code, id).not.toBe(0);
+      }
+      expect(ws.list("requests").filter((name) => name.endsWith(".json"))).toEqual([]);
+      expect(containers(ws)).toEqual([]);
+    },
+  );
 
   queueModel(
     "the public request command captures only and refuses invalid or empty requests",

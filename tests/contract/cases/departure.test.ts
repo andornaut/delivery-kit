@@ -157,7 +157,8 @@ suite("departure", () => {
         const runner = await departOnce(ws, () =>
           kinds(ws).includes("blocked-" + (failure === "gateFail" ? "full-gate" : "install")),
         );
-        if (QUEUE_MODEL) await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
+        if (QUEUE_MODEL)
+          await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
         const result = await runner.stop();
         expect(pushes(ws)).toBe(0);
         expect(ws.exists("deploy-pending")).toBe(false);
