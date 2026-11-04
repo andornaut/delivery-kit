@@ -14,6 +14,7 @@ import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { MONITOR_ROLE } from "../monitor/wake.ts";
 import { resolveConversation } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
+import { SPECS } from "./spec.ts";
 
 export interface ChannelStreams {
   readonly input: NodeJS.ReadableStream;
@@ -92,12 +93,7 @@ export async function runChannel(
   try {
     const { values } = parseArgs({
       args,
-      options: {
-        game: { multiple: true, type: "string" },
-        monitor: { type: "string" },
-        "poll-seconds": { type: "string" },
-        "state-dir": { multiple: true, type: "string" },
-      },
+      options: SPECS.channel.options,
       strict: true,
     });
     pollSeconds = Number(values["poll-seconds"] ?? DEFAULT_POLL_SECONDS);

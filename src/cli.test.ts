@@ -2,7 +2,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { COMMANDS, EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "./cli.ts";
+import { COMMANDS, EXIT_INVALID, EXIT_OK, EXIT_USAGE, main, USAGE } from "./cli.ts";
+import { SPECS } from "./commands/spec.ts";
 import { loadLayout } from "./layout.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
@@ -104,5 +105,19 @@ describe("status --harness", () => {
     expect(missing.code).toBe(EXIT_INVALID);
     expect(missing.err).toMatch(/^delivery-kit: /);
     expect((await run(root, "status", "--harness", "other")).code).toBe(EXIT_USAGE);
+  });
+});
+
+describe("help", () => {
+  it("lists every command with every option its parser accepts", () => {
+    for (const command of COMMANDS) {
+      expect(USAGE).toContain(`  ${command}`);
+      for (const option of Object.keys(SPECS[command].options)) {
+        expect(USAGE, `${command} --${option}`).toMatch(
+          new RegExp(`^  ${command} .*--${option}\\b`, "m"),
+        );
+      }
+    }
+    expect(Object.keys(SPECS).sort()).toEqual([...COMMANDS].sort());
   });
 });

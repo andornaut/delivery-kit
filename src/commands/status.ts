@@ -9,8 +9,9 @@ import { type Layout, loadLayout } from "../layout.ts";
 import { harnessReadiness } from "../monitor/readiness.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import { commandUsage, SPECS } from "./spec.ts";
 
-const USAGE = "usage: delivery-kit status --game ID | --harness claude|codex";
+const USAGE = commandUsage("status");
 
 async function readiness(io: Io, root: string, harness: string | undefined): Promise<number> {
   if (harness !== "claude" && harness !== "codex") {
@@ -57,7 +58,8 @@ export const status: Handler = (io, root, args) => {
   if (args[0] === "--harness") {
     return readiness(io, root, args.length === 2 ? args[1] : undefined);
   }
-  const resolved = resolveGame(io, root, {}, USAGE, args);
+  // --harness is a separate form, read above; the game form takes --game alone.
+  const resolved = resolveGame(io, root, { game: SPECS.status.options.game }, USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }

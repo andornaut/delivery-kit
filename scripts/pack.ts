@@ -21,7 +21,7 @@ import {
   validPackArgs,
 } from "./guards.ts";
 
-const USAGE = "usage: pack.sh EXACT_COMMIT_SHA NEW_ABSOLUTE_DIRECTORY";
+const USAGE = "usage: npm run pack -- EXACT_COMMIT_SHA NEW_ABSOLUTE_DIRECTORY";
 
 const PACK = `
   umask 022
@@ -63,7 +63,7 @@ function main(args: string[]): number {
   }
   const volume = process.env.DELIVERY_KIT_NPM_VOLUME ?? DEFAULT_VOLUME;
   if (quiet("docker", ["volume", "inspect", volume]) !== 0) {
-    console.error(`delivery-kit: run scripts/check.sh first to populate the ${volume} volume`);
+    console.error(`delivery-kit: run npm run verify first to populate the ${volume} volume`);
     return 2;
   }
   const image = checkImage(root);

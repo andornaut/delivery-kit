@@ -13,22 +13,16 @@ import { runMigration, runRemoveLegacy } from "../migrate/migrate.ts";
 import { readRegistrySources } from "../migrate/registryBuild.ts";
 import { procProbe } from "../migrate/runnerRecord.ts";
 import { type Harness, HARNESSES } from "../registry/schema.ts";
+import { commandUsage, SPECS } from "./spec.ts";
 
-export const MIGRATE_USAGE = `usage: delivery-kit migrate [--game ID] [--dry-run] [--harness claude|codex]
-       delivery-kit migrate --remove-legacy [--dry-run]
-`;
+export const MIGRATE_USAGE = `${commandUsage("migrate")}\n`;
 
 export const migrate: Handler = (io, root, args) => {
   let values;
   try {
     ({ values } = parseArgs({
       args,
-      options: {
-        "dry-run": { type: "boolean" },
-        game: { type: "string" },
-        harness: { type: "string" },
-        "remove-legacy": { type: "boolean" },
-      },
+      options: SPECS.migrate.options,
       strict: true,
     }));
   } catch (error) {

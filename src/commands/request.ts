@@ -6,11 +6,12 @@ import { spawnExec } from "../bus/exec.ts";
 import { captureRequest } from "../bus/requests.ts";
 import { busPaths } from "../bus/state.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../io.ts";
+import { commandUsage, SPECS } from "./spec.ts";
 
-const USAGE = "usage: delivery-kit request --game ID --request-id SAFE_ID";
+const USAGE = commandUsage("request");
 
 export const request: Handler = async (io, root, args) => {
-  const resolved = resolveGame(io, root, { "request-id": { type: "string" } }, USAGE, args);
+  const resolved = resolveGame(io, root, SPECS.request.options, USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }

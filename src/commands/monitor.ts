@@ -18,6 +18,7 @@ import { MONITOR_ROLE } from "../monitor/wake.ts";
 import { resolveConversation } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import { SPECS } from "./spec.ts";
 
 const UNAVAILABLE_OUTPUT = {
   reason: "inspect local monitor state and retry explicit reconciliation",
@@ -200,12 +201,6 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
   return Object.keys(errors).length === 0 ? EXIT_OK : EXIT_INVALID;
 }
 
-const COMMON = {
-  game: { type: "string" },
-  parent: { multiple: true, type: "string" },
-  recipient: { type: "string" },
-} as const;
-
 async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
   try {
     return await body();
@@ -228,7 +223,7 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
 export const monitorSnapshot: Handler = (io, root, args) => {
   const { values } = parseArgs({
     args,
-    options: { ...COMMON, "history-cursor": { type: "string" } },
+    options: SPECS["monitor-snapshot"].options,
     strict: true,
   });
   return guarded(io, () =>
@@ -243,13 +238,7 @@ export const monitorSnapshot: Handler = (io, root, args) => {
 export const monitorAck: Handler = (io, root, args) => {
   const { values } = parseArgs({
     args,
-    options: {
-      ...COMMON,
-      disposition: { type: "string" },
-      "queue-id": { multiple: true, type: "string" },
-      reason: { type: "string" },
-      snapshot: { type: "string" },
-    },
+    options: SPECS["monitor-ack"].options,
     strict: true,
   });
   const queueIds = values["queue-id"] ?? [];

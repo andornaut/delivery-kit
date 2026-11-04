@@ -4,11 +4,12 @@ import { busContext } from "../bus/context.ts";
 import { resourceReport as report } from "../bus/resources.ts";
 import { testOptions } from "../bus/testOverrides.ts";
 import { EXIT_OK, type Handler } from "../io.ts";
+import { commandUsage, SPECS } from "./spec.ts";
 
-const USAGE = "usage: delivery-kit resource-report --game ID";
+const USAGE = commandUsage("resource-report");
 
 export const resourceReport: Handler = async (io, root, args) => {
-  const resolved = resolveGame(io, root, {}, USAGE, args);
+  const resolved = resolveGame(io, root, SPECS["resource-report"].options, USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }

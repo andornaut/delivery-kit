@@ -9,6 +9,7 @@ import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
 import { request } from "./commands/request.ts";
 import { resourceReport } from "./commands/resourceReport.ts";
 import { run } from "./commands/run.ts";
+import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import { addressedRoles, loadProjectConfig, type ProjectConfig } from "./config.ts";
 import { readJsonIfExists } from "./durable.ts";
@@ -32,34 +33,28 @@ export const COMMANDS = [
   "channel",
   "monitor-snapshot",
   "monitor-ack",
-] as const;
-export type Command = (typeof COMMANDS)[number];
+] as const satisfies readonly Command[];
+export type { Command };
 
-export const USAGE = `usage: delivery-kit [--root GAME_DEV_ROOT] COMMAND [options]
-
-Commands:
-  run --game ID           run one game's resident delivery runner
-  check-config [--game ID]
-                          validate config.json, var/registry.json and each delivery-kit.json
-  request                 record a user-authorized one-off departure request
-  status                  print read-only runner and delivery status
-  status --harness claude|codex
-                          probe whether that harness can deliver; exit 0 when ready
-  resource-report         print reporting-only resource information
-  migrate                 move 0.x state into var/ (run from game-dev)
-  channel                 run the Claude channel consumer
-  monitor-snapshot --game ID [--recipient ROLE|UUID] [--parent ROLE|UUID ...]
-                          capture the monitor review snapshot
-  monitor-ack --game ID --snapshot UUID --queue-id ID --disposition D [--reason TEXT]
-                          acknowledge monitor queue items
-
---recipient and --parent take a role name resolved through var/registry.json, or a
-conversation UUID registered for the active harness. Repeat --parent UUID for each parent.
-  help, --help            print this text
-  --version               print the version
-
-game-dev is --root, else DELIVERY_KIT_ROOT, else the working directory.
-`;
+/** Help text, generated from each command's parser options. */
+export const USAGE = [
+  "usage: delivery-kit [--root GAME_DEV_ROOT] COMMAND [options]",
+  "",
+  "Commands:",
+  ...COMMANDS.flatMap((command) => [
+    ...synopsis(command).map((line) => `  ${line}`),
+    `      ${SPECS[command].summary}`,
+  ]),
+  "",
+  "--recipient and --parent take a role name resolved through var/registry.json, or a",
+  "conversation UUID registered for the active harness. Repeat --parent UUID for each parent.",
+  "",
+  "  help, --help    print this text",
+  "  --version       print the version",
+  "",
+  "game-dev is --root, else DELIVERY_KIT_ROOT, else the working directory.",
+  "",
+].join("\n");
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -98,7 +93,7 @@ function checkGame(
 }
 
 function checkConfig(io: Io, root: string, args: string[]): number {
-  const { values } = parseArgs({ args, options: { game: { type: "string" } }, strict: true });
+  const { values } = parseArgs({ args, options: SPECS["check-config"].options, strict: true });
   let layout: Layout;
   try {
     layout = loadLayout(root);

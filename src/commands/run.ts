@@ -5,11 +5,12 @@ import { RunnerRefused, runRunner } from "../bus/runner.ts";
 import { testOptions } from "../bus/testOverrides.ts";
 import { EXIT_INVALID, EXIT_OK, type Handler } from "../io.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
+import { commandUsage, SPECS } from "./spec.ts";
 
-const USAGE = "usage: delivery-kit run --game ID";
+const USAGE = commandUsage("run");
 
 export const run: Handler = async (io, root, args) => {
-  const resolved = resolveGame(io, root, {}, USAGE, args);
+  const resolved = resolveGame(io, root, SPECS.run.options, USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }
