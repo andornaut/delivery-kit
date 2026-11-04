@@ -83,6 +83,22 @@ describe("status report", () => {
     });
   });
 
+  it("reports an unreadable ci/ or events directory and a corrupt identity as blockers", () => {
+    const bus = paths();
+    // A file where a directory belongs cannot be listed, unlike a directory that is absent.
+    writeFileSync(bus.ciDir, "");
+    writeFileSync(bus.eventsDir, "");
+    writeFileSync(bus.identity, "{not json");
+    expect(statusReport(bus, true)).toMatchObject({
+      drained: false,
+      identity: null,
+      identity_status: "unreadable",
+      idle: false,
+      idle_blockers: ["identity_unreadable", "ci_dir_unreadable"],
+      reporter_blockers: ["events_dir_unreadable"],
+    });
+  });
+
   it("sees a runner lock held by a Bash flock holder", async () => {
     const bus = paths();
     writeFileSync(bus.runnerLock, "");

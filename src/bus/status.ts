@@ -2,7 +2,15 @@
 // Only the runner writes its identity, while it holds runner.lock. The report never reads
 // /proc: the singleton test is a non-blocking flock on the same lock files.
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fsyncSync, openSync, readdirSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readdirSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { writeDurable } from "../durable.ts";
@@ -56,13 +64,14 @@ export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<st
   return { ...identity, started_ns: started };
 }
 
-function jsonFiles(directory: string, suffix: string): string[] {
+/** The directory's names ending in `suffix`; [] when it does not exist, null when unreadable. */
+function jsonFiles(directory: string, suffix: string): string[] | null {
   try {
     return readdirSync(directory)
       .filter((name) => name.endsWith(suffix))
       .sort();
-  } catch {
-    return [];
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : null;
   }
 }
 
@@ -73,13 +82,19 @@ function parse(text: string | undefined): unknown {
   return JSON.parse(text) as unknown;
 }
 
-/** The identity file parsed with started_ns kept exact. */
-function readIdentity(paths: BusPaths): Record<string, unknown> | null {
+/**
+ * The identity file parsed with started_ns kept exact: null when it does not exist, "unreadable"
+ * when it exists but cannot be read or is not a JSON object.
+ */
+function readIdentity(paths: BusPaths): Record<string, unknown> | "unreadable" | null {
+  if (!existsSync(paths.identity)) {
+    return null;
+  }
   try {
     const text = readText(paths.identity);
     const value = parse(text?.replace(/"started_ns":\s*(\d+)/, '"started_ns": "$1"'));
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      return null;
+      return "unreadable";
     }
     const identity = value as Record<string, unknown>;
     if (typeof identity.started_ns === "string") {
@@ -87,7 +102,7 @@ function readIdentity(paths: BusPaths): Record<string, unknown> | null {
     }
     return identity;
   } catch {
-    return null;
+    return "unreadable";
   }
 }
 
@@ -98,9 +113,12 @@ export interface StatusReport {
 /** The status report. `ciEnabled` requires a CI record for the last push. */
 export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport {
   const running = lockHeld(paths.runnerLock);
-  const identity = readIdentity(paths);
+  const read = readIdentity(paths);
+  const identity = read === "unreadable" ? null : read;
   let identityStatus: string;
-  if (identity === null) {
+  if (read === "unreadable") {
+    identityStatus = "unreadable";
+  } else if (identity === null) {
     identityStatus = "absent";
   } else if (!running) {
     identityStatus = "stale";
@@ -114,13 +132,20 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
     identityStatus = "unattested";
   }
   const blockers: string[] = [];
+  if (read === "unreadable") {
+    blockers.push("identity_unreadable");
+  }
   if (readTrimmed(paths.activeDeparture)) {
     blockers.push("active_departure");
   }
   if (readTrimmed(paths.deployPending)) {
     blockers.push("deploy_retry_pending");
   }
-  for (const name of jsonFiles(paths.ciDir, ".status")) {
+  const ci = jsonFiles(paths.ciDir, ".status");
+  if (ci === null) {
+    blockers.push("ci_dir_unreadable");
+  }
+  for (const name of ci ?? []) {
     if (["pending", "running"].includes(readTrimmed(join(paths.ciDir, name)) ?? "")) {
       blockers.push(`ci_watch:${name.slice(0, -".status".length)}`);
     }
@@ -129,7 +154,11 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
   if (ciEnabled && pushed && readText(ciStatusFile(paths, pushed)) === undefined) {
     blockers.push(`ci_watch_unrecorded:${pushed}`);
   }
-  for (const name of jsonFiles(paths.requestsDir, ".json")) {
+  const requests = jsonFiles(paths.requestsDir, ".json");
+  if (requests === null) {
+    blockers.push("requests_dir_unreadable");
+  }
+  for (const name of requests ?? []) {
     let value: unknown;
     try {
       value = (parse(readText(join(paths.requestsDir, name))) as { state?: unknown }).state;
@@ -145,7 +174,11 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
     reporters.push("event_flush_running");
   }
   let unsent = 0;
-  for (const name of jsonFiles(paths.eventsDir, ".json")) {
+  const events = jsonFiles(paths.eventsDir, ".json");
+  if (events === null) {
+    reporters.push("events_dir_unreadable");
+  }
+  for (const name of events ?? []) {
     let event: unknown;
     try {
       event = parse(readText(join(paths.eventsDir, name)));
@@ -164,9 +197,12 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
     reporters.push(`unsent_events:${unsent}`);
   }
   const gateFailed = jsonFiles(paths.gateFailedDir, "");
+  if (gateFailed === null) {
+    blockers.push("gate_failed_dir_unreadable");
+  }
   return {
     drained: blockers.length === 0 && reporters.length === 0,
-    gate_failed: gateFailed,
+    gate_failed: gateFailed ?? [],
     identity,
     identity_status: identityStatus,
     idle: blockers.length === 0,
