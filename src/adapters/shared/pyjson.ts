@@ -102,9 +102,9 @@ function dump(value: unknown, options: DumpOptions): string {
   throw new Error(`unsupported JSON value: ${typeof value}`);
 }
 
-/** json.dumps(value, sort_keys=sortKeys) for JSON-safe values. */
-export function pyJsonDumps(value: unknown, sortKeys = false): string {
-  return dump(value, { sortKeys });
+/** json.dumps(value, sort_keys=sortKeys) for JSON-safe values; floats only when allowed. */
+export function pyJsonDumps(value: unknown, sortKeys = false, floats = false): string {
+  return dump(value, { floats, sortKeys });
 }
 
 /** json.dumps(value, sort_keys=True) as persist() writes it: state files and receipts. */

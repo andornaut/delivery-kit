@@ -191,5 +191,4 @@ export {
   sessionStatus,
 } from "./agents.ts";
 export { channelNotification, initializeResult } from "./protocol.ts";
-export { type ResolvedRoute, resolveRouteV2, RouteError, routeHarness } from "./route.ts";
 export { DELIVERED, pendingEntries, SPOOL, spoolEvent, spoolMonitorBrief } from "./spool.ts";

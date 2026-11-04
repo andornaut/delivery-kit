@@ -7,9 +7,9 @@ import { join } from "node:path";
 
 import { type AgentEntry, roleDiagnostics } from "../adapters/claude/agents.ts";
 import { deliveredEntries } from "../adapters/claude/index.ts";
-import type { ResolvedRoute } from "../adapters/claude/route.ts";
 import { spoolDir } from "../adapters/claude/spool.ts";
 import { unavailableCollected } from "../adapters/codex/collect.ts";
+import type { ActiveScope } from "../adapters/shared/route.ts";
 import type { CollectRequest, HarnessAdapter } from "../adapters/types.ts";
 import { nativeEntry } from "./ack.ts";
 import {
@@ -51,7 +51,7 @@ function channelPending(busDir: string): Json[] {
 export function captureClaude(
   context: SnapshotContext,
   listing: readonly AgentEntry[] | null,
-  route: Extract<ResolvedRoute, { status: "active" }>,
+  route: ActiveScope,
   recipient: string,
   parents: readonly string[],
 ): Json {
@@ -117,6 +117,13 @@ function priorProcess(
   }
 }
 
+export interface CodexCaptureOptions {
+  readonly slot?: number | null;
+  readonly historyCursor?: string | null;
+  /** The active route's members, or null for a declared route that is not active. */
+  readonly routeMembers?: readonly string[] | null;
+}
+
 /**
  * Codex snapshot: the adapter's native queue inventory for each recipient, then the history,
  * question, worker and process collectors when the adapter provides them.
@@ -126,8 +133,9 @@ export async function captureCodex(
   adapter: HarnessAdapter,
   recipients: readonly string[],
   parents: readonly string[],
-  slot: number | null = null,
+  options: CodexCaptureOptions = {},
 ): Promise<Json> {
+  const slot = options.slot ?? null;
   const queues: Json = {};
   const errors: Json = {};
   const inventories = await Promise.all(
@@ -144,7 +152,8 @@ export async function captureCodex(
   });
   const manifest = processManifest(context.busDir);
   const request: CollectRequest = {
-    historyCursor: null,
+    historyCursor: options.historyCursor ?? null,
+    ...(options.routeMembers === undefined ? {} : { routeMembers: options.routeMembers }),
     parents,
     recipients,
     slot,

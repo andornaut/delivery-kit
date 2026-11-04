@@ -3,12 +3,11 @@
 import { parseArgs } from "node:util";
 
 import { listingOrNull } from "../adapters/claude/agents.ts";
-import { resolveRouteV2 } from "../adapters/claude/route.ts";
 import { unblockDir } from "../adapters/claude/spool.ts";
-import { canonicalUuid } from "../adapters/shared/ids.ts";
+import { canonicalUuid, isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
+import { type ActiveScope, readRoleRoute, routeScope } from "../adapters/shared/route.ts";
 import type { Disposition } from "../adapters/types.ts";
-import { readJson } from "../durable.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { acknowledge, ackSucceeded, DISPOSITIONS } from "../monitor/ack.ts";
@@ -31,12 +30,46 @@ interface Scope {
   readonly registry: Registry;
   readonly recipient: string;
   readonly parents: string[];
+  /**
+   * Coordinator and peers of an active Codex route; null when a declared route is not active;
+   * undefined when no route is declared, which leaves collection unscoped.
+   */
+  readonly members: readonly string[] | null | undefined;
 }
 
 class UsageError extends Error {}
 
+/** The active route's members, null when it is not active, undefined without a route. */
+function codexMembers(layout: Layout, registry: Registry): string[] | null | undefined {
+  try {
+    const route = readRoleRoute(layout);
+    if (route === null) {
+      return undefined;
+    }
+    const active = routeScope(registry, route);
+    return active === null ? null : [active.coordinator, ...active.peers];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A canonical conversation UUID registered for the active harness is used as given; anything
+ * else is a role name for the registry.
+ */
 function conversation(registry: Registry, role: string): string {
-  const id = resolveConversation(registry, role);
+  if (
+    isCanonicalUuid(role) &&
+    Object.values(registry.roles).some((record) => record.conversations[registry.harness] === role)
+  ) {
+    return role;
+  }
+  let id: string | null;
+  try {
+    id = resolveConversation(registry, role);
+  } catch (error) {
+    throw new UsageError(error instanceof Error ? error.message : String(error));
+  }
   if (id === null) {
     throw new UsageError(`${role} has no ${registry.harness} conversation`);
   }
@@ -58,29 +91,33 @@ function scope(
   if (new Set(resolvedParents).size !== resolvedParents.length) {
     throw new UsageError("duplicate parent");
   }
+  const members = registry.harness === "codex" ? codexMembers(layout, registry) : undefined;
+  // Worker parents must belong to the active route before any native call (monitor.py:141-161).
+  if (
+    registry.harness === "codex" &&
+    resolvedParents.length > 0 &&
+    (members == null || resolvedParents.some((parent) => !members.includes(parent)))
+  ) {
+    throw new UsageError("worker parents require membership in the active monitor route");
+  }
   return {
     game: gameLayout(layout, game),
     layout,
+    members,
     parents: resolvedParents,
     recipient: conversation(registry, recipient ?? MONITOR_ROLE),
     registry,
   };
 }
 
-/** The recipient must be the active route monitor. */
-function claudeRoute(
-  layout: Layout,
-  recipient: string,
-): Extract<ReturnType<typeof resolveRouteV2>, { status: "active" }> {
-  const declared = readJson(layout.routeFile) as { host_project_root?: unknown };
-  if (typeof declared.host_project_root !== "string") {
-    throw new Error("invalid monitor route schema");
+/** The recipient must be the active route monitor, resolved for the active harness now. */
+function claudeRoute(layout: Layout, registry: Registry, recipient: string): ActiveScope {
+  const route = readRoleRoute(layout);
+  const active = route === null ? null : routeScope(registry, route);
+  if (active === null || active.coordinator !== recipient) {
+    throw new Error("recipient must be the active route monitor");
   }
-  const route = resolveRouteV2(layout.routeFile, declared.host_project_root);
-  if (route.status !== "active" || route.coordinator !== recipient) {
-    throw new Error("recipient must be the active Claude route monitor");
-  }
-  return route;
+  return active;
 }
 
 /** CLI output keeps the 0.9.x key order, which sort-keys would otherwise rewrite. */
@@ -97,11 +134,11 @@ function statusMap(value: unknown, field: string): Record<string, unknown> {
   );
 }
 
-async function snapshot(io: Io, context: Scope): Promise<number> {
+async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise<number> {
   const unblock = unblockDir(context.game.busDir);
   const { parents, recipient } = context;
   if (context.registry.harness === "claude") {
-    const route = claudeRoute(context.layout, recipient);
+    const route = claudeRoute(context.layout, context.registry, recipient);
     const members = new Set([recipient, ...route.peers]);
     if (parents.some((parent) => !members.has(parent))) {
       throw new Error("parent outside active route");
@@ -134,7 +171,10 @@ async function snapshot(io: Io, context: Scope): Promise<number> {
   }
   const adapter = adapterFor(io.env, context.layout, context.game, context.registry.harness);
   const record = await locked(unblock, () =>
-    captureCodex({ busDir: context.game.busDir, unblock }, adapter, [recipient], parents),
+    captureCodex({ busDir: context.game.busDir, unblock }, adapter, [recipient], parents, {
+      historyCursor: historyCursor ?? null,
+      ...(context.members === undefined ? {} : { routeMembers: context.members }),
+    }),
   );
   const id = record.snapshot_id as string;
   const errors = record.errors as Record<string, unknown>;
@@ -146,12 +186,15 @@ async function snapshot(io: Io, context: Scope): Promise<number> {
         ["path", snapshotPath(unblock, id)],
         ["queue_ids", queue.map((entry) => entry.id)],
         ["complete", Object.keys(errors).length === 0],
-        ["harness", "codex"],
         ["history", record.history],
         ["worker_health", record.worker_health],
         ["question_state_status", statusMap(record.question_state, "status")],
+        ["collection_budget", record.collection_budget],
         ["process_health_source", record.process_health_source],
+        ["process_health_status", statusMap(record.process_health, "status")],
       ]),
+      false,
+      true,
     )}\n`,
   );
   return Object.keys(errors).length === 0 ? EXIT_OK : EXIT_INVALID;
@@ -177,9 +220,17 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
 }
 
 export const monitorSnapshot: Handler = (io, root, args) => {
-  const { values } = parseArgs({ args, options: COMMON, strict: true });
+  const { values } = parseArgs({
+    args,
+    options: { ...COMMON, "history-cursor": { type: "string" } },
+    strict: true,
+  });
   return guarded(io, () =>
-    snapshot(io, scope(root, values.game, values.recipient, values.parent ?? [])),
+    snapshot(
+      io,
+      scope(root, values.game, values.recipient, values.parent ?? []),
+      values["history-cursor"],
+    ),
   );
 };
 
@@ -219,7 +270,7 @@ export const monitorAck: Handler = (io, root, args) => {
   return guarded(io, async () => {
     const context = scope(root, values.game, values.recipient, values.parent ?? []);
     if (context.registry.harness === "claude") {
-      claudeRoute(context.layout, context.recipient);
+      claudeRoute(context.layout, context.registry, context.recipient);
     }
     const adapter = adapterFor(io.env, context.layout, context.game, context.registry.harness);
     const results = await acknowledge(adapter, unblockDir(context.game.busDir), {

@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
-import { resolveRouteV2 } from "../adapters/claude/route.ts";
 import { deliveredDir, spoolMonitorBrief } from "../adapters/claude/spool.ts";
 import { slotRequestId } from "../adapters/shared/ids.ts";
 import { digest } from "../adapters/shared/pyjson.ts";
 import { main } from "../cli.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE } from "../io.ts";
 import {
+  activeRoute,
   type ClaudeFixture,
   claudeFixture,
   GAME,
@@ -40,10 +40,7 @@ async function run(
 
 async function delivered(): Promise<{ fixture: ClaudeFixture; requestId: string }> {
   const fixture = claudeFixture();
-  const route = resolveRouteV2(fixture.layout.routeFile, fixture.game.repo);
-  if (route.status !== "active") {
-    throw new Error("fixture route must be active");
-  }
+  const route = activeRoute(fixture);
   spoolMonitorBrief(fixture.env, fixture.game.busDir, route, SLOT);
   await deliverPending(() => undefined, fixture.game.busDir, MONITOR);
   return { fixture, requestId: slotRequestId(MONITOR, SLOT) };
@@ -119,6 +116,14 @@ describe("monitor-snapshot (claude)", () => {
       status: "unavailable",
     });
     expect((await run(fixture, "monitor-snapshot")).code).toBe(EXIT_USAGE);
+  });
+
+  it("accepts a registered conversation UUID and refuses an unregistered one", async () => {
+    const { fixture } = await delivered();
+    const recipient = (id: string) =>
+      run(fixture, "monitor-snapshot", "--game", GAME, "--recipient", id);
+    expect((await recipient(MONITOR)).code).toBe(EXIT_OK);
+    expect((await recipient("00000000-0000-4000-8000-0000000000ff")).code).toBe(EXIT_USAGE);
   });
 });
 

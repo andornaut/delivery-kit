@@ -23,7 +23,6 @@ import { deliverReceipt } from "./steer.ts";
 export { BudgetClient, collectAll, unavailableCollected } from "./collect.ts";
 export { nativeQuestionsClear, questionItem } from "./guard.ts";
 export { acknowledgeEntry, historyRefs, queueEntries, queuePayload } from "./inventory.ts";
-export { resolveRoute, RouteError, type RouteScope } from "./route.ts";
 export { connectControl, RpcError } from "./rpc.ts";
 export { deliverReceipt, selectTarget } from "./steer.ts";
 

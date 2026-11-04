@@ -46,6 +46,11 @@ export interface CollectRequest {
   /** The process-health manifest; undefined disables process collection. */
   readonly processManifest?: string;
   readonly priorProcess?: unknown;
+  /**
+   * The active monitor route's coordinator and peers, or null when no active route declares
+   * them. Question and process collection never reaches outside it (monitor.py:222-236,387-398).
+   */
+  readonly routeMembers?: readonly string[] | null;
 }
 
 /** Snapshot capabilities in the 0.9.x snapshot field names. */

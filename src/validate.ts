@@ -14,7 +14,11 @@ export class ValidationError extends Error {
 export type Json = Record<string, unknown>;
 
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** Anything shaped like a UUID in either case: names must never look like one. */
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A conversation ID in the canonical lowercase form native receipts and routes compare. */
+export const CONVERSATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const SECRET_KEY_PATTERN = /secret|token|passw|api[-_]?key|credential|private[-_]?key|auth/i;
 
 export class Issues {

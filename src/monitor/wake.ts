@@ -1,25 +1,58 @@
 // Scheduled monitor wake for a due slot. The adapter follows the registry's active harness; the monitor and
 // worker parents are role names resolved through the registry. The result is the one-line JSON
 // status the runner logs, or an empty string when this project does not dispatch the slot.
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { performance } from "node:perf_hooks";
 
-import { resolveRouteV2, routeHarness } from "../adapters/claude/route.ts";
 import { spoolMonitorBrief, unblockDir } from "../adapters/claude/spool.ts";
-import { resolveRoute, type RouteScope } from "../adapters/codex/route.ts";
-import { decisionClear } from "../adapters/shared/decisions.ts";
-import { slotRequestId } from "../adapters/shared/ids.ts";
-import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
+import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
+import { SOCKET_MISSING } from "../adapters/codex/index.ts";
+import { queueEntries, queuePayload } from "../adapters/codex/inventory.ts";
+import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
+import { persistSlot, previousSlot } from "../adapters/codex/slot.ts";
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
+import { isRecord, pyJsonDumps } from "../adapters/shared/pyjson.ts";
+import {
+  type ActiveScope,
+  activeScope,
+  readRoleRoute,
+  roleConversation,
+  type RoleRoute,
+  RouteError,
+  sendRoute,
+} from "../adapters/shared/route.ts";
+import type { HarnessAdapter, Inventory } from "../adapters/types.ts";
 import { loadProjectConfig } from "../config.ts";
 import { readJson } from "../durable.ts";
+import { emitEvent } from "../events.ts";
 import type { GameLayout, Layout } from "../layout.ts";
-import { resolveConversation } from "../registry/resolve.ts";
+import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
+import { resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
-import { codexAdapter } from "./harnesses.ts";
-import { readRecord } from "./store.ts";
+import { type HealthEmit, recordHealth } from "./health.ts";
+import { reconcileSlot } from "./reconcile.ts";
+import { captureCodex } from "./snapshot.ts";
+import { type Json, locked, snapshotPath } from "./store.ts";
 
 export const MONITOR_ROLE = "monitor";
-const PRINTED = ["status", "previousStatus", "reason", "monitor_session_status"] as const;
+const PRINTED = [
+  "status",
+  "previousStatus",
+  "reason",
+  "snapshot_id",
+  "snapshot_path",
+  "history_status",
+  "worker_health_status",
+  "question_state_status",
+  "process_health_status",
+  "monitor_status",
+  "monitor_reason",
+  "recipient",
+  "backlog_slots",
+  "deferral_slots",
+  "monitor_session_status",
+] as const;
 
 function line(outcome: Readonly<Record<string, unknown>>): string {
   const printed: Record<string, unknown> = {};
@@ -31,148 +64,267 @@ function line(outcome: Readonly<Record<string, unknown>>): string {
   return pyJsonDumps(printed);
 }
 
-function reminder(slot: number, queues: Readonly<Record<string, readonly string[]>>): string {
-  const inventory = Object.entries(queues)
-    .map(([thread, ids]) => `${thread}: ${ids.length > 0 ? ids.join(",") : "none"}`)
-    .join("\n");
-  return (
-    `Scheduled monitoring review, slot ${slot}. Review recent Art, Gameplay and Tech activity ` +
-    "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies " +
-    "and dependency unblockers. Use native live steering only for confirmed unblockers. Remove an " +
-    "original only after confirmed delivery or reconciliation. Preserve unanswered questions and " +
-    "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner " +
-    "question. Report only new or unresolved blockers. This is a triage reminder, not permission " +
-    `to interrupt turns, answer questions, restart work, or duplicate deliveries.\n${inventory}`
-  );
-}
+/** A runner log line for a wake the runner defers before any helper runs. */
+export const DEFERRED_PREFIX = "bus: monitor deferred: ";
 
-async function codexWake(
-  layout: Layout,
-  game: GameLayout,
-  peers: readonly string[],
-  monitor: string,
-  slot: number,
-): Promise<string> {
-  const unblock = unblockDir(game.busDir);
-  const receipt = join(unblock, `${monitor}-${slot}.json`);
-  const previous = existsSync(receipt) ? readRecord(receipt) : undefined;
-  if (previous !== undefined) {
-    return line({
-      previousStatus: previous.status,
-      reason: previous.reason ?? null,
-      status: "deduplicated",
-    });
-  }
-  if (!decisionClear(unblock, monitor)) {
-    return line({
-      reason: "recipient-bound user-decision clearance missing, invalid or pending",
-      status: "deferred",
-    });
-  }
-  const adapter = codexAdapter(layout);
-  const recipients = [monitor, ...peers];
-  const inventories = await Promise.all(
-    recipients.map((recipient) => adapter.inventory(recipient)),
-  );
-  const queues: Record<string, string[]> = {};
-  for (const [index, recipient] of recipients.entries()) {
-    const inventory = inventories[index];
-    if (inventory?.status !== "available") {
-      return line({
-        reason: "queue inventory incomplete; inspect snapshot and retry reconciliation",
-        status: "deferred",
-      });
-    }
-    queues[recipient] = inventory.entries.map((entry) => entry.queueId);
-  }
-  const result = await adapter.deliver(
-    receipt,
-    slotRequestId(monitor, slot),
-    monitor,
-    reminder(slot, queues),
-  );
-  return line({
-    ...(result.reason === undefined ? {} : { reason: result.reason }),
-    status: result.status,
-  });
-}
+const PARENTS_INVALID =
+  "worker parents require unique canonical UUIDs in an active MONITOR_ROUTE_FILE";
+const CONNECT_MS = 25_000;
+const ROUTE_UNAVAILABLE =
+  "monitor route is unavailable or invalid; its owner must verify identities and ownership";
 
-/** Full version 1 route validation before any native call. */
-async function codexScope(
-  layout: Layout,
-  game: GameLayout,
-  monitor: string,
-  slot: number,
-): Promise<string> {
-  let scope: RouteScope;
+function socketAvailable(path: string): boolean {
   try {
-    scope = resolveRoute(game.repo, layout.routeFile);
+    return statSync(path).isSocket();
   } catch {
-    return line({
-      reason:
-        "monitor route is unavailable or invalid; its owner must verify identities and ownership",
-      status: "deferred",
-    });
+    return false;
   }
-  if (scope.status !== "active") {
-    return "";
-  }
-  if (scope.coordinator !== monitor) {
-    return line({
-      reason: "monitor route identity differs from the registry monitor",
-      status: "deferred",
-    });
-  }
-  return codexWake(layout, game, scope.peers, monitor, slot);
 }
 
+/** Serializes calls: the connection matches one outstanding response at a time. */
+class SerialClient implements RpcClient {
+  readonly #client: RpcClient;
+  #tail: Promise<unknown> = Promise.resolve();
+
+  constructor(client: RpcClient) {
+    this.#client = client;
+  }
+
+  call(method: string, params: unknown): Promise<unknown> {
+    const run = this.#tail.then(() => this.#client.call(method, params));
+    this.#tail = run.catch(() => undefined);
+    return run;
+  }
+
+  close(): void {
+    this.#client.close();
+  }
+}
+
+function unsupported(): never {
+  throw new Error("snapshot adapter only reads inventory and collectors");
+}
+
+/** Inventory and collectors over one connection, or every capability unavailable without one. */
+function snapshotAdapter(client: RpcClient | null, deadline: number): HarnessAdapter {
+  return {
+    ack: unsupported,
+    collectors: {
+      collect: (request) =>
+        client === null
+          ? Promise.resolve(unavailableCollected("collector_unavailable", request))
+          : collectAll(client, deadline, request).catch(() =>
+              unavailableCollected("collector_unavailable", request),
+            ),
+    },
+    deliver: unsupported,
+    harness: "codex",
+    async inventory(conversationId: string): Promise<Inventory> {
+      try {
+        if (client === null) {
+          throw new Error(SOCKET_MISSING);
+        }
+        const entries = await queueEntries(client, conversationId);
+        return {
+          entries: entries.map((entry) => ({
+            clientUserMessageId: entry.clientUserMessageId,
+            payload: queuePayload(entry),
+            queueId: entry.id,
+          })),
+          status: "available",
+        };
+      } catch {
+        return {
+          entries: [],
+          reason: "queue inventory unavailable or incomplete; retry snapshot before reconciliation",
+          status: "unavailable",
+        };
+      }
+    },
+    status: unsupported,
+  };
+}
+
+interface Wake {
+  readonly unblock: string;
+  readonly busDir: string;
+  readonly coordinator: string;
+  readonly peers: readonly string[];
+  readonly parents: readonly string[];
+  readonly slot: number;
+  readonly socket: string;
+  readonly emit: HealthEmit;
+}
+
+function capture(wake: Wake, client: RpcClient | null, deadline: number): Promise<Json> {
+  const recipients = [...new Set([wake.coordinator, ...wake.peers])];
+  return locked(wake.unblock, () =>
+    captureCodex(
+      { busDir: wake.busDir, unblock: wake.unblock },
+      snapshotAdapter(client, deadline),
+      recipients,
+      wake.parents,
+      { routeMembers: recipients, slot: wake.slot },
+    ),
+  );
+}
+
+/** unblock.py run: one slot under the non-blocking unblock lock, over one native connection. */
+async function runSlot(wake: Wake): Promise<Json> {
+  const { coordinator, slot, unblock } = wake;
+  const health = { emit: wake.emit, unblock };
+  if (
+    wake.parents.some((parent) => !isCanonicalUuid(parent)) ||
+    new Set(wake.parents).size !== wake.parents.length
+  ) {
+    return { reason: PARENTS_INVALID, status: "deferred" };
+  }
+  mkdirSync(unblock, { recursive: true });
+  const path = join(unblock, `${coordinator}-${slot}.json`);
+  let lock: LockHandle;
+  try {
+    lock = holdLock(join(unblock, "unblock.lock"), { nonBlocking: true });
+  } catch (error) {
+    if (error instanceof LockBusy) {
+      return { status: "busy" };
+    }
+    throw error;
+  }
+  let client: RpcClient | null = null;
+  let snapshot: Json | undefined;
+  try {
+    try {
+      if (!socketAvailable(wake.socket)) {
+        snapshot = await capture(wake, null, 0);
+        const state: Json = { reason: SOCKET_MISSING, status: "deferred" };
+        Object.assign(state, recordHealth(health, coordinator, slot, snapshot, state));
+        state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
+        return state;
+      }
+      const deadline = performance.now() + CONNECT_MS;
+      client = new SerialClient(await connectControl(deadline, wake.socket));
+      // Inventory precedes decision guards and reminder deduplication.
+      snapshot = await capture(wake, client, deadline);
+      const previous = previousSlot(path);
+      let state: Json;
+      let outcome: Json;
+      if (previous === undefined) {
+        state = await reconcileSlot(client, { coordinator, slot, unblock }, snapshot);
+        outcome = state;
+      } else {
+        state = { previousStatus: previous.status, status: "deduplicated" };
+        outcome = { ...state, reason: previous.reason ?? null };
+      }
+      Object.assign(state, recordHealth(health, coordinator, slot, snapshot, outcome));
+      state.snapshot_id = snapshot.snapshot_id;
+      state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
+      return state;
+    } catch {
+      // Never log queue contents, native error messages or transport data.
+      let state: Json;
+      const stored = existsSync(path) ? readJson(path) : undefined;
+      if (isRecord(stored)) {
+        state = stored;
+        if (state.status === "sending") {
+          state.status = "ambiguous";
+          state.reason = "send outcome unavailable; do not resend";
+        }
+      } else {
+        state = { reason: "native metadata unavailable", slot, status: "blocked" };
+      }
+      persistSlot(path, state);
+      snapshot ??= await capture(wake, null, 0);
+      Object.assign(state, recordHealth(health, coordinator, slot, snapshot, state));
+      state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
+      return state;
+    }
+  } finally {
+    client?.close();
+    lock.release();
+  }
+}
+
+/** The Codex slot: socket and parent checks, then one budgeted connection for the whole slot. */
+async function codexSlot(
+  game: GameLayout,
+  scope: ActiveScope,
+  parents: readonly string[],
+  project: string,
+  slot: number,
+): Promise<string> {
+  const socket = process.env.CODEX_CONTROL_SOCKET;
+  if (socket === undefined || !isAbsolute(socket)) {
+    return `${DEFERRED_PREFIX}provide CODEX_CONTROL_SOCKET and the installed unblock helper`;
+  }
+  const state = await runSlot({
+    busDir: game.busDir,
+    coordinator: scope.coordinator,
+    emit: (kind, key, message) => emitEvent(game, { project }, kind, key, message),
+    parents,
+    peers: scope.peers,
+    slot,
+    socket,
+    unblock: unblockDir(game.busDir),
+  });
+  return line(state);
+}
+
+/**
+ * Resolve the role-name route and the worker parents through the registry as it is now. A
+ * route this runner does not host, a held route or no route returns "" before any native call.
+ */
 export async function deliverScheduledWake(
   layout: Layout,
   game: GameLayout,
   slot: number,
 ): Promise<string> {
   try {
+    let route: RoleRoute | null;
+    try {
+      route = readRoleRoute(layout);
+    } catch (error) {
+      if (error instanceof RouteError) {
+        return `${DEFERRED_PREFIX}${ROUTE_UNAVAILABLE}`;
+      }
+      throw error;
+    }
+    if (route === null) {
+      return "";
+    }
     const registry = readRegistry(layout);
-    const monitor = resolveConversation(registry, MONITOR_ROLE);
-    if (monitor === null) {
+    const send = sendRoute(registry, route, game.id);
+    if (send.status !== "active") {
+      return "";
+    }
+    const scope = activeScope(send);
+    if (scope === null) {
       return line({
         reason: "monitor has no conversation for the active harness",
         status: "deferred",
       });
     }
-    const route = readJson(layout.routeFile);
-    if (routeHarness(route) !== registry.harness) {
-      return line({
-        reason: "monitor route harness differs from the registry harness",
-        status: "deferred",
-      });
+    const config = loadProjectConfig(game.configFile);
+    const members = new Set([route.monitor, ...route.targets]);
+    const parentRoles = config.reports.workerParents.map((role) => resolveRole(registry, role));
+    if (parentRoles.some((role) => !members.has(role))) {
+      return `${DEFERRED_PREFIX}workerParents requires parents in the active monitor route`;
     }
-    if (registry.harness === "codex") {
-      return await codexScope(layout, game, monitor, slot);
-    }
-    const resolved = resolveRouteV2(layout.routeFile, game.repo);
-    if (resolved.status !== "active") {
-      return "";
-    }
-    if (resolved.coordinator !== monitor) {
-      return line({
-        reason: "monitor route identity differs from the registry monitor",
-        status: "deferred",
-      });
-    }
-    const parents = loadProjectConfig(game.configFile).reports.workerParents.map((role) =>
-      resolveConversation(registry, role),
-    );
+    const parents = parentRoles.map((role) => roleConversation(registry, role));
     if (parents.some((parent) => parent === null)) {
       return line({
         reason: "worker parents require conversations for the active harness",
         status: "deferred",
       });
     }
+    const unique = [...new Set(parents as string[])];
+    if (registry.harness === "codex") {
+      return await codexSlot(game, scope, unique, config.reports.project, slot);
+    }
     return line(
-      spoolMonitorBrief(process.env, game.busDir, resolved, slot, [
-        ...new Set(parents as string[]),
-      ]) as unknown as Record<string, unknown>,
+      spoolMonitorBrief(process.env, game.busDir, scope, slot, unique) as unknown as Record<
+        string,
+        unknown
+      >,
     );
   } catch {
     return line({ reason: "monitor route or state unavailable", status: "blocked" });

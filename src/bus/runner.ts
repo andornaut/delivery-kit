@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { unfinishedCi, watchCi } from "../ci.ts";
 import { deployAfterCi } from "../deploy.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import { deliverScheduledWake } from "../monitor/wake.ts";
+import { DEFERRED_PREFIX, deliverScheduledWake } from "../monitor/wake.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
 import { holdLegacyLocks, legacyBusDir } from "./legacy.ts";
@@ -53,9 +53,14 @@ export async function observe(context: BusContext, after: number, now: number): 
   const wake = currentMinuteSlot(layout.config.timezone, layout.config.wakeMinutes, after, now);
   if (wake !== undefined) {
     try {
-      context.log(
-        `bus: scheduled monitor ${wake}: ${await deliverScheduledWake(layout, context.game, wake)}`,
-      );
+      // "" means this runner does not dispatch the slot; a deferral is its own line.
+      const outcome = await deliverScheduledWake(layout, context.game, wake);
+      if (outcome.startsWith(DEFERRED_PREFIX)) {
+        context.log(outcome);
+        process.stderr.write(`${outcome}\n`);
+      } else if (outcome !== "") {
+        context.log(`bus: scheduled monitor ${wake}: ${outcome}`);
+      }
     } catch (error) {
       context.log(
         `bus: scheduled monitor ${wake} unavailable (${String(error)}); no delivery claimed`,

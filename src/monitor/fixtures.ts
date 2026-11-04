@@ -3,8 +3,9 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { type ActiveScope, readRoleRoute, routeScope } from "../adapters/shared/route.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
-import { createRegistry, type Registry } from "../registry/index.ts";
+import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
 import { CLAUDE_GAME_DEV, CLAUDE_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 
 export const MONITOR = CLAUDE_GAME_DEV;
@@ -24,21 +25,14 @@ export interface ClaudeFixture {
   clear(state?: string): void;
 }
 
-export function routeValue(
-  hostRoot: string,
-  change: Record<string, unknown> = {},
-): Record<string, unknown> {
+/** A role-name route hosted by GAME; HELD has no role, so only the Archie tech target resolves. */
+export function routeValue(change: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    harness: "claude",
-    host_project_root: hostRoot,
-    monitor: { name: "game-dev", ownership: "active", session_id: MONITOR },
+    host: GAME,
+    monitor: "game-dev",
+    schema: 1,
     state: "active",
-    targets: [
-      { name: "Archie tech", ownership: "active", session_id: TECH },
-      { name: "Archie tech", ownership: "active", session_id: TECH },
-      { name: "Chibi tech", ownership: "held", session_id: HELD },
-    ],
-    version: 2,
+    targets: ["archies-dog-walks/tech", "chibis-way-home/tech"],
     ...change,
   };
 }
@@ -86,7 +80,7 @@ export function claudeFixture(): ClaudeFixture {
     game,
     layout,
     route(change = {}) {
-      const value = routeValue(game.repo, change);
+      const value = routeValue(change);
       mkdirSync(layout.varDir, { recursive: true });
       writeFileSync(layout.routeFile, JSON.stringify(value));
       return value;
@@ -97,4 +91,14 @@ export function claudeFixture(): ClaudeFixture {
   fixture.agents([idle(), idle(TECH)]);
   fixture.clear();
   return fixture;
+}
+
+/** The fixture route resolved through the fixture registry, as a send resolves it. */
+export function activeRoute(fixture: ClaudeFixture): ActiveScope {
+  const route = readRoleRoute(fixture.layout);
+  const scope = route === null ? null : routeScope(readRegistry(fixture.layout), route);
+  if (scope === null) {
+    throw new Error("fixture route must be active");
+  }
+  return scope;
 }

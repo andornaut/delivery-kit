@@ -30,6 +30,14 @@ export interface AckResult {
   readonly state: string;
 }
 
+const NATIVE_OUTCOMES: ReadonlySet<string> = new Set([
+  "ambiguous",
+  "changed_payload",
+  "confirmed_absent",
+  "deleted",
+  "not_deleted",
+]);
+
 export const DISPOSITIONS: readonly Disposition[] = ["handled", "retained", "superseded"];
 
 /** Exit nonzero unless every item ended deleted, confirmed absent or retained. */
@@ -174,8 +182,10 @@ async function acknowledgeOne(
         disposition,
         reason,
       );
-      state =
-        receipt.status === "accepted"
+      // An adapter that knows the exact native outcome reports it as the reason.
+      state = NATIVE_OUTCOMES.has(receipt.reason ?? "")
+        ? (receipt.reason as string)
+        : receipt.status === "accepted"
           ? "deleted"
           : receipt.status === "unchanged"
             ? "confirmed_absent"

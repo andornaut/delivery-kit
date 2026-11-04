@@ -112,10 +112,18 @@ function boundQuestions(owner: string, value: Json): void {
 async function questionState(
   client: RpcClient,
   unblockDir: string,
-  recipients: readonly string[],
+  members: ReadonlySet<string> | null,
+  requested: readonly string[],
 ): Promise<Json> {
+  const outside: Json = {};
+  for (const recipient of requested) {
+    if (members !== null && !members.has(recipient)) {
+      outside[recipient] = questionUnavailable("question_recipient_outside_active_route");
+    }
+  }
+  const recipients = requested.filter((recipient) => !Object.hasOwn(outside, recipient));
   if (recipients.length === 0) {
-    return {};
+    return outside;
   }
   const decisions = Object.fromEntries(
     recipients.map((recipient) => [recipient, decisionRecord(unblockDir, recipient)]),
@@ -140,7 +148,9 @@ async function questionState(
     boundQuestions(recipient, chosen);
     result[recipient] = chosen;
   }
-  return result;
+  return Object.fromEntries(
+    requested.map((recipient) => [recipient, outside[recipient] ?? result[recipient]]),
+  );
 }
 
 /** Collect every snapshot capability over `client`, whose own deadline is `deadline`. */
@@ -157,9 +167,13 @@ export async function collectAll(
     history[recipient] = await historyRefs(client, recipient, request.historyCursor);
   }
   const shared = new BudgetClient(client, deadline - RESERVE_MS);
-  const questions = await questionState(shared, request.unblockDir, recipients);
+  // An undeclared scope (undefined) is unrestricted; a declared invalid route (null) allows none.
+  const members = request.routeMembers === undefined ? null : new Set(request.routeMembers ?? []);
+  const questions = await questionState(shared, request.unblockDir, members, recipients);
   const workers = request.parents.length === 0 ? {} : await workerHealth(shared, request.parents);
-  const allowed = [...new Set([...recipients, ...request.parents])];
+  const allowed = [...new Set([...recipients, ...request.parents])].filter(
+    (id) => members === null || members.has(id),
+  );
   const [processes, source] = await processHealth(
     shared,
     request.processManifest,

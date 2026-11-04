@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it, type Mock, vi } from "vitest";
 
@@ -17,7 +17,7 @@ import {
 } from "./events.ts";
 import { type GameLayout, gameLayout, loadLayout } from "./layout.ts";
 import { holdLock } from "./lock.ts";
-import { createRegistry, type Registry } from "./registry/index.ts";
+import { createRegistry, type Registry, updateRegistry } from "./registry/index.ts";
 import { CLAUDE_GAME_DEV, makeFixture, registryInput } from "./testFixtures.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -197,5 +197,41 @@ describe("flushEventsWith", () => {
     const text = readFileSync(join(directory, `${id}.json`), "utf8");
     expect(text).toContain(`"created": ${created},`);
     expect(text).toContain('"sent": true');
+  });
+
+  it("resolves the harness and recipient again for each flush, without a restart", async () => {
+    const game = setup();
+    const root = resolve(game.stateDir, "..", "..", "..");
+    const layout = loadLayout(root);
+    const codexMonitor = "00000000-0000-4000-8000-000000000004";
+    updateRegistry(layout, 1, (draft) => {
+      draft.roles["game-dev"]!.conversations.codex = codexMonitor;
+    });
+    writeFileSync(
+      layout.routeFile,
+      JSON.stringify({
+        host: "archies-dog-walks",
+        monitor: "game-dev",
+        schema: 1,
+        state: "active",
+        targets: ["archies-dog-walks/tech"],
+      }),
+    );
+    const claude = mockAdapter([]);
+    const codex = mockAdapter([]);
+    const adapters = { claude: () => claude, codex: () => codex };
+    emitEvent(game, OPTIONS, "push", "one", "first");
+    await flushEventsWith(adapters, game);
+    updateRegistry(layout, 2, (draft) => {
+      draft.harness = "codex";
+    });
+    emitEvent(game, OPTIONS, "push", "two", "second");
+    await flushEventsWith(adapters, game);
+    expect(claude.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
+      [CLAUDE_GAME_DEV, expect.stringContaining("first")],
+    ]);
+    expect(codex.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
+      [codexMonitor, expect.stringContaining("second")],
+    ]);
   });
 });
