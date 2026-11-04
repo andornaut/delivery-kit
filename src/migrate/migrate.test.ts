@@ -613,7 +613,30 @@ describe("migrate route", () => {
     writeRoute({ monitor_thread_id: id(32), state: "active", targets: [], version: 3 });
     expect((await run(tree, "--dry-run")).err).toContain("version must be 1 or 2");
     writeRoute({ monitor_thread_id: id(32), state: "paused", targets: [], version: 1 });
-    expect((await run(tree, "--dry-run")).err).toContain("/state");
+    expect((await run(tree, "--dry-run")).err).toContain("invalid monitor route schema");
+  });
+
+  it("stops on an active route with no targets", async () => {
+    writeRoute({ monitor_thread_id: id(32), state: "active", targets: [], version: 1 });
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain("an active route needs targets distinct from its monitor");
+    expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
+    expect(existsSync(join(tree.fixture.root, "var", "registry.json"))).toBe(false);
+  });
+
+  it("stops on an active route that lists its monitor as a target", async () => {
+    // The game-dev Claude session as a target resolves to the monitor role itself.
+    writeRoute({
+      monitor_thread_id: id(32),
+      state: "active",
+      targets: [{ thread_id: id(57) }, { thread_id: id(31) }],
+      version: 1,
+    });
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain("an active route needs targets distinct from its monitor");
+    expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
   });
 
   it("maps through an existing registry and is a no-op on rerun", async () => {

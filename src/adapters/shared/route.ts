@@ -4,7 +4,7 @@
 import { existsSync } from "node:fs";
 
 import { readJson } from "../../durable.ts";
-import { type Layout, roleKeys } from "../../layout.ts";
+import { type GameDevConfig, type Layout, roleKeys } from "../../layout.ts";
 import type { Harness, Registry } from "../../registry/schema.ts";
 import { isRecord } from "./pyjson.ts";
 
@@ -26,25 +26,16 @@ export class RouteError extends Error {
 
 const ROUTE_KEYS = ["host", "monitor", "schema", "state", "targets"];
 
-/** Read and validate var/route.json against config.json; null when no route is declared. */
-export function readRoleRoute(layout: Layout): RoleRoute | null {
-  if (!existsSync(layout.routeFile)) {
-    return null;
-  }
-  let value: unknown;
-  try {
-    value = readJson(layout.routeFile);
-  } catch {
-    throw new RouteError("monitor route is unreadable");
-  }
-  const roles = new Set(roleKeys(layout.config));
+/** Validate a schema 1 route against config.json; throws RouteError when it is not one. */
+export function validateRoleRoute(config: GameDevConfig, value: unknown): RoleRoute {
+  const roles = new Set(roleKeys(config));
   if (
     !isRecord(value) ||
     Object.keys(value).sort().join() !== ROUTE_KEYS.join() ||
     value.schema !== 1 ||
     (value.state !== "active" && value.state !== "held") ||
     typeof value.host !== "string" ||
-    !Object.hasOwn(layout.config.games, value.host) ||
+    !Object.hasOwn(config.games, value.host) ||
     typeof value.monitor !== "string" ||
     !roles.has(value.monitor) ||
     !Array.isArray(value.targets)
@@ -69,6 +60,20 @@ export function readRoleRoute(layout: Layout): RoleRoute | null {
     state: value.state,
     targets: names,
   };
+}
+
+/** Read and validate var/route.json against config.json; null when no route is declared. */
+export function readRoleRoute(layout: Layout): RoleRoute | null {
+  if (!existsSync(layout.routeFile)) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = readJson(layout.routeFile);
+  } catch {
+    throw new RouteError("monitor route is unreadable");
+  }
+  return validateRoleRoute(layout.config, value);
 }
 
 export interface RouteEndpoint {

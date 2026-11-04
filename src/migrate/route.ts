@@ -1,8 +1,8 @@
 // CLEANUP (added 2026-11-03): remove with src/migrate/ at convergence (see tree.ts).
 //
 // The 0.x monitor route lives in the route host game's .claude/monitor/route.json; 1.x reads the
-// fixed var/route.json in the role-name schema (routeSchema.ts). The host is the one game that
-// has the file, and the route's own host_project_root must name that game. Each conversation ID
+// fixed var/route.json in the role-name schema, checked with the runtime route validator. The
+// host is the one game that has the file, and its host_project_root must name that game. Each conversation ID
 // in the 0.x route (version 1 monitor_thread_id and targets[].thread_id, or version 2
 // monitor.session_id and targets[].session_id) maps through the registry's conversations to
 // exactly one role. The write follows the tree rules: hashed, durable, marked with the source
@@ -10,11 +10,11 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { type RoleRoute, validateRoleRoute } from "../adapters/shared/route.ts";
 import { readJsonIfExists, writeDurable, writeJsonDurable } from "../durable.ts";
 import { gameLayout, type Layout } from "../layout.ts";
 import type { RoleRecord } from "../registry/schema.ts";
 import type { MigrationMarker } from "./marker.ts";
-import { type RouteV1, validateRoute } from "./routeSchema.ts";
 import { hashFile } from "./tree.ts";
 
 export interface RoutePlan {
@@ -27,7 +27,7 @@ export interface RoutePlan {
   readonly mode: number;
   readonly size: number;
   /** The converted var/route.json, for a copy. */
-  readonly route?: RouteV1;
+  readonly route?: RoleRoute;
 }
 
 export const ROUTE_MARKER = "route.migrated.json";
@@ -101,7 +101,7 @@ export function convertRoute(
   host: string,
   source: Record<string, unknown>,
   problems: string[],
-): RouteV1 | undefined {
+): RoleRoute | undefined {
   const ids = sourceIds(source);
   if (typeof ids === "string") {
     problems.push(`route: ${ids}`);
@@ -141,7 +141,7 @@ export function convertRoute(
     targets: [...new Set(targets as string[])],
   };
   try {
-    return validateRoute(layout.config, route);
+    return validateRoleRoute(layout.config, route);
   } catch (error) {
     problems.push(`route: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
