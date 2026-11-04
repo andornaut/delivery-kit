@@ -1,5 +1,5 @@
-// Child processes for the bus. Only git, docker, gh, flock and the game's own Wrangler
-// (run by this Node binary from the game's node_modules) may be spawned.
+// Child processes for the bus. Only git, docker, gh and the game's own Wrangler (run by this
+// Node binary from the game's node_modules) may be spawned; locks spawn flock in lock.ts.
 import { spawn } from "node:child_process";
 import { closeSync, constants, openSync } from "node:fs";
 
@@ -24,7 +24,7 @@ export interface ExecResult {
 export type Exec = (spec: ExecSpec) => Promise<ExecResult>;
 
 export const WRANGLER_ENTRY = "node_modules/wrangler/bin/wrangler.js";
-const ALLOWED = new Set(["docker", "flock", "gh", "git"]);
+const ALLOWED = new Set(["docker", "gh", "git"]);
 
 export class ExecRefused extends Error {
   constructor(command: string) {
