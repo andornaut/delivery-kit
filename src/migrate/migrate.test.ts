@@ -1,4 +1,5 @@
 // CLEANUP (added 2026-11-03): remove with src/migrate/ at convergence (see tree.ts).
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -9,6 +10,7 @@ import {
   readlinkSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -136,7 +138,19 @@ function buildTree(): Tree {
 
   writeJson(join(monitor, "current-state.json"), { slot: "20" });
   const route = join(base, ARCHIE, ".claude", "monitor", "route.json");
-  writeJson(route, { host_project_root: join(base, ARCHIE), state: "active", version: 1 });
+  // A version 1 Codex route: the game-dev monitor, Archie Tech and art-kit by Codex thread ID,
+  // with Archie Tech also listed by its Claude session ID.
+  writeJson(route, {
+    host_project_root: join(base, ARCHIE),
+    monitor_thread_id: id(32),
+    state: "active",
+    targets: [
+      { ownership: "active", thread_id: id(57) },
+      { ownership: "held", thread_id: id(12) },
+      { ownership: "active", thread_id: id(52) },
+    ],
+    version: 1,
+  });
   chmodSync(route, 0o600);
   writeJson(join(monitor, "acks/one.json"), { ack: true });
   put(join(monitor, "delivery-kit/0123abc/README.md"), "snapshot\n");
@@ -457,7 +471,14 @@ describe("migrate", () => {
     }
     expect(readFileSync(tree.libraries, "utf8")).toBe(before);
 
-    expect(readFileSync(layout.routeFile, "utf8")).toBe(readFileSync(tree.route, "utf8"));
+    expect(JSON.parse(readFileSync(layout.routeFile, "utf8"))).toEqual({
+      host: ARCHIE,
+      monitor: "game-dev",
+      schema: 1,
+      state: "active",
+      targets: [`${ARCHIE}/tech`, "art-kit"],
+    });
+    expect(readFileSync(layout.routeFile, "utf8")).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
     expect(statSync(layout.routeFile).mode & 0o777).toBe(0o600);
     expect(
       JSON.parse(readFileSync(join(layout.varDir, "route.migrated.json"), "utf8")),
@@ -465,6 +486,7 @@ describe("migrate", () => {
       entries: 1,
       schema: 1,
       source: tree.route,
+      sourceDigest: createHash("sha256").update(readFileSync(tree.route)).digest("hex"),
       target: layout.routeFile,
       unit: "route",
     });
@@ -525,6 +547,93 @@ describe("migrate", () => {
 });
 
 describe("migrate route", () => {
+  const writeRoute = (value: Record<string, unknown>): void =>
+    writeJson(tree.route, { host_project_root: join(tree.fixture.base, ARCHIE), ...value });
+
+  it("converts a version 2 Claude route by session ID and keeps a held state", async () => {
+    writeRoute({
+      monitor: { name: "monitor", ownership: "active", session_id: id(31) },
+      state: "held",
+      targets: [
+        { name: "Chibi tech", ownership: "active", session_id: id(62) },
+        { name: "kit", ownership: "held", session_id: id(21) },
+      ],
+      version: 2,
+    });
+    const result = await run(tree);
+    expect(result.err).toBe("");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(readFileSync(join(tree.fixture.root, "var", "route.json"), "utf8"))).toEqual({
+      host: ARCHIE,
+      monitor: "game-dev",
+      schema: 1,
+      state: "held",
+      targets: [`${CHIBI}/tech`, "delivery-kit"],
+    });
+  });
+
+  it("stops before any write when an ID maps to no role, listing every one", async () => {
+    writeRoute({
+      monitor_thread_id: id(32),
+      state: "active",
+      targets: [{ thread_id: id(800) }, { thread_id: id(57) }, { thread_id: id(801) }],
+      version: 1,
+    });
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain(`map to no registry role: ${id(800)}, ${id(801)}`);
+    expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
+    expect(existsSync(join(tree.fixture.root, "var", "registry.json"))).toBe(false);
+    expect(writable(tree.route)).toBe(true);
+  });
+
+  it("stops when an ID belongs to more than one role", async () => {
+    const libraries = JSON.parse(readFileSync(tree.libraries, "utf8")) as {
+      libraries: Record<string, { providers: { claude: { session_id: string } } }>;
+    };
+    const gameKit = libraries.libraries["game-kit"];
+    if (gameKit === undefined) {
+      throw new Error("fixture has no game-kit library");
+    }
+    gameKit.providers.claude.session_id = id(11);
+    writeJson(tree.libraries, libraries);
+    writeRoute({
+      monitor_thread_id: id(32),
+      state: "active",
+      targets: [{ thread_id: id(11) }],
+      version: 1,
+    });
+    const result = await run(tree);
+    expect(result.status).toBe(1);
+    expect(result.err).toContain(`more than one registry role: ${id(11)} (art-kit, game-kit)`);
+    expect(existsSync(join(tree.fixture.root, "var", "route.json"))).toBe(false);
+  });
+
+  it("stops on a route of an unknown version or state", async () => {
+    writeRoute({ monitor_thread_id: id(32), state: "active", targets: [], version: 3 });
+    expect((await run(tree, "--dry-run")).err).toContain("version must be 1 or 2");
+    writeRoute({ monitor_thread_id: id(32), state: "paused", targets: [], version: 1 });
+    expect((await run(tree, "--dry-run")).err).toContain("/state");
+  });
+
+  it("maps through an existing registry and is a no-op on rerun", async () => {
+    const source = readFileSync(tree.route, "utf8");
+    unlinkSync(tree.route);
+    expect((await run(tree)).out).toContain("route: no game has");
+    put(tree.route, source);
+    const routeFile = join(tree.fixture.root, "var", "route.json");
+    const converted = await run(tree);
+    expect(converted.err).toBe("");
+    expect(converted.out).toContain("exists; not rebuilt");
+    expect(JSON.parse(readFileSync(routeFile, "utf8"))).toMatchObject({ monitor: "game-dev" });
+    const written = readFileSync(routeFile, "utf8");
+    const rerun = await run(tree);
+    expect(rerun.err).toBe("");
+    expect(rerun.status).toBe(0);
+    expect(rerun.out).toContain("route: already migrated");
+    expect(readFileSync(routeFile, "utf8")).toBe(written);
+  });
+
   it("stops when the route changed after migration", async () => {
     expect((await run(tree)).status).toBe(0);
     chmodSync(tree.route, 0o600);

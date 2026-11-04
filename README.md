@@ -229,8 +229,11 @@ npx delivery-kit migrate --harness claude
   block: they are copied and listed as "Tech-owned records, copied, not acted on". Legacy scripts,
   `bus.conf`, 0.x snapshots, `__pycache__` and `npm-cache` are not copied.
 - **Runner log:** `runner.log`, or Chibi's `codex-bus.log`, moves to `var/games/<g>/bus/runner.log`.
-- **Route:** the route host game's `.claude/monitor/route.json` is copied to `var/route.json` when
-  its `host_project_root` names that game.
+- **Route:** the route host game's `.claude/monitor/route.json`, whose `host_project_root` must name
+  that game, becomes `var/route.json` in the role-name schema
+  (`{"schema":1,"state","host","monitor","targets"}`). Each version 1 `monitor_thread_id` and
+  `targets[].thread_id`, or version 2 `session_id`, maps through the registry's conversations to
+  one role; an ID that maps to no role or to several stops the migration and is listed.
 - **Markers:** `var/games/<g>/migrated.json`, `var/game-dev.migrated.json` and
   `var/route.migrated.json` record the source digest. A matching marker makes a rerun a no-op; a
   changed source, or a target without a marker, stops and reports. A leftover staging directory is

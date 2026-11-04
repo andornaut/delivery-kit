@@ -10,8 +10,8 @@ import { holdExistingLock } from "../bus/locks.ts";
 import { fsyncDirectory, readJsonIfExists, writeDurable, writeJsonDurable } from "../durable.ts";
 import { gameLayout, type Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import { type Harness, validateRegistry } from "../registry/schema.ts";
-import { createRegistry } from "../registry/store.ts";
+import { type Harness, type Registry, validateRegistry } from "../registry/schema.ts";
+import { createRegistry, readRegistry } from "../registry/store.ts";
 import { isMarker, type MigrationMarker } from "./marker.ts";
 import { buildRegistry, type BuiltRegistry, type RegistrySources } from "./registryBuild.ts";
 import {
@@ -356,6 +356,26 @@ function prepareRegistry(
   }
 }
 
+/** The roles the route maps through: the registry being built, else the existing one. */
+function registryRoles(
+  layout: Layout,
+  built: BuiltRegistry | undefined,
+  problems: string[],
+): Registry["roles"] | undefined {
+  if (built !== undefined) {
+    return built.registry.roles;
+  }
+  if (!exists(layout.registryFile)) {
+    return undefined;
+  }
+  try {
+    return readRegistry(layout).roles;
+  } catch (error) {
+    problems.push(`route: ${message(error)}`);
+    return undefined;
+  }
+}
+
 /** Run the migration. Returns 0 on success or a completed dry run, 1 when it stops. */
 export function runMigration(reporter: Reporter, layout: Layout, options: MigrateOptions): number {
   const now = options.now ?? ((): Date => new Date());
@@ -385,9 +405,11 @@ export function runMigration(reporter: Reporter, layout: Layout, options: Migrat
     const plans = units
       .map((unit) => planUnit(unit, problems))
       .filter((plan): plan is Plan => plan !== undefined);
-    const route: RoutePlan | undefined =
-      options.game === undefined ? planRoute(layout, notes, problems) : undefined;
     const built = prepareRegistry(layout, options, notes, problems);
+    const route: RoutePlan | undefined =
+      options.game === undefined
+        ? planRoute(layout, registryRoles(layout, built, problems), notes, problems)
+        : undefined;
     reporter.out(plans.map(describe).join(""));
     if (route !== undefined) {
       reporter.out(describeRoute(route));
