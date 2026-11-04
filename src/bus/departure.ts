@@ -1,12 +1,4 @@
-// One scheduled or requested trunk-based departure, under departure.lock:
-//
-// 1. Read local refs/heads/<main> in the canonical checkout.
-// 2. Skip when that HEAD is the last pushed SHA or the remote main, or its gate already failed.
-// 3. Gate it on a detached scratch worktree at HEAD (merge commits included).
-// 4. Push exactly that SHA to the remote main, never forced; a non-fast-forward is reported.
-// 5. Watch CI for that SHA; the deployment runs when CI passes.
-//
-// There is no cherry-pick, rewrite or revert: a failure is fixed forward by a new merge on main.
+// One scheduled or requested trunk-based departure under departure.lock; README "Departures" lists its steps.
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
