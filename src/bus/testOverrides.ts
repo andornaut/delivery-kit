@@ -1,9 +1,12 @@
 // Test-only clock and load overrides for the contract harness, never configuration.
 //
-// DELIVERY_KIT_TEST_CLOCK names a JSON file {epoch, realStartMs, speed}. Virtual seconds are
-// epoch + the sum of the numbers in a `clock-offsets` file beside it (one per line, re-read on
-// every reading so a harness can step time) + (Date.now() - realStartMs) * speed / 1000. Sleeps
-// shrink by the same speed. Unset, the runner uses the system clock.
+// DELIVERY_KIT_TEST_CLOCK names a JSON file {epoch, realStartMs, speed, maxRealSleep?}. Virtual
+// seconds are epoch + the sum of the numbers in a `clock-offsets` file beside it (one per line)
+// + (Date.now() - realStartMs) * speed / 1000. Both files are re-read on every reading, so a
+// harness can reset or step time. A sleep lasts until virtual time has advanced by its full
+// interval. With maxRealSleep (seconds) set, it waits in real slices of at most that length and
+// re-reads the clock after each one, so a stepped clock ends it promptly; without it, it waits
+// interval / speed real seconds. Unset, the runner uses the system clock.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -15,6 +18,7 @@ interface ClockFile {
   readonly epoch: number;
   readonly realStartMs: number;
   readonly speed: number;
+  readonly maxRealSleep?: number;
 }
 
 function offsets(path: string): number {
@@ -28,41 +32,83 @@ function offsets(path: string): number {
   }
 }
 
+function readClockFile(file: string): ClockFile {
+  const value = JSON.parse(readFileSync(file, "utf8")) as ClockFile;
+  const valid =
+    [value.epoch, value.realStartMs, value.speed].every(Number.isFinite) &&
+    value.speed > 0 &&
+    (value.maxRealSleep === undefined ||
+      (Number.isFinite(value.maxRealSleep) && value.maxRealSleep > 0));
+  if (!valid) {
+    throw new Error(
+      [
+        `${TEST_CLOCK_VARIABLE}: ${file} must hold finite epoch, realStartMs and speed,`,
+        "and a positive maxRealSleep if set",
+      ].join(" "),
+    );
+  }
+  return value;
+}
+
+function wait(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, Math.max(0, milliseconds));
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
 export function testClock(env: NodeJS.ProcessEnv): Clock | undefined {
   const file = env[TEST_CLOCK_VARIABLE];
   if (file === undefined || file === "") {
     return undefined;
   }
-  const value = JSON.parse(readFileSync(file, "utf8")) as ClockFile;
-  if (![value.epoch, value.realStartMs, value.speed].every(Number.isFinite) || value.speed <= 0) {
-    throw new Error(
-      `${TEST_CLOCK_VARIABLE}: ${file} must hold finite epoch, realStartMs and speed`,
-    );
-  }
+  let current = readClockFile(file);
   const offsetsFile = join(dirname(file), "clock-offsets");
+  // A file caught mid-rewrite keeps the last valid reading.
+  const refresh = (): ClockFile => {
+    try {
+      current = readClockFile(file);
+    } catch {
+      // Keep the previous reading.
+    }
+    return current;
+  };
+  const exact = (): number => {
+    const value = refresh();
+    return (
+      value.epoch + offsets(offsetsFile) + ((Date.now() - value.realStartMs) * value.speed) / 1000
+    );
+  };
   return {
-    now: () =>
-      Math.floor(
-        value.epoch +
-          offsets(offsetsFile) +
-          ((Date.now() - value.realStartMs) * value.speed) / 1000,
-      ),
-    sleep: (seconds, signal) =>
-      new Promise((resolve) => {
-        if (signal?.aborted === true) {
-          resolve();
+    now: () => Math.floor(exact()),
+    sleep: async (seconds, signal) => {
+      const target = exact() + Math.max(0, seconds);
+      for (;;) {
+        const remaining = target - exact();
+        if (remaining <= 0 || signal?.aborted === true) {
           return;
         }
-        const timer = setTimeout(resolve, (Math.max(0, seconds) * 1000) / value.speed);
-        signal?.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true },
+        const { maxRealSleep, speed } = current;
+        const slice = (remaining * 1000) / speed;
+        // Sequential slices are the mechanism.
+        // eslint-disable-next-line no-await-in-loop
+        await wait(
+          maxRealSleep === undefined ? slice : Math.min(slice, maxRealSleep * 1000),
+          signal,
         );
-      }),
+      }
+    },
   };
 }
 
