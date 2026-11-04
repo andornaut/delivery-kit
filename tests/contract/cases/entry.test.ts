@@ -5,7 +5,14 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { cli, execute, impl } from "../lib/adapter.ts";
-import { bashConfig, bashOnly, contract, suite, workspaces } from "../lib/cases.ts";
+import {
+  bashConfig,
+  bashOnly,
+  contract,
+  EXIT_INVALID_CONFIG,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { BASH_ROOT } from "../lib/parity.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -113,7 +120,7 @@ suite("entry", () => {
         roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
         ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
         const result = await execute(impl.checkConfig(ws));
-        expect(result.code, `${ids} ${result.stderr}`).toBe(2);
+        expect(result.code, `${ids} ${result.stderr}`).toBe(EXIT_INVALID_CONFIG);
         expect(result.stderr).toMatch(
           impl.name === "bash" ? /WORKER_PARENT_THREADS/ : /workerParents/,
         );
@@ -233,7 +240,7 @@ suite("entry", () => {
     const before = ws.list();
     for (const mode of [undefined, "workers-builds", ""]) {
       ws.config.deploy = { mode, skipPattern: "" };
-      expect((await execute(impl.checkConfig(ws))).code, String(mode)).toBe(2);
+      expect((await execute(impl.checkConfig(ws))).code, String(mode)).toBe(EXIT_INVALID_CONFIG);
     }
     for (const mode of ["none", "wrangler"]) {
       ws.config.deploy = { mode, skipPattern: "" };
@@ -250,7 +257,7 @@ suite("entry", () => {
       for (const value of [0, -1, 5, 1.5, "invalid", "2+2", "", "04"]) {
         ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24, [key]: value };
         const result = await execute(impl.checkConfig(ws));
-        expect(result.code, `${key}=${value} ${result.stderr}`).toBe(2);
+        expect(result.code, `${key}=${value} ${result.stderr}`).toBe(EXIT_INVALID_CONFIG);
       }
       for (const value of [1, 4]) {
         ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24, [key]: value };

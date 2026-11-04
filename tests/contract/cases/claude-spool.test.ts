@@ -16,7 +16,7 @@ import {
   slotRequestId,
   tick,
 } from "../lib/claude-fixture.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, ROUTE_INVALID_MESSAGE, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
@@ -192,7 +192,7 @@ suite("claude monitor slots", () => {
     expect(spooled(ws)).toHaveLength(1);
     ws.writeRoute(claudeRoute(ws, { targets: [] }));
     const invalid = await tick(ws, NEXT);
-    expect(invalid.stderr).toContain("MONITOR_ROUTE_FILE is unavailable or invalid");
+    expect(invalid.stderr).toContain(ROUTE_INVALID_MESSAGE);
     expect(spooled(ws)).toHaveLength(1);
   });
 });

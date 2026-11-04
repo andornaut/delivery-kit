@@ -16,7 +16,7 @@ import {
   eventRequestId,
   MONITOR,
 } from "../lib/claude-fixture.ts";
-import { bashConfig, contract, suite, workspaces } from "../lib/cases.ts";
+import { bashConfig, contract, EXIT_INVALID_CONFIG, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
@@ -260,8 +260,8 @@ suite("claude bus events", () => {
     claudeGame(ws, { recipient: true });
     for (const [value, expected] of [
       [MONITOR, 0],
-      ["AAAAAAAA-0000-4000-8000-000000000001", 2],
-      ["not-a-uuid", 2],
+      ["AAAAAAAA-0000-4000-8000-000000000001", EXIT_INVALID_CONFIG],
+      ["not-a-uuid", EXIT_INVALID_CONFIG],
     ] as const) {
       ws.writeRegistry({
         schema: 1,

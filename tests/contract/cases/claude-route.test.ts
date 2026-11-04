@@ -2,9 +2,9 @@
 // RouteTests). Observed through the scheduled brief and monitor-snapshot.
 import { expect } from "vitest";
 
-import { cli } from "../lib/adapter.ts";
+import { cli, impl } from "../lib/adapter.ts";
 import { ARCHIE, CHIBI, claudeGame, claudeRoute, MONITOR, tick } from "../lib/claude-fixture.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, ROUTE_INVALID_MESSAGE, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 
 const SLOT = at(20);
@@ -81,7 +81,7 @@ suite("claude route", () => {
       for (const name of ["version", "conflict", "no_active_targets"]) {
         ws.writeRoute(claudeRoute(ws, cases[name]));
         const deferred = await tick(ws, SLOT);
-        expect(deferred.stderr, name).toContain("MONITOR_ROUTE_FILE is unavailable or invalid");
+        expect(deferred.stderr, name).toContain(ROUTE_INVALID_MESSAGE);
         expect(ws.exists(`unblock/${MONITOR}-${SLOT}.json`)).toBe(false);
       }
     },
@@ -99,11 +99,26 @@ suite("claude route", () => {
       monitor_thread_id: MONITOR,
       targets: [{ thread_id: ARCHIE, ownership: "active" }],
     };
-    // A version 1 route selects the Codex path, which needs its control socket.
     ws.writeRoute(v1);
     const codex = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
-    expect(codex.code).toBe(1);
-    expect(JSON.parse(codex.stdout).reason).toContain("CODEX_CONTROL_SOCKET");
+    if (impl.name === "bash") {
+      // 0.9 selects the adapter by route version: a version 1 route takes the Codex path,
+      // which needs its control socket.
+      expect(codex.code).toBe(1);
+      expect(JSON.parse(codex.stdout).reason).toContain("CODEX_CONTROL_SOCKET");
+    } else {
+      // 1.0 selects the adapter by the registry's active harness: under a Claude registry a
+      // version 1 route is rejected or deferred and never takes the Codex path.
+      let status: unknown;
+      try {
+        status = (JSON.parse(codex.stdout) as { status?: unknown }).status;
+      } catch {
+        status = undefined;
+      }
+      expect(codex.code !== 0 || status === "deferred", codex.stdout + codex.stderr).toBe(true);
+      expect(codex.stdout + codex.stderr).not.toContain("CODEX_CONTROL_SOCKET");
+      expect(codex.stdout).not.toContain('"harness": "codex"');
+    }
     ws.writeRoute(claudeRoute(ws));
     const claude = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
     expect(claude.code).toBe(0);

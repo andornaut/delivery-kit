@@ -35,6 +35,18 @@ export const contract = it;
  */
 export const RECEIVE_TIMEOUT_LATCHES = impl.name !== "bash";
 
+/**
+ * The deferral for an unusable monitor route. 0.9 names its MONITOR_ROUTE_FILE key; 1.0 retires
+ * the key for the fixed var/route.json.
+ */
+export const ROUTE_INVALID_MESSAGE =
+  impl.name === "bash"
+    ? "MONITOR_ROUTE_FILE is unavailable or invalid"
+    : "monitor route is unavailable or invalid; its owner must verify identities and ownership";
+
+/** check-config's exit status for invalid configuration: 2 in 0.9, EXIT_INVALID (1) in 1.0. */
+export const EXIT_INVALID_CONFIG = impl.name === "bash" ? 2 : 1;
+
 export function bashConfig(
   name: string,
   body: () => Promise<void> | void,

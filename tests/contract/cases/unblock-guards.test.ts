@@ -5,7 +5,7 @@ import { rmSync } from "node:fs";
 import { afterEach, expect } from "vitest";
 
 import { startRunner } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, ROUTE_INVALID_MESSAGE, suite, workspaces } from "../lib/cases.ts";
 import { ART, type Params, TECH } from "../lib/unblock-native.ts";
 import { decide, Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
@@ -85,7 +85,7 @@ suite("unblock guards", () => {
       const m = await routed(workspace(), { monitor_thread_id: identity });
       await m.start();
       const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
-      expect(output).toContain("MONITOR_ROUTE_FILE is unavailable or invalid");
+      expect(output).toContain(ROUTE_INVALID_MESSAGE);
       expect(m.socket.connections).toEqual([]);
     }
   });

@@ -17,6 +17,12 @@ Queue-model cases: departure (eight repair approval rejections; the one-shot rep
 
 The Bash adapter runs the verified v0.9.1 release, which reaches the Codex control socket through websocket-client. A receive timeout there raises `WebSocketTimeoutException`, not `TimeoutError`, so v0.9.1 records a generic failure and keeps calling where the 0.9 unit tests (with a mocked `TimeoutError`) expected a latched `native_timeout`. Four cases assert the specified latching on Node and the observed v0.9.1 behaviour on Bash (`RECEIVE_TIMEOUT_LATCHES` in `lib/cases.ts`): child health timeout, process health timeout, question state timeout and the monitor history transport failure.
 
+Documented 1.0 decisions that change a shared case's Node expectation while Bash keeps the 0.9 behaviour (constants in `lib/cases.ts`):
+
+- Adapter selection: 1.0 chooses the monitor adapter by the registry's active harness, not the route version. claude-route "route harness selection keeps the Codex and Claude resolvers disjoint" expects a version 1 route under a Claude registry to be rejected or deferred on Node, never the Codex path.
+- Route deferral wording: `MONITOR_ROUTE_FILE` is retired for the fixed `var/route.json`, so Node expects "monitor route is unavailable or invalid; its owner must verify identities and ownership" (`ROUTE_INVALID_MESSAGE`, used by claude-route, claude-spool and unblock-guards).
+- Invalid configuration: 1.0 `check-config` exits 1 (`EXIT_INVALID_CONFIG`; 0.9 exits 2), in claude-events "the report recipient must resolve to a canonical session UUID" and in the entry validation cases (worker parents, deployment mode, resource caps). Usage errors keep exit 2 on both.
+
 fsync calls themselves are not observable from outside the process without syscall tracing (the offline image has no `strace`). Hardened cases assert the observable half of the durable primitive: replacement by rename (a new inode) and no leftover temporary files.
 
 ## Bus, entry, requests, status, events and packaging
