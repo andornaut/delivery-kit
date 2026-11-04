@@ -3,8 +3,11 @@
 set -uo pipefail
 S=$(cd "$(dirname "$0")" && pwd)
 . "$S/bus-common.sh"
-exec 5>"$BUS_DIR/runner.lock"
+# Open without truncation so a refused duplicate start leaves the holder's identity token intact.
+exec 5<>"$BUS_DIR/runner.lock"
 flock -n 5 || { echo 'bus: a runner is already active'; exit 1; }
+python3 "$S/status.py" record "$BUS_DIR" "$S/.." "$BUS_CONF" "$$" 5>&- \
+  || echo 'bus: runner identity record unavailable; status reports it unattested' >&2
 (
   exec 5>&-
   while true; do

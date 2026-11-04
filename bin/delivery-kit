@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 usage() {
-  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|resource-report|scheduled-once [--scheduled-at EPOCH]|request-once --request-id SAFE_ID|monitor-snapshot --recipient UUID [--parent UUID ...]|monitor-ack --recipient UUID --snapshot UUID --queue-id ID --disposition handled|superseded|retained [--reason REASON]'
+  echo 'usage: delivery-kit --config ABSOLUTE_FILE --state-dir ABSOLUTE_DIRECTORY [--revision SHA] run|check-config|status|resource-report|scheduled-once [--scheduled-at EPOCH]|request-once --request-id SAFE_ID|monitor-snapshot --recipient UUID [--parent UUID ...]|monitor-ack --recipient UUID --snapshot UUID --queue-id ID --disposition handled|superseded|retained [--reason REASON]'
 }
 if (( $# == 1 )) && [[ $1 == --help || $1 == help ]]; then
   usage
@@ -38,6 +38,14 @@ case "$command" in
     printf 'delivery: configuration accepted\n'
     ;;
   resource-report) (( $# == 0 )) || { usage >&2; exit 2; }; exec bash "$ROOT/libexec/resource-report.sh" ;;
+  status)
+    (( $# == 0 )) || { usage >&2; exit 2; }
+    S=$ROOT/libexec
+    . "$S/bus-common.sh"
+    ci_enabled=0
+    if [ -n "$REMOTE" ] && [ -n "$GH_SLUG" ]; then ci_enabled=1; fi
+    exec python3 "$S/status.py" report "$BUS_DIR" "$ci_enabled"
+    ;;
   request-once)
     (( $# == 2 )) && [[ $1 == --request-id ]] || { usage >&2; exit 2; }
     S=$ROOT/libexec

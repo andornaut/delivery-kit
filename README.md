@@ -946,6 +946,44 @@ removes the entry (`deleted`). Operations are durable in `STATE/unblock/acks/`; 
 interrupted removal is recorded `ambiguous` before reconciliation, and a
 disposition cannot change.
 
+### Runner identity and status
+
+After it acquires `STATE/runner.lock`, a 0.9.0 runner writes
+`STATE/runner.identity.json` with its own `pid`, `started_at` and `started_ns`
+from its clock, `VERSION`, `SOURCE_COMMIT`, configuration path, state directory and
+a start token. It also writes the token into `runner.lock`. The runner opens the
+lock without truncation, so a refused duplicate start leaves the token in place.
+
+```bash
+/path/to/snapshot/bin/delivery-kit --config /absolute/path/to/bus.conf \
+  --state-dir /absolute/path/to/bus-state status
+```
+
+`status` prints one JSON object and never reads `/proc`. It reports:
+
+- `status`: `running` or `not running`, from a non-blocking `flock` probe of
+  `runner.lock`. `loop_lock_held` comes from the same probe of `loop.lock`.
+- `identity_status`:
+  - `current`: the lock is held and its token matches the record.
+  - `stale`: a record exists but the lock is free.
+  - `unattested`: the lock is held without a matching token, for example by a
+    runner from before 0.9.0.
+  - `absent`: no record exists.
+- `idle`, with `idle_blockers`. Any of these blocks it: an active departure, a
+  pending deployment retry, a CI status of `pending` or `running`, a pushed SHA
+  with CI configured but no CI status yet, or a `pending`, `started` or
+  unreadable one-off request.
+- `drained`, which additionally requires no running event flush and no unsent
+  outbox events (`reporter_blockers`).
+- `queued_branches`.
+
+Runners before 0.9.0 use the same `STATE/runner.lock` and `STATE/loop.lock` paths
+but write no record. For them only `status`, the lock probes and the idle and
+drain fields are evidence. A probe holds a lock for an instant. Do not run
+`status` while a runner is starting, because a probe that coincides with the
+start makes that start refuse to run. A probe that coincides with an event flush
+only defers that flush to the next minute. Probing a lock changes no state file.
+
 ### Codex fields to retire
 
 Keep these working until one clean all-Claude cycle has completed on every
@@ -956,3 +994,13 @@ ambiguous receipts). Removing them is a later incompatible release:
 - `SESSION_MAP_FILE` and `SHARED_TARGETS_FILE` (replaced by version 2 route targets)
 - `CODEX_PYTHON`, `CODEX_CONTROL_SOCKET` and `CODEX_SHARED_ROLES`
 - version 1 route files, retained until then for rollback
+- `STATE/codex-bus.pid`, the loop PID written by `bus.sh`, superseded by
+  `STATE/runner.identity.json`
+
+Consumer-owned Codex state is not read on Claude paths and stays in place as
+audit until its owner retires it: Codex role maps (`SESSION_MAP_FILE` targets),
+shared-target files, `STATE/unblock/` health, decision and slot receipts keyed by
+Codex thread IDs, and any copies of older delivery scripts kept beside project
+state. A changed `REPORT_THREAD`, `REPORT_SESSION_ID` or route path takes effect
+only through the controlled idle runner replacement, because resident runners
+and detached flushers keep the values they started with.
