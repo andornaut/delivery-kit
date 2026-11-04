@@ -18,7 +18,7 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v1.0.1/delivery-kit-1.0.1.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v1.0.2/delivery-kit-1.0.2.tgz"
 }
 ```
 
@@ -47,6 +47,9 @@ directory. `--root` comes before the command.
 | `help`, `--help`, `--version`                                                                                                                              | Usage and version.                                                                                                             |
 
 - `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
+- `status --game`: an unreadable `ci/`, `events/`, `requests/` or `gate-failed/` directory is a
+  blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
+  `unreadable` with the `identity_unreadable` blocker.
 - `channel`: by default it drains every game's spool (or each `--game`) for the registry's
   `monitor` conversation and requires `harness` to be `claude`. `--monitor UUID` and repeated
   absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
@@ -61,7 +64,10 @@ directory. `--root` comes before the command.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
 read or a refused runner start, and 2 for a usage error or an unexpected failure. `run` exits 130
-on `SIGINT` and 143 on `SIGTERM`.
+on `SIGINT` and 143 on `SIGTERM`. Errors, a refused runner start and a refused request go to
+stderr prefixed `delivery-kit:`. `monitor-snapshot` and `monitor-ack` keep their JSON result on
+stdout and also name the error on stderr. `--help` is generated from each command's parser
+options, so it lists every flag a command accepts.
 
 ## Configuration
 
@@ -89,8 +95,9 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
 - `schedule`: `departures`, a non-empty list of two-digit minute strings such as `"00"`, and
   `timezone`, which defaults to the `config.json` timezone.
 - `gate`: `image`, `install` and ordered `steps` (`name`, `run`). Any image and install command
-  are accepted. An empty `install` skips the install step, and an empty `steps` list gates with no
-  checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
+  are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`; a departure names
+  the tool an image lacks. An empty `install` skips the install step, and an empty `steps` list
+  gates with no checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
   rejected.
 - `resources`: `cpus` (1 to 4) and `loadLimit` (0 to 24). A departure starts only below
   `loadLimit`, so 0 holds every departure.
@@ -161,7 +168,8 @@ Output is one JSON line:
 }
 ```
 
-It exits 0 when ready and 1 when not. Run it before flipping `harness`.
+It exits 0 when ready and 1 when not, including when the registry is missing or the layout
+cannot be read. Run it before flipping `harness`.
 
 ## Monitor route
 
@@ -212,7 +220,6 @@ All mutable state lives in game-dev's ignored `var/`:
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
   `events/`, `requests/`, `unblock/` (the delivery spool), `runner.json`, `runner.identity.json`,
   `resources.log` and `runner.log`.
-- `games/<g>/process-health.json`: the optional owner-registered process manifest.
 - `games/<g>/migrated.json`: the migration marker.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
@@ -259,7 +266,8 @@ Delivery is trunk-based. Tech merges each reviewed feature branch into the game'
 a real merge or a fast-forward, and never pushes. There is no queue, admission, batch merge,
 cherry-pick, rewrite or revert. Each scheduled or requested departure, under `departure.lock`:
 
-1. Retries a pending deployment whose CI has passed.
+1. Restarts the CI watch of the pending deployment or the last push when it timed out or lost
+   GitHub authentication, then retries a pending deployment whose CI has passed.
 2. Reads `refs/heads/main` in the canonical checkout and the remote `main` with `git ls-remote`.
 3. Skips when HEAD is the remote `main` or the last pushed SHA, or has a `gate-failed/<sha>`
    record. Nothing new means nothing departs.
@@ -274,14 +282,21 @@ cherry-pick, rewrite or revert. Each scheduled or requested departure, under `de
 The runner never fetches, checks out or moves a ref in the canonical checkout. Its only write there
 is the push of an exact SHA (and the scratch worktree's Git metadata).
 
-- **Fix forward:** a red gate leaves `main` unpushed and records `gate-failed/<sha>`, so that SHA
-  is never gated again; the next departure runs once Tech merges a fix. Red CI or a failed
-  deployment is fixed the same way, with no automatic CI rerun.
+- **Fix forward:** a red gate (install or a gate step exiting non-zero inside the running
+  container) leaves `main` unpushed and records `gate-failed/<sha>`, so that SHA is never gated
+  again; the next departure runs once Tech merges a fix. Red CI or a failed deployment is fixed the
+  same way, with no automatic CI rerun.
+- **Gate infrastructure:** when Docker is unavailable, the image cannot be pulled, the container
+  cannot be created or started, the network cannot be detached, more than loopback remains, a
+  `docker cp` fails or the worktree fingerprint changes, the departure reports `blocked-gate` with
+  the cause, writes no `gate-failed` record and gates the same SHA again at the next departure.
 - **CI:** polls the check runs of the exact pushed commit through the existing `gh` login, or the
-  public GitHub API when `gh` is not installed. The latest run of each name counts. Any completed
-  run that is not `success`, `neutral` or `skipped` fails it; it passes once every
-  `requiredNames` check exists and every run has completed. A watch that reaches `timeoutSeconds`
-  reports the status as unknown.
+  public GitHub API (User-Agent `delivery-kit`) when `gh` is not installed. The latest run of each
+  name counts. Any completed run that is not `success`, `neutral` or `skipped` fails it; it passes
+  once every `requiredNames` check exists and every run has completed. A watch that reaches
+  `timeoutSeconds` reports the status as unknown (`ci_timeout`), and a refused GitHub
+  authentication stops the watch with `ci_auth_failed`. The next departure restarts either watch,
+  so a pending deployment still runs once CI passes.
 - **Deployment:** with `mode` `wrangler` and a range that needs it, the push records
   `deploy-pending` with its worktree, superseding an older pending deployment. When CI passes and
   the remote `main` is still that SHA, it runs `node_modules/wrangler/bin/wrangler.js deploy
@@ -302,8 +317,8 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
   group and `--cpus` from `resources.cpus`;
 - binds the worktree read-only at `/src` (`--mount type=bind,...,readonly`) and the npm cache
   volume at `/var/tmp` (`npm_config_cache=/var/tmp/npm`), and sets `WORKERS_CI_COMMIT_SHA`;
-- copies `/src` without `.git` into `/tmp/work` and checks that the copy's tree is the commit's
-  tree;
+- checks that the image has `git`, `tar`, `ls` and `tail`, then copies `/src` without `.git`
+  into `/tmp/work` and checks that the copy's tree is the commit's tree;
 - runs `install` with network, disconnects the container from every network and confirms only
   loopback remains, then runs each step in order under `sh -c` with `set -e`, logging to
   `NN-<name>.log`;
