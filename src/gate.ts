@@ -252,7 +252,10 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
     (await docker(context, ["start", name])).status !== 0 ||
     !(await copyIn(context, name, input))
   ) {
-    return failed("install", "gate container copy of the checkout does not match the departure commit");
+    return failed(
+      "install",
+      "gate container copy of the checkout does not match the departure commit",
+    );
   }
   if (settings.install !== "") {
     const log = join(input.logs, "install.log");

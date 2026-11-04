@@ -75,12 +75,10 @@ describe("channel options", () => {
     const layout = loadLayout(fixture.root);
     createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">);
     const input = new PassThrough();
-    const done = runChannel(
-      { input, write: () => undefined },
-      io(),
-      fixture.root,
-      ["--poll-seconds", "0.05"],
-    );
+    const done = runChannel({ input, write: () => undefined }, io(), fixture.root, [
+      "--poll-seconds",
+      "0.05",
+    ]);
     input.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     await new Promise((resolve) => setTimeout(resolve, 200));
     input.end();
