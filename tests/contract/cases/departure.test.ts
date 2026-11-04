@@ -405,7 +405,8 @@ suite("departure", () => {
     // Let the departure itself finish; only the detached watcher should remain.
     await runner.until(
       () =>
-        runner.output().stdout.includes("landed bus/feature") && ws.read("active-departure") === "",
+        runner.output().stdout.includes(QUEUE_MODEL ? "landed bus/feature" : `pushed ${SHA}`) &&
+        ws.read("active-departure") === "",
     );
     await runner.terminateLeader();
     await sleep(300);
