@@ -50,6 +50,19 @@ describe("check-config", () => {
     expect(result.err).toContain("no registered role or duty named chibis-way-home/tech");
   });
 
+  it("names workerParents when parents share a conversation", async () => {
+    const { base, root } = makeFixture();
+    withRegistry(root);
+    const config = projectConfig("Chibi");
+    (config.reports as Record<string, unknown>).workerParents = ["monitor", "game-dev"];
+    writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
+    const result = await run(root, "check-config");
+    expect(result.code).toBe(EXIT_INVALID);
+    expect(result.err).toContain(
+      "/reports/workerParents/1: game-dev resolves to the same conversation as workerParents/0",
+    );
+  });
+
   it("rejects a project name that differs from config.json and limits checks with --game", async () => {
     const { base, root } = makeFixture();
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));

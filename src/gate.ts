@@ -13,7 +13,7 @@ import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BusContext } from "./bus/context.ts";
-import { type ExecResult, git } from "./bus/exec.ts";
+import { assertNotInterrupted, type ExecResult, git, Interrupted } from "./bus/exec.ts";
 import type { GateStep } from "./config.ts";
 import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
 
@@ -122,18 +122,20 @@ export function createArgs(context: BusContext, name: string, input: GateInput):
   ];
 }
 
-function docker(
+async function docker(
   context: BusContext,
   args: readonly string[],
   logFile?: string,
   timeoutMs?: number,
 ): Promise<ExecResult> {
-  return context.exec({
+  const result = await context.exec({
     args,
     command: "docker",
     ...(logFile === undefined ? {} : { logFile }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
+  // A gate stopped by the runner's shutdown is not a gate failure; removal still runs.
+  return args[0] === "rm" ? result : assertNotInterrupted(`docker ${args[0] ?? ""}`, result);
 }
 
 /**
@@ -301,6 +303,9 @@ export async function runGate(
     // Logs are copied out whatever the outcome; dist/ only from a passing, verified gate.
     await copyOut(context, name, input, outcome.ok);
   } catch (error) {
+    if (error instanceof Interrupted) {
+      throw error;
+    }
     outcome = failed(
       outcome.ok ? "full-gate" : outcome.stage,
       error instanceof Error ? error.message : String(error),

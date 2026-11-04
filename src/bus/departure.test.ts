@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { deployAfterCi } from "../deploy.ts";
 import { depart, requestStore } from "./departure.ts";
+import type { Exec, ExecResult, ExecSpec } from "./exec.ts";
 import { captureRequest } from "./requests.ts";
 import {
   commitFile,
@@ -234,5 +235,56 @@ describe("deployment after CI", () => {
     expect(await depart(context)).toBe(0);
     expect(existsSync(join(context.paths.deployDir, `${second}.superseded`))).toBe(true);
     expect(readFileSync(context.paths.deployPending, "utf8").split("\n")[0]).toBe(third);
+  });
+});
+
+describe("shutdown", () => {
+  function interruptible(test: TestGame, when: (spec: ExecSpec) => boolean, result: ExecResult) {
+    const events = recordingEvents();
+    const base = fakeExec(gateDocker());
+    const exec: Exec = (spec) => (when(spec) ? Promise.resolve(result) : base(spec));
+    return { context: testContext(test, { events, exec }), events };
+  }
+  const killed: ExecResult = { signal: "SIGTERM", status: null, stderr: "", stdout: "" };
+
+  it("ends quietly when the shutdown signal kills ls-remote", async () => {
+    const test = makeGame();
+    mergeFastForward(test, "feature");
+    const { context, events } = interruptible(
+      test,
+      (spec) => spec.args.includes("ls-remote"),
+      killed,
+    );
+    expect(await depart(context)).toBe(1);
+    expect(events.list).toEqual([]);
+    expect(context.lines.at(-1)).toContain("departure stopped by shutdown");
+  });
+
+  it("still reports a genuine ls-remote failure", async () => {
+    const test = makeGame();
+    mergeFastForward(test, "feature");
+    const failure: ExecResult = {
+      status: 128,
+      stderr: "fatal: unable to access remote",
+      stdout: "",
+    };
+    const { context, events } = interruptible(
+      test,
+      (spec) => spec.args.includes("ls-remote"),
+      failure,
+    );
+    expect(await depart(context)).toBe(1);
+    expect(events.list.map(([kind]) => kind)).toEqual(["blocked-fetch"]);
+  });
+
+  it("records no gate failure when the shutdown signal stops the gate", async () => {
+    const test = makeGame();
+    const head = mergeFastForward(test, "feature");
+    const gate = (spec: ExecSpec): boolean => spec.args.at(-1)?.startsWith("set -e") === true;
+    const { context, events } = interruptible(test, gate, killed);
+    expect(await depart(context)).toBe(1);
+    expect(existsSync(join(test.game.busDir, "gate-failed", head))).toBe(false);
+    expect(events.list.map(([kind]) => kind)).toEqual(["scheduled-status", "attempt"]);
+    expect(originMain(test)).not.toBe(head);
   });
 });
