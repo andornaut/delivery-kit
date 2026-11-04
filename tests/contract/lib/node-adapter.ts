@@ -243,13 +243,6 @@ function registerUsedConversations(ws: Workspace, words: string[]): void {
       ids.add(words[index + 1]!);
     }
   });
-  if (existsSync(ws.processHealthFile)) {
-    for (const match of readFileSync(ws.processHealthFile, "utf8").matchAll(
-      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
-    )) {
-      ids.add(match[0]);
-    }
-  }
   if (ids.size) registerConversations(ws, harness, [...ids]);
 }
 

@@ -7,7 +7,7 @@
 import { performance } from "node:perf_hooks";
 
 import { isCanonicalUuid } from "../../shared/ids.ts";
-import { utcTimestamp } from "../../shared/isoformat.ts";
+import { utcStamp } from "../../shared/isoformat.ts";
 import { isRecord, sameJson } from "../../shared/pyjson.ts";
 import { NATIVE_ITEM_TYPES } from "../guard.ts";
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
@@ -533,11 +533,7 @@ function freshAttestation(now: number, attestation: unknown): attestation is Att
   if (!boundedContent(attestation.title, attestation.options as string[] | null)) {
     return false;
   }
-  const value = attestation.confirmed_at;
-  if (!value.endsWith("Z") && !value.endsWith("+00:00")) {
-    return false;
-  }
-  const confirmed = utcTimestamp(value.replaceAll("Z", "+00:00"));
+  const confirmed = utcStamp(attestation.confirmed_at);
   return confirmed !== null && now - confirmed >= 0 && now - confirmed <= 1800;
 }
 

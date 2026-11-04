@@ -48,7 +48,6 @@ beforeEach(() => {
     id: "game",
     migratedFile: join(stateDir, "migrated.json"),
     name: "Game",
-    processHealthFile: join(stateDir, "process-health.json"),
     repo: join(base, "game"),
     stateDir,
   };

@@ -1,7 +1,7 @@
-// Public monitor-snapshot inventory, history, question, worker and process metadata
+// Public monitor-snapshot inventory, history, question and worker metadata
 // (from tests/test_monitor.py). Assertions read stdout and STATE/unblock/snapshots/<id>.json.
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
@@ -16,12 +16,9 @@ import {
 import {
   ART,
   entry,
-  health,
   type Json,
-  launchItem,
   mode,
   Native,
-  processJob,
   snapshot,
   TECH,
   writeCodexRoute,
@@ -66,128 +63,6 @@ suite("monitor snapshot", () => {
     natives.push(native);
     return { ws, native };
   }
-
-  function manifest(ws: Workspace, jobs: unknown[] = []): void {
-    mkdirSync(dirname(ws.processHealthFile), { recursive: true });
-    writeFileSync(ws.processHealthFile, JSON.stringify({ version: 1, jobs }));
-  }
-
-  contract("an unset process feature never loads or inspects resources", async () => {
-    const { ws, native } = await setup();
-    const { file, result } = await snapshot(ws, TECH);
-    expect(result.code).toBe(0);
-    expect(file!.process_health).toEqual({});
-    expect(file!.process_health_source.status).toBe("disabled");
-    expect(native.socket.methods()).not.toContain("thread/items/read");
-  });
-
-  contract("bad process manifests, bounds and schema do not block queues", async () => {
-    const { ws, native } = await setup();
-    mkdirSync(dirname(ws.processHealthFile), { recursive: true });
-    const valid = join(ws.root, "valid-manifest.json");
-    writeFileSync(valid, JSON.stringify({ version: 1, jobs: [] }));
-    const variants: Array<[string, () => void]> = [
-      ["oversized", () => writeFileSync(ws.processHealthFile, Buffer.alloc(1048577, "x"))],
-      ["alias", () => symlinkSync(valid, ws.processHealthFile)],
-      ["invalid", () => writeFileSync(ws.processHealthFile, "{PRIVATE_BAD_JSON")],
-      [
-        "too many",
-        () =>
-          writeFileSync(
-            ws.processHealthFile,
-            JSON.stringify({ version: 1, jobs: Array(101).fill({}) }),
-          ),
-      ],
-    ];
-    for (const [name, prepare] of variants) {
-      rmSync(ws.processHealthFile, { force: true });
-      prepare();
-      const { file, result } = await snapshot(ws, TECH);
-      expect(result.code, name).toBe(0);
-      expect(file!.errors, name).toEqual({});
-      expect(file!.queues[TECH], name).toEqual([entry("one"), entry("two")]);
-      expect(file!.process_health_source.status, name).toBe("unavailable");
-      expect(JSON.stringify(file)).not.toContain("PRIVATE_BAD_JSON");
-    }
-    expect(native.socket.methods()).not.toContain("thread/items/read");
-  });
-
-  bashConfig(
-    "a relative or missing PROCESS_HEALTH_FILE is unavailable at the feature boundary",
-    async () => {
-      const { ws } = await setup();
-      for (const path of ["relative.json", join(ws.root, "missing.json")]) {
-        ws.legacyConf = `PROCESS_HEALTH_FILE='${path}'\n`;
-        const { file, result } = await snapshot(ws, TECH);
-        expect(result.code).toBe(0);
-        expect(file!.errors).toEqual({});
-        expect(file!.queues[TECH]).toEqual([entry("one"), entry("two")]);
-        expect(file!.process_health_source.status).toBe("unavailable");
-      }
-    },
-  );
-
-  bashConfig(
-    "a declared PROCESS_HEALTH_FILE is not validated with unrelated configuration",
-    async () => {
-      const { ws } = await setup();
-      ws.legacyConf = "PROCESS_HEALTH_FILE=relative-invalid-at-feature-boundary\n";
-      const checked = await cli(ws, ["check-config"]);
-      expect(checked.code, checked.stderr).toBe(0);
-      const { file } = await snapshot(ws, TECH);
-      expect(file!.process_health_source).toEqual({
-        status: "unavailable",
-        diagnostics: ["process_manifest_path_invalid"],
-      });
-    },
-  );
-
-  contract("process collection keeps the explicit route scope", async () => {
-    const { ws } = await setup();
-    manifest(ws, [
-      processJob(TECH, new Date().toISOString()),
-      processJob(ART, new Date().toISOString()),
-    ]);
-    const { file } = await snapshot(ws, TECH);
-    expect(Object.keys(file!.process_health)).toEqual([TECH]);
-    expect(file!.process_health_source.status).toBe("available");
-  });
-
-  contract("a public snapshot never loads or persists prior process samples", async () => {
-    const { ws, native } = await setup();
-    launchItem(native);
-    manifest(ws, [processJob(TECH, new Date(Date.now() - 10_000).toISOString())]);
-    const prior = { process_observations: [{ owner_parent_id: TECH, job_id: "job-1", slot: 100 }] };
-    ws.write(join("unblock", "health", TECH + ".json"), JSON.stringify(prior));
-    const before = ws.read("unblock", "health", TECH + ".json");
-    const { file } = await snapshot(ws, TECH);
-    expect(file!.process_health[TECH].observations).toEqual([]);
-    expect(ws.read("unblock", "health", TECH + ".json")).toBe(before);
-    expect(health(ws)).toEqual(prior);
-  });
-
-  contract(
-    "the real process collector reports owner-attested state publicly without samples",
-    async () => {
-      const { ws, native } = await setup();
-      launchItem(native);
-      manifest(ws, [processJob(TECH, new Date(Date.now() - 10_000).toISOString())]);
-      const before = readFileSync(ws.processHealthFile);
-      const { file } = await snapshot(ws, TECH);
-      const value = file!.process_health[TECH];
-      expect(value.observations).toEqual([]);
-      expect(value.jobs[0].state).toBe("stalled");
-      expect(value.jobs[0].closure_status).toBe("none");
-      expect(value.jobs[0].identity_provenance).toBe("owner_attested");
-      expect(native.socket.callsOf("thread/items/read")[0]!.params).toEqual({
-        threadId: TECH,
-        turnId: "launch-turn",
-        itemIds: ["launch-item"],
-      });
-      expect(JSON.stringify(file)).not.toContain("PRIVATE_COMMAND");
-      expect(readFileSync(ws.processHealthFile)).toEqual(before);
-    },
-  );
 
   contract(
     "question state reads existing records only and reports unknown visibility",

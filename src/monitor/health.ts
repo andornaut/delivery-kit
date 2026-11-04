@@ -1,8 +1,7 @@
 // Scheduled monitor health in `<unblock>/health/<recipient>.json`: per-item backlog ages across
-// distinct slots, deferral counts, question and process observation history, and one
+// distinct slots, deferral counts, question observation history, and one
 // `monitor-stuck` event per failed episode. Delivery acceptance deduplicates reminders; it never
 // acknowledges queue work or records recovery.
-import { processSample } from "../adapters/codex/collectors/processHealth.ts";
 import {
   hasErrors,
   hash,
@@ -62,61 +61,6 @@ export function recordQuestions(
     }
     previous[identity] = old;
   }
-}
-
-const SAMPLE_IDENTITY = [
-  "owner_parent_id",
-  "kind",
-  "job_id",
-  "start_identity",
-  "invocation",
-] as const;
-
-function sampleIdentity(sample: Json): string {
-  return hash(SAMPLE_IDENTITY.map((key) => sample[key] ?? null));
-}
-
-export function recordProcesses(record: Json, snapshot: Json, slot: number, outcome: Json): void {
-  const processHealth = rec(snapshot.process_health);
-  const samples: Json[] = [];
-  for (const [parent, health] of Object.entries(processHealth)) {
-    for (const sample of list(rec(health).observations)) {
-      if (processSample([parent], sample) && rec(sample).slot === slot) {
-        samples.push(rec(sample));
-      }
-    }
-  }
-  if (Object.keys(processHealth).length > 0) {
-    // The collector's exact samples remain owner evidence, never monitor attestations.
-    const parents = Object.keys(processHealth);
-    const merged = new Map<string, Json>();
-    for (const sample of list(record.process_observations)) {
-      if (processSample(parents, sample)) {
-        merged.set(sampleIdentity(rec(sample)), rec(sample));
-      }
-    }
-    for (const sample of samples) {
-      const identity = sampleIdentity(sample);
-      const old = merged.get(identity);
-      if (old === undefined || Number(sample.slot) >= Number(old.slot ?? -1)) {
-        merged.set(identity, sample);
-      }
-    }
-    record.process_observations = [...merged.values()].slice(-100);
-  }
-  const requestKeys = list(outcome.process_request_keys);
-  const status = outcome.status;
-  const deliveries = rec(record.process_request_delivery);
-  record.process_request_delivery = deliveries;
-  if (status === "accepted" || status === "ambiguous" || status === "rejected") {
-    for (const key of requestKeys) {
-      deliveries[hash(key)] = { ...rec(deliveries[hash(key)]), request_key: key, status };
-    }
-  }
-  record.accepted_process_requests = sortedUnique([
-    ...list(record.accepted_process_requests),
-    ...(status === "accepted" ? requestKeys : []),
-  ]);
 }
 
 function stuckMessage(unblock: string, recipient: string, snapshotId: string): string {
@@ -231,7 +175,6 @@ export function recordHealth(
     ]);
   }
   recordQuestions(record, snapshot, slot, accepted ? list(outcome.question_notice_keys) : []);
-  recordProcesses(record, snapshot, slot, outcome);
   const backlogSlots = Number(record.backlog_slots ?? 0);
   const deferralSlots = Number(record.deferral_slots ?? 0);
   const failed = Math.max(backlogSlots, deferralSlots) >= 2;
@@ -250,32 +193,15 @@ export function recordHealth(
       list(health.questions).some((question) => rec(question).state === "unknown")
     );
   });
-  const sourceStatus = rec(snapshot.process_health_source).status;
-  const processesDegraded =
-    sourceStatus === "unavailable" ||
-    Object.values(rec(snapshot.process_health)).some((value) => {
-      const health = rec(value);
-      return (
-        degradedValue(health) ||
-        list(health.jobs).some((job) => ["stalled", "unknown"].includes(String(rec(job).state)))
-      );
-    });
-  const anyDegraded = degraded || workersDegraded || questionsDegraded || processesDegraded;
+  const anyDegraded = degraded || workersDegraded || questionsDegraded;
   let monitorStatus = "ok";
   if (failed) {
     monitorStatus = "failed";
   } else if (anyDegraded) {
     monitorStatus = "degraded";
   }
-  let processStatus = "ok";
-  if (processesDegraded) {
-    processStatus = "degraded";
-  } else if (sourceStatus === "disabled") {
-    processStatus = "disabled";
-  }
   // The printed line selects its own key order.
   const health: Json = Object.fromEntries([
-    ["process_health_status", processStatus],
     ["question_state_status", questionsDegraded ? "degraded" : "ok"],
     ["worker_health_status", workersDegraded ? "degraded" : "ok"],
     ["monitor_status", monitorStatus],
@@ -312,12 +238,6 @@ export function recordHealth(
       reasons.push(
         "question lifecycle or visibility unavailable; inspect question state diagnostics without " +
           "inferring pending decisions or clearance",
-      );
-    }
-    if (processesDegraded) {
-      reasons.push(
-        "process metadata unavailable or owner action needed; inspect scoped process evidence without " +
-          "inferring resource closure",
       );
     }
   }

@@ -465,7 +465,7 @@ describe("collectors", () => {
       status: "complete",
       user_reply_refs: [{ item_id: "u1", turn_id: TURN }],
     });
-    expect(collected.process_health_source).toMatchObject({ status: "disabled" });
+    expect(collected).not.toHaveProperty("process_health_source");
     expect(collected.collection_budget).toMatchObject({ max_calls: 256 });
   });
 

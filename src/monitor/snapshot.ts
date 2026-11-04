@@ -2,8 +2,7 @@
 // from the active harness adapter; every capability the harness cannot report is `unavailable`,
 // which is never clearance.
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync } from "node:fs";
 
 import { type AgentEntry, roleDiagnostics } from "../adapters/claude/agents.ts";
 import { deliveredEntries } from "../adapters/claude/index.ts";
@@ -18,7 +17,6 @@ import {
   persist,
   type QueueEntry,
   queueEntry,
-  readRecord,
   retained,
   snapshotPath,
 } from "./store.ts";
@@ -74,8 +72,6 @@ export function captureClaude(
     errors: {},
     harness: "claude",
     history: Object.fromEntries(roles.map((role) => [role, { ...UNAVAILABLE }])),
-    process_health: {},
-    process_health_source: { ...UNAVAILABLE },
     question_state: Object.fromEntries(
       roleDiagnostics(listing, roles).map((row) => [row.session_id, row]),
     ),
@@ -88,34 +84,6 @@ export function captureClaude(
   };
   persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   return record;
-}
-
-/** The process-health manifest beside a game's bus directory, when one is registered. */
-function processManifest(busDir: string): string | undefined {
-  const path = join(busDir, "..", "process-health.json");
-  return existsSync(path) ? path : undefined;
-}
-
-/** The coordinator's prior process observations, or null. */
-function priorProcess(
-  context: SnapshotContext,
-  manifest: string | undefined,
-  recipients: readonly string[],
-): unknown {
-  const coordinator = recipients[0];
-  if (manifest === undefined || coordinator === undefined) {
-    return undefined;
-  }
-  try {
-    const record = readRecord(join(context.unblock, "health", `${coordinator}.json`));
-    if (record === undefined) {
-      return null;
-    }
-    const values = record.process_observations ?? [];
-    return Array.isArray(values) ? values : null;
-  } catch {
-    return null;
-  }
 }
 
 /** The Codex control socket is missing or refused the connection; `message` is the reason. */
@@ -135,7 +103,7 @@ export interface CodexCaptureOptions {
 
 /**
  * Codex snapshot: the adapter's native queue inventory for each recipient, then the history,
- * question, worker and process collectors when the adapter provides them.
+ * question and worker collectors when the adapter provides them.
  */
 export async function captureCodex(
   context: SnapshotContext,
@@ -169,7 +137,6 @@ export async function captureCodex(
     }
     queues[recipient] = inventory.entries.map((entry) => nativeEntry(entry));
   });
-  const manifest = processManifest(context.busDir);
   const request: CollectRequest = {
     historyCursor: options.historyCursor ?? null,
     ...(options.routeMembers === undefined ? {} : { routeMembers: options.routeMembers }),
@@ -177,8 +144,6 @@ export async function captureCodex(
     recipients,
     slot,
     unblockDir: context.unblock,
-    ...optional("processManifest", manifest),
-    ...optional("priorProcess", priorProcess(context, manifest, recipients)),
   };
   const collectors = adapter.collectors;
   const collected =
@@ -190,8 +155,6 @@ export async function captureCodex(
     errors,
     harness: "codex",
     history: collected.history,
-    process_health: collected.process_health,
-    process_health_source: collected.process_health_source,
     question_state: collected.question_state,
     queues,
     snapshot_id: randomUUID(),
@@ -202,8 +165,4 @@ export async function captureCodex(
   }
   persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   return record;
-}
-
-function optional<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
-  return value === undefined ? {} : ({ [key]: value } as Partial<Record<K, V>>);
 }

@@ -43,9 +43,6 @@ export interface CollectRequest {
   readonly parents: readonly string[];
   readonly slot: number | null;
   readonly historyCursor: string | null;
-  /** The process-health manifest; undefined disables process collection. */
-  readonly processManifest?: string;
-  readonly priorProcess?: unknown;
   /**
    * The active monitor route's coordinator and peers, or null when no active route declares
    * them. Question and process collection never reaches outside it.
@@ -58,8 +55,6 @@ export interface Collected {
   readonly history: CollectorRecord;
   readonly question_state: CollectorRecord;
   readonly worker_health: CollectorRecord;
-  readonly process_health: CollectorRecord;
-  readonly process_health_source: CollectorRecord;
   readonly collection_budget: CollectorRecord;
 }
 

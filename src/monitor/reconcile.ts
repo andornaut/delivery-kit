@@ -1,11 +1,10 @@
 // Scheduled reminder reconciliation over one snapshot: which queue IDs, owner-attested
-// questions, stalled processes and failed worker turns still need a reminder, the bounded brief
+// questions and failed worker turns still need a reminder, the bounded brief
 // that carries them, and the guarded send. State lives in `<unblock>/health/<recipient>.json`
 // and the slot receipt; their keys are persisted game state.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { processSample } from "../adapters/codex/collectors/processHealth.ts";
 import type { RpcClient } from "../adapters/codex/rpc.ts";
 import {
   CLEARANCE_MISSING,
@@ -22,19 +21,10 @@ import {
   pyJsonDumps,
   sameJson,
 } from "../adapters/shared/pyjson.ts";
-import {
-  type Json,
-  persist,
-  type QueueEntry,
-  readRecord,
-  retained,
-  snapshotPath,
-} from "./store.ts";
+import { type Json, type QueueEntry, readRecord, retained, snapshotPath } from "./store.ts";
 
 const BRIEF_BOUND = 32768;
-const PROCESS_BOUND = 16384;
 const DIAGNOSTIC_BOUND = 4096;
-const PROCESS_FIELD = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export function rec(value: unknown): Json {
   return isRecord(value) ? value : {};
@@ -346,162 +336,11 @@ export function questionBrief(notices: readonly QuestionNotice[]): [Json[], Json
   return [rows, keys];
 }
 
-const KEY_FIELDS = [
-  "owner_parent_id",
-  "kind",
-  "job_id",
-  "start_identity",
-  "stall_episode",
-] as const;
-const SAMPLE_MATCH = ["owner_parent_id", "kind", "job_id", "start_identity", "invocation"] as const;
-const NOTICE_FIELDS = [
-  "owner_parent_id",
-  "worker_id",
-  "kind",
-  "job_id",
-  "start_identity",
-  "invocation",
-  "stall_episode",
-  "identity_provenance",
-  "progress_provenance",
-] as const;
-
-export function processKey(job: Json): unknown[] {
-  return KEY_FIELDS.map((key) => get(job, key));
-}
-
-/** Confirmed owner-attested stalls not yet requested, within the byte bound. */
-export function processNotices(unblock: string, coordinator: string, snapshot: Json): Json[] {
-  const record = readHealth(unblock, coordinator);
-  const accepted = list(record.accepted_process_requests);
-  const unresolved = Object.values(rec(record.process_request_delivery))
-    .map(rec)
-    .filter((item) => ["sending", "ambiguous", "accepted"].includes(String(item.status)))
-    .map((item) => get(item, "request_key"));
-  const notices: Json[] = [];
-  for (const [parent, value] of Object.entries(rec(snapshot.process_health))) {
-    const health = rec(value);
-    for (const row of list(health.jobs)) {
-      const job = rec(row);
-      const key = processKey(job);
-      if (
-        job.owner_parent_id !== parent ||
-        job.state !== "stalled" ||
-        job.requires_owner_action !== true ||
-        job.protected !== false ||
-        !["process", "container", "browser_job"].includes(String(job.kind)) ||
-        job.identity_provenance !== "owner_attested" ||
-        job.progress_provenance !== "owner_attested" ||
-        job.lineage_verified !== true ||
-        job.invocation_verified !== true ||
-        key.some((item) => typeof item !== "string" || !PROCESS_FIELD.test(item)) ||
-        containsJson(accepted, key) ||
-        containsJson(unresolved, key) ||
-        job.closure_status !== "none"
-      ) {
-        continue;
-      }
-      const evidence: Json[] = [];
-      for (const sample of list(health.observations)) {
-        if (
-          processSample([parent], sample) &&
-          SAMPLE_MATCH.every((field) => sameJson(get(rec(sample), field), get(job, field)))
-        ) {
-          const owner = rec(rec(sample).owner_evidence);
-          evidence.push(
-            Object.fromEntries(
-              ["confirmed_by", "confirmed_at", "episode_id", "blocked_condition"]
-                .filter((field) => Object.hasOwn(owner, field))
-                .map((field) => [field, owner[field]]),
-            ),
-          );
-        }
-      }
-      const reference = job.owner_evidence_ref;
-      if (
-        evidence.length === 0 &&
-        isRecord(reference) &&
-        reference.confirmed_by === parent &&
-        reference.episode_id === job.stall_episode
-      ) {
-        evidence.push(reference);
-      }
-      if (evidence.length === 0) {
-        continue;
-      }
-      const notice = pick(job, NOTICE_FIELDS);
-      notice.evidence_refs = evidence;
-      notice.request_key = key;
-      if (bytes(ascii([...notices, notice])) > PROCESS_BOUND) {
-        break;
-      }
-      notices.push(notice);
-    }
-  }
-  return notices;
-}
-
-/** Bind each request key to `requestId` as sending, unless another request holds it unresolved. */
-export function processRequestStarted(
-  unblock: string,
-  coordinator: string,
-  keys: readonly unknown[],
-  requestId: string,
-): boolean {
-  if (keys.length === 0) {
-    return true;
-  }
-  const path = healthPath(unblock, coordinator);
-  const record = readRecord(path) ?? { seen_slots: [] };
-  const deliveries = rec(record.process_request_delivery);
-  record.process_request_delivery = deliveries;
-  for (const key of keys) {
-    const old = rec(deliveries[hash(key)]);
-    if (
-      ["sending", "ambiguous", "accepted"].includes(String(old.status)) &&
-      old.request_id !== requestId
-    ) {
-      return false;
-    }
-  }
-  for (const key of keys) {
-    deliveries[hash(key)] = { request_id: requestId, request_key: key, status: "sending" };
-  }
-  persist(path, record);
-  return true;
-}
-
-export function processRequestResult(
-  unblock: string,
-  coordinator: string,
-  keys: readonly unknown[],
-  requestId: string,
-  status: string,
-): void {
-  if (keys.length === 0) {
-    return;
-  }
-  const path = healthPath(unblock, coordinator);
-  const record = readRecord(path);
-  if (record === undefined) {
-    throw new Error("health record missing");
-  }
-  const deliveries = rec(record.process_request_delivery);
-  for (const key of keys) {
-    const item = deliveries[hash(key)];
-    if (isRecord(item) && item.request_id === requestId) {
-      item.status = status;
-    }
-  }
-  persist(path, record);
-}
-
 /** Whether the snapshot's unacknowledged inventory was already reminded or explicitly retained. */
 export function acceptedInventory(unblock: string, recipient: string, snapshot: Json): boolean {
   if (
     pendingWorkerFailures(unblock, recipient, snapshot).length > 0 ||
-    questionNotices(unblock, recipient, snapshot).length > 0 ||
-    processNotices(unblock, recipient, snapshot).length > 0
+    questionNotices(unblock, recipient, snapshot).length > 0
   ) {
     return false;
   }
@@ -523,8 +362,6 @@ export interface Brief {
   readonly workerFailures: readonly unknown[];
   readonly questions: readonly Json[];
   readonly questionDiagnostics: readonly Json[];
-  readonly processes: readonly Json[];
-  readonly processDiagnostics: readonly Json[];
 }
 
 export function reminder(
@@ -560,24 +397,6 @@ export function reminder(
     brief.questionDiagnostics.length > 0
       ? `\nQuestion capability diagnostics (no pending-decision inference): ${ascii(brief.questionDiagnostics)}`
       : "";
-  const processReview =
-    brief.processes.length > 0
-      ? `\nConfirmed owner-attested stalled resources: ${ascii(brief.processes)}.` +
-        " Ask only the exact owning parent/team to checkpoint WIP and preserve diagnostics, " +
-        "then safely close that exact job/start identity and report closure proof or a concrete blocker. " +
-        "Resource identity and progress are owner_attested; native invocation references corroborate " +
-        "metadata only. Do not kill, remove, cancel, restart or rerun any resource from the monitor. " +
-        "Preserve healthy jobs, services, protected and unknown resources, and unanswered questions. " +
-        "Delivery acceptance is not reported closure. Reported closure is not verified closure. " +
-        "Verified closure means an exact owner verification receipt corroborated by a supported " +
-        "successful native verification result, never a direct host probe. Exit zero, completed " +
-        "invocation or an absent handle alone never proves closure. Reconcile ambiguous existing " +
-        "requests before another request; do not duplicate accepted closure requests."
-      : "";
-  const processDiagnosticReview =
-    brief.processDiagnostics.length > 0
-      ? `\nProcess visibility diagnostics (no stall or closure inference): ${ascii(brief.processDiagnostics)}`
-      : "";
   return (
     `Scheduled monitoring review, slot ${slot}. Review recent Art, Gameplay and Tech activity ` +
     "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies " +
@@ -587,7 +406,7 @@ export function reminder(
     "question. Report only new or unresolved blockers. This is a triage reminder, not permission " +
     "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n" +
     `Full local inventory: ${snapshotFile}\n${inventory}${workerReview}${questionReview}` +
-    `${diagnosticReview}${processReview}${processDiagnosticReview}`
+    `${diagnosticReview}`
   );
 }
 
@@ -598,18 +417,6 @@ const QUESTION_DIAGNOSTIC_FIELDS = [
   "ui_visibility",
   "diagnostics",
 ] as const;
-const CLOSURE_FIELDS = [
-  "kind",
-  "job_id",
-  "start_identity",
-  "closure_status",
-  "closure_provenance",
-  "closure_result_ref",
-  "closure_evidence_id",
-  "closure_reason_code",
-  "closure_next_review_slot",
-] as const;
-
 function questionDiagnostics(snapshot: Json, snapshotFile: string): Json[] {
   const diagnostics = Object.entries(rec(snapshot.question_state)).map(([owner, value]) => ({
     owner,
@@ -619,34 +426,6 @@ function questionDiagnostics(snapshot: Json, snapshotFile: string): Json[] {
   if (bytes(ascii(diagnostics)) > DIAGNOSTIC_BOUND) {
     return [
       { reason_code: "question_diagnostics_exceed_brief_bounds", snapshot_path: snapshotFile },
-    ];
-  }
-  return diagnostics;
-}
-
-function processDiagnostics(snapshot: Json, snapshotFile: string): Json[] {
-  const diagnostics: Json[] = Object.entries(rec(snapshot.process_health)).map(([owner, item]) => {
-    const value = rec(item);
-    return Object.fromEntries([
-      ["owner", owner],
-      ["status", get(value, "status")],
-      ["diagnostics", value.diagnostics ?? []],
-      [
-        "closure_receipts",
-        list(value.jobs)
-          .map(rec)
-          .filter((job) => job.closure_status !== "none" && job.closure_status != null)
-          .map((job) => pick(job, CLOSURE_FIELDS)),
-      ],
-    ]) as Json;
-  });
-  const source = rec(snapshot.process_health_source);
-  if (source.status === "unavailable") {
-    diagnostics.push(source);
-  }
-  if (bytes(ascii(diagnostics)) > DIAGNOSTIC_BOUND) {
-    return [
-      { reason_code: "process_diagnostics_exceed_brief_bounds", snapshot_path: snapshotFile },
     ];
   }
   return diagnostics;
@@ -717,12 +496,7 @@ export async function reconcileSlot(
   );
   state.question_notice_keys = noticeKeys;
   const qDiagnostics = questionDiagnostics(snapshot, snapshotFile);
-  const processes = processNotices(unblock, coordinator, snapshot);
-  const requestKeys = processes.map((notice) => notice.request_key);
-  state.process_request_keys = requestKeys;
   const text = reminder(slot, queues, snapshotFile, {
-    processDiagnostics: processDiagnostics(snapshot, snapshotFile),
-    processes,
     questionDiagnostics: qDiagnostics,
     questions,
     workerFailures: pendingWorkerFailures(unblock, coordinator, snapshot),
@@ -730,12 +504,7 @@ export async function reconcileSlot(
   return sendSlot(
     client,
     unblock,
-    {
-      finished: (requestId, status) =>
-        processRequestResult(unblock, coordinator, requestKeys, requestId, status),
-      started: (requestId) => processRequestStarted(unblock, coordinator, requestKeys, requestId),
-      stopping: () => target.signal?.aborted === true,
-    },
+    { stopping: () => target.signal?.aborted === true },
     { ownWait, path, recipient: coordinator, text },
     state,
   );

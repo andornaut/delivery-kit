@@ -14,25 +14,20 @@ import { selectTarget } from "./steer.ts";
 export const CLEARANCE_MISSING =
   "recipient-bound user-decision clearance missing, invalid or pending";
 const INTERRUPTED = "previous send interrupted; do not resend";
-const UNRESOLVED_PROCESS =
-  "process request has an unresolved delivery; reconcile exact existing receipt";
 
 export type SlotState = Record<string, unknown>;
 
 export type SendResult = "accepted" | "ambiguous" | "rejected";
 
-/** Process closure request bookkeeping around each send attempt. */
+/** Runner state observed around each send attempt. */
 export interface SlotHooks {
-  /** False when another request already holds an unresolved delivery. */
-  readonly started: (requestId: string) => boolean;
-  readonly finished: (requestId: string, status: SendResult) => void;
   /** True once the runner is stopping: an unresolved send then keeps its sending receipt. */
   readonly stopping?: () => boolean;
 }
 
 /**
- * The runner stopped while a send was unresolved. Nothing more is recorded, so the receipt and
- * the process request stay `sending`, as a runner killed mid-send leaves them.
+ * The runner stopped while a send was unresolved. Nothing more is recorded, so the receipt stays
+ * `sending`, as a runner killed mid-send leaves it.
  */
 export class SlotInterrupted extends Error {
   constructor() {
@@ -130,9 +125,6 @@ export async function sendSlot(
     if (selected.method === "turn/steer") {
       params.expectedTurnId = selected.expectedTurnId;
     }
-    if (!hooks.started(requestId)) {
-      return finish({ reason: UNRESOLVED_PROCESS, status: "deferred" });
-    }
     finish({ attempt: attempt + 1, method: selected.method, status: "sending" });
     let response: unknown;
     try {
@@ -143,14 +135,12 @@ export async function sendSlot(
         throw new SlotInterrupted();
       }
       if (error instanceof RpcError) {
-        hooks.finished(requestId, "rejected");
-        finish({ errorCode: error.code ?? null, status: "rejected" });
+          finish({ errorCode: error.code ?? null, status: "rejected" });
         if (selected.method === "turn/steer" && error.staleTurn && attempt === 0) {
           continue;
         }
         return state;
       }
-      hooks.finished(requestId, "ambiguous");
       return finish({ reason: "response unavailable; do not resend", status: "ambiguous" });
     }
     const turnId = acceptedTurn(response);
@@ -159,13 +149,11 @@ export async function sendSlot(
       turnId === "" ||
       (selected.method === "turn/steer" && turnId !== params.expectedTurnId)
     ) {
-      hooks.finished(requestId, "ambiguous");
       return finish({
         reason: "unexpected acceptance response; do not resend",
         status: "ambiguous",
       });
     }
-    hooks.finished(requestId, "accepted");
     return finish({ status: "accepted", turnId });
   }
   throw new Error("bounded attempt exhausted");

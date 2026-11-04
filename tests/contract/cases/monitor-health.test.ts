@@ -1,7 +1,7 @@
 // Scheduled monitor health across distinct slots, driven through the resident runner's
 // observer (from tests/test_monitor.py). Each slot is one wall-clock minute.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { contract, suite, workspaces } from "../lib/cases.ts";
@@ -12,11 +12,9 @@ import {
   entry,
   health,
   type Json,
-  launchItem,
   monitorEvents,
   Native,
   retentionName,
-  processJob,
   pyJson,
   snapshot,
   TECH,
@@ -49,11 +47,6 @@ suite("monitor scheduled health", () => {
     const schedule = new MonitorSchedule(ws);
     cleanups.push(() => schedule.stop());
     return { ws, native, schedule };
-  }
-
-  function manifest(ws: Workspace, jobs: unknown[]): void {
-    mkdirSync(dirname(ws.processHealthFile), { recursive: true });
-    writeFileSync(ws.processHealthFile, JSON.stringify({ version: 1, jobs }));
   }
 
   function ages(ws: Workspace): Record<string, number> {
@@ -499,7 +492,7 @@ suite("monitor scheduled health", () => {
   );
 
   // 26 recipients times ten question pages exceed the shared 256-call collection budget.
-  async function exhaustedBudget(withProcess: boolean): Promise<{ snap: Json; native: Native }> {
+  async function exhaustedBudget(): Promise<{ snap: Json; native: Native }> {
     const targets = Array.from(
       { length: 25 },
       (_, i) => `00000000-0000-0000-0000-${String(100 + i).padStart(12, "0")}`,
@@ -511,16 +504,12 @@ suite("monitor scheduled health", () => {
       harness: "codex",
       roles: { tech: { conversations: { codex: TECH } } },
     });
-    if (!withProcess) ws.config.reports = { workerParents: ["tech"] };
+    ws.config.reports = { workerParents: ["tech"] };
     clear(ws);
     native.queues = {};
     let page = 0;
     native.items = (params: Json) =>
       params.turnId ? { data: [] } : { data: [], nextCursor: `page-${++page}` };
-    if (withProcess) {
-      launchItem(native);
-      manifest(ws, [processJob(TECH, new Date().toISOString())]);
-    }
     await schedule.start();
     return { snap: readSnapshot((await schedule.slot()).output), native };
   }
@@ -528,24 +517,11 @@ suite("monitor scheduled health", () => {
   contract(
     "worker and question collection share the reserved call budget",
     async () => {
-      const { snap, native } = await exhaustedBudget(false);
+      const { snap, native } = await exhaustedBudget();
       expect(snap.collection_budget.calls_used).toBe(256);
       expect(snap.collection_budget.reason_code).toBe("collection_call_budget_exhausted");
       expect(snap.worker_health[TECH].status).toBe("unavailable");
       expect(native.socket.methods()).not.toContain("thread/list");
-    },
-    SLOW,
-  );
-
-  contract(
-    "process collection cannot restart an exhausted shared budget",
-    async () => {
-      const { snap, native } = await exhaustedBudget(true);
-      expect(snap.collection_budget.calls_used).toBe(256);
-      // The real collector reports its own exhausted reader as incomplete rather than raising.
-      expect(snap.process_health[TECH].complete).toBe(false);
-      expect(snap.process_health[TECH].status).not.toBe("complete");
-      expect(native.socket.methods()).not.toContain("thread/items/read");
     },
     SLOW,
   );

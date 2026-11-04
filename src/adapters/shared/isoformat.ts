@@ -238,7 +238,7 @@ export function utcTimestamp(value: string): number | null {
 }
 
 /**
- * The process-health stamp and the question attestation check: epoch seconds of a timestamp
+ * The question attestation stamp: epoch seconds of a timestamp
  * ending in Z or +00:00 that parses with a zero UTC offset, else null.
  */
 export function utcStamp(value: unknown): number | null {

@@ -84,7 +84,6 @@ describe("monitor-snapshot (claude)", () => {
       "question_state_status",
       "session_status",
       "target_queue_status",
-      "process_health_source",
       "channel_pending",
     ]);
     expect(output).toMatchObject({

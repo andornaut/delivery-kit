@@ -45,7 +45,6 @@ const PRINTED = [
   "history_status",
   "worker_health_status",
   "question_state_status",
-  "process_health_status",
   "monitor_status",
   "monitor_reason",
   "recipient",

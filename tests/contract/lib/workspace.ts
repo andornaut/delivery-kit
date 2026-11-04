@@ -296,10 +296,6 @@ export class Workspace {
     writeFileSync(this.routeFile, typeof route === "string" ? route : JSON.stringify(route));
   }
 
-  get processHealthFile(): string {
-    return join(this.gameDev, "var", "games", this.game, "process-health.json");
-  }
-
   get configFile(): string {
     return join(this.repo, "delivery-kit.json");
   }

@@ -78,7 +78,6 @@ export function renderBusConf(ws: Workspace): string {
     const wake = ws.gameDevConfig().wakeMinutes;
     set("MONITOR_MINUTES", list(wake, " "));
   }
-  if (existsSync(ws.processHealthFile)) set("PROCESS_HEALTH_FILE", ws.processHealthFile);
   set("CODEX_PYTHON", "/usr/bin/python3");
   set("CLAUDE_PYTHON", "/usr/bin/python3");
   return (

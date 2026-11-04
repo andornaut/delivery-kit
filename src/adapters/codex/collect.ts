@@ -1,5 +1,5 @@
 // Snapshot collectors over one native connection. History
-// is read first; the question, worker and process collectors then share a 256-call budget and a
+// is read first; the question and worker collectors then share a 256-call budget and a
 // deadline reserved five seconds before the connection's own. Every failure is a diagnostic,
 // never clearance.
 import { performance } from "node:perf_hooks";
@@ -8,7 +8,6 @@ import { decisionRecord } from "../shared/decisions.ts";
 import { isRecord } from "../shared/pyjson.ts";
 import type { Collected, CollectRequest } from "../types.ts";
 import { workerHealth } from "./collectors/childHealth.ts";
-import { processHealth } from "./collectors/processHealth.ts";
 import { collectQuestionState } from "./collectors/questionState.ts";
 import { historyRefs } from "./inventory.ts";
 import { NativeTimeout, type RpcClient } from "./rpc.ts";
@@ -171,16 +170,6 @@ export async function collectAll(
   const members = request.routeMembers === undefined ? null : new Set(request.routeMembers ?? []);
   const questions = await questionState(shared, request.unblockDir, members, recipients);
   const workers = request.parents.length === 0 ? {} : await workerHealth(shared, request.parents);
-  const allowed = [...new Set([...recipients, ...request.parents])].filter(
-    (id) => members === null || members.has(id),
-  );
-  const [processes, source] = await processHealth(
-    shared,
-    request.processManifest,
-    allowed,
-    request.slot,
-    request.priorProcess ?? null,
-  );
   return {
     collection_budget: {
       calls_used: shared.callsUsed,
@@ -188,8 +177,6 @@ export async function collectAll(
       reason_code: shared.reasonCode,
     },
     history,
-    process_health: processes,
-    process_health_source: source,
     question_state: questions,
     worker_health: workers,
   };
@@ -201,8 +188,6 @@ export function unavailableCollected(reasonCode: string, request: CollectRequest
   return {
     collection_budget: { calls_used: 0, max_calls: MAX_COLLECTION_CALLS, reason_code: reasonCode },
     history: Object.fromEntries(request.recipients.map((id) => [id, { ...unavailable }])),
-    process_health: {},
-    process_health_source: { ...unavailable },
     question_state: Object.fromEntries(
       request.recipients.map((id) => [id, questionUnavailable(reasonCode)]),
     ),

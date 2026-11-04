@@ -1,19 +1,10 @@
-// Scheduled reminder briefs for owner-attested questions, stalled processes and failed
-// worker turns (from tests/test_unblock.py).
-import { writeFileSync } from "node:fs";
+// Scheduled reminder briefs for owner-attested questions and failed worker turns
+// (from tests/test_unblock.py).
 import { afterEach, expect } from "vitest";
 
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
-import {
-  ART,
-  CHILD,
-  emptyQueue,
-  GAMEPLAY,
-  type NativeWorld,
-  rpcError,
-  TECH,
-} from "../lib/unblock-native.ts";
-import { confirmedAt, decide, Monitored, virtualNow, wake } from "../lib/unblock-runner.ts";
+import { ART, CHILD, emptyQueue, GAMEPLAY, type NativeWorld, TECH } from "../lib/unblock-native.ts";
+import { confirmedAt, decide, Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const TITLE = "Choose the local path";
@@ -112,76 +103,6 @@ function briefQuestions(text: string): Array<Record<string, unknown>> {
   if (at < 0) return [];
   return JSON.parse(text.slice(at + start.length, text.indexOf(end, at)));
 }
-
-interface Job {
-  start?: string;
-  closure?: Record<string, unknown>;
-  protected?: boolean;
-  state?: string;
-  invocation?: boolean;
-}
-
-/** An owner-registered process job that its owner confirms is stalled. */
-function job(
-  m: Monitored,
-  {
-    start = "start-1",
-    closure,
-    protected: guarded,
-    state = "running",
-    invocation = true,
-  }: Job = {},
-): void {
-  const identity = {
-    owner_parent_id: ART,
-    worker_id: null,
-    kind: "process",
-    job_id: "job-1",
-    start_identity: start,
-    invocation: { thread_id: ART, turn_id: "launch-turn", item_id: "launch-item" },
-  };
-  const registration: Record<string, unknown> = {
-    ...identity,
-    owner_evidence: {
-      confirmed_by: ART,
-      confirmed_at: confirmedAt(),
-      identity_verified: true,
-      provenance: "owner_attested",
-      state,
-      confirmed_stalled: true,
-      episode_id: "episode-1",
-    },
-  };
-  if (guarded !== undefined) registration.protected = guarded;
-  if (closure) {
-    registration.closure = {
-      ...identity,
-      confirmed_by: ART,
-      provenance: "owner_attested",
-      evidence_id: "evidence-1",
-      confirmed_at: confirmedAt(),
-      ...closure,
-    };
-  }
-  writeFileSync(m.ws.processHealthFile, JSON.stringify({ version: 1, jobs: [registration] }));
-  const key = `${ART}:launch-turn:launch-item`;
-  if (invocation) {
-    m.world.commands.set(key, {
-      result: {
-        data: [
-          {
-            turnId: "launch-turn",
-            item: { id: "launch-item", type: "commandExecution", status: "completed", exitCode: 0 },
-          },
-        ],
-      },
-    });
-  } else {
-    m.world.commands.delete(key);
-  }
-}
-
-const PROCESS_SECTION = "Confirmed owner-attested stalled resources";
 
 suite("unblock briefs", () => {
   const workspace = workspaces();
@@ -316,127 +237,6 @@ suite("unblock briefs", () => {
     ).toBe(true);
     expect((m.receipt(wake(0)).question_notice_keys as unknown[]).length).toBe(rows.length);
   });
-
-  contract(
-    "a confirmed process stall requests owner closure once and keeps the guard",
-    async () => {
-      const m = await routed();
-      job(m);
-      await m.start();
-      expect((await m.slot(wake(0))).result?.status).toBe("accepted");
-      const text = m.world.lastText();
-      for (const value of [
-        ART,
-        "job-1",
-        "start-1",
-        "launch-turn",
-        "launch-item",
-        "episode-1",
-        "owner_attested",
-      ]) {
-        expect(text).toContain(value);
-      }
-      expect(text).toContain("Do not kill, remove, cancel, restart or rerun");
-      expect(text).toContain("Reported closure is not verified closure");
-      expect((await m.slot(wake(1))).result?.status).toBe("unchanged");
-      job(m, { start: "start-2" });
-      decide(m.ws, TECH, { thread_id: TECH, state: "pending" });
-      expect((await m.slot(wake(2))).result?.status).toBe("deferred");
-      expect(m.world.mutations()).toHaveLength(1);
-      const record = m.health();
-      expect(record.accepted_process_requests).toEqual([
-        [ART, "process", "job-1", "start-1", "episode-1"],
-      ]);
-      expect(record).not.toHaveProperty("closure_status");
-    },
-  );
-
-  contract(
-    "closure receipts, protected and unknown jobs never request closure",
-    async () => {
-      const m = await routed();
-      const variants: Job[] = [
-        { closure: { state: "requested" } },
-        { closure: { state: "delivery_accepted" } },
-        { closure: { state: "ambiguous" } },
-        { closure: { state: "reported_closed" } },
-        { closure: { state: "verified_closed" } },
-        { closure: { state: "blocked", reason_code: "owner-blocked" } },
-        { closure: { state: "retained", reason_code: "owner-retained", next_review_slot: 1 } },
-        { closure: { state: "unrecognised" } },
-        { protected: true },
-        { state: "unknown" },
-        { invocation: false },
-      ];
-      job(m, variants[0]);
-      await m.start();
-      // The first slot reminds the new inventory; a closure request would appear in its brief.
-      expect((await m.slot(wake(0))).result?.status).toBe("accepted");
-      expect(m.world.lastText()).not.toContain(PROCESS_SECTION);
-      // Later slots stay unchanged: any closure notice would force a new reminder.
-      for (const [index, variant] of variants.slice(1).entries()) {
-        job(m, variant);
-        expect((await m.slot(wake(index + 1))).result?.status, JSON.stringify(variant)).toBe(
-          "unchanged",
-        );
-      }
-      expect(m.world.mutations()).toHaveLength(1);
-    },
-    CASE_TIMEOUT_MS,
-  );
-
-  contract(
-    "an ambiguous send is neither an accepted closure request nor an owner outcome",
-    async () => {
-      const m = await routed();
-      job(m);
-      m.world.outcomes.push({ close: true });
-      await m.start();
-      expect((await m.slot(wake(0))).result?.status).toBe("ambiguous");
-      expect(m.health().accepted_process_requests).toEqual([]);
-      // The unresolved delivery suppresses a second closure request.
-      expect((await m.slot(wake(1))).result?.status).toBe("accepted");
-      expect(m.world.lastText()).not.toContain(PROCESS_SECTION);
-      expect(m.ws.read(`unblock/${TECH}-${wake(0)}.json`)).not.toContain("PRIVATE");
-    },
-  );
-
-  contract("an interrupted process send stays guarded across later slots", async () => {
-    const m = await routed();
-    job(m);
-    m.world.outcomes.push({ hang: true });
-    await m.start();
-    const mark = wake(0);
-    m.ws.advanceClock(mark + 1 - virtualNow(m.ws));
-    await m.runner!.until(() => m.world.mutations().length === 1);
-    // The runner stops while its send is unresolved.
-    await m.stop();
-    expect(m.receipt(mark).status).toBe("sending");
-    await m.start();
-    expect((await m.slot(wake(0))).result).toMatchObject({
-      status: "deduplicated",
-      previousStatus: "ambiguous",
-    });
-    expect((await m.slot(wake(1))).result?.status).toBe("accepted");
-    expect(m.world.lastText()).not.toContain(PROCESS_SECTION);
-    expect(m.world.mutations()).toHaveLength(2);
-  });
-
-  contract(
-    "an explicit native rejection does not permanently guard the closure request",
-    async () => {
-      const m = await routed();
-      job(m);
-      m.world.outcomes.push(rpcError("explicit rejection", -1));
-      await m.start();
-      expect((await m.slot(wake(0))).result?.status).toBe("rejected");
-      expect((await m.slot(wake(1))).result?.status).toBe("accepted");
-      expect(m.world.lastText()).toContain(PROCESS_SECTION);
-      expect(m.health().accepted_process_requests).toEqual([
-        [ART, "process", "job-1", "start-1", "episode-1"],
-      ]);
-    },
-  );
 
   contract(
     "a new worker failure bypasses an unchanged queue and preserves the guard",
