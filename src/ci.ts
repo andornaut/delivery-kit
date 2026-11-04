@@ -69,7 +69,7 @@ export const githubChecks: CheckSource = async (context, sha) => {
     return JSON.parse(result.stdout) as CheckRun[];
   }
   const response = await fetch(`https://api.github.com/${path}`, {
-    headers: { Accept: "application/vnd.github+json", "User-Agent": "scheduled-game-bus" },
+    headers: { Accept: "application/vnd.github+json", "User-Agent": "delivery-kit" },
     signal: AbortSignal.timeout(20_000),
   });
   if (response.status === 401) {

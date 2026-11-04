@@ -3,6 +3,7 @@
 import { appendFileSync } from "node:fs";
 import { loadavg, uptime } from "node:os";
 
+import { GATE_LABEL } from "../gate.ts";
 import type { BusContext } from "./context.ts";
 import { zonedParts } from "./time.ts";
 
@@ -32,7 +33,7 @@ export async function resourceReport(context: BusContext): Promise<string> {
       args: [
         "ps",
         "--filter",
-        `label=game-bus=${context.config.git.github}`,
+        `label=${GATE_LABEL}=${context.game.id}`,
         "--format",
         "{{.Names}} {{.Status}}",
       ],

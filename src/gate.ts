@@ -109,8 +109,6 @@ export function createArgs(context: BusContext, name: string, input: GateInput):
     name,
     "--label",
     `${GATE_LABEL}=${game.id}`,
-    "--label",
-    `game-bus=${config.git.github}`,
     "--cpus",
     String(config.resources.cpus),
     ...userArgs(),
