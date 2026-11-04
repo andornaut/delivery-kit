@@ -5,7 +5,13 @@ import { rmSync } from "node:fs";
 import { afterEach, expect } from "vitest";
 
 import { startRunner } from "../lib/adapter.ts";
-import { contract, ROUTE_INVALID_MESSAGE, suite, workspaces } from "../lib/cases.ts";
+import {
+  contract,
+  ROUTE_INVALID_MESSAGE,
+  suite,
+  WORKER_PARENTS_ROUTE_MESSAGE,
+  workspaces,
+} from "../lib/cases.ts";
 import { ART, type Params, TECH } from "../lib/unblock-native.ts";
 import { decide, Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
@@ -384,9 +390,7 @@ suite("unblock guards", () => {
       m.ws.config.reports = { workerParents: ["gameplay"] };
       await m.start();
       const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
-      expect(output).toContain(
-        "WORKER_PARENT_THREADS requires parents in the active monitor route",
-      );
+      expect(output).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
       expect(m.socket.connections).toEqual([]);
     },
   );

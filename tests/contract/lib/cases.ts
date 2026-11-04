@@ -44,6 +44,15 @@ export const ROUTE_INVALID_MESSAGE =
     ? "MONITOR_ROUTE_FILE is unavailable or invalid"
     : "monitor route is unavailable or invalid; its owner must verify identities and ownership";
 
+/**
+ * The deferral for worker parents outside the active monitor route. 0.9 names its
+ * WORKER_PARENT_THREADS key; 1.0 names the delivery-kit.json field.
+ */
+export const WORKER_PARENTS_ROUTE_MESSAGE =
+  impl.name === "bash"
+    ? "WORKER_PARENT_THREADS requires parents in the active monitor route"
+    : "workerParents requires parents in the active monitor route";
+
 /** The fastest CI poll: 0 in 0.9; 1.0 rejects 0, and 1 second runs fast under the test clock. */
 export const CI_POLL_SECONDS = impl.name === "bash" ? 0 : 1;
 

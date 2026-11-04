@@ -17,11 +17,18 @@ import {
   v1Route,
 } from "../lib/claude-codex.ts";
 import { threads, tick, virtualNow } from "../lib/claude-fixture.ts";
-import { bashConfig, contract, suite, workspaces } from "../lib/cases.ts";
+import {
+  bashConfig,
+  contract,
+  suite,
+  WORKER_PARENTS_ROUTE_MESSAGE,
+  workspaces,
+} from "../lib/cases.ts";
 import type { CodexSocket } from "../lib/codex-socket.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
+// The 0.9 text, for the Bash-only legacy triage case.
 const ROUTE_PARENTS = "WORKER_PARENT_THREADS requires parents in the active monitor route";
 
 function monitorLines(text: string): string[] {
@@ -105,7 +112,9 @@ suite("monitor cadence", () => {
       const result = await tick(ws, at(20));
       expect(result.monitor.map((row) => row.slot)).toEqual([at(20)]);
       expect(result.stderr).not.toContain("monitor deferred");
-      expect(result.stderr).not.toContain("WORKER_PARENT_THREADS");
+      expect(result.stderr).not.toContain(
+        impl.name === "bash" ? "WORKER_PARENT_THREADS" : WORKER_PARENTS_ROUTE_MESSAGE,
+      );
       expect(threads(socket, "thread/list", "parentThreadId")).toEqual(parents);
       expect(threads(socket, "thread/queue/list")[0]).toBe(MONITOR);
       expect(threads(socket, "thread/queue/list")).not.toContain(TECH);
@@ -141,9 +150,9 @@ suite("monitor cadence", () => {
           workerParents: ["monitor", parent],
         };
         const result = await tick(ws, at(20), {
-          done: ({ stderr }) => stderr.includes(ROUTE_PARENTS),
+          done: ({ stderr }) => stderr.includes(WORKER_PARENTS_ROUTE_MESSAGE),
         });
-        expect(result.stderr, parent).toContain(ROUTE_PARENTS);
+        expect(result.stderr, parent).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
         expect(socket.calls, parent).toEqual([]);
       }
     },
