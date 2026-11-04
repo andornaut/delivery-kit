@@ -26,7 +26,7 @@ function setup(ws: Workspace, options: { reports?: boolean; mode?: "none" | "wra
     git: { main: "main", remote: "", github: "" },
     schedule: { departures: ["00"], timezone: "UTC" },
     gate: { image: "unused", install: "", steps: [{ name: "test", run: "true" }] },
-    resources: { cpus: 4, maxWorkers: 4, loadLimit: 1000000 },
+    resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
     deploy: { mode: options.mode ?? "none", skipPattern: "" },
     reports: {},
   };

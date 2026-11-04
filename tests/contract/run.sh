@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Contract harness in isolated containers. Only the npm cache is a writable host mount; the
-# checkout is read-only and copied into container tmpfs. Usage: run.sh [--lock] [vitest args]
-#   --lock  regenerate tests/contract/package-lock.json (network; writes only that file)
+# Contract harness in isolated containers. Every container runs as 19001:19001 with HOME=/tmp;
+# every host mount is read-only. The npm cache and all scratch stay in container paths. The 1.0 bundle is built inside the container from the
+# read-only checkout. Usage: run.sh [--lock] [vitest args]
+#   --lock  regenerate tests/contract/package-lock.json (network); the file leaves by stdout.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HARNESS=$ROOT/tests/contract
 IMAGE=node:24.21.0
-CACHE=${DK_NPM_CACHE:-$ROOT/.claude/npm-cache}
-uid=$(id -u)
-gid=$(id -g)
+IDS=19001:19001
 
 require_load() {
   local load
@@ -27,46 +26,64 @@ fingerprint() {
   } | sha256sum | cut -d' ' -f1
 }
 
-# Docker creates a missing bind source as root, so the cache exists before mounting.
-mkdir -p "$CACHE"
-container=(docker run --rm --read-only --cpus 4 -u "$uid:$gid" -e HOME=/tmp -e npm_config_cache=/npmcache
-  --mount "type=bind,src=$ROOT,dst=/source,readonly"
-  --mount "type=bind,src=$CACHE,dst=/npmcache"
-  --tmpfs "/tmp:exec,uid=$uid,gid=$gid")
+# The checkout is group-readable only (umask 007); the supplementary group grants read access.
+# No host path is writable: /tmp is the container's own layer, and the npm cache moves from the
+# install container to the check container with `docker cp`.
+options=(--cpus 4 --user "$IDS" --group-add "$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npmcache
+  --mount "type=bind,src=$ROOT,dst=/source,readonly")
+containers=()
+cleanup() { (( ${#containers[@]} )) && docker rm -f "${containers[@]}" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
 
 if [[ ${1:-} == --lock ]]; then
   require_load
-  out=$(mktemp -d)
-  "${container[@]}" --mount "type=bind,src=$out,dst=/out" "$IMAGE" sh -ec \
-    'cp -a /source/tests/contract /tmp/h; cd /tmp/h; rm -rf node_modules; npm install --package-lock-only --ignore-scripts --no-audit --no-fund; cp package-lock.json /out/'
-  cp "$out/package-lock.json" "$HARNESS/package-lock.json"
+  lock=$(docker run --rm "${options[@]}" "$IMAGE" sh -ec \
+    'cp -r /source/tests/contract /tmp/h; cd /tmp/h; rm -rf node_modules; npm install --package-lock-only --ignore-scripts --no-audit --no-fund >&2; cat package-lock.json')
+  printf '%s\n' "$lock" >"$HARNESS/package-lock.json"
   exit 0
 fi
 
 before=$(fingerprint)
 require_load
 echo 'contract: populating the npm cache (network)'
-"${container[@]}" "$IMAGE" sh -ec \
-  'cp -a /source/tests/contract /tmp/h; cd /tmp/h; npm ci --ignore-scripts --no-audit --no-fund >/dev/null'
+install=$(docker create "${options[@]}" "$IMAGE" sh -ec '
+  mkdir -p /tmp/root /tmp/h
+  cp /source/package.json /source/package-lock.json /tmp/root/
+  cp /source/tests/contract/package.json /source/tests/contract/package-lock.json /tmp/h/
+  cd /tmp/root && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
+  cd /tmp/h && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
+')
+containers+=("$install")
+docker start -a "$install"
 
 require_load
-echo 'contract: type check and cases offline'
-result=0
-"${container[@]}" --network none -e "DK_VITEST_ARGS=$*" "$IMAGE" bash -ec '
-  cp -a /source /tmp/check
-  cd /tmp/check/tests/contract
+echo 'contract: build, type check and cases offline'
+check=$(docker create "${options[@]}" --network none -e "DK_VITEST_ARGS=$*" "$IMAGE" bash -ec '
+  mkdir /tmp/check
+  tar -C /source --exclude=./.git --exclude=./.claude --exclude=./node_modules --exclude=./dist \
+    --exclude=./tests/contract/node_modules -cf - . | tar -C /tmp/check -xf -
+  cd /tmp/check
+  npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null
+  npm run build >/dev/null
+  cd tests/contract
   npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null
   npx tsc
+  status=0
   echo "contract: DK_IMPL=bash"
-  DK_IMPL=bash npx vitest run --maxWorkers=4 $DK_VITEST_ARGS
+  DK_IMPL=bash npx vitest run --maxWorkers=4 $DK_VITEST_ARGS || status=1
   echo "contract: DK_IMPL=node"
-  DK_IMPL=node npx vitest run --maxWorkers=4 $DK_VITEST_ARGS
-' || result=$?
+  DK_IMPL=node npx vitest run --maxWorkers=4 $DK_VITEST_ARGS || status=1
+  exit "$status"
+')
+containers+=("$check")
+docker cp "$install:/tmp/npmcache" - | docker cp -a - "$check:/tmp/"
+result=0
+docker start -a "$check" || result=$?
 
 after=$(fingerprint)
 [[ $before == "$after" ]] || { echo 'contract: source changed during checks; discard results' >&2; exit 1; }
-if [[ -n $(find "$ROOT" -xdev -uid 0 -print -quit) ]]; then
-  echo 'contract: root-owned files found in the checkout' >&2
+if [[ -n $(find "$ROOT" -xdev \( -uid 0 -o -uid 19001 \) -print -quit) ]]; then
+  echo 'contract: files owned by root or the container user found in the checkout' >&2
   exit 1
 fi
 exit "$result"

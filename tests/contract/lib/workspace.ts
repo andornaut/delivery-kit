@@ -83,7 +83,7 @@ export function defaultConfig(): GameConfig {
         { name: "build", run: "build" },
       ],
     },
-    resources: { cpus: 4, maxWorkers: 4, loadLimit: 10000 },
+    resources: { cpus: 4, maxWorkers: 4, loadLimit: 24 },
     ci: { requiredNames: ["Test"] },
     deploy: { mode: "wrangler", skipPattern: "(\\.md$|^art/|^gameplay/)" },
     reports: {},
@@ -201,8 +201,27 @@ export class Workspace {
     return JSON.parse(readFileSync(join(this.gameDev, "config.json"), "utf8"));
   }
 
+  /**
+   * Write var/registry.json, completing the 1.0 schema fields a case leaves out. Role keys
+   * without a game prefix are registered as shared roles in config.json, as the skills do.
+   */
   writeRegistry(registry: Registry): void {
-    writeJson(join(this.gameDev, "var", "registry.json"), registry);
+    const roles = Object.fromEntries(
+      Object.entries(registry.roles).map(([key, role]) => [key, { ownership: "active", worktree: ".", ...role }]),
+    );
+    const complete = {
+      updatedAt: "2026-11-04T03:00:00Z",
+      host: { nativeProjectId: "fixture-project", root: "." },
+      operations: {},
+      transfers: [],
+      ...registry,
+      roles,
+    };
+    writeJson(join(this.gameDev, "var", "registry.json"), complete);
+    const config = this.gameDevConfig();
+    const shared = new Set(config.sharedRoles as string[]);
+    for (const key of Object.keys(roles)) if (!key.includes("/")) shared.add(key);
+    writeJson(join(this.gameDev, "config.json"), { ...config, sharedRoles: [...shared] });
   }
 
   registry(): Registry {
@@ -306,6 +325,8 @@ export class Workspace {
       HOME: this.home,
       XDG_STATE_HOME: this.xdgState,
       DK_FAKE_DIR: this.fakeDir,
+      // The fake gate checks the selected implementation's container contract.
+      DK_IMPL: process.env.DK_IMPL ?? "bash",
       LANG: "C.UTF-8",
       GIT_AUTHOR_NAME: "Fixture",
       GIT_AUTHOR_EMAIL: "fixture@example.invalid",

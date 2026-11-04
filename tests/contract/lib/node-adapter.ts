@@ -16,8 +16,29 @@ import { KIT_ROOT, type Workspace, writeJson } from "./workspace.ts";
 
 const CLI = join(KIT_ROOT, "dist", "cli.js");
 
+/**
+ * Complete the 1.0 required fields a case leaves out with neutral defaults. Fields a case sets,
+ * including deliberately invalid values, pass through unchanged; `ws.omit` names JSON paths
+ * (for example "deploy.mode") a case wants absent.
+ */
+export function nodeConfig(ws: Workspace): Record<string, unknown> {
+  const c = structuredClone(ws.config) as Record<string, Record<string, unknown>>;
+  const fill = (section: string, defaults: Record<string, unknown>) => {
+    c[section] = { ...defaults, ...(c[section] ?? {}) };
+    for (const key of Object.keys(c[section]!)) if (c[section]![key] === undefined) delete c[section]![key];
+  };
+  fill("ci", { requiredNames: ["Test"], pollSeconds: 60, timeoutSeconds: 1800 });
+  fill("reports", { project: "Fixture", scheduledTicks: false, recipient: "monitor", workerParents: [] });
+  for (const path of ws.omit) {
+    const [section, key] = path.split(".");
+    if (section && key && c[section]) delete c[section]![key];
+    else if (section) delete c[section];
+  }
+  return c;
+}
+
 function command(ws: Workspace, words: string[]): Command {
-  writeJson(ws.configFile, ws.config);
+  writeJson(ws.configFile, nodeConfig(ws));
   const [verb = "", ...rest] = words;
   return {
     argv: [process.execPath, CLI, verb, "--game", ws.game, ...rest],

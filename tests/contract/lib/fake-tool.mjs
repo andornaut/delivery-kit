@@ -122,10 +122,48 @@ function git() {
   }
 }
 
+/** Host bind mounts without a read-only flag, from `-v`/`--volume` and `--mount type=bind`. */
+function writableBinds(argv) {
+  const found = [];
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    let value;
+    if (flag === "-v" || flag === "--volume" || flag === "--mount") value = argv[++i];
+    else if (flag.startsWith("--volume=") || flag.startsWith("--mount=")) value = flag.slice(flag.indexOf("=") + 1);
+    else continue;
+    if (flag.startsWith("--mount")) {
+      const fields = value.split(",");
+      if (!fields.includes("type=bind")) continue;
+      if (!fields.some((f) => ["readonly", "ro", "readonly=true", "ro=true", "readonly=1"].includes(f))) found.push(value);
+    } else {
+      const [source, , options = ""] = value.split(":");
+      // Named volumes are not host binds.
+      if (!source.startsWith("/")) continue;
+      if (!options.split(",").includes("ro")) found.push(value);
+    }
+  }
+  return found;
+}
+
 function docker() {
   const behaviour = control.docker ?? {};
   log();
   if (args[0] === "ps") return 0;
+  if (process.env.DK_IMPL === "node") {
+    // Container lifecycle for the 1.0 gate. `cp CONTAINER:/app/dist HOST` delivers the build.
+    if (["create", "start", "rm", "wait", "volume", "kill", "stop"].includes(args[0])) {
+      if (args[0] === "create") process.stdout.write("fakecontainer\n");
+      return 0;
+    }
+    if (args[0] === "cp") {
+      const [from, to] = args.slice(-2);
+      if (from.includes(":") && !from.startsWith("/") && /\/dist\/?$/.test(from)) {
+        mkdirSync(to, { recursive: true });
+        writeFileSync(join(to, "index.html"), sha.slice(0, 8));
+      }
+      return 0;
+    }
+  }
   const fail = (reason) => {
     process.stderr.write(`fake docker: ${reason}\n`);
     return 99;
@@ -135,14 +173,23 @@ function docker() {
   // Scripted Git stamps the control SHA; a real repository stamps its own scratch HEAD.
   const stamp = args.find((x) => x.startsWith("WORKERS_CI_COMMIT_SHA="))?.slice(22) ?? "";
   if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha) return fail("missing exact commit stamp");
-  const user = args.indexOf("-u");
-  const ids = `${process.getuid()}:${process.getgid()}`;
-  if (user < 0 || args[user + 1] !== ids) return fail("gate must run as the invoking user");
-  // 0.9.0 uses `-v SRC:/npmcache`; 0.9.1 uses `--mount type=bind,src=SRC,dst=/npmcache`.
-  const cache =
-    args.find((x) => x.endsWith(",dst=/npmcache"))?.split(",").find((x) => x.startsWith("src="))?.slice(4) ??
-    args.find((x) => x.endsWith(":/npmcache"))?.slice(0, -":/npmcache".length);
-  if (!cache || !existsSync(cache)) return fail("npm cache bind source must exist before mounting");
+  if (process.env.DK_IMPL === "node") {
+    // 1.0 gate: a fixed unprivileged user and read-only binds; outputs leave by `docker cp`.
+    const user = args.indexOf("--user");
+    if (user < 0 || args[user + 1] !== "19001:19001") return fail("gate must run as --user 19001:19001");
+    const writable = writableBinds(args);
+    if (writable.length) return fail(`writable bind mount: ${writable.join(" ")}`);
+  } else {
+    // 0.9.1 interim: the invoking user, with the npm cache created before it is mounted.
+    const user = args.indexOf("-u");
+    const ids = `${process.getuid()}:${process.getgid()}`;
+    if (user < 0 || args[user + 1] !== ids) return fail("gate must run as the invoking user");
+    // 0.9.0 uses `-v SRC:/npmcache`; 0.9.1 uses `--mount type=bind,src=SRC,dst=/npmcache`.
+    const cache =
+      args.find((x) => x.endsWith(",dst=/npmcache"))?.split(",").find((x) => x.startsWith("src="))?.slice(4) ??
+      args.find((x) => x.endsWith(":/npmcache"))?.slice(0, -":/npmcache".length);
+    if (!cache || !existsSync(cache)) return fail("npm cache bind source must exist before mounting");
+  }
   if (behaviour.blockWhile) {
     // Hold the gate open while the file exists, so a case can act mid-departure.
     while (existsSync(behaviour.blockWhile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
