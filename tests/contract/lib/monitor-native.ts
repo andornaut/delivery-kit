@@ -171,6 +171,8 @@ export function writeCodexRoute(
   change: Record<string, unknown> = {},
   targets = [ART],
 ): void {
+  // A Codex route runs under a Codex registry; the Node adapter registers its conversations.
+  if (process.env.DK_IMPL === "node") ws.writeRegistry({ ...ws.registry(), harness: "codex" });
   ws.writeRoute({
     version: 1,
     harness: "codex",

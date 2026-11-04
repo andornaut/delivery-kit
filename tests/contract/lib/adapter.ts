@@ -20,7 +20,7 @@ export interface Command {
   env: Record<string, string>;
   /**
    * A log file the command writes instead of stdout (the 1.0 runner's runner.log). A resident
-   * started from it replays the file's new content as stdout data, so cases read one stream.
+   * started from it replays the file's new content as stdout and stderr data.
    */
   logFile?: string;
 }
@@ -126,7 +126,9 @@ export function start(command: Command): Resident {
     if (!command.logFile || !existsSync(command.logFile)) return;
     const content = readFileSync(command.logFile);
     if (content.length > offset) {
+      // 1.0 writes one log where 0.9 split stdout and stderr; cases see it on both streams.
       child.stdout.emit("data", content.subarray(offset));
+      child.stderr.emit("data", content.subarray(offset));
       offset = content.length;
     }
   };

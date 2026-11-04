@@ -4,9 +4,10 @@ import { rmSync } from "node:fs";
 
 import { afterEach, expect } from "vitest";
 
-import { startRunner } from "../lib/adapter.ts";
+import { impl, startRunner } from "../lib/adapter.ts";
 import {
   contract,
+  EXIT_INVALID_CONFIG,
   ROUTE_INVALID_MESSAGE,
   suite,
   WORKER_PARENTS_ROUTE_MESSAGE,
@@ -400,7 +401,7 @@ suite("unblock guards", () => {
     async () => {
       const ws = workspace();
       const m = await routed(ws);
-      for (const parents of [[ART, ART], ["ABCDEFAB-0000-0000-0000-000000000002"]]) {
+      const registry = (parents: string[]) =>
         ws.writeRegistry({
           schema: 1,
           revision: 1,
@@ -409,10 +410,30 @@ suite("unblock guards", () => {
             parents.map((id, i) => [`parent-${i}`, { conversations: { codex: id } }]),
           ),
         });
-        ws.config.reports = { workerParents: parents.map((_, i) => `parent-${i}`) };
+      if (impl.name === "bash") {
+        // 0.9 refuses to start: WORKER_PARENT_THREADS must hold distinct canonical UUIDs.
+        for (const parents of [[ART, ART], ["ABCDEFAB-0000-0000-0000-000000000002"]]) {
+          registry(parents);
+          ws.config.reports = { workerParents: parents.map((_, i) => `parent-${i}`) };
+          const result = await startRunner(ws).done;
+          expect(result.code, result.stderr).toBe(2);
+          expect(result.stderr).toContain("WORKER_PARENT_THREADS");
+        }
+      } else {
+        // 1.0 addresses parents by role: two roles sharing a conversation are outside the
+        // active route, so the wake defers with the workerParents wording. A noncanonical
+        // conversation makes the registry invalid, so the runner does not start.
+        registry([ART, ART]);
+        ws.config.reports = { workerParents: ["parent-0", "parent-1"] };
+        await m.start();
+        const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
+        expect(output).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
+        await m.stop();
+        registry(["ABCDEFAB-0000-0000-0000-000000000002"]);
+        ws.config.reports = { workerParents: ["parent-0"] };
         const result = await startRunner(ws).done;
-        expect(result.code, result.stderr).toBe(2);
-        expect(result.stderr).toMatch(/WORKER_PARENT_THREADS|workerParents/);
+        expect(result.code, result.stderr).toBe(EXIT_INVALID_CONFIG);
+        expect(result.stderr).toContain("registry.json");
       }
       expect(m.socket.connections).toEqual([]);
     },

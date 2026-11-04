@@ -281,7 +281,15 @@ export class Workspace {
     return join(this.gameDev, "var", "route.json");
   }
 
+  /** The last 0.x route a case wrote; the Node adapter translates it to a role-name route. */
+  legacyRoute: unknown;
+
+  /**
+   * Write a 0.x monitor route (version 1 Codex or version 2 Claude, or raw text). Bash reads it
+   * as is; the Node adapter rewrites var/route.json as a schema 1 role-name route at each command.
+   */
   writeRoute(route: unknown): void {
+    this.legacyRoute = route;
     writeFileSync(this.routeFile, typeof route === "string" ? route : JSON.stringify(route));
   }
 
@@ -301,6 +309,12 @@ export class Workspace {
     const control = this.control();
     change(control);
     this.setControl(control);
+    // Keep an existing clock's sleep cap in step with the control value.
+    if (existsSync(this.clockFile)) {
+      const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as Record<string, unknown>;
+      delete clock.maxRealSleep;
+      writeJson(this.clockFile, { ...clock, ...this.realSleepCap() });
+    }
   }
 
   control(): Control {
@@ -338,7 +352,21 @@ export class Workspace {
    */
   setClock(epoch: number, speed = 60): void {
     rmSync(join(this.fakeDir, "clock-offsets"), { force: true });
-    writeJson(join(this.fakeDir, "clock.json"), { epoch, realStartMs: Date.now(), speed });
+    writeJson(join(this.fakeDir, "clock.json"), {
+      epoch,
+      realStartMs: Date.now(),
+      speed,
+      ...this.realSleepCap(),
+    });
+  }
+
+  /**
+   * The real-time cap on one sleep: fake `sleep` reads control.maxRealSleep, and the 1.0 runner
+   * reads clock.json's optional maxRealSleep (seconds), so both follow the same fixture value.
+   */
+  private realSleepCap(): { maxRealSleep?: number } {
+    const cap = this.control().maxRealSleep;
+    return cap !== undefined && cap > 0 ? { maxRealSleep: cap } : {};
   }
 
   /**
@@ -353,7 +381,12 @@ export class Workspace {
       speed: number;
     };
     const now = clock.epoch + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
-    writeJson(this.clockFile, { epoch: now, realStartMs: Date.now(), speed: 0 });
+    writeJson(this.clockFile, {
+      epoch: now,
+      realStartMs: Date.now(),
+      speed: 0,
+      ...this.realSleepCap(),
+    });
     return clock.speed;
   }
 
@@ -364,7 +397,12 @@ export class Workspace {
       speed: number;
     };
     if (clock.speed !== 0) return;
-    writeJson(this.clockFile, { epoch: clock.epoch, realStartMs: Date.now(), speed });
+    writeJson(this.clockFile, {
+      epoch: clock.epoch,
+      realStartMs: Date.now(),
+      speed,
+      ...this.realSleepCap(),
+    });
   }
 
   /** How many fake `sleep` calls have started so far. */

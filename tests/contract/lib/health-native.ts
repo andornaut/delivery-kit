@@ -37,6 +37,8 @@ export function sockets(): (ws: Workspace) => Promise<CodexSocket> {
 
 /** An active version 1 route: monitor coordinator plus active targets. */
 export function codexRoute(ws: Workspace, targets: string[], monitor = M): void {
+  // A Codex route runs under a Codex registry; the Node adapter registers its conversations.
+  if (process.env.DK_IMPL === "node") ws.writeRegistry({ ...ws.registry(), harness: "codex" });
   ws.writeRoute({
     version: 1,
     harness: "codex",
