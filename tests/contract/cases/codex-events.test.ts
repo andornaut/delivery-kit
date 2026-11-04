@@ -164,9 +164,10 @@ suite("codex events", () => {
       }
       await m.start();
       await m.runner!.until(() => receiptStatus(m.ws) === "deferred");
-      if (impl.name === "node" && mode === "local") {
+      if (impl.name === "node" && (mode === "local" || mode === "race")) {
         // 1.0 defers from the local record alone with no handshake: later flushes open no
-        // connection either. Step the clock across three flush intervals and look.
+        // connection either (in race mode the record turns pending during the first flush).
+        // Step the clock across three flush intervals and look.
         const before = m.socket.connections.length;
         for (let step = 0; step < 3; step += 1) {
           m.ws.advanceClock(60);
