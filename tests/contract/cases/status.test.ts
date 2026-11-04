@@ -25,7 +25,8 @@ interface Report {
 
 function kitVersion(): string {
   if (impl.name === "bash") return readFileSync(join(BASH_ROOT, "VERSION"), "utf8").trim();
-  return (JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as { version: string }).version;
+  return (JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as { version: string })
+    .version;
 }
 
 function quiet(ws: Workspace, ci = false): void {
@@ -50,7 +51,9 @@ async function report(ws: Workspace): Promise<Report> {
 
 async function started(ws: Workspace): Promise<Resident> {
   const runner = startRunner(ws);
-  await runner.until(() => ws.exists("runner.identity.json") && ws.read("runner.lock").trim() !== "");
+  await runner.until(
+    () => ws.exists("runner.identity.json") && ws.read("runner.lock").trim() !== "",
+  );
   return runner;
 }
 
@@ -63,7 +66,11 @@ suite("status", () => {
     await (await started(ws)).stop();
     ws.write("active-departure", "");
     const result = await report(ws);
-    expect([result.status, result.runner_lock_held, result.identity_status]).toEqual(["not running", false, "stale"]);
+    expect([result.status, result.runner_lock_held, result.identity_status]).toEqual([
+      "not running",
+      false,
+      "stale",
+    ]);
     expect(result.idle && result.drained).toBe(true);
   });
 

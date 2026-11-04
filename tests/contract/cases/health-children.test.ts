@@ -27,13 +27,22 @@ import {
 
 type Json = Record<string, unknown>;
 type Child = Json & { requires_parent_action: boolean; error_code: unknown; status: string };
-type Health = Json & { children: Child[]; diagnostics: string[]; counts: Json; budget: Json; inventories: Record<string, Json> };
+type Health = Json & {
+  children: Child[];
+  diagnostics: string[];
+  counts: Json;
+  budget: Json;
+  inventories: Record<string, Json>;
+};
 
 suite("child health", () => {
   const workspace = workspaces();
   const socketFor = sockets();
 
-  async function collect(native: { install(socket: CodexSocket): unknown }, parents: string[] = [P]) {
+  async function collect(
+    native: { install(socket: CodexSocket): unknown },
+    parents: string[] = [P],
+  ) {
     const ws = workspace();
     const socket = await socketFor(ws);
     native.install(socket);
@@ -43,7 +52,13 @@ suite("child health", () => {
     expect(shot.text).not.toContain(CH_PRIVATE);
     const health = shot.record.worker_health as Record<string, Health>;
     expect(shot.out.worker_health).toEqual(health);
-    return { health, all: health, one: health[parents[0]!]!, calls: only(socket.calls, CHILD_METHODS), shot };
+    return {
+      health,
+      all: health,
+      one: health[parents[0]!]!,
+      calls: only(socket.calls, CHILD_METHODS),
+      shot,
+    };
   }
 
   contract("typed failures are classified and private fields discarded", async () => {
@@ -65,7 +80,15 @@ suite("child health", () => {
 
   contract("no status or untyped error inference", async () => {
     for (const status of ["completed", "interrupted", "inProgress", "failed"]) {
-      for (const code of [null, "other", { rateLimitExceeded: {} }, { flexUnavailable: {} }, { serverOverloaded: {} }, { unknown: CH_PRIVATE }, CH_PRIVATE]) {
+      for (const code of [
+        null,
+        "other",
+        { rateLimitExceeded: {} },
+        { flexUnavailable: {} },
+        { serverOverloaded: {} },
+        { unknown: CH_PRIVATE },
+        CH_PRIVATE,
+      ]) {
         const native = new ChildNative();
         native.turn = turn(status, code);
         const child = (await collect(native)).one.children[0]!;
@@ -122,7 +145,10 @@ suite("child health", () => {
 
   contract("active and archived pagination deduplicates children", async () => {
     const native = new ChildNative();
-    native.listPages.false = [{ data: [], nextCursor: "1" }, { data: [row()], nextCursor: null }];
+    native.listPages.false = [
+      { data: [], nextCursor: "1" },
+      { data: [row()], nextCursor: null },
+    ];
     native.listPages.true = [{ data: [row()], nextCursor: null }];
     const { one } = await collect(native);
     expect(one.complete).toBe(true);
@@ -133,7 +159,10 @@ suite("child health", () => {
   contract("a partial inventory keeps safe verified facts", async () => {
     // The CLI collector reads at most ten pages per inventory stream.
     const native = new ChildNative();
-    native.listPages.false = Array.from({ length: 10 }, (_, i) => ({ data: i ? [] : [native.child], nextCursor: String(i + 1) }));
+    native.listPages.false = Array.from({ length: 10 }, (_, i) => ({
+      data: i ? [] : [native.child],
+      nextCursor: String(i + 1),
+    }));
     const { one } = await collect(native);
     expect(one.status).toBe("partial");
     expect(one.diagnostics).toContain("page_bound_reached");
@@ -264,13 +293,19 @@ suite("child health", () => {
     const native = new ScopedNative([22, 11, 12, 12, 12, 12, 11, 11, 11, 11], 8);
     const { all, calls, shot } = await collect(native, native.parents);
     expect(calls).toHaveLength(20 + 125 + 2 * 8);
-    const sum = (key: string) => Object.values(all).reduce((total, h) => total + Number(h.counts[key]), 0);
+    const sum = (key: string) =>
+      Object.values(all).reduce((total, h) => total + Number(h.counts[key]), 0);
     expect(sum("observed")).toBe(125);
     expect(sum("validated")).toBe(8);
     expect(Object.values(all).every((h) => h.complete)).toBe(true);
     for (const parent of native.parents) {
       const count = native.children[parent]!.length;
-      expect(all[parent]!.counts).toEqual({ discovered: count, observed: count, validated: parent === native.parents[0] ? 8 : 0, omitted: 0 });
+      expect(all[parent]!.counts).toEqual({
+        discovered: count,
+        observed: count,
+        validated: parent === native.parents[0] ? 8 : 0,
+        omitted: 0,
+      });
     }
     expect(shot.text).not.toContain("privateOlderHistory");
     expect(calls.filter((c) => c.method === "thread/read")).toHaveLength(8);
@@ -281,7 +316,9 @@ suite("child health", () => {
     const native = new ScopedNative([120, 120]);
     const { calls } = await collect(native, native.parents);
     const [first, second] = native.parents;
-    expect(calls.slice(0, 5).map((c) => [c.params.parentThreadId, c.params.archived, c.params.cursor])).toEqual([
+    expect(
+      calls.slice(0, 5).map((c) => [c.params.parentThreadId, c.params.archived, c.params.cursor]),
+    ).toEqual([
       [first, false, undefined],
       [second, false, undefined],
       [first, true, undefined],
@@ -293,7 +330,9 @@ suite("child health", () => {
   contract("child observations round-robin across parents", async () => {
     const native = new ScopedNative([3, 3, 3]);
     const { calls } = await collect(native, native.parents);
-    expect(calls.slice(6, 9).map((c) => c.params.threadId)).toEqual(native.parents.map((p) => native.children[p]![0]));
+    expect(calls.slice(6, 9).map((c) => c.params.threadId)).toEqual(
+      native.parents.map((p) => native.children[p]![0]),
+    );
   });
 
   contract("discovered counts include listed children beyond the inspection bound", async () => {
@@ -314,7 +353,11 @@ suite("child health", () => {
       const native = new ChildNative();
       native.turn = turn(status, code);
       const { one, calls } = await collect(native);
-      expect(calls.map((c) => c.method)).toEqual(["thread/list", "thread/list", "thread/turns/list"]);
+      expect(calls.map((c) => c.method)).toEqual([
+        "thread/list",
+        "thread/list",
+        "thread/turns/list",
+      ]);
       expect(one.counts).toEqual({ discovered: 1, observed: 1, validated: 0, omitted: 0 });
       expect(one.children[0]!.requires_parent_action).toBe(false);
     }

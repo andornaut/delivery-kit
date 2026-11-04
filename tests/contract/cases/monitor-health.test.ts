@@ -70,11 +70,18 @@ suite("monitor scheduled health", () => {
       const first = await schedule.slot();
       expect(first.output).toMatchObject({ status: "accepted", monitor_status: "ok" });
       const second = await schedule.slot();
-      expect(second.output).toMatchObject({ status: "unchanged", monitor_status: "failed", backlog_slots: 2 });
+      expect(second.output).toMatchObject({
+        status: "unchanged",
+        monitor_status: "failed",
+        backlog_slots: 2,
+      });
       await schedule.slot();
       expect(monitorEvents(ws)).toHaveLength(1);
       native.queues = { [TECH]: [], [ART]: [] };
-      expect((await schedule.slot()).output).toMatchObject({ status: "accepted", monitor_status: "ok" });
+      expect((await schedule.slot()).output).toMatchObject({
+        status: "accepted",
+        monitor_status: "ok",
+      });
       rmSync(ws.path("unblock", "decisions", TECH + ".json"));
       expect((await schedule.slot()).output!.status).toBe("deferred");
       const failed = await schedule.slot();
@@ -102,12 +109,19 @@ suite("monitor scheduled health", () => {
         }),
       );
       // History pages fail; exact latest-turn reads for delivery still succeed.
-      let history: (params: Json) => unknown = () => ({ error: { code: -32000, message: "transport" } });
+      let history: (params: Json) => unknown = () => ({
+        error: { code: -32000, message: "transport" },
+      });
       native.items = (params: Json) => (params.turnId ? { data: [] } : history(params));
       await schedule.start();
       for (let i = 0; i < 2; i++) {
         const result = (await schedule.slot()).output!;
-        expect(result).toMatchObject({ monitor_status: "degraded", history_status: "degraded", deferral_slots: 0, backlog_slots: 0 });
+        expect(result).toMatchObject({
+          monitor_status: "degraded",
+          history_status: "degraded",
+          deferral_slots: 0,
+          backlog_slots: 0,
+        });
       }
       expect(health(ws).reported).toBe(false);
       for (const page of [
@@ -115,7 +129,10 @@ suite("monitor scheduled health", () => {
         { data: [], truncated: true },
       ]) {
         history = () => page;
-        expect((await schedule.slot()).output).toMatchObject({ monitor_status: "degraded", deferral_slots: 0 });
+        expect((await schedule.slot()).output).toMatchObject({
+          monitor_status: "degraded",
+          deferral_slots: 0,
+        });
       }
       native.queues[TECH] = [entry("one")];
       expect((await schedule.slot()).output!.backlog_slots).toBe(1);
@@ -127,7 +144,8 @@ suite("monitor scheduled health", () => {
       expect(monitorEvents(ws)).toHaveLength(1);
       native.queues[TECH] = [];
       // One more page exists for history; the question collector's second page completes.
-      history = (params: Json) => (params.cursor ? { data: [] } : { data: [], nextCursor: "older" });
+      history = (params: Json) =>
+        params.cursor ? { data: [] } : { data: [], nextCursor: "older" };
       const recovered = (await schedule.slot()).output!;
       expect(recovered.monitor_status).toBe("ok");
       expect(recovered.history_status).toBe("ok");
@@ -142,7 +160,9 @@ suite("monitor scheduled health", () => {
       async () => {
         const { ws, native, schedule } = await setup();
         native.items = (params: Json) =>
-          params.turnId ? { data: [] } : { data: [{ turnId: "compact", item: { id: "compact", type: "contextCompaction" } }] };
+          params.turnId
+            ? { data: [] }
+            : { data: [{ turnId: "compact", item: { id: "compact", type: "contextCompaction" } }] };
         native.queues = { [TECH]: [], [ART]: [] };
         if (cause === "inventory") {
           clear(ws);
@@ -200,7 +220,12 @@ suite("monitor scheduled health", () => {
     "worker diagnostics never age queue starvation",
     async () => {
       const { ws, native, schedule } = await setup();
-      ws.writeRegistry({ schema: 1, revision: 1, harness: "codex", roles: { tech: { conversations: { codex: TECH } } } });
+      ws.writeRegistry({
+        schema: 1,
+        revision: 1,
+        harness: "codex",
+        roles: { tech: { conversations: { codex: TECH } } },
+      });
       ws.config.reports = { workerParents: ["tech"] };
       clear(ws);
       native.queues = { [TECH]: [], [ART]: [] };
@@ -270,7 +295,10 @@ suite("monitor scheduled health", () => {
       const { ws, native, schedule } = await setup();
       clear(ws);
       native.queues = { [TECH]: [entry("A")], [ART]: [] };
-      ws.write(join("unblock", "health", TECH + ".json"), JSON.stringify({ seen_slots: [100, 200], backlog_slots: 99 }));
+      ws.write(
+        join("unblock", "health", TECH + ".json"),
+        JSON.stringify({ seen_slots: [100, 200], backlog_slots: 99 }),
+      );
       await schedule.start();
       expect((await schedule.slot()).output!.backlog_slots).toBe(1);
     },
@@ -284,7 +312,14 @@ suite("monitor scheduled health", () => {
       clear(ws);
       native.queues = { [TECH]: [entry("one")], [ART]: [] };
       const taken = await snapshot(ws, TECH);
-      const retained = await ack(ws, TECH, taken.public.snapshot_id as string, ["one"], "retained", "independent planned work");
+      const retained = await ack(
+        ws,
+        TECH,
+        taken.public.snapshot_id as string,
+        ["one"],
+        "retained",
+        "independent planned work",
+      );
       expect(retained.rows![0]!.state).toBe("retained");
       expect(native.deletions()).toEqual([]);
       expect(native.queues[TECH]).toEqual([entry("one")]);
@@ -303,7 +338,13 @@ suite("monitor scheduled health", () => {
       expect(Object.keys(ages(ws))).toEqual(["new-work"]);
       const fresh = await snapshot(ws, TECH);
       native.deleteResult = false;
-      const notDeleted = await ack(ws, TECH, fresh.public.snapshot_id as string, ["one"], "handled");
+      const notDeleted = await ack(
+        ws,
+        TECH,
+        fresh.public.snapshot_id as string,
+        ["one"],
+        "handled",
+      );
       expect(notDeleted.rows![0]!.state).toBe("not_deleted");
       expect(ws.readJson(retentionName(TECH, "one")).active).toBe(false);
       await schedule.slot();
@@ -319,7 +360,9 @@ suite("monitor scheduled health", () => {
   contract(
     "the real question collector keeps partial old history apart from complete current proof",
     async () => {
-      const { ws, native, schedule } = await setup((w) => writeCodexRoute(w, { monitor_thread_id: ART }, [TECH]));
+      const { ws, native, schedule } = await setup((w) =>
+        writeCodexRoute(w, { monitor_thread_id: ART }, [TECH]),
+      );
       clear(ws, ART);
       const question = {
         turnId: "current",
@@ -330,7 +373,10 @@ suite("monitor scheduled health", () => {
           questions: [{ title: "Choose a local path", options: ["First", "Second"] }],
         },
       };
-      const compact = { turnId: "older", item: { id: "old-compaction", type: "contextCompaction" } };
+      const compact = {
+        turnId: "older",
+        item: { id: "old-compaction", type: "contextCompaction" },
+      };
       const marker = {
         thread_id: TECH,
         state: "pending",
@@ -348,7 +394,11 @@ suite("monitor scheduled health", () => {
       };
       writeDecision(ws, TECH, marker);
       native.threads[TECH] = {
-        thread: { id: TECH, updatedAt: 1, status: { type: "active", activeFlags: ["waitingOnUserInput"] } },
+        thread: {
+          id: TECH,
+          updatedAt: 1,
+          status: { type: "active", activeFlags: ["waitingOnUserInput"] },
+        },
       };
       native.turns[TECH] = [{ id: "current", status: "inProgress" }];
       let truncated = false;
@@ -364,7 +414,10 @@ suite("monitor scheduled health", () => {
       expect(value.complete).toBe(false);
       expect(value.latest_turn_proof.complete).toBe(true);
       expect(value.questions[0].proof_complete).toBe(true);
-      const notices = () => native.reminders().filter((text) => text.includes("Owner-attested confirmed pending questions"));
+      const notices = () =>
+        native
+          .reminders()
+          .filter((text) => text.includes("Owner-attested confirmed pending questions"));
       expect(notices()).toHaveLength(1);
       expect(notices()[0]).toContain("Choose a local path");
       expect(JSON.stringify(first)).not.toContain("PRIVATE_UNRELATED_BODY");
@@ -384,22 +437,53 @@ suite("monitor scheduled health", () => {
       const child = "00000000-0000-0000-0000-000000000003";
       const failedTurn = "00000000-0000-0000-0000-000000000004";
       const variants: Array<[string, Json, Json, boolean]> = [
-        ["failed", { parentThreadId: TECH }, { status: "failed", error: { codexErrorInfo: "contextWindowExceeded" } }, true],
-        ["invalid lineage", { parentThreadId: ART }, { status: "failed", error: { codexErrorInfo: "contextWindowExceeded" } }, false],
-        ["retrying", { parentThreadId: TECH }, { status: "inProgress", error: { codexErrorInfo: "contextWindowExceeded" } }, false],
+        [
+          "failed",
+          { parentThreadId: TECH },
+          { status: "failed", error: { codexErrorInfo: "contextWindowExceeded" } },
+          true,
+        ],
+        [
+          "invalid lineage",
+          { parentThreadId: ART },
+          { status: "failed", error: { codexErrorInfo: "contextWindowExceeded" } },
+          false,
+        ],
+        [
+          "retrying",
+          { parentThreadId: TECH },
+          { status: "inProgress", error: { codexErrorInfo: "contextWindowExceeded" } },
+          false,
+        ],
         ["recovered", { parentThreadId: TECH }, { status: "completed" }, false],
-        ["untyped", { parentThreadId: TECH }, { status: "failed", error: { message: "PRIVATE_BODY" } }, false],
+        [
+          "untyped",
+          { parentThreadId: TECH },
+          { status: "failed", error: { message: "PRIVATE_BODY" } },
+          false,
+        ],
       ];
       for (const [name, lineage, turn, expected] of variants) {
         const { ws, native, schedule } = await setup();
-        ws.writeRegistry({ schema: 1, revision: 1, harness: "codex", roles: { tech: { conversations: { codex: TECH } } } });
+        ws.writeRegistry({
+          schema: 1,
+          revision: 1,
+          harness: "codex",
+          roles: { tech: { conversations: { codex: TECH } } },
+        });
         ws.config.reports = { workerParents: ["tech"] };
         clear(ws);
         native.queues = { [TECH]: [], [ART]: [] };
         native.socket.on("thread/list", (params: Json) => ({
-          result: { data: params.archived ? [] : [{ id: child, parentThreadId: TECH, status: { type: "idle" }, updatedAt: 1 }] },
+          result: {
+            data: params.archived
+              ? []
+              : [{ id: child, parentThreadId: TECH, status: { type: "idle" }, updatedAt: 1 }],
+          },
         }));
-        native.threads[child] = { thread: { id: child, status: { type: "idle" }, updatedAt: 1, ...lineage } };
+        native.threads[child] = {
+          thread: { id: child, status: { type: "idle" }, updatedAt: 1, ...lineage },
+        };
         native.turns[child] = [{ id: failedTurn, ...turn }];
         await schedule.start();
         await schedule.slot();
@@ -416,14 +500,23 @@ suite("monitor scheduled health", () => {
 
   // 26 recipients times ten question pages exceed the shared 256-call collection budget.
   async function exhaustedBudget(withProcess: boolean): Promise<{ snap: Json; native: Native }> {
-    const targets = Array.from({ length: 25 }, (_, i) => `00000000-0000-0000-0000-${String(100 + i).padStart(12, "0")}`);
+    const targets = Array.from(
+      { length: 25 },
+      (_, i) => `00000000-0000-0000-0000-${String(100 + i).padStart(12, "0")}`,
+    );
     const { ws, native, schedule } = await setup((w) => writeCodexRoute(w, {}, targets));
-    ws.writeRegistry({ schema: 1, revision: 1, harness: "codex", roles: { tech: { conversations: { codex: TECH } } } });
+    ws.writeRegistry({
+      schema: 1,
+      revision: 1,
+      harness: "codex",
+      roles: { tech: { conversations: { codex: TECH } } },
+    });
     if (!withProcess) ws.config.reports = { workerParents: ["tech"] };
     clear(ws);
     native.queues = {};
     let page = 0;
-    native.items = (params: Json) => (params.turnId ? { data: [] } : { data: [], nextCursor: `page-${++page}` });
+    native.items = (params: Json) =>
+      params.turnId ? { data: [] } : { data: [], nextCursor: `page-${++page}` };
     if (withProcess) {
       launchItem(native);
       manifest(ws, [processJob(TECH, new Date().toISOString())]);

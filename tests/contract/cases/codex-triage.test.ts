@@ -33,7 +33,11 @@ suite("codex triage", () => {
     return m;
   }
 
-  function files(ws: Workspace, mapping: unknown, targets: unknown): { map: string; targets: string } {
+  function files(
+    ws: Workspace,
+    mapping: unknown,
+    targets: unknown,
+  ): { map: string; targets: string } {
     const paths = { map: join(ws.root, "sessions.json"), targets: join(ws.root, "shared.json") };
     writeFileSync(paths.map, JSON.stringify(mapping));
     writeFileSync(paths.targets, JSON.stringify(targets));
@@ -41,13 +45,22 @@ suite("codex triage", () => {
   }
 
   /** Reach the departure in hour `hour` and return the triaged recipients, or the tick output. */
-  async function depart(m: Monitored, hour: number): Promise<{ recipients?: string[]; output: string }> {
+  async function depart(
+    m: Monitored,
+    hour: number,
+  ): Promise<{ recipients?: string[]; output: string }> {
     const slot = at(5, 0, hour);
-    const output = await m.jump(slot, (text) => text.includes(`scheduled monitor ${slot}`) || text.includes(`hourly unblock ${slot}`));
+    const output = await m.jump(
+      slot,
+      (text) =>
+        text.includes(`scheduled monitor ${slot}`) || text.includes(`hourly unblock ${slot}`),
+    );
     const line = output.split("\n").find((row) => row.includes(`scheduled monitor ${slot}: `));
     if (!line) return { output };
     const result = JSON.parse(line.slice(line.indexOf(": {") + 2)) as { snapshot_id: string };
-    const snapshot = m.ws.readJson<{ queues: Record<string, unknown> }>(`unblock/snapshots/${result.snapshot_id}.json`);
+    const snapshot = m.ws.readJson<{ queues: Record<string, unknown> }>(
+      `unblock/snapshots/${result.snapshot_id}.json`,
+    );
     return { recipients: Object.keys(snapshot.queues), output };
   }
 
@@ -83,10 +96,17 @@ suite("codex triage", () => {
       { version: true },
     ]) {
       writeFileSync(paths.targets, JSON.stringify({ ...config, ...change }));
-      expect((await depart(m, hour++)).recipients, JSON.stringify(change)).toEqual([TECH, ART, GAMEPLAY]);
+      expect((await depart(m, hour++)).recipients, JSON.stringify(change)).toEqual([
+        TECH,
+        ART,
+        GAMEPLAY,
+      ]);
     }
     writeFileSync(paths.targets, JSON.stringify(config));
-    for (const roles of [{ tech: ART, art: ART, gameplay: GAMEPLAY }, { tech: TECH, art: ART, gameplay: ART }]) {
+    for (const roles of [
+      { tech: ART, art: ART, gameplay: GAMEPLAY },
+      { tech: TECH, art: ART, gameplay: ART },
+    ]) {
       writeFileSync(paths.map, JSON.stringify({ codex: roles }));
       const tick = await depart(m, hour++);
       expect(tick.recipients).toBeUndefined();
@@ -101,48 +121,57 @@ suite("codex triage", () => {
     }
   });
 
-  bashConfig("host-matching library targets are deduplicated and held targets excluded", async () => {
-    const ws = workspace();
-    const m = await legacy(ws);
-    const config = {
-      version: 1,
-      harness: "codex",
-      host_coordinator_thread_id: TECH,
-      host_project_root: ws.repo,
-      targets: [
-        { role: "art-kit", ownership: "active", thread_id: LIBRARY },
-        { role: "game-kit", ownership: "active", thread_id: LIBRARY },
-        { role: "delivery-kit", ownership: "active", thread_id: OTHER },
-        { role: "delivery-kit", ownership: "held", thread_id: HELD },
-      ],
-    };
-    const paths = files(ws, { codex: { tech: TECH, art: ART, gameplay: GAMEPLAY } }, config);
-    ws.legacyConf = `CODEX_SHARED_ROLES="art-kit delivery-kit game-kit"\nSESSION_MAP_FILE='${paths.map}'\nSHARED_TARGETS_FILE='${paths.targets}'\n`;
-    await m.start();
-    expect((await depart(m, -1)).recipients).toEqual([TECH, ART, GAMEPLAY, LIBRARY, OTHER]);
-    writeFileSync(paths.targets, JSON.stringify({ ...config, host_project_root: "/different/project" }));
-    expect((await depart(m, 0)).recipients).toEqual([TECH, ART, GAMEPLAY]);
-  });
-
-  bashConfig("missing socket or shared-role configuration defers triage without the native helper", async () => {
-    const ws = workspace();
-    const m = await legacy(ws);
-    for (const [legacyConf, missing, socket] of [
-      ["CODEX_SHARED_ROLES=''\n", "CODEX_CONTROL_SOCKET", false],
-      ["", "CODEX_SHARED_ROLES", true],
-    ] as const) {
-      if (socket) ws.env.CODEX_CONTROL_SOCKET = m.socket.path;
-      else delete ws.env.CODEX_CONTROL_SOCKET;
-      ws.legacyConf = legacyConf;
+  bashConfig(
+    "host-matching library targets are deduplicated and held targets excluded",
+    async () => {
+      const ws = workspace();
+      const m = await legacy(ws);
+      const config = {
+        version: 1,
+        harness: "codex",
+        host_coordinator_thread_id: TECH,
+        host_project_root: ws.repo,
+        targets: [
+          { role: "art-kit", ownership: "active", thread_id: LIBRARY },
+          { role: "game-kit", ownership: "active", thread_id: LIBRARY },
+          { role: "delivery-kit", ownership: "active", thread_id: OTHER },
+          { role: "delivery-kit", ownership: "held", thread_id: HELD },
+        ],
+      };
+      const paths = files(ws, { codex: { tech: TECH, art: ART, gameplay: GAMEPLAY } }, config);
+      ws.legacyConf = `CODEX_SHARED_ROLES="art-kit delivery-kit game-kit"\nSESSION_MAP_FILE='${paths.map}'\nSHARED_TARGETS_FILE='${paths.targets}'\n`;
       await m.start();
-      const tick = await depart(m, -1);
-      expect(tick.recipients).toBeUndefined();
-      expect(tick.output).toContain(missing);
-      await m.stop();
-    }
-    expect(m.socket.connections).toEqual([]);
-    expect(ws.exists("unblock/snapshots")).toBe(false);
-  });
+      expect((await depart(m, -1)).recipients).toEqual([TECH, ART, GAMEPLAY, LIBRARY, OTHER]);
+      writeFileSync(
+        paths.targets,
+        JSON.stringify({ ...config, host_project_root: "/different/project" }),
+      );
+      expect((await depart(m, 0)).recipients).toEqual([TECH, ART, GAMEPLAY]);
+    },
+  );
+
+  bashConfig(
+    "missing socket or shared-role configuration defers triage without the native helper",
+    async () => {
+      const ws = workspace();
+      const m = await legacy(ws);
+      for (const [legacyConf, missing, socket] of [
+        ["CODEX_SHARED_ROLES=''\n", "CODEX_CONTROL_SOCKET", false],
+        ["", "CODEX_SHARED_ROLES", true],
+      ] as const) {
+        if (socket) ws.env.CODEX_CONTROL_SOCKET = m.socket.path;
+        else delete ws.env.CODEX_CONTROL_SOCKET;
+        ws.legacyConf = legacyConf;
+        await m.start();
+        const tick = await depart(m, -1);
+        expect(tick.recipients).toBeUndefined();
+        expect(tick.output).toContain(missing);
+        await m.stop();
+      }
+      expect(m.socket.connections).toEqual([]);
+      expect(ws.exists("unblock/snapshots")).toBe(false);
+    },
+  );
 
   bashConfig("a monitor route rejects a relative project root even while held", async () => {
     const ws = workspace();

@@ -19,7 +19,11 @@ export type Reply =
   | { hang: true }
   | { close: true };
 
-export type Handler = (params: Record<string, unknown>, call: RpcCall, calls: RpcCall[]) => Reply | unknown;
+export type Handler = (
+  params: Record<string, unknown>,
+  call: RpcCall,
+  calls: RpcCall[],
+) => Reply | unknown;
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -105,7 +109,9 @@ export class CodexSocket {
         const head = buffer.subarray(0, end).toString();
         buffer = buffer.subarray(end + 4);
         const key = /Sec-WebSocket-Key:\s*(\S+)/i.exec(head)?.[1] ?? "";
-        const accept = createHash("sha1").update(key + GUID).digest("base64");
+        const accept = createHash("sha1")
+          .update(key + GUID)
+          .digest("base64");
         socket.write(
           `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
         );
@@ -130,7 +136,8 @@ export class CodexSocket {
         if (masked) offset += 4;
         if (buffer.length < offset + length) return;
         const payload = Buffer.from(buffer.subarray(offset, offset + length));
-        if (masked) for (let i = 0; i < payload.length; i++) payload[i]! ^= buffer[maskOffset + (i % 4)]!;
+        if (masked)
+          for (let i = 0; i < payload.length; i++) payload[i]! ^= buffer[maskOffset + (i % 4)]!;
         buffer = buffer.subarray(offset + length);
         if (opcode === 8) {
           socket.end();
@@ -142,7 +149,11 @@ export class CodexSocket {
   }
 
   private dispatch(socket: Socket, text: string): void {
-    const message = JSON.parse(text) as { id?: number; method?: string; params?: Record<string, unknown> };
+    const message = JSON.parse(text) as {
+      id?: number;
+      method?: string;
+      params?: Record<string, unknown>;
+    };
     if (!message.method) return;
     const call: RpcCall = { method: message.method, params: message.params ?? {} };
     if (message.id !== undefined) call.id = message.id;
@@ -158,8 +169,12 @@ export class CodexSocket {
       socket.destroy();
       return;
     }
-    for (const notification of reply.before ?? []) socket.write(frame(JSON.stringify(notification)));
-    const body = "error" in reply ? { id: message.id, error: reply.error } : { id: message.id, result: reply.result };
+    for (const notification of reply.before ?? [])
+      socket.write(frame(JSON.stringify(notification)));
+    const body =
+      "error" in reply
+        ? { id: message.id, error: reply.error }
+        : { id: message.id, result: reply.result };
     socket.write(frame(JSON.stringify(body)));
   }
 }

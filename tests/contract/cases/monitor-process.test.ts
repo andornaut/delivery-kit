@@ -5,7 +5,17 @@ import { dirname } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { contract, suite, workspaces } from "../lib/cases.ts";
-import { clear, health, type Json, launchItem, Native, processJob, TECH, ART, writeCodexRoute } from "../lib/monitor-native.ts";
+import {
+  clear,
+  health,
+  type Json,
+  launchItem,
+  Native,
+  processJob,
+  TECH,
+  ART,
+  writeCodexRoute,
+} from "../lib/monitor-native.ts";
 import { MonitorSchedule } from "../lib/monitor-schedule.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -52,7 +62,9 @@ suite("monitor scheduled process health", () => {
       expect(health(ws).process_observations).toEqual(first.process_health[TECH].observations);
       const second = readSnapshot((await schedule.slot()).output);
       expect(health(ws).process_observations).toEqual(second.process_health[TECH].observations);
-      expect(second.process_health[TECH].observations[0].slot).not.toBe(first.process_health[TECH].observations[0].slot);
+      expect(second.process_health[TECH].observations[0].slot).not.toBe(
+        first.process_health[TECH].observations[0].slot,
+      );
       expect(second.process_health[TECH].observations[0].owner_evidence.confirmed_at).toBe(
         first.process_health[TECH].observations[0].owner_evidence.confirmed_at,
       );
@@ -79,7 +91,11 @@ suite("monitor scheduled process health", () => {
       expect(sample.provenance).toBe("owner_attested");
       expect(Number.isNaN(Date.parse(sample.collected_at))).toBe(false);
       expect(JSON.stringify(snap)).not.toContain("PRIVATE_COMMAND");
-      expect(native.reminders().filter((text) => text.includes("Confirmed owner-attested stalled resources"))).toHaveLength(1);
+      expect(
+        native
+          .reminders()
+          .filter((text) => text.includes("Confirmed owner-attested stalled resources")),
+      ).toHaveLength(1);
       job.closure = {
         owner_parent_id: TECH,
         kind: "process",
@@ -96,10 +112,13 @@ suite("monitor scheduled process health", () => {
       const before = readFileSync(ws.processHealthFile);
       const closed = readSnapshot((await schedule.slot()).output);
       expect(closed.process_health[TECH].jobs[0].closure_status).toBe("reported_closed");
-      expect(native.reminders().filter((text) => text.includes("Confirmed owner-attested stalled resources"))).toHaveLength(1);
+      expect(
+        native
+          .reminders()
+          .filter((text) => text.includes("Confirmed owner-attested stalled resources")),
+      ).toHaveLength(1);
       expect(readFileSync(ws.processHealthFile)).toEqual(before);
     },
     REAL_TIME,
   );
-
 });

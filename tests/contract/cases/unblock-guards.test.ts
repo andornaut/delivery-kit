@@ -21,7 +21,10 @@ suite("unblock guards", () => {
   afterEach(async () => {
     for (const monitored of open.splice(0)) await monitored.close();
   });
-  async function routed(ws: Workspace = workspace(), route: Record<string, unknown> = {}): Promise<Monitored> {
+  async function routed(
+    ws: Workspace = workspace(),
+    route: Record<string, unknown> = {},
+  ): Promise<Monitored> {
     const monitored = await Monitored.routed(ws, route);
     open.push(monitored);
     return monitored;
@@ -58,17 +61,24 @@ suite("unblock guards", () => {
     expect(m.ws.readJson("unblock/pending-user-decision.json")).toEqual({ state: "clear" });
   });
 
-  contract("another recipient's pending record neither blocks the monitor nor changes any record", async () => {
-    const m = await routed();
-    decide(m.ws, ART, { thread_id: ART, state: "pending" });
-    m.ws.write("unblock/pending-user-decision.json", JSON.stringify({ state: "pending" }));
-    const files = [`unblock/decisions/${TECH}.json`, `unblock/decisions/${ART}.json`, "unblock/pending-user-decision.json"];
-    const before = files.map((file) => m.ws.read(file));
-    await m.start();
-    expect((await m.slot(wake(0))).result?.status).toBe("accepted");
-    expect(m.world.mutations()[0]?.params.threadId).toBe(TECH);
-    expect(files.map((file) => m.ws.read(file))).toEqual(before);
-  });
+  contract(
+    "another recipient's pending record neither blocks the monitor nor changes any record",
+    async () => {
+      const m = await routed();
+      decide(m.ws, ART, { thread_id: ART, state: "pending" });
+      m.ws.write("unblock/pending-user-decision.json", JSON.stringify({ state: "pending" }));
+      const files = [
+        `unblock/decisions/${TECH}.json`,
+        `unblock/decisions/${ART}.json`,
+        "unblock/pending-user-decision.json",
+      ];
+      const before = files.map((file) => m.ws.read(file));
+      await m.start();
+      expect((await m.slot(wake(0))).result?.status).toBe("accepted");
+      expect(m.world.mutations()[0]?.params.threadId).toBe(TECH);
+      expect(files.map((file) => m.ws.read(file))).toEqual(before);
+    },
+  );
 
   contract("a non-UUID monitor identity is never a clear recipient", async () => {
     for (const identity of ["../other", "tech"]) {
@@ -86,7 +96,9 @@ suite("unblock guards", () => {
     await m.start();
     const tick = await m.slot(wake(0));
     expect(tick.result?.status).toBe("deferred");
-    expect(m.receipt(wake(0)).reason).toBe("recipient-bound user-decision clearance missing, invalid or pending");
+    expect(m.receipt(wake(0)).reason).toBe(
+      "recipient-bound user-decision clearance missing, invalid or pending",
+    );
     expect(m.world.mutations()).toEqual([]);
   });
 
@@ -102,18 +114,29 @@ suite("unblock guards", () => {
     expect(m.world.mutations()).toEqual([]);
   });
 
-  contract("a native question on a later history page overrides empty flags and a clear marker", async () => {
-    const m = await routed();
-    history(m, (params) =>
-      params.cursor
-        ? { data: [turnOne({ id: "license-question", type: "agentMessage", questions: [{ title: "License", options: ["One", "Two"] }] })] }
-        : { data: [], nextCursor: "question-page" },
-    );
-    await m.start();
-    expect((await m.slot(wake(0))).result?.status).toBe("deferred");
-    expect(String(m.receipt(wake(0)).reason)).toContain("native question pending");
-    expect(m.world.mutations()).toEqual([]);
-  });
+  contract(
+    "a native question on a later history page overrides empty flags and a clear marker",
+    async () => {
+      const m = await routed();
+      history(m, (params) =>
+        params.cursor
+          ? {
+              data: [
+                turnOne({
+                  id: "license-question",
+                  type: "agentMessage",
+                  questions: [{ title: "License", options: ["One", "Two"] }],
+                }),
+              ],
+            }
+          : { data: [], nextCursor: "question-page" },
+      );
+      await m.start();
+      expect((await m.slot(wake(0))).result?.status).toBe("deferred");
+      expect(String(m.receipt(wake(0)).reason)).toContain("native question pending");
+      expect(m.world.mutations()).toEqual([]);
+    },
+  );
 
   contract("unknown, truncated or question-tool history defers", async () => {
     const m = await routed();
@@ -123,7 +146,16 @@ suite("unblock guards", () => {
       { data: [], nextCursor: "" },
       { data: [{ turnId: "other", item: { id: "x", type: "userMessage" } }] },
       { data: [turnOne({ id: "x", type: "unknown" })] },
-      { data: [turnOne({ id: "x", type: "dynamicToolCall", tool: "request_user_input_async", status: "completed" })] },
+      {
+        data: [
+          turnOne({
+            id: "x",
+            type: "dynamicToolCall",
+            tool: "request_user_input_async",
+            status: "completed",
+          }),
+        ],
+      },
       { data: [turnOne({ id: "x", type: "mcpToolCall", status: "inProgress" })] },
     ];
     await m.start();
@@ -149,7 +181,9 @@ suite("unblock guards", () => {
 
   contract("an omitted optional questions field means no question", async () => {
     const m = await routed();
-    history(m, () => ({ data: [turnOne({ id: "message", type: "agentMessage", text: "fixture" })] }));
+    history(m, () => ({
+      data: [turnOne({ id: "message", type: "agentMessage", text: "fixture" })],
+    }));
     await m.start();
     expect((await m.slot(wake(0))).result?.status).toBe("accepted");
   });
@@ -162,11 +196,21 @@ suite("unblock guards", () => {
       answer_turn_id: "answer-turn",
       answer_item_id: "answer",
     };
-    const variant = (answerType = "userMessage", answerTurn = "answer-turn", extraQuestion = false) =>
+    const variant = (
+      answerType = "userMessage",
+      answerTurn = "answer-turn",
+      extraQuestion = false,
+    ) =>
       history(m, (params) => {
-        if (params.turnId === "answer-turn") return { data: [{ turnId: answerTurn, item: { id: "answer", type: answerType } }] };
-        const items = [turnOne({ id: "question", type: "agentMessage", questions: [{ title: "choose" }] })];
-        if (extraQuestion) items.push(turnOne({ id: "new-question", type: "dynamicToolCall", tool: "request_user_input" }));
+        if (params.turnId === "answer-turn")
+          return { data: [{ turnId: answerTurn, item: { id: "answer", type: answerType } }] };
+        const items = [
+          turnOne({ id: "question", type: "agentMessage", questions: [{ title: "choose" }] }),
+        ];
+        if (extraQuestion)
+          items.push(
+            turnOne({ id: "new-question", type: "dynamicToolCall", tool: "request_user_input" }),
+          );
         return { data: items };
       });
     decide(m.ws, TECH, { thread_id: TECH, state: "clear", resolutions: [resolution] });
@@ -218,9 +262,26 @@ suite("unblock guards", () => {
       ["lost answer proof", [question, marker], [resolution]],
       ["opaque lost proof", [marker], [resolution]],
       ["answer before question", [answer, marker, question], [resolution]],
-      ["new rendered question", [question, marker, answer, { id: "new-question", type: "agentMessage", questions: [{}] }], [resolution]],
-      ["new question tool", [question, marker, answer, { id: "new-tool", type: "dynamicToolCall", tool: "request_user_input" }], [resolution]],
-      ["unknown item", [question, marker, answer, { id: "unknown", type: "futureQuestion" }], [resolution]],
+      [
+        "new rendered question",
+        [question, marker, answer, { id: "new-question", type: "agentMessage", questions: [{}] }],
+        [resolution],
+      ],
+      [
+        "new question tool",
+        [
+          question,
+          marker,
+          answer,
+          { id: "new-tool", type: "dynamicToolCall", tool: "request_user_input" },
+        ],
+        [resolution],
+      ],
+      [
+        "unknown item",
+        [question, marker, answer, { id: "unknown", type: "futureQuestion" }],
+        [resolution],
+      ],
     ];
     const m = await routed();
     await m.start();
@@ -244,36 +305,61 @@ suite("unblock guards", () => {
     const m = await routed();
     history(m, (params) =>
       params.turnId === undefined
-        ? { data: [{ turnId: "older-turn", item: { id: "old-compaction", type: "contextCompaction" } }] }
+        ? {
+            data: [
+              { turnId: "older-turn", item: { id: "old-compaction", type: "contextCompaction" } },
+            ],
+          }
         : { data: [turnOne({ id: "message", type: "agentMessage", questions: null })] },
     );
     await m.start();
     expect((await m.slot(wake(0))).result?.status).toBe("accepted");
     expect(m.world.mutations()).toHaveLength(1);
-    const turnReads = m.socket.callsOf("thread/items/list").filter((c) => c.params.threadId === TECH && "turnId" in c.params);
+    const turnReads = m.socket
+      .callsOf("thread/items/list")
+      .filter((c) => c.params.threadId === TECH && "turnId" in c.params);
     expect(turnReads.length).toBeGreaterThan(0);
     expect(turnReads.every((c) => c.params.turnId === "turn-one")).toBe(true);
   });
 
-  contract("an unrelated old resolution neither fetches its turns nor blocks the current clear turn", async () => {
-    const m = await routed();
-    decide(m.ws, TECH, {
-      thread_id: TECH,
-      state: "clear",
-      resolutions: [{ question_turn_id: "old-unavailable", question_item_id: "old-question", answer_turn_id: "old-answer", answer_item_id: "old-reply" }],
-    });
-    await m.start();
-    expect((await m.slot(wake(0))).result?.status).toBe("accepted");
-    const calls = m.socket.callsOf("thread/items/list").filter((c) => c.params.threadId === TECH);
-    expect(calls.every((c) => c.params.turnId === undefined || c.params.turnId === "turn-one")).toBe(true);
-  });
+  contract(
+    "an unrelated old resolution neither fetches its turns nor blocks the current clear turn",
+    async () => {
+      const m = await routed();
+      decide(m.ws, TECH, {
+        thread_id: TECH,
+        state: "clear",
+        resolutions: [
+          {
+            question_turn_id: "old-unavailable",
+            question_item_id: "old-question",
+            answer_turn_id: "old-answer",
+            answer_item_id: "old-reply",
+          },
+        ],
+      });
+      await m.start();
+      expect((await m.slot(wake(0))).result?.status).toBe("accepted");
+      const calls = m.socket.callsOf("thread/items/list").filter((c) => c.params.threadId === TECH);
+      expect(
+        calls.every((c) => c.params.turnId === undefined || c.params.turnId === "turn-one"),
+      ).toBe(true);
+    },
+  );
 
   contract("a same-turn answer must follow its exact question", async () => {
     const m = await routed();
     decide(m.ws, TECH, {
       thread_id: TECH,
       state: "clear",
-      resolutions: [{ question_turn_id: "turn-one", question_item_id: "question", answer_turn_id: "turn-one", answer_item_id: "answer" }],
+      resolutions: [
+        {
+          question_turn_id: "turn-one",
+          question_item_id: "question",
+          answer_turn_id: "turn-one",
+          answer_item_id: "answer",
+        },
+      ],
     });
     await m.start();
     for (const [index, answerFirst] of [true, false].entries()) {
@@ -282,35 +368,49 @@ suite("unblock guards", () => {
         turnOne({ id: "answer", type: "userMessage" }),
       ];
       history(m, () => ({ data: answerFirst ? items.reverse() : items }));
-      expect((await m.slot(wake(index))).result?.status).toBe(answerFirst ? "deferred" : "accepted");
+      expect((await m.slot(wake(index))).result?.status).toBe(
+        answerFirst ? "deferred" : "accepted",
+      );
     }
-    expect(m.receipt(wake(0)).reason).toBe("recipient answer item must follow its question in the same native turn");
+    expect(m.receipt(wake(0)).reason).toBe(
+      "recipient answer item must follow its question in the same native turn",
+    );
   });
 
-  contract("worker parents outside the active route defer before any native connection", async () => {
-    const m = await routed(workspace(), { targets: [{ thread_id: ART, ownership: "active" }] });
-    m.ws.config.reports = { workerParents: ["gameplay"] };
-    await m.start();
-    const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
-    expect(output).toContain("WORKER_PARENT_THREADS requires parents in the active monitor route");
-    expect(m.socket.connections).toEqual([]);
-  });
+  contract(
+    "worker parents outside the active route defer before any native connection",
+    async () => {
+      const m = await routed(workspace(), { targets: [{ thread_id: ART, ownership: "active" }] });
+      m.ws.config.reports = { workerParents: ["gameplay"] };
+      await m.start();
+      const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
+      expect(output).toContain(
+        "WORKER_PARENT_THREADS requires parents in the active monitor route",
+      );
+      expect(m.socket.connections).toEqual([]);
+    },
+  );
 
-  contract("duplicate or noncanonical worker parents stop the runner before any native connection", async () => {
-    const ws = workspace();
-    const m = await routed(ws);
-    for (const parents of [[ART, ART], ["ABCDEFAB-0000-0000-0000-000000000002"]]) {
-      ws.writeRegistry({
-        schema: 1,
-        revision: 1,
-        harness: "codex",
-        roles: Object.fromEntries(parents.map((id, i) => [`parent-${i}`, { conversations: { codex: id } }])),
-      });
-      ws.config.reports = { workerParents: parents.map((_, i) => `parent-${i}`) };
-      const result = await startRunner(ws).done;
-      expect(result.code, result.stderr).toBe(2);
-      expect(result.stderr).toMatch(/WORKER_PARENT_THREADS|workerParents/);
-    }
-    expect(m.socket.connections).toEqual([]);
-  });
+  contract(
+    "duplicate or noncanonical worker parents stop the runner before any native connection",
+    async () => {
+      const ws = workspace();
+      const m = await routed(ws);
+      for (const parents of [[ART, ART], ["ABCDEFAB-0000-0000-0000-000000000002"]]) {
+        ws.writeRegistry({
+          schema: 1,
+          revision: 1,
+          harness: "codex",
+          roles: Object.fromEntries(
+            parents.map((id, i) => [`parent-${i}`, { conversations: { codex: id } }]),
+          ),
+        });
+        ws.config.reports = { workerParents: parents.map((_, i) => `parent-${i}`) };
+        const result = await startRunner(ws).done;
+        expect(result.code, result.stderr).toBe(2);
+        expect(result.stderr).toMatch(/WORKER_PARENT_THREADS|workerParents/);
+      }
+      expect(m.socket.connections).toEqual([]);
+    },
+  );
 });

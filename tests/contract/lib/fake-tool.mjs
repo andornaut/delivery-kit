@@ -2,7 +2,14 @@
 // `node fake-tool.mjs <tool> ...args`. Behaviour is read from DK_FAKE_DIR/control.json on
 // every invocation, so a case can change it while a resident runner keeps running.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join } from "node:path";
 
 const [, , tool, ...args] = process.argv;
@@ -79,7 +86,9 @@ function git() {
   switch (command) {
     case "rev-parse":
       if (last.endsWith("^{tree}")) {
-        out(`${last === "HEAD^{tree}" ? (behaviour.wrongTree ?? "f".repeat(40)) : "f".repeat(40)}\n`);
+        out(
+          `${last === "HEAD^{tree}" ? (behaviour.wrongTree ?? "f".repeat(40)) : "f".repeat(40)}\n`,
+        );
       } else if (last.startsWith("refs/heads/bus/")) {
         const branch = last.replace(/^refs\/heads\//, "").replace(/\^\{commit\}$/, "");
         const tip = behaviour.tips?.[branch] ?? behaviour.branchTip ?? sha;
@@ -129,12 +138,18 @@ function writableBinds(argv) {
     const flag = argv[i];
     let value;
     if (flag === "-v" || flag === "--volume" || flag === "--mount") value = argv[++i];
-    else if (flag.startsWith("--volume=") || flag.startsWith("--mount=")) value = flag.slice(flag.indexOf("=") + 1);
+    else if (flag.startsWith("--volume=") || flag.startsWith("--mount="))
+      value = flag.slice(flag.indexOf("=") + 1);
     else continue;
     if (flag.startsWith("--mount")) {
       const fields = value.split(",");
       if (!fields.includes("type=bind")) continue;
-      if (!fields.some((f) => ["readonly", "ro", "readonly=true", "ro=true", "readonly=1"].includes(f))) found.push(value);
+      if (
+        !fields.some((f) =>
+          ["readonly", "ro", "readonly=true", "ro=true", "readonly=1"].includes(f),
+        )
+      )
+        found.push(value);
     } else {
       const [source, , options = ""] = value.split(":");
       // Named volumes are not host binds.
@@ -172,15 +187,18 @@ function docker() {
   if (cpus !== String(behaviour.cpus ?? 4)) return fail(`unexpected --cpus ${cpus}`);
   // Scripted Git stamps the control SHA; a real repository stamps its own scratch HEAD.
   const stamp = args.find((x) => x.startsWith("WORKERS_CI_COMMIT_SHA="))?.slice(22) ?? "";
-  if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha) return fail("missing exact commit stamp");
+  if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha)
+    return fail("missing exact commit stamp");
   if (process.env.DK_IMPL === "node") {
     // 1.0 gate: a fixed unprivileged user and read-only binds; outputs leave by `docker cp`.
     const user = args.indexOf("--user");
-    if (user < 0 || args[user + 1] !== "19001:19001") return fail("gate must run as --user 19001:19001");
+    if (user < 0 || args[user + 1] !== "19001:19001")
+      return fail("gate must run as --user 19001:19001");
     // Checkouts are group-readable only, so the gate joins the checkout's group.
     const group = args.indexOf("--group-add");
     const gid = String(statSync(process.env.DK_FAKE_CHECKOUT).gid);
-    if (group < 0 || args[group + 1] !== gid) return fail(`gate must pass --group-add ${gid} (the checkout gid)`);
+    if (group < 0 || args[group + 1] !== gid)
+      return fail(`gate must pass --group-add ${gid} (the checkout gid)`);
     const writable = writableBinds(args);
     if (writable.length) return fail(`writable bind mount: ${writable.join(" ")}`);
   } else {
@@ -190,13 +208,18 @@ function docker() {
     if (user < 0 || args[user + 1] !== ids) return fail("gate must run as the invoking user");
     // 0.9.0 uses `-v SRC:/npmcache`; 0.9.1 uses `--mount type=bind,src=SRC,dst=/npmcache`.
     const cache =
-      args.find((x) => x.endsWith(",dst=/npmcache"))?.split(",").find((x) => x.startsWith("src="))?.slice(4) ??
-      args.find((x) => x.endsWith(":/npmcache"))?.slice(0, -":/npmcache".length);
-    if (!cache || !existsSync(cache)) return fail("npm cache bind source must exist before mounting");
+      args
+        .find((x) => x.endsWith(",dst=/npmcache"))
+        ?.split(",")
+        .find((x) => x.startsWith("src="))
+        ?.slice(4) ?? args.find((x) => x.endsWith(":/npmcache"))?.slice(0, -":/npmcache".length);
+    if (!cache || !existsSync(cache))
+      return fail("npm cache bind source must exist before mounting");
   }
   if (behaviour.blockWhile) {
     // Hold the gate open while the file exists, so a case can act mid-departure.
-    while (existsSync(behaviour.blockWhile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    while (existsSync(behaviour.blockWhile))
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   }
   if (args.includes("--network")) {
     if (behaviour.gateFail) return 1;
@@ -246,7 +269,8 @@ function claude() {
 function codex() {
   const behaviour = control.codex ?? {};
   if (behaviour.blockWhile) {
-    while (existsSync(behaviour.blockWhile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    while (existsSync(behaviour.blockWhile))
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   }
   if (behaviour.fail) return 1;
   log();
@@ -281,7 +305,17 @@ function node() {
   return 0;
 }
 
-const handlers = { claude, codex, date, docker, gh, git, node, sleep, wrangler: () => wrangler(args) };
+const handlers = {
+  claude,
+  codex,
+  date,
+  docker,
+  gh,
+  git,
+  node,
+  sleep,
+  wrangler: () => wrangler(args),
+};
 const handler = handlers[tool];
 if (!handler) {
   process.stderr.write(`fake tool: unknown ${tool}\n`);

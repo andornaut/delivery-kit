@@ -48,7 +48,9 @@ function roles(ws: Workspace, ids: Record<string, string>): void {
     schema: 1,
     revision: 1,
     harness: "claude",
-    roles: Object.fromEntries(Object.entries(ids).map(([role, id]) => [role, { conversations: { claude: id } }])),
+    roles: Object.fromEntries(
+      Object.entries(ids).map(([role, id]) => [role, { conversations: { claude: id } }]),
+    ),
   });
 }
 
@@ -86,85 +88,102 @@ suite("entry", () => {
     expect(ws.calls()).toEqual([]);
   });
 
-  contract("worker parents must resolve to canonical, unique conversation IDs offline", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const before = ws.list();
-    const valid: string[][] = [[], [FIRST], [FIRST, SECOND]];
-    for (const ids of valid) {
-      roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
-      ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
-      const result = await execute(impl.checkConfig(ws));
-      expect(result.code, `${ids} ${result.stderr}`).toBe(0);
-    }
-    const invalid: string[][] = [
-      ["invalid"],
-      [SECOND.toUpperCase()],
-      [FIRST.replace(/-/g, "")],
-      [FIRST, FIRST],
-      ["*"],
-      [FIRST + ","],
-    ];
-    for (const ids of invalid) {
-      roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
-      ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
-      const result = await execute(impl.checkConfig(ws));
-      expect(result.code, `${ids} ${result.stderr}`).toBe(2);
-      expect(result.stderr).toMatch(impl.name === "bash" ? /WORKER_PARENT_THREADS/ : /workerParents/);
-    }
-    expect(ws.calls()).toEqual([]);
-    expect(ws.list()).toEqual(before);
-  });
+  contract(
+    "worker parents must resolve to canonical, unique conversation IDs offline",
+    async () => {
+      const ws = workspace();
+      minimal(ws);
+      const before = ws.list();
+      const valid: string[][] = [[], [FIRST], [FIRST, SECOND]];
+      for (const ids of valid) {
+        roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
+        ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
+        const result = await execute(impl.checkConfig(ws));
+        expect(result.code, `${ids} ${result.stderr}`).toBe(0);
+      }
+      const invalid: string[][] = [
+        ["invalid"],
+        [SECOND.toUpperCase()],
+        [FIRST.replace(/-/g, "")],
+        [FIRST, FIRST],
+        ["*"],
+        [FIRST + ","],
+      ];
+      for (const ids of invalid) {
+        roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
+        ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
+        const result = await execute(impl.checkConfig(ws));
+        expect(result.code, `${ids} ${result.stderr}`).toBe(2);
+        expect(result.stderr).toMatch(
+          impl.name === "bash" ? /WORKER_PARENT_THREADS/ : /workerParents/,
+        );
+      }
+      expect(ws.calls()).toEqual([]);
+      expect(ws.list()).toEqual(before);
+    },
+  );
 
-  bashConfig("WORKER_PARENT_THREADS accepts whitespace-separated lists and never calls the interpreter", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const marker = join(ws.root, "unexpected-native-call");
-    const interpreter = join(ws.root, "unexpected-python");
-    execFileSync("sh", ["-c", `printf '#!/bin/sh\\ntouch "%s"\\nexit 99\\n' "$1" > "$2"; chmod +x "$2"`, "x", marker, interpreter]);
-    const base = `CODEX_PYTHON="${interpreter}"\n`;
-    for (const value of ["", " \t\n ", FIRST, ` \t${FIRST}\n${SECOND} `]) {
-      ws.legacyConf = base + `WORKER_PARENT_THREADS='${value}'\n`;
-      expect((await execute(impl.checkConfig(ws))).code).toBe(0);
-    }
-    for (const value of [`${FIRST} ${FIRST}`, `${FIRST}\n${FIRST}`]) {
-      ws.legacyConf = base + `WORKER_PARENT_THREADS='${value}'\n`;
-      const result = await execute(impl.checkConfig(ws));
-      expect(result.code).toBe(2);
-      expect(result.stderr).toContain("WORKER_PARENT_THREADS");
-    }
-    expect(existsSync(marker)).toBe(false);
-  });
-
-  bashOnly("monitor-snapshot forwards only explicit repeated --parent flags to the native entrypoint", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const second = "00000000-0000-0000-0000-000000000002";
-    const interpreter = join(ws.root, "native-python");
-    execFileSync("sh", [
-      "-c",
-      `printf '#!%s\\nconsole.log(JSON.stringify(process.argv.slice(2)))\\n' "$2" > "$1"; chmod +x "$1"`,
-      "x",
-      interpreter,
-      process.execPath,
-    ]);
-    ws.legacyConf = `CODEX_PYTHON="${interpreter}"\nWORKER_PARENT_THREADS=${second}\n`;
-    for (const parents of [[], ["--parent", FIRST, "--parent", second]]) {
-      const result = await cli(ws, ["monitor-snapshot", "--recipient", FIRST, ...parents]);
-      expect(result.code, result.stderr).toBe(0);
-      expect(JSON.parse(result.stdout)).toEqual([
-        join(BASH_ROOT, "libexec/monitor.py"),
-        "snapshot",
-        "--state-dir",
-        ws.path("unblock"),
-        "--control-socket",
-        "",
-        "--recipient",
-        FIRST,
-        ...parents,
+  bashConfig(
+    "WORKER_PARENT_THREADS accepts whitespace-separated lists and never calls the interpreter",
+    async () => {
+      const ws = workspace();
+      minimal(ws);
+      const marker = join(ws.root, "unexpected-native-call");
+      const interpreter = join(ws.root, "unexpected-python");
+      execFileSync("sh", [
+        "-c",
+        `printf '#!/bin/sh\\ntouch "%s"\\nexit 99\\n' "$1" > "$2"; chmod +x "$2"`,
+        "x",
+        marker,
+        interpreter,
       ]);
-    }
-  });
+      const base = `CODEX_PYTHON="${interpreter}"\n`;
+      for (const value of ["", " \t\n ", FIRST, ` \t${FIRST}\n${SECOND} `]) {
+        ws.legacyConf = base + `WORKER_PARENT_THREADS='${value}'\n`;
+        expect((await execute(impl.checkConfig(ws))).code).toBe(0);
+      }
+      for (const value of [`${FIRST} ${FIRST}`, `${FIRST}\n${FIRST}`]) {
+        ws.legacyConf = base + `WORKER_PARENT_THREADS='${value}'\n`;
+        const result = await execute(impl.checkConfig(ws));
+        expect(result.code).toBe(2);
+        expect(result.stderr).toContain("WORKER_PARENT_THREADS");
+      }
+      expect(existsSync(marker)).toBe(false);
+    },
+  );
+
+  bashOnly(
+    "monitor-snapshot forwards only explicit repeated --parent flags to the native entrypoint",
+    async () => {
+      const ws = workspace();
+      minimal(ws);
+      const second = "00000000-0000-0000-0000-000000000002";
+      const interpreter = join(ws.root, "native-python");
+      execFileSync("sh", [
+        "-c",
+        `printf '#!%s\\nconsole.log(JSON.stringify(process.argv.slice(2)))\\n' "$2" > "$1"; chmod +x "$1"`,
+        "x",
+        interpreter,
+        process.execPath,
+      ]);
+      ws.legacyConf = `CODEX_PYTHON="${interpreter}"\nWORKER_PARENT_THREADS=${second}\n`;
+      for (const parents of [[], ["--parent", FIRST, "--parent", second]]) {
+        const result = await cli(ws, ["monitor-snapshot", "--recipient", FIRST, ...parents]);
+        expect(result.code, result.stderr).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual([
+          join(BASH_ROOT, "libexec/monitor.py"),
+          "snapshot",
+          "--state-dir",
+          ws.path("unblock"),
+          "--control-socket",
+          "",
+          "--recipient",
+          FIRST,
+          ...parents,
+        ]);
+      }
+    },
+  );
 
   contract("manual departure and unpinned revision flags are rejected", async () => {
     const ws = workspace();
@@ -181,16 +200,22 @@ suite("entry", () => {
     minimal(ws);
     const source = join(ws.root, "source");
     mkdirSync(source);
-    for (const name of ["bin", "libexec", "scripts"]) cpSync(join(BASH_ROOT, name), join(source, name), { recursive: true });
+    for (const name of ["bin", "libexec", "scripts"])
+      cpSync(join(BASH_ROOT, name), join(source, name), { recursive: true });
     // Export uses the real Git; fakes stay off PATH for this packaging step.
     const env = { ...ws.baseEnv(), PATH: "/usr/local/bin:/usr/bin:/bin" };
-    const git = (...args: string[]) => execFileSync("/usr/bin/git", ["-C", source, ...args], { env, encoding: "utf8" }).trim();
+    const git = (...args: string[]) =>
+      execFileSync("/usr/bin/git", ["-C", source, ...args], { env, encoding: "utf8" }).trim();
     git("init", "-q", "-b", "main");
     git("add", "--", "bin", "libexec", "scripts");
     git("-c", "core.hooksPath=/dev/null", "commit", "-q", "--no-verify", "-m", "Fixture");
     const revision = git("rev-parse", "HEAD");
     const snapshot = join(ws.root, "snapshot");
-    const exported = { argv: ["bash", join(source, "scripts/export.sh"), revision, snapshot], cwd: ws.root, env };
+    const exported = {
+      argv: ["bash", join(source, "scripts/export.sh"), revision, snapshot],
+      cwd: ws.root,
+      env,
+    };
     expect((await execute(exported)).code).toBe(0);
     expect(readFileSync(join(snapshot, "SOURCE_COMMIT"), "utf8").trim()).toBe(revision);
     expect((await execute(exported)).code).not.toBe(0);

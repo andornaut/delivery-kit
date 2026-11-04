@@ -42,14 +42,21 @@ export interface Implementation {
 }
 
 export const IMPL_NAME = (process.env.DK_IMPL ?? "bash") as "bash" | "node";
-if (IMPL_NAME !== "bash" && IMPL_NAME !== "node") throw new Error(`DK_IMPL must be bash or node, not ${IMPL_NAME}`);
+if (IMPL_NAME !== "bash" && IMPL_NAME !== "node")
+  throw new Error(`DK_IMPL must be bash or node, not ${IMPL_NAME}`);
 export const impl: Implementation = IMPL_NAME === "bash" ? bashImplementation : nodeImplementation;
 export const NODE_CLI = join(KIT_ROOT, "dist", "cli.js");
 export const nodeBuilt = existsSync(NODE_CLI);
 
-export function execute(command: Command, options: { input?: string; timeoutMs?: number } = {}): Promise<Result> {
+export function execute(
+  command: Command,
+  options: { input?: string; timeoutMs?: number } = {},
+): Promise<Result> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command.argv[0]!, command.argv.slice(1), { cwd: command.cwd, env: command.env });
+    const child = spawn(command.argv[0]!, command.argv.slice(1), {
+      cwd: command.cwd,
+      env: command.env,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -67,7 +74,11 @@ export function execute(command: Command, options: { input?: string; timeoutMs?:
 }
 
 /** Run an operation on the selected implementation. */
-export function cli(ws: Workspace, words: string[], options?: { input?: string; timeoutMs?: number }): Promise<Result> {
+export function cli(
+  ws: Workspace,
+  words: string[],
+  options?: { input?: string; timeoutMs?: number },
+): Promise<Result> {
   return execute(impl.command(ws, words), options);
 }
 

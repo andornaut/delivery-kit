@@ -63,9 +63,17 @@ export class MonitorSchedule {
     }
     const prefix = `bus: scheduled monitor ${slot}`;
     let line: string | undefined;
-    await this.runner!.until(() => (line = this.lines.find((row) => row.startsWith(prefix))) !== undefined, timeoutMs);
+    await this.runner!.until(
+      () => (line = this.lines.find((row) => row.startsWith(prefix))) !== undefined,
+      timeoutMs,
+    );
     const json = line!.slice(prefix.length);
-    return { slot, output: json.startsWith(": ") ? (JSON.parse(json.slice(2)) as Record<string, unknown>) : undefined };
+    return {
+      slot,
+      output: json.startsWith(": ")
+        ? (JSON.parse(json.slice(2)) as Record<string, unknown>)
+        : undefined,
+    };
   }
 
   output(): string {

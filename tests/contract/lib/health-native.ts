@@ -59,15 +59,25 @@ export interface Snapshot {
 }
 
 /** Public `monitor-snapshot`; returns stdout JSON and the persisted snapshot record. */
-export async function snapshot(ws: Workspace, recipient: string, parents: string[] = []): Promise<Snapshot> {
-  const result = await cli(ws, ["monitor-snapshot", "--recipient", recipient, ...parents.flatMap((p) => ["--parent", p])], {
-    timeoutMs: 60_000,
-  });
-  let out: Json = {};
+export async function snapshot(
+  ws: Workspace,
+  recipient: string,
+  parents: string[] = [],
+): Promise<Snapshot> {
+  const result = await cli(
+    ws,
+    ["monitor-snapshot", "--recipient", recipient, ...parents.flatMap((p) => ["--parent", p])],
+    {
+      timeoutMs: 60_000,
+    },
+  );
+  let out: Json;
   try {
     out = JSON.parse(result.stdout) as Json;
   } catch {
-    throw new Error(`snapshot stdout is not JSON\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    throw new Error(
+      `snapshot stdout is not JSON\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
   }
   const text = typeof out.path === "string" ? readFileSync(out.path, "utf8") : "{}";
   return { result, out, record: JSON.parse(text) as Json, text: text + result.stdout };
@@ -105,7 +115,10 @@ export async function scheduled(
   prepare(slot);
   const wake = Math.floor(slot / 60) % 60;
   ws.updateGameDevConfig({ wakeMinutes: [wake] });
-  ws.config.schedule = { departures: [String((wake + 30) % 60).padStart(2, "0")], timezone: "America/Toronto" };
+  ws.config.schedule = {
+    departures: [String((wake + 30) % 60).padStart(2, "0")],
+    timezone: "America/Toronto",
+  };
   ws.env.CODEX_CONTROL_SOCKET = socket.path;
   // Start one virtual minute early so the runner's observer is polling before the slot.
   ws.setClock(slot - 60, 60);
@@ -148,7 +161,10 @@ export function question(item = "question", turn = "current", questions?: unknow
       id: item,
       type: "agentMessage",
       text: Q_PRIVATE,
-      questions: questions === undefined ? [{ title: "Choose a licence", options: ["MIT", "Apache"] }] : questions,
+      questions:
+        questions === undefined
+          ? [{ title: "Choose a licence", options: ["MIT", "Apache"] }]
+          : questions,
     },
   };
 }
@@ -186,13 +202,16 @@ export class QuestionNative {
       if (!(index in pages)) return { error: { message: "no such page" } };
       const page = clone(pages[index]!);
       if ("turnId" in params && this.latestPages === null) {
-        page.data = (page.data as Json[]).filter((entry) => !("turnId" in entry) || entry.turnId === params.turnId);
+        page.data = (page.data as Json[]).filter(
+          (entry) => !("turnId" in entry) || entry.turnId === params.turnId,
+        );
       }
       return { result: page };
     });
     socket.on("thread/read", (params: Json) => {
       if (this.failure === "thread/read") return { error: { message: Q_PRIVATE } };
-      if (params.threadId !== P || params.includeTurns !== false) return { error: { message: "unexpected" } };
+      if (params.threadId !== P || params.includeTurns !== false)
+        return { error: { message: "unexpected" } };
       this.contextReads += 1;
       return {
         thread: {
@@ -241,7 +260,13 @@ export function evidence(changes: Json = {}): Json {
 }
 
 export function progress(changes: Json = {}): Json {
-  return { contract_id: "tasks-finished", epoch: "epoch-1", counter: 10, expected_to_advance: true, ...changes };
+  return {
+    contract_id: "tasks-finished",
+    epoch: "epoch-1",
+    counter: 10,
+    expected_to_advance: true,
+    ...changes,
+  };
 }
 
 export function blocked(changes: Json = {}): Json {
@@ -294,7 +319,8 @@ export class ProcessNative {
     socket.on("thread/read", (params: Json) => {
       if (this.hang === "thread/read") return { hang: true };
       if (this.failure === "thread/read") return { error: { message: PR_PRIVATE } };
-      if (params.threadId !== C || params.includeTurns !== false) return { error: { message: "unexpected read" } };
+      if (params.threadId !== C || params.includeTurns !== false)
+        return { error: { message: "unexpected read" } };
       return {
         thread: {
           id: C,
@@ -308,7 +334,8 @@ export class ProcessNative {
       if (this.hang === "thread/items/read") return { hang: true };
       if (this.failure === "thread/items/read") return { error: { message: PR_PRIVATE } };
       const ids = params.itemIds as string[];
-      if (![P, C].includes(String(params.threadId)) || ids.length !== 1) return { error: { message: "unexpected" } };
+      if (![P, C].includes(String(params.threadId)) || ids.length !== 1)
+        return { error: { message: "unexpected" } };
       if (this.missing) return { data: [] };
       const verification = ids[0] === "verification";
       return {
@@ -368,7 +395,11 @@ export function row(child = C, parent = P): Json {
   };
 }
 
-export function turn(status = "failed", code: unknown = "contextWindowExceeded", identifier = T): Json {
+export function turn(
+  status = "failed",
+  code: unknown = "contextWindowExceeded",
+  identifier = T,
+): Json {
   return {
     id: identifier,
     status,
@@ -397,7 +428,8 @@ export class ChildNative {
     socket.on("thread/list", (params: Json) => {
       if (this.hang === "thread/list") return { hang: true };
       if (this.failure === "thread/list") return { error: { message: CH_PRIVATE } };
-      if (![P, N].includes(String(params.parentThreadId))) return { error: { message: "unexpected parent" } };
+      if (![P, N].includes(String(params.parentThreadId)))
+        return { error: { message: "unexpected parent" } };
       if (params.parentThreadId === N) return { data: [], nextCursor: null };
       const pages = this.listPages[String(params.archived) as "false" | "true"];
       const index = params.cursor === undefined ? 0 : Number(params.cursor);
@@ -406,7 +438,8 @@ export class ChildNative {
     });
     socket.on("thread/read", (params: Json) => {
       if (this.failure === "thread/read") return { error: { message: CH_PRIVATE } };
-      if (params.threadId !== C || params.includeTurns !== false) return { error: { message: "unexpected" } };
+      if (params.threadId !== C || params.includeTurns !== false)
+        return { error: { message: "unexpected" } };
       this.readCount += 1;
       return { thread: clone(this.freshChild ?? this.child) };
     });
@@ -433,7 +466,10 @@ export class ScopedNative {
     this.parents = sizes.map((_, n) => `00000000-0000-0000-0001-${hex(n)}`);
     sizes.forEach((size, i) => {
       const parent = this.parents[i]!;
-      const children = Array.from({ length: size }, (_, n) => `00000000-0000-0000-0002-${hex(i * 1000 + n)}`);
+      const children = Array.from(
+        { length: size },
+        (_, n) => `00000000-0000-0000-0002-${hex(i * 1000 + n)}`,
+      );
       this.children[parent] = children;
       children.forEach((child, n) => {
         this.rows[child] = row(child, parent);

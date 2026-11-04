@@ -22,14 +22,25 @@ suite("packaging", () => {
         filter: (path) => !path.includes("__pycache__") && !path.includes("node_modules"),
       });
     }
-    for (const name of ["README.md", "VERSION", "LICENSE"]) cpSync(join(BASH_ROOT, name), join(source, name));
+    for (const name of ["README.md", "VERSION", "LICENSE"])
+      cpSync(join(BASH_ROOT, name), join(source, name));
     // Packaging uses the real Git; the fakes stay off PATH.
     const env = { ...ws.baseEnv(), PATH: "/usr/local/bin:/usr/bin:/bin" };
     const sh = async (script: string, ...args: string[]) => {
-      const result = await execute({ argv: ["bash", "-c", script, "sh", ...args], cwd: source, env });
+      const result = await execute({
+        argv: ["bash", "-c", script, "sh", ...args],
+        cwd: source,
+        env,
+      });
       return result;
     };
-    expect((await sh("git init -q -b main && git add -- bin examples libexec scripts tests README.md VERSION LICENSE && git -c core.hooksPath=/dev/null commit -q --no-verify -m Fixture")).code).toBe(0);
+    expect(
+      (
+        await sh(
+          "git init -q -b main && git add -- bin examples libexec scripts tests README.md VERSION LICENSE && git -c core.hooksPath=/dev/null commit -q --no-verify -m Fixture",
+        )
+      ).code,
+    ).toBe(0);
     const revision = (await sh("git rev-parse HEAD")).stdout.trim();
     const original = readFileSync(join(source, "README.md"));
     writeFileSync(join(source, "README.md"), "uncommitted edit");
@@ -37,7 +48,11 @@ suite("packaging", () => {
     const outputs = [join(ws.root, "first"), join(ws.root, "second")];
     for (const [index, output] of outputs.entries()) {
       const umask = index ? "077" : "022";
-      const result = await sh(`umask ${umask}; bash scripts/package.sh "$1" "$2"`, revision, output);
+      const result = await sh(
+        `umask ${umask}; bash scripts/package.sh "$1" "$2"`,
+        revision,
+        output,
+      );
       expect(result.code, result.stderr).toBe(0);
       expect((await sh(`cd "$1" && sha256sum --check SHA256SUMS`, output)).code).toBe(0);
       expect(readFileSync(join(output, "SOURCE_COMMIT"), "utf8")).toBe(revision + "\n");
@@ -47,7 +62,8 @@ suite("packaging", () => {
     expect(readFileSync(archives[0]!).equals(readFileSync(archives[1]!))).toBe(true);
     const listing = (await sh(`tar -tvzf "$1"`, archives[0]!)).stdout.split("\n");
     const names = (await sh(`tar -tzf "$1"`, archives[0]!)).stdout.split("\n").filter(Boolean);
-    const extract = async (path: string) => (await sh(`tar -xOzf "$1" "$2"`, archives[0]!, `${name}/${path}`)).stdout;
+    const extract = async (path: string) =>
+      (await sh(`tar -xOzf "$1" "$2"`, archives[0]!, `${name}/${path}`)).stdout;
     expect(Buffer.from(await extract("README.md")).equals(original)).toBe(true);
     expect(await extract("SOURCE_COMMIT")).toBe(revision + "\n");
     expect(listing.find((row) => row.endsWith(`${name}/bin/delivery-kit`))).toMatch(/^-..x/);

@@ -47,7 +47,9 @@ export function renderBusConf(ws: Workspace): string {
   set("GATE_INSTALL", c.gate?.install);
   if (c.gate?.steps !== undefined && !ws.omit.includes("GATE_STEPS")) {
     const steps = Array.isArray(c.gate.steps) ? c.gate.steps : [];
-    const rows = steps.map((step: { name?: unknown; run?: unknown }) => quote(`${step.name}|${step.run}`));
+    const rows = steps.map((step: { name?: unknown; run?: unknown }) =>
+      quote(`${step.name}|${step.run}`),
+    );
     lines.push(`GATE_STEPS=(${rows.join(" ")})`);
   }
   set("DEPLOY_MODE", c.deploy?.mode);
@@ -55,13 +57,16 @@ export function renderBusConf(ws: Workspace): string {
   set("CI_POLL_SECONDS", c.ci?.pollSeconds);
   set("CI_TIMEOUT_SECONDS", c.ci?.timeoutSeconds);
   set("REPORT_PROJECT", c.reports?.project);
-  if (c.reports?.scheduledTicks !== undefined) set("REPORT_SCHEDULED_TICKS", c.reports.scheduledTicks ? 1 : 0);
+  if (c.reports?.scheduledTicks !== undefined)
+    set("REPORT_SCHEDULED_TICKS", c.reports.scheduledTicks ? 1 : 0);
   if (c.reports?.recipient !== undefined) {
     const key = ws.registry().harness === "claude" ? "REPORT_SESSION_ID" : "REPORT_THREAD";
     set(key, resolveRole(ws, c.reports.recipient));
   }
   if (c.reports?.workerParents !== undefined) {
-    const parents = Array.isArray(c.reports.workerParents) ? c.reports.workerParents : [c.reports.workerParents];
+    const parents = Array.isArray(c.reports.workerParents)
+      ? c.reports.workerParents
+      : [c.reports.workerParents];
     set("WORKER_PARENT_THREADS", parents.map((p) => resolveRole(ws, p)).join(" "));
   }
   if (existsSync(ws.routeFile)) {
@@ -72,7 +77,12 @@ export function renderBusConf(ws: Workspace): string {
   if (existsSync(ws.processHealthFile)) set("PROCESS_HEALTH_FILE", ws.processHealthFile);
   set("CODEX_PYTHON", "/usr/bin/python3");
   set("CLAUDE_PYTHON", "/usr/bin/python3");
-  return lines.join("\n") + "\n" + ws.legacyConf + (ws.legacyConf.endsWith("\n") || !ws.legacyConf ? "" : "\n");
+  return (
+    lines.join("\n") +
+    "\n" +
+    ws.legacyConf +
+    (ws.legacyConf.endsWith("\n") || !ws.legacyConf ? "" : "\n")
+  );
 }
 
 function confPath(ws: Workspace): string {
@@ -96,7 +106,9 @@ function contextual(ws: Workspace, words: string[]): Command {
 
 export const bashImplementation: Implementation = {
   name: "bash",
-  available: parityInstalled ? true : "the v0.9.1 parity release is not installed (tests/contract/run.sh installs it)",
+  available: parityInstalled
+    ? true
+    : "the v0.9.1 parity release is not installed (tests/contract/run.sh installs it)",
   help: (ws, word) => ({ argv: ["bash", ENTRY, word], cwd: ws.root, env: env(ws) }),
   command: contextual,
   bare: (ws, words) => ({ argv: ["bash", ENTRY, ...words], cwd: ws.root, env: env(ws) }),

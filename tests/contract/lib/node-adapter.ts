@@ -25,10 +25,16 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
   const c = structuredClone(ws.config) as Record<string, Record<string, unknown>>;
   const fill = (section: string, defaults: Record<string, unknown>) => {
     c[section] = { ...defaults, ...(c[section] ?? {}) };
-    for (const key of Object.keys(c[section]!)) if (c[section]![key] === undefined) delete c[section]![key];
+    for (const key of Object.keys(c[section]!))
+      if (c[section]![key] === undefined) delete c[section]![key];
   };
   fill("ci", { requiredNames: ["Test"], pollSeconds: 60, timeoutSeconds: 1800 });
-  fill("reports", { project: "Fixture", scheduledTicks: false, recipient: "monitor", workerParents: [] });
+  fill("reports", {
+    project: "Fixture",
+    scheduledTicks: false,
+    recipient: "monitor",
+    workerParents: [],
+  });
   // 0.9 spells "no exclusions" as an empty pattern; 1.0 omits the field. Same behaviour.
   if (c.deploy?.skipPattern === "") delete c.deploy.skipPattern;
   // 0.9 spells "no CI watch" as an empty GitHub slug; 1.0 requires a slug and always watches.
@@ -57,7 +63,11 @@ export const nodeImplementation: Implementation = {
   available: existsSync(CLI) ? true : "dist/cli.js is not built; Node cases are pending",
   help: (ws, word) => ({ argv: [process.execPath, CLI, word], cwd: ws.gameDev, env: ws.baseEnv() }),
   command,
-  bare: (ws, words) => ({ argv: [process.execPath, CLI, ...words], cwd: ws.gameDev, env: ws.baseEnv() }),
+  bare: (ws, words) => ({
+    argv: [process.execPath, CLI, ...words],
+    cwd: ws.gameDev,
+    env: ws.baseEnv(),
+  }),
   checkConfig: (ws) => command(ws, ["check-config"]),
   status: (ws) => command(ws, ["status"]),
   resourceReport: (ws) => command(ws, ["resource-report"]),

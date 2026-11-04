@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { type Command, impl, type Resident, type Result, start, startRunner } from "./adapter.ts";
 import type { CodexSocket } from "./codex-socket.ts";
 import type { Workspace } from "./workspace.ts";
+import type { Json } from "./json.ts";
 
 export const MONITOR = "00000000-0000-4000-8000-000000000001";
 export const ARCHIE = "00000000-0000-4000-8000-000000000002";
@@ -17,15 +18,19 @@ const URL_NAMESPACE = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";
 /** RFC 4122 version 5 UUID in the URL namespace (Python `uuid.uuid5(uuid.NAMESPACE_URL, name)`). */
 export function uuid5(name: string): string {
   const namespace = Buffer.from(URL_NAMESPACE.replace(/-/g, ""), "hex");
-  const hash = createHash("sha1").update(Buffer.concat([namespace, Buffer.from(name, "utf8")])).digest();
+  const hash = createHash("sha1")
+    .update(Buffer.concat([namespace, Buffer.from(name, "utf8")]))
+    .digest();
   hash[6] = (hash[6]! & 0x0f) | 0x50;
   hash[8] = (hash[8]! & 0x3f) | 0x80;
   const hex = hash.subarray(0, 16).toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export const slotRequestId = (monitor: string, slot: number) => uuid5(`hourly-unblock:${monitor}:${slot}`);
-export const eventRequestId = (event: string, recipient: string) => uuid5(`bus-event:${event}:${recipient}`);
+export const slotRequestId = (monitor: string, slot: number) =>
+  uuid5(`hourly-unblock:${monitor}:${slot}`);
+export const eventRequestId = (event: string, recipient: string) =>
+  uuid5(`bus-event:${event}:${recipient}`);
 
 /** Python `hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()` for string lists. */
 export function pythonDigest(values: string[]): string {
@@ -47,7 +52,10 @@ const OTHER: Agent = {
 };
 
 /** The fake `claude agents --json` listing modes of the original fixture. */
-export function agents(ws: Workspace, mode: "idle" | "busy" | "blocked" | "missing" | "fail" | Agent[]): void {
+export function agents(
+  ws: Workspace,
+  mode: "idle" | "busy" | "blocked" | "missing" | "fail" | Agent[],
+): void {
   ws.updateControl((control) => {
     if (mode === "fail") control.claude = { exitCode: 3 };
     else if (Array.isArray(mode)) control.claude = { agents: mode };
@@ -63,7 +71,10 @@ export function agents(ws: Workspace, mode: "idle" | "busy" | "blocked" | "missi
   });
 }
 
-export function claudeRoute(ws: Workspace, change: Record<string, unknown> = {}): Record<string, unknown> {
+export function claudeRoute(
+  ws: Workspace,
+  change: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     version: 2,
     harness: "claude",
@@ -96,14 +107,21 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
     },
   });
   ws.config.schedule = { departures: ["05"], timezone: "America/Toronto" };
-  ws.config.reports = { project: "Fixture", ...(options.recipient ? { recipient: "monitor" } : {}) };
+  ws.config.reports = {
+    project: "Fixture",
+    ...(options.recipient ? { recipient: "monitor" } : {}),
+  };
   ws.writeRoute(claudeRoute(ws));
   clear(ws);
   agents(ws, "idle");
 }
 
 export function virtualNow(ws: Workspace): number {
-  const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as { epoch: number; realStartMs: number; speed: number };
+  const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as {
+    epoch: number;
+    realStartMs: number;
+    speed: number;
+  };
   return clock.epoch + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
 }
 
@@ -128,7 +146,11 @@ function parseMonitor(stdout: string): Tick["monitor"] {
 export async function tick(
   ws: Workspace,
   slot: number,
-  options: { done?: (out: { stdout: string; stderr: string }) => boolean; settle?: number; lead?: number } = {},
+  options: {
+    done?: (out: { stdout: string; stderr: string }) => boolean;
+    settle?: number;
+    lead?: number;
+  } = {},
 ): Promise<Tick> {
   ws.setClock(slot - (options.lead ?? 30), 60);
   const runner = startRunner(ws);
@@ -138,7 +160,9 @@ export async function tick(
   runner.child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
   const done =
     options.done ??
-    (() => stdout.includes(`bus: scheduled monitor ${slot}`) || /monitor (deferred|\d+ unavailable)/.test(stderr));
+    (() =>
+      stdout.includes(`bus: scheduled monitor ${slot}`) ||
+      /monitor (deferred|\d+ unavailable)/.test(stderr));
   const settle = slot + (options.settle ?? 150);
   await runner.until(() => done({ stdout, stderr }) || virtualNow(ws) >= settle, 30_000);
   const result = await runner.stop();
@@ -164,7 +188,7 @@ export async function holdLock(path: string): Promise<() => Promise<void>> {
   };
 }
 
-export type Message = Record<string, any>;
+export type Message = Json;
 
 /** The stdio MCP channel consumer, driven as a Claude Code client would drive it. */
 export class Channel {
@@ -196,7 +220,12 @@ export class Channel {
   }
 
   initialize(protocolVersion = "2025-06-18"): void {
-    this.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion, capabilities: {} } });
+    this.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion, capabilities: {} },
+    });
   }
 
   initialized(): void {
@@ -227,23 +256,39 @@ export class Channel {
 }
 
 /** Deliver every spooled entry once through a short consumer session, as `deliver_pending` did. */
-export async function deliver(ws: Workspace, stateDirs = [ws.path("unblock")], monitor = MONITOR): Promise<Message[]> {
+export async function deliver(
+  ws: Workspace,
+  stateDirs = [ws.path("unblock")],
+  monitor = MONITOR,
+): Promise<Message[]> {
   const spool = (dir: string) =>
-    existsSync(`${dir}/claude-spool`) ? readdirSync(`${dir}/claude-spool`).filter((n) => n.endsWith(".json")) : [];
+    existsSync(`${dir}/claude-spool`)
+      ? readdirSync(`${dir}/claude-spool`).filter((n) => n.endsWith(".json"))
+      : [];
   const channel = Channel.open(ws, stateDirs, monitor);
   channel.initialize();
   channel.initialized();
-  await channel.waitFor(() => stateDirs.every((dir) => spool(dir).length === 0) && channel.messages.length > 0);
+  await channel.waitFor(
+    () => stateDirs.every((dir) => spool(dir).length === 0) && channel.messages.length > 0,
+  );
   await channel.collect(200);
   await channel.close();
   return channel.channel();
 }
 
 /** The default Codex world of the original fixtures: active coordinator mid-turn, empty history. */
-export function codexWorld(socket: CodexSocket, queues: Record<string, unknown[]> = {}): CodexSocket {
+export function codexWorld(
+  socket: CodexSocket,
+  queues: Record<string, unknown[]> = {},
+): CodexSocket {
   return socket
-    .on("thread/queue/list", (params: Record<string, unknown>) => ({ data: queues[String(params.threadId)] ?? [], nextCursor: null }))
-    .on("thread/read", { thread: { status: { type: "active", activeFlags: [] }, canAcceptDirectInput: true } })
+    .on("thread/queue/list", (params: Record<string, unknown>) => ({
+      data: queues[String(params.threadId)] ?? [],
+      nextCursor: null,
+    }))
+    .on("thread/read", {
+      thread: { status: { type: "active", activeFlags: [] }, canAcceptDirectInput: true },
+    })
     .on("thread/turns/list", { data: [{ id: "turn-one", status: "inProgress" }], nextCursor: null })
     .on("thread/items/list", { data: [], nextCursor: null })
     .on("thread/list", { data: [], nextCursor: null })

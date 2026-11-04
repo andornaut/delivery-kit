@@ -18,7 +18,8 @@ async function download(url: string): Promise<Buffer> {
 
 function verify(name: string, data: Buffer, expected: string): void {
   const actual = createHash("sha256").update(data).digest("hex");
-  if (actual !== expected) throw new Error(`parity: ${name} sha256 ${actual}, expected ${expected}`);
+  if (actual !== expected)
+    throw new Error(`parity: ${name} sha256 ${actual}, expected ${expected}`);
 }
 
 if (existsSync(marker) && readFileSync(marker, "utf8") === identity) {
@@ -37,11 +38,15 @@ if (existsSync(marker) && readFileSync(marker, "utf8") === identity) {
   execFileSync("tar", ["-xzf", tarball, "-C", PARITY_DIR]);
   rmSync(tarball);
   const commit = readFileSync(join(PARITY_DIR, PARITY.root, "SOURCE_COMMIT"), "utf8").trim();
-  if (commit !== PARITY.sourceCommit) throw new Error(`parity: SOURCE_COMMIT ${commit}, expected ${PARITY.sourceCommit}`);
+  if (commit !== PARITY.sourceCommit)
+    throw new Error(`parity: SOURCE_COMMIT ${commit}, expected ${PARITY.sourceCommit}`);
   const wheel = await download(PARITY.websocketClient.url);
   verify(PARITY.websocketClient.name, wheel, PARITY.websocketClient.sha256);
   writeFileSync(join(PARITY_DIR, `${PARITY.websocketClient.name}.part`), wheel);
-  renameSync(join(PARITY_DIR, `${PARITY.websocketClient.name}.part`), join(PARITY_DIR, PARITY.websocketClient.name));
+  renameSync(
+    join(PARITY_DIR, `${PARITY.websocketClient.name}.part`),
+    join(PARITY_DIR, PARITY.websocketClient.name),
+  );
   writeFileSync(marker, identity);
   console.log(`parity: installed v0.9.1 (${commit}) into ${PARITY_DIR}`);
 }

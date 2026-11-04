@@ -25,7 +25,9 @@ export interface ThreadModel {
 /** The 0.9 Python fixture's two-page queue holding a private payload. */
 export function twoPageQueue(params: Params): Page {
   if (params.cursor) {
-    return { data: [{ id: "queue-two", clientUserMessageId: "user-two", input: ["private user content"] }] };
+    return {
+      data: [{ id: "queue-two", clientUserMessageId: "user-two", input: ["private user content"] }],
+    };
   }
   return {
     data: [{ id: "queue-one", clientUserMessageId: "user-one", input: ["private user content"] }],
@@ -58,7 +60,12 @@ export class NativeWorld {
         queue: twoPageQueue,
         items: () => ({
           data: created.turn
-            ? [{ turnId: created.turn.id, item: { id: "message", type: "agentMessage", questions: null } }]
+            ? [
+                {
+                  turnId: created.turn.id,
+                  item: { id: "message", type: "agentMessage", questions: null },
+                },
+              ]
             : [],
         }),
       };
@@ -71,34 +78,54 @@ export class NativeWorld {
   install(socket: CodexSocket): this {
     this.socket = socket;
     const threadOf = (params: Params) => this.thread(String(params.threadId));
-    const wrap = (handler: (params: Params, call: RpcCall) => unknown) => (params: Params, call: RpcCall) => {
-      this.hook?.(call);
-      return handler(params, call);
-    };
-    socket.on("thread/queue/list", wrap((params) => threadOf(params).queue(params)));
-    socket.on("thread/items/list", wrap((params) => threadOf(params).items(params)));
+    const wrap =
+      (handler: (params: Params, call: RpcCall) => unknown) => (params: Params, call: RpcCall) => {
+        this.hook?.(call);
+        return handler(params, call);
+      };
+    socket.on(
+      "thread/queue/list",
+      wrap((params) => threadOf(params).queue(params)),
+    );
+    socket.on(
+      "thread/items/list",
+      wrap((params) => threadOf(params).items(params)),
+    );
     socket.on(
       "thread/read",
       wrap((params) => {
         const model = threadOf(params);
         return {
-          thread: { status: model.status, canAcceptDirectInput: model.canAcceptDirectInput, ...model.read },
+          thread: {
+            status: model.status,
+            canAcceptDirectInput: model.canAcceptDirectInput,
+            ...model.read,
+          },
         };
       }),
     );
-    socket.on("thread/turns/list", wrap((params) => {
-      const turn = threadOf(params).turn;
-      return { data: turn ? [turn] : [] };
-    }));
-    socket.on("thread/list", wrap((params) => ({
-      data: this.children.get(`${params.parentThreadId}:${params.archived}`) ?? [],
-      nextCursor: null,
-    })));
-    socket.on("thread/items/read", wrap((params) => {
-      const ids = (params.itemIds as string[] | undefined) ?? [];
-      const reply = this.commands.get(`${params.threadId}:${params.turnId}:${ids[0]}`);
-      return reply ?? { error: { code: -32602, message: "unknown item" } };
-    }));
+    socket.on(
+      "thread/turns/list",
+      wrap((params) => {
+        const turn = threadOf(params).turn;
+        return { data: turn ? [turn] : [] };
+      }),
+    );
+    socket.on(
+      "thread/list",
+      wrap((params) => ({
+        data: this.children.get(`${params.parentThreadId}:${params.archived}`) ?? [],
+        nextCursor: null,
+      })),
+    );
+    socket.on(
+      "thread/items/read",
+      wrap((params) => {
+        const ids = (params.itemIds as string[] | undefined) ?? [];
+        const reply = this.commands.get(`${params.threadId}:${params.turnId}:${ids[0]}`);
+        return reply ?? { error: { code: -32602, message: "unknown item" } };
+      }),
+    );
     const mutate = (method: string) =>
       wrap((params) => {
         if (this.outcomes.length) return this.outcomes.shift();

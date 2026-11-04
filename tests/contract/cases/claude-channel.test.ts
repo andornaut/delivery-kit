@@ -4,16 +4,25 @@ import { renameSync } from "node:fs";
 import { expect } from "vitest";
 
 import { execute, impl } from "../lib/adapter.ts";
-import { ARCHIE, Channel, claudeGame, claudeRoute, deliver, MONITOR, tick } from "../lib/claude-fixture.ts";
+import {
+  ARCHIE,
+  Channel,
+  claudeGame,
+  claudeRoute,
+  deliver,
+  MONITOR,
+  tick,
+} from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
+import type { Json } from "../lib/json.ts";
 
 const SLOT = at(20);
 const NEXT = at(50);
 const ACCEPTED_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
-function receipt(ws: Workspace, slot = SLOT): Record<string, any> {
+function receipt(ws: Workspace, slot = SLOT): Json {
   return ws.readJson(`unblock/${MONITOR}-${slot}.json`);
 }
 
@@ -75,50 +84,66 @@ suite("claude channel consumer", () => {
     expect(spooled(ws)).toHaveLength(1);
   });
 
-  contract("a failed channel write and an interrupted claim are ambiguous and never resent", async () => {
-    const ws = workspace();
-    claudeGame(ws);
-    await tick(ws, SLOT);
-    const broken = Channel.open(ws, [ws.path("unblock")]);
-    broken.initialize();
-    await broken.waitFor(() => broken.messages.length > 0);
-    // The client stops reading: the consumer's next write fails.
-    broken.resident.child.stdout.destroy();
-    broken.initialized();
-    const failed = await broken.resident.done;
-    // The consumer exits nonzero once its output is unusable.
-    expect(failed.code).not.toBe(0);
-    expect(receipt(ws).status).toBe("ambiguous");
-    expect(await deliver(ws)).toEqual([]);
-    await tick(ws, NEXT);
-    const [pending] = spooled(ws);
-    renameSync(ws.path("unblock", "claude-spool", pending!), ws.path("unblock", "claude-spool", pending!.replace(/\.json$/, ".claimed")));
-    expect(await deliver(ws)).toEqual([]);
-    expect(receipt(ws, NEXT).status).toBe("ambiguous");
-  });
+  contract(
+    "a failed channel write and an interrupted claim are ambiguous and never resent",
+    async () => {
+      const ws = workspace();
+      claudeGame(ws);
+      await tick(ws, SLOT);
+      const broken = Channel.open(ws, [ws.path("unblock")]);
+      broken.initialize();
+      await broken.waitFor(() => broken.messages.length > 0);
+      // The client stops reading: the consumer's next write fails.
+      broken.resident.child.stdout.destroy();
+      broken.initialized();
+      const failed = await broken.resident.done;
+      // The consumer exits nonzero once its output is unusable.
+      expect(failed.code).not.toBe(0);
+      expect(receipt(ws).status).toBe("ambiguous");
+      expect(await deliver(ws)).toEqual([]);
+      await tick(ws, NEXT);
+      const [pending] = spooled(ws);
+      renameSync(
+        ws.path("unblock", "claude-spool", pending!),
+        ws.path("unblock", "claude-spool", pending!.replace(/\.json$/, ".claimed")),
+      );
+      expect(await deliver(ws)).toEqual([]);
+      expect(receipt(ws, NEXT).status).toBe("ambiguous");
+    },
+  );
 
-  contract("one consumer drains each project state once and rejects a repeated state directory", async () => {
-    const host = workspace();
-    const other = workspace();
-    claudeGame(host);
-    claudeGame(other);
-    // Each project dispatches only while it is the route host.
-    other.writeRoute(claudeRoute(other));
-    await tick(other, SLOT);
-    await tick(host, SLOT);
-    const dirs = [host.path("unblock"), other.path("unblock")];
-    const channel = Channel.open(host, dirs);
-    channel.initialize();
-    channel.initialized();
-    await channel.waitFor(() => channel.channel().length >= 2);
-    await channel.collect(500);
-    expect(channel.channel()).toHaveLength(2);
-    await channel.close();
-    for (const ws of [host, other]) {
-      expect(receipt(ws).status).toBe("accepted");
-      expect(ws.list("unblock", "claude-delivered")).toHaveLength(1);
-    }
-    const repeated = impl.channel(host, ["--monitor", MONITOR, "--state-dir", dirs[0]!, "--state-dir", dirs[0]!]);
-    expect((await execute(repeated)).code).toBe(2);
-  });
+  contract(
+    "one consumer drains each project state once and rejects a repeated state directory",
+    async () => {
+      const host = workspace();
+      const other = workspace();
+      claudeGame(host);
+      claudeGame(other);
+      // Each project dispatches only while it is the route host.
+      other.writeRoute(claudeRoute(other));
+      await tick(other, SLOT);
+      await tick(host, SLOT);
+      const dirs = [host.path("unblock"), other.path("unblock")];
+      const channel = Channel.open(host, dirs);
+      channel.initialize();
+      channel.initialized();
+      await channel.waitFor(() => channel.channel().length >= 2);
+      await channel.collect(500);
+      expect(channel.channel()).toHaveLength(2);
+      await channel.close();
+      for (const ws of [host, other]) {
+        expect(receipt(ws).status).toBe("accepted");
+        expect(ws.list("unblock", "claude-delivered")).toHaveLength(1);
+      }
+      const repeated = impl.channel(host, [
+        "--monitor",
+        MONITOR,
+        "--state-dir",
+        dirs[0]!,
+        "--state-dir",
+        dirs[0]!,
+      ]);
+      expect((await execute(repeated)).code).toBe(2);
+    },
+  );
 });

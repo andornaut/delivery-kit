@@ -11,17 +11,25 @@ import { ART, GAMEPLAY, NativeWorld, TECH } from "./unblock-native.ts";
 import type { Workspace } from "./workspace.ts";
 
 export function virtualNow(ws: Workspace): number {
-  const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as { epoch: number; realStartMs: number; speed: number };
+  const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as {
+    epoch: number;
+    realStartMs: number;
+    speed: number;
+  };
   let offset = 0;
   const offsets = join(ws.fakeDir, "clock-offsets");
   if (existsSync(offsets)) {
-    for (const line of readFileSync(offsets, "utf8").split("\n")) if (line.trim()) offset += Number(line);
+    for (const line of readFileSync(offsets, "utf8").split("\n"))
+      if (line.trim()) offset += Number(line);
   }
   return Math.floor(clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
 }
 
 /** A version 1 Codex monitor route; host defaults to this game's checkout. */
-export function codexRoute(ws: Workspace, change: Record<string, unknown> = {}): Record<string, unknown> {
+export function codexRoute(
+  ws: Workspace,
+  change: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     version: 1,
     harness: "codex",
@@ -50,7 +58,10 @@ export function codexRegistry(ws: Workspace): void {
 }
 
 export function decide(ws: Workspace, recipient: string, record: unknown): void {
-  ws.write(`unblock/decisions/${recipient}.json`, typeof record === "string" ? record : JSON.stringify(record));
+  ws.write(
+    `unblock/decisions/${recipient}.json`,
+    typeof record === "string" ? record : JSON.stringify(record),
+  );
 }
 
 /** Real UTC now, for owner attestations that the 0.9 collectors check against wall time. */
@@ -117,7 +128,11 @@ export class Monitored {
   }
 
   /** Jump the clock to second 1 of the epoch's minute and wait for `predicate` on new output. */
-  async jump(epoch: number, predicate: (output: string) => boolean, timeoutMs = 20_000): Promise<string> {
+  async jump(
+    epoch: number,
+    predicate: (output: string) => boolean,
+    timeoutMs = 20_000,
+  ): Promise<string> {
     const mark = this.output.length;
     const now = virtualNow(this.ws);
     if (epoch + 1 <= now) throw new Error(`clock already past ${epoch}`);
@@ -131,9 +146,17 @@ export class Monitored {
   /** Reach a monitor wake slot and return the helper's reported status. */
   async slot(epoch: number): Promise<Tick> {
     const marker = `scheduled monitor ${epoch}`;
-    const output = await this.jump(epoch, (text) => text.includes(marker) || text.includes("monitor deferred"));
+    const output = await this.jump(
+      epoch,
+      (text) => text.includes(marker) || text.includes("monitor deferred"),
+    );
     const line = output.split("\n").find((row) => row.includes(`${marker}: `));
-    const result = line ? (JSON.parse(line.slice(line.indexOf(`${marker}: `) + marker.length + 2)) as Record<string, unknown>) : undefined;
+    const result = line
+      ? (JSON.parse(line.slice(line.indexOf(`${marker}: `) + marker.length + 2)) as Record<
+          string,
+          unknown
+        >)
+      : undefined;
     return { result, output };
   }
 

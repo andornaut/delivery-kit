@@ -17,6 +17,7 @@ import {
 import { contract, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
+import type { Json } from "../lib/json.ts";
 
 const SLOT = at(20);
 const REQUEST = slotRequestId(MONITOR, SLOT);
@@ -27,21 +28,38 @@ async function delivered(ws: Workspace): Promise<void> {
   await deliver(ws);
 }
 
-async function snapshot(ws: Workspace, recipient = MONITOR): Promise<Record<string, any>> {
+async function snapshot(ws: Workspace, recipient = MONITOR): Promise<Json> {
   const result = await cli(ws, ["monitor-snapshot", "--recipient", recipient]);
   expect(result.code, result.stdout + result.stderr).toBe(0);
   return JSON.parse(result.stdout);
 }
 
-function stored(ws: Workspace, output: Record<string, any>): Record<string, any> {
+function stored(ws: Workspace, output: Json): Json {
   return ws.readJson(`unblock/snapshots/${output.snapshot_id}.json`);
 }
 
-async function ack(ws: Workspace, output: Record<string, any>, disposition: string, extra: string[] = [], ids = [REQUEST]) {
-  const args = ["--recipient", MONITOR, "--snapshot", output.snapshot_id, "--disposition", disposition, ...extra];
+async function ack(
+  ws: Workspace,
+  output: Json,
+  disposition: string,
+  extra: string[] = [],
+  ids = [REQUEST],
+) {
+  const args = [
+    "--recipient",
+    MONITOR,
+    "--snapshot",
+    output.snapshot_id,
+    "--disposition",
+    disposition,
+    ...extra,
+  ];
   for (const id of ids) args.push("--queue-id", id);
   const result = await cli(ws, ["monitor-ack", ...args]);
-  return { ...result, json: result.stdout ? (JSON.parse(result.stdout) as Record<string, any>) : {} };
+  return {
+    ...result,
+    json: result.stdout ? (JSON.parse(result.stdout) as Json) : {},
+  };
 }
 
 function deliveredPath(ws: Workspace): string {
@@ -58,13 +76,30 @@ suite("claude monitor inventory", () => {
     const record = stored(ws, output);
     expect(record.queues[MONITOR].map((entry: { id: string }) => entry.id)).toEqual([REQUEST]);
     expect(record.queues[MONITOR][0].receipt_status).toBe("accepted");
-    expect(new Set(Object.values(record.history).map((row: any) => row.status))).toEqual(new Set(["unavailable"]));
-    expect(output.question_state_status).toEqual({ [MONITOR]: "unavailable", [ARCHIE]: "unavailable" });
+    expect(new Set(Object.values(record.history).map((row) => (row as Json).status))).toEqual(
+      new Set(["unavailable"]),
+    );
+    expect(output.question_state_status).toEqual({
+      [MONITOR]: "unavailable",
+      [ARCHIE]: "unavailable",
+    });
     expect(output.session_status).toEqual({ [MONITOR]: "idle", [ARCHIE]: "idle" });
     expect(output.target_queue_status[ARCHIE]).toBe("unavailable");
     for (const [rows, expected] of [
-      [[{ sessionId: MONITOR, status: "idle" }, { sessionId: ARCHIE, status: "waiting" }], "waiting"],
-      [[{ sessionId: MONITOR, status: "idle" }, { sessionId: ARCHIE, status: "Bad value" }], "unknown"],
+      [
+        [
+          { sessionId: MONITOR, status: "idle" },
+          { sessionId: ARCHIE, status: "waiting" },
+        ],
+        "waiting",
+      ],
+      [
+        [
+          { sessionId: MONITOR, status: "idle" },
+          { sessionId: ARCHIE, status: "Bad value" },
+        ],
+        "unknown",
+      ],
       [[{ sessionId: MONITOR, status: "idle" }], "missing"],
     ] as const) {
       agents(ws, [...rows]);
@@ -82,8 +117,12 @@ suite("claude monitor inventory", () => {
     const ws = workspace();
     await delivered(ws);
     const output = await snapshot(ws);
-    expect((await ack(ws, output, "handled")).json).toEqual({ results: [{ queue_id: REQUEST, state: "deleted" }] });
-    expect((await ack(ws, output, "handled")).json).toEqual({ results: [{ queue_id: REQUEST, state: "deleted" }] });
+    expect((await ack(ws, output, "handled")).json).toEqual({
+      results: [{ queue_id: REQUEST, state: "deleted" }],
+    });
+    expect((await ack(ws, output, "handled")).json).toEqual({
+      results: [{ queue_id: REQUEST, state: "deleted" }],
+    });
     expect((await snapshot(ws)).queue_ids).toEqual([]);
     const changed = await ack(ws, output, "superseded");
     expect(changed.code).toBe(1);
@@ -108,7 +147,10 @@ suite("claude monitor inventory", () => {
     const retained = await ack(ws, fresh, "retained", ["--reason", "waiting on Archie tech"]);
     expect(retained.json.results[0].state).toBe("retained");
     expect(stored(ws, await snapshot(ws)).queues[MONITOR][0].retained).toBe(true);
-    writeFileSync(deliveredPath(ws), JSON.stringify({ ...JSON.parse(original), text: "changed again" }));
+    writeFileSync(
+      deliveredPath(ws),
+      JSON.stringify({ ...JSON.parse(original), text: "changed again" }),
+    );
     expect(stored(ws, await snapshot(ws)).queues[MONITOR][0].retained).toBe(false);
   });
 
@@ -134,7 +176,7 @@ suite("claude monitor inventory", () => {
     );
     rmSync(deliveredPath(ws));
     expect((await ack(ws, output, "handled")).json.results[0].state).toBe("confirmed_absent");
-    const record = ws.readJson<Record<string, any>>(operation);
+    const record = ws.readJson<Json>(operation);
     expect(record.attempts.at(-1).state).toBe("ambiguous");
     expect(record.history).toContainEqual({ attempt: 1, state: "ambiguous" });
   });
@@ -147,6 +189,8 @@ suite("claude monitor inventory", () => {
     const output = JSON.parse(result.stdout);
     expect([output.harness, output.queue_ids]).toEqual(["claude", [REQUEST]]);
     expect(result.stdout + result.stderr).not.toContain("CODEX");
-    expect((await ack(ws, output, "handled")).json).toEqual({ results: [{ queue_id: REQUEST, state: "deleted" }] });
+    expect((await ack(ws, output, "handled")).json).toEqual({
+      results: [{ queue_id: REQUEST, state: "deleted" }],
+    });
   });
 });

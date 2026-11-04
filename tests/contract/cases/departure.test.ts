@@ -18,7 +18,12 @@ function bus(ws: Workspace, options: { github?: string; reports?: boolean } = {}
   ws.config.schedule = { departures: EVERY_MINUTE, timezone: "America/Toronto" };
   ws.config.git = { main: "main", remote: "origin", github: options.github ?? "" };
   if (options.reports ?? true) {
-    ws.writeRegistry({ schema: 1, revision: 1, harness: "codex", roles: { monitor: { conversations: { codex: MONITOR } } } });
+    ws.writeRegistry({
+      schema: 1,
+      revision: 1,
+      harness: "codex",
+      roles: { monitor: { conversations: { codex: MONITOR } } },
+    });
     ws.config.reports = { project: "Fixture", recipient: "monitor" };
     // The legacy Codex queue sink fails, so events stay in the local outbox for inspection.
     ws.updateControl((c) => (c.codex = { fail: true }));
@@ -34,7 +39,11 @@ function containers(ws: Workspace) {
 }
 
 function deploys(ws: Workspace) {
-  return ws.calls().filter((call) => call.tool === "wrangler" || (call.tool === "node" && call.args.includes("deploy")));
+  return ws
+    .calls()
+    .filter(
+      (call) => call.tool === "wrangler" || (call.tool === "node" && call.args.includes("deploy")),
+    );
 }
 
 function kinds(ws: Workspace): string[] {
@@ -74,7 +83,12 @@ suite("departure", () => {
       bus(ws);
       ws.updateControl((c) => (c.git = { files }));
       ws.queue(["bus/docs"]);
-      const runner = await departOnce(ws, () => kinds(ws).includes("push") && kinds(ws).includes(deployed ? "deploy_success" : "deploy_skipped"));
+      const runner = await departOnce(
+        ws,
+        () =>
+          kinds(ws).includes("push") &&
+          kinds(ws).includes(deployed ? "deploy_success" : "deploy_skipped"),
+      );
       await runner.stop();
       expect(deploys(ws).length > 0, files).toBe(deployed);
       if (!deployed) {
@@ -84,29 +98,38 @@ suite("departure", () => {
     }
   });
 
-  contract("a failed deployment retains the gated build and retries without another gate or push", async () => {
-    const ws = workspace();
-    bus(ws);
-    ws.updateControl((c) => (c.wrangler = { fail: true }));
-    ws.queue(["bus/feature"]);
-    const runner = await departOnce(ws, () => ws.exists("deploy-pending") && kinds(ws).includes("deploy_failure"));
-    const [pendingSha, work] = ws.read("deploy-pending").split("\n");
-    expect(pendingSha).toBe(SHA);
-    expect(readFileSync(`${work}/.bus-built.sha`, "utf8").trim()).toBe(SHA);
-    expect(containers(ws).length).toBe(2);
-    expect(pushes(ws)).toBe(1);
-    const deploy = deploys(ws)[0]!.args;
-    expect(deploy).toEqual(expect.arrayContaining(["--tag", "--message", "--no-bundle"]));
-    ws.updateControl((c) => (c.wrangler = {}));
-    // The pointer moves before the success event is written; wait for both.
-    await runner.until(() => !ws.exists("deploy-pending") && kinds(ws).includes("deploy_success"), 30_000);
-    await runner.stop();
-    expect(ws.read("last-deploy.sha").trim()).toBe(SHA);
-    expect(ws.exists("deploy", `${SHA}.completed`)).toBe(true);
-    expect(containers(ws).length).toBe(2);
-    expect(pushes(ws)).toBe(1);
-    expect(kinds(ws)).toEqual(expect.arrayContaining(["deploy_failure", "deploy_success"]));
-  });
+  contract(
+    "a failed deployment retains the gated build and retries without another gate or push",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      ws.updateControl((c) => (c.wrangler = { fail: true }));
+      ws.queue(["bus/feature"]);
+      const runner = await departOnce(
+        ws,
+        () => ws.exists("deploy-pending") && kinds(ws).includes("deploy_failure"),
+      );
+      const [pendingSha, work] = ws.read("deploy-pending").split("\n");
+      expect(pendingSha).toBe(SHA);
+      expect(readFileSync(`${work}/.bus-built.sha`, "utf8").trim()).toBe(SHA);
+      expect(containers(ws).length).toBe(2);
+      expect(pushes(ws)).toBe(1);
+      const deploy = deploys(ws)[0]!.args;
+      expect(deploy).toEqual(expect.arrayContaining(["--tag", "--message", "--no-bundle"]));
+      ws.updateControl((c) => (c.wrangler = {}));
+      // The pointer moves before the success event is written; wait for both.
+      await runner.until(
+        () => !ws.exists("deploy-pending") && kinds(ws).includes("deploy_success"),
+        30_000,
+      );
+      await runner.stop();
+      expect(ws.read("last-deploy.sha").trim()).toBe(SHA);
+      expect(ws.exists("deploy", `${SHA}.completed`)).toBe(true);
+      expect(containers(ws).length).toBe(2);
+      expect(pushes(ws)).toBe(1);
+      expect(kinds(ws)).toEqual(expect.arrayContaining(["deploy_failure", "deploy_success"]));
+    },
+  );
 
   contract("deployment mode none leaves deployment state and commands untouched", async () => {
     const ws = workspace();
@@ -124,31 +147,67 @@ suite("departure", () => {
   });
 
   for (const failure of ["gateFail", "installFail"] as const) {
-    contract(`a failed ${failure === "gateFail" ? "gate" : "install"} never pushes, stages deployment or deletes the batch branch`, async () => {
-      const ws = workspace();
-      bus(ws);
-      ws.updateControl((c) => (c.docker = { [failure]: true }));
-      ws.queue(["bus/test-input"]);
-      const runner = await departOnce(ws, () => kinds(ws).includes("blocked-" + (failure === "gateFail" ? "full-gate" : "install")));
-      await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
-      const result = await runner.stop();
-      expect(pushes(ws)).toBe(0);
-      expect(ws.exists("deploy-pending")).toBe(false);
-      expect(deploys(ws)).toEqual([]);
-      expect(result.stdout).toContain("kept branch batch-");
-      expect(ws.calls("git").some((call) => call.args.includes("branch") && call.args.includes("-D"))).toBe(false);
-    });
+    contract(
+      `a failed ${failure === "gateFail" ? "gate" : "install"} never pushes, stages deployment or deletes the batch branch`,
+      async () => {
+        const ws = workspace();
+        bus(ws);
+        ws.updateControl((c) => (c.docker = { [failure]: true }));
+        ws.queue(["bus/test-input"]);
+        const runner = await departOnce(ws, () =>
+          kinds(ws).includes("blocked-" + (failure === "gateFail" ? "full-gate" : "install")),
+        );
+        await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
+        const result = await runner.stop();
+        expect(pushes(ws)).toBe(0);
+        expect(ws.exists("deploy-pending")).toBe(false);
+        expect(deploys(ws)).toEqual([]);
+        expect(result.stdout).toContain("kept branch batch-");
+        expect(
+          ws.calls("git").some((call) => call.args.includes("branch") && call.args.includes("-D")),
+        ).toBe(false);
+      },
+    );
   }
 
   for (const [title, setup, rejectedAtDeparture] of [
-    ["a branch tip other than the approved one", (ws: Workspace) => ws.updateControl((c) => (c.git = { branchTip: "8".repeat(40) })), true],
+    [
+      "a branch tip other than the approved one",
+      (ws: Workspace) => ws.updateControl((c) => (c.git = { branchTip: "8".repeat(40) })),
+      true,
+    ],
     ["an extra queued branch", (ws: Workspace) => ws.queue([REPAIR, "bus/extra"]), true],
-    ["a remote base other than the failed push", (ws: Workspace) => (ws.remoteHead = "7".repeat(40)), true],
-    ["a failed gate", (ws: Workspace) => ws.updateControl((c) => (c.docker = { gateFail: true })), false],
-    ["a failed push", (ws: Workspace) => ws.updateControl((c) => (c.git = { pushFail: true })), false],
-    ["a base moved during the gate", (ws: Workspace) => ws.updateControl((c) => (c.docker = { moveBase: true })), false],
-    ["an approval changed during the gate", (ws: Workspace) => ws.updateControl((c) => (c.docker = { changeApproval: ws.path("ci-repair-approval") })), false],
-    ["a scratch tree other than the approved tip", (ws: Workspace) => ws.updateControl((c) => (c.git = { wrongTree: "0".repeat(40) })), false],
+    [
+      "a remote base other than the failed push",
+      (ws: Workspace) => (ws.remoteHead = "7".repeat(40)),
+      true,
+    ],
+    [
+      "a failed gate",
+      (ws: Workspace) => ws.updateControl((c) => (c.docker = { gateFail: true })),
+      false,
+    ],
+    [
+      "a failed push",
+      (ws: Workspace) => ws.updateControl((c) => (c.git = { pushFail: true })),
+      false,
+    ],
+    [
+      "a base moved during the gate",
+      (ws: Workspace) => ws.updateControl((c) => (c.docker = { moveBase: true })),
+      false,
+    ],
+    [
+      "an approval changed during the gate",
+      (ws: Workspace) =>
+        ws.updateControl((c) => (c.docker = { changeApproval: ws.path("ci-repair-approval") })),
+      false,
+    ],
+    [
+      "a scratch tree other than the approved tip",
+      (ws: Workspace) => ws.updateControl((c) => (c.git = { wrongTree: "0".repeat(40) })),
+      false,
+    ],
   ] as const) {
     contract(`repair approval rejects ${title} and preserves the approval`, async () => {
       const ws = workspace();
@@ -169,65 +228,77 @@ suite("departure", () => {
     });
   }
 
-  contract("a one-shot repair requires the full gate, is consumed only after push and rejects replay", async () => {
-    const ws = workspace();
-    bus(ws);
-    prepareRepair(ws);
-    const runner = await departOnce(ws, () => ws.exists("ci-repair-approval.consumed") && kinds(ws).includes("push"));
-    await runner.stop();
-    expect(ws.exists("ci-repair-approval")).toBe(false);
-    expect(ws.read("bus-queue")).toBe("");
-    expect(containers(ws).length).toBe(2);
-    expect(pushes(ws)).toBe(1);
-    expect(ws.read(`ci/${BASE}.status`).trim()).toBe("failure");
-    // Reintroducing the same approval cannot reuse it, even with the remote reset.
-    ws.remoteHead = BASE;
-    ws.write("last-push.sha", BASE + "\n");
-    ws.write("ci-repair-approval", ws.read("ci-repair-approval.consumed"));
-    ws.queue([REPAIR]);
-    ws.clearCalls();
-    const replay = await departOnce(ws, () => kinds(ws).includes("blocked-CI"));
-    await replay.stop();
-    expect(pushes(ws)).toBe(0);
-    expect(containers(ws)).toEqual([]);
-    expect(ws.exists("ci-repair-approval")).toBe(true);
-    expect(ws.exists("ci-repair-approval.consumed")).toBe(true);
-  });
+  contract(
+    "a one-shot repair requires the full gate, is consumed only after push and rejects replay",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      prepareRepair(ws);
+      const runner = await departOnce(
+        ws,
+        () => ws.exists("ci-repair-approval.consumed") && kinds(ws).includes("push"),
+      );
+      await runner.stop();
+      expect(ws.exists("ci-repair-approval")).toBe(false);
+      expect(ws.read("bus-queue")).toBe("");
+      expect(containers(ws).length).toBe(2);
+      expect(pushes(ws)).toBe(1);
+      expect(ws.read(`ci/${BASE}.status`).trim()).toBe("failure");
+      // Reintroducing the same approval cannot reuse it, even with the remote reset.
+      ws.remoteHead = BASE;
+      ws.write("last-push.sha", BASE + "\n");
+      ws.write("ci-repair-approval", ws.read("ci-repair-approval.consumed"));
+      ws.queue([REPAIR]);
+      ws.clearCalls();
+      const replay = await departOnce(ws, () => kinds(ws).includes("blocked-CI"));
+      await replay.stop();
+      expect(pushes(ws)).toBe(0);
+      expect(containers(ws)).toEqual([]);
+      expect(ws.exists("ci-repair-approval")).toBe(true);
+      expect(ws.exists("ci-repair-approval.consumed")).toBe(true);
+    },
+  );
 
-  contract("run accepts no departure arguments and enforces singleton runner and loop locks", async () => {
-    const ws = workspace();
-    bus(ws);
-    expect((await execute(impl.command(ws, ["run", "--now"]))).code).toBe(2);
-    ws.setClock(at(30), 1);
-    ws.write("loop.lock", "");
-    const loop = await hold(ws.path("loop.lock"));
-    try {
-      const result = await execute(impl.run(ws), { timeoutMs: 10_000 });
-      expect(result.code).toBe(1);
-    } finally {
-      await loop.release();
-    }
-    const runner = await hold(ws.path("runner.lock"));
-    try {
-      const result = await execute(impl.run(ws), { timeoutMs: 10_000 });
-      expect(result.code).toBe(1);
-    } finally {
-      await runner.release();
-    }
-    expect(containers(ws)).toEqual([]);
-  });
+  contract(
+    "run accepts no departure arguments and enforces singleton runner and loop locks",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      expect((await execute(impl.command(ws, ["run", "--now"]))).code).toBe(2);
+      ws.setClock(at(30), 1);
+      ws.write("loop.lock", "");
+      const loop = await hold(ws.path("loop.lock"));
+      try {
+        const result = await execute(impl.run(ws), { timeoutMs: 10_000 });
+        expect(result.code).toBe(1);
+      } finally {
+        await loop.release();
+      }
+      const runner = await hold(ws.path("runner.lock"));
+      try {
+        const result = await execute(impl.run(ws), { timeoutMs: 10_000 });
+        expect(result.code).toBe(1);
+      } finally {
+        await runner.release();
+      }
+      expect(containers(ws)).toEqual([]);
+    },
+  );
 
-  contract("a high-load departure retains its queue and persists attempt and blocked events", async () => {
-    const ws = workspace();
-    bus(ws);
-    ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
-    ws.queue(["bus/queued"]);
-    const runner = await departOnce(ws, () => kinds(ws).includes("blocked-load"));
-    await runner.stop();
-    expect(ws.read("bus-queue")).toBe("bus/queued\n");
-    expect(new Set(kinds(ws))).toEqual(new Set(["attempt", "blocked-load"]));
-    expect(containers(ws)).toEqual([]);
-  });
+  contract(
+    "a high-load departure retains its queue and persists attempt and blocked events",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
+      ws.queue(["bus/queued"]);
+      const runner = await departOnce(ws, () => kinds(ws).includes("blocked-load"));
+      await runner.stop();
+      expect(ws.read("bus-queue")).toBe("bus/queued\n");
+      expect(new Set(kinds(ws))).toEqual(new Set(["attempt", "blocked-load"]));
+      expect(containers(ws)).toEqual([]);
+    },
+  );
 
   contract("empty scheduled departures add no events", async () => {
     const ws = workspace();
@@ -242,8 +313,18 @@ suite("departure", () => {
   });
 
   for (const [title, runs, status, event] of [
-    ["success", [{ id: 1, name: "Test", status: "completed", conclusion: "success" }], "success", "ci_success"],
-    ["failure", [{ id: 1, name: "Test", status: "completed", conclusion: "failure" }], "failure", "ci_failure"],
+    [
+      "success",
+      [{ id: 1, name: "Test", status: "completed", conclusion: "success" }],
+      "success",
+      "ci_success",
+    ],
+    [
+      "failure",
+      [{ id: 1, name: "Test", status: "completed", conclusion: "failure" }],
+      "failure",
+      "ci_failure",
+    ],
     [
       "an unrelated failed workflow",
       [
@@ -270,9 +351,19 @@ suite("departure", () => {
       ws.config.ci = { requiredNames: ["Test"], pollSeconds: 0, timeoutSeconds: 1 };
       ws.updateControl((c) => (c.gh = { checks: { [SHA]: [...runs] } }));
       ws.queue(["bus/feature"]);
-      const runner = await departOnce(ws, () => ws.exists("ci", `${SHA}.status`) && ws.read("ci", `${SHA}.status`).trim() === status && kinds(ws).includes(event));
+      const runner = await departOnce(
+        ws,
+        () =>
+          ws.exists("ci", `${SHA}.status`) &&
+          ws.read("ci", `${SHA}.status`).trim() === status &&
+          kinds(ws).includes(event),
+      );
       await runner.stop();
-      expect(ws.calls("gh").every((call) => call.args.some((arg) => arg.includes(`/commits/${SHA}/check-runs`)))).toBe(true);
+      expect(
+        ws
+          .calls("gh")
+          .every((call) => call.args.some((arg) => arg.includes(`/commits/${SHA}/check-runs`))),
+      ).toBe(true);
       expect(ws.calls("gh").length).toBeGreaterThan(0);
     });
   }
@@ -282,11 +373,20 @@ suite("departure", () => {
     bus(ws, { github: "fixture/project" });
     ws.config.deploy = { mode: "none", skipPattern: "" };
     ws.config.ci = { requiredNames: ["Test"], pollSeconds: 1, timeoutSeconds: 30 };
-    ws.updateControl((c) => (c.gh = { default: [{ id: 1, name: "Test", status: "in_progress", conclusion: null }] }));
+    ws.updateControl(
+      (c) =>
+        (c.gh = { default: [{ id: 1, name: "Test", status: "in_progress", conclusion: null }] }),
+    );
     ws.queue(["bus/feature"]);
-    const runner = await departOnce(ws, () => ws.exists("ci", `${SHA}.status`) && ws.read("ci", `${SHA}.status`).trim() === "running");
+    const runner = await departOnce(
+      ws,
+      () => ws.exists("ci", `${SHA}.status`) && ws.read("ci", `${SHA}.status`).trim() === "running",
+    );
     // Let the departure itself finish; only the detached watcher should remain.
-    await runner.until(() => runner.output().stdout.includes("landed bus/feature") && ws.read("active-departure") === "");
+    await runner.until(
+      () =>
+        runner.output().stdout.includes("landed bus/feature") && ws.read("active-departure") === "",
+    );
     await runner.terminateLeader();
     await sleep(300);
     try {

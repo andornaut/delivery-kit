@@ -100,8 +100,13 @@ suite("monitor acknowledgements", () => {
     native.deleteResult = true;
     expect((await ack(ws, TECH, id, ["one"], "handled")).rows![0]!.state).toBe("deleted");
     const record = receipt(ws);
-    expect((record.attempts as Array<{ state: string }>).map((row) => row.state)).toEqual(["ambiguous", "deleted"]);
-    expect((record.history as Array<{ state: string }>).map((row) => row.state)).toContain("ambiguous");
+    expect((record.attempts as Array<{ state: string }>).map((row) => row.state)).toEqual([
+      "ambiguous",
+      "deleted",
+    ]);
+    expect((record.history as Array<{ state: string }>).map((row) => row.state)).toContain(
+      "ambiguous",
+    );
     expect(native.deletions()).toHaveLength(2);
   });
 
@@ -118,7 +123,9 @@ suite("monitor acknowledgements", () => {
     ws.write(join("unblock", "acks", name), JSON.stringify(record));
     expect((await ack(ws, TECH, id, ["one"], "handled")).rows![0]!.state).toBe("confirmed_absent");
     expect(native.deletions()).toHaveLength(1);
-    expect((receipt(ws).history as Array<{ state: string }>).map((row) => row.state)).toContain("ambiguous");
+    expect((receipt(ws).history as Array<{ state: string }>).map((row) => row.state)).toContain(
+      "ambiguous",
+    );
   });
 
   contract("a false delete requires absence confirmation", async () => {
@@ -127,7 +134,9 @@ suite("monitor acknowledgements", () => {
     expect((await ack(ws, TECH, id, ["one"], "superseded")).rows![0]!.state).toBe("not_deleted");
     expect(native.queues[TECH]![0]).toEqual(entry("one"));
     native.removeOnError = true;
-    expect((await ack(ws, TECH, id, ["one"], "superseded")).rows![0]!.state).toBe("confirmed_absent");
+    expect((await ack(ws, TECH, id, ["one"], "superseded")).rows![0]!.state).toBe(
+      "confirmed_absent",
+    );
   });
 
   contract("a retained ack confirms absence and deactivates the matching retention", async () => {
@@ -154,7 +163,9 @@ suite("monitor acknowledgements", () => {
     expect(history.slice(0, -1)).toEqual(operationBefore.history);
     expect(history.at(-1)!.state).toBe("confirmed_absent");
     expect(native.deletions()).toEqual([]);
-    const calls = native.socket.calls.slice(callsBefore).filter((call) => !call.method.startsWith("initialize"));
+    const calls = native.socket.calls
+      .slice(callsBefore)
+      .filter((call) => !call.method.startsWith("initialize"));
     expect(calls.length).toBeGreaterThan(0);
     expect(calls.every((call) => call.method === "thread/queue/list")).toBe(true);
     expect(snapshotFiles(ws)).toEqual(snapshotsBefore);
@@ -187,7 +198,14 @@ suite("monitor acknowledgements", () => {
         ...changes,
       };
       ws.write(retention, JSON.stringify(record));
-      const result = await ack(ws, TECH, taken.public.snapshot_id as string, ["one"], "retained", "planned work");
+      const result = await ack(
+        ws,
+        TECH,
+        taken.public.snapshot_id as string,
+        ["one"],
+        "retained",
+        "planned work",
+      );
       expect(result.rows![0]!.state, JSON.stringify(changes)).toBe("confirmed_absent");
       expect(ws.readJson(retention)).toEqual(record);
     }
@@ -210,7 +228,9 @@ suite("monitor acknowledgements", () => {
       const after = ws.readJson(retention);
       expect(after.active).toBe(true);
       if (changed) expect(after).toEqual(before);
-      expect((after.history as Array<{ state: string }>).map((row) => row.state)).not.toContain("confirmed_absent");
+      expect((after.history as Array<{ state: string }>).map((row) => row.state)).not.toContain(
+        "confirmed_absent",
+      );
     }
     expect(native.deletions()).toEqual([]);
   });

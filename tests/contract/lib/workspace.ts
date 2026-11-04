@@ -19,7 +19,17 @@ import { fileURLToPath } from "node:url";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 export const KIT_ROOT = join(HERE, "..", "..", "..");
-export const FAKE_TOOLS = ["claude", "codex", "date", "docker", "gh", "git", "node", "sleep", "wrangler"] as const;
+export const FAKE_TOOLS = [
+  "claude",
+  "codex",
+  "date",
+  "docker",
+  "gh",
+  "git",
+  "node",
+  "sleep",
+  "wrangler",
+] as const;
 export type FakeTool = (typeof FAKE_TOOLS)[number];
 
 export const SHA = "a".repeat(40);
@@ -160,7 +170,8 @@ export class Workspace {
     this.legacyConf = options.legacyConf ?? "";
     this.omit = options.omit ?? [];
     this.realGit = options.realGit ?? false;
-    for (const path of [this.xdgState, this.fakeBin, this.repo, this.state]) mkdirSync(path, { recursive: true });
+    for (const path of [this.xdgState, this.fakeBin, this.repo, this.state])
+      mkdirSync(path, { recursive: true });
     // Docker would create a missing bind source as root; consumers keep this cache in state.
     mkdirSync(join(this.state, "npm-cache"));
     this.installFakes();
@@ -184,7 +195,13 @@ export class Workspace {
       schema: 1,
       timezone: "America/Toronto",
       wakeMinutes: [20, 50],
-      games: { [this.game]: { name: "Fixture", path: `../${this.game}`, roles: ["art", "gameplay", "tech"] } },
+      games: {
+        [this.game]: {
+          name: "Fixture",
+          path: `../${this.game}`,
+          roles: ["art", "gameplay", "tech"],
+        },
+      },
       kits: {},
       sharedRoles: ["game-dev", "art-kit", "delivery-kit", "game-kit"],
     });
@@ -207,7 +224,10 @@ export class Workspace {
    */
   writeRegistry(registry: Registry): void {
     const roles = Object.fromEntries(
-      Object.entries(registry.roles).map(([key, role]) => [key, { ownership: "active", worktree: ".", ...role }]),
+      Object.entries(registry.roles).map(([key, role]) => [
+        key,
+        { ownership: "active", worktree: ".", ...role },
+      ]),
     );
     const complete = {
       updatedAt: "2026-11-04T03:00:00Z",
@@ -306,12 +326,21 @@ export class Workspace {
 
   /** Current virtual time, as fake `date +%s` reports it. */
   virtualNow(): number {
-    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as { epoch: number; realStartMs: number; speed: number };
+    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as {
+      epoch: number;
+      realStartMs: number;
+      speed: number;
+    };
     const offsetsPath = join(this.fakeDir, "clock-offsets");
     const offsets = existsSync(offsetsPath)
-      ? readFileSync(offsetsPath, "utf8").split("\n").filter(Boolean).reduce((sum, line) => sum + Number(line), 0)
+      ? readFileSync(offsetsPath, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .reduce((sum, line) => sum + Number(line), 0)
       : 0;
-    return Math.floor(clock.epoch + offsets + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
+    return Math.floor(
+      clock.epoch + offsets + ((Date.now() - clock.realStartMs) * clock.speed) / 1000,
+    );
   }
 
   advanceClock(seconds: number): void {
@@ -347,7 +376,10 @@ export class Workspace {
   }
 
   git(...args: string[]): string {
-    return execFileSync("git", ["-C", this.repo, ...args], { env: this.baseEnv(), encoding: "utf8" }).trim();
+    return execFileSync("git", ["-C", this.repo, ...args], {
+      env: this.baseEnv(),
+      encoding: "utf8",
+    }).trim();
   }
 
   /** Create a commit on `branch` with plumbing only, leaving every checkout untouched. */
@@ -361,9 +393,16 @@ export class Workspace {
     execFileSync("git", ["-C", this.repo, "read-tree", parent], { env: indexed });
     for (const [name, content] of Object.entries(files)) {
       const blob = run(["hash-object", "-w", "--stdin"], content);
-      execFileSync("git", ["-C", this.repo, "update-index", "--add", "--cacheinfo", `100644,${blob},${name}`], { env: indexed });
+      execFileSync(
+        "git",
+        ["-C", this.repo, "update-index", "--add", "--cacheinfo", `100644,${blob},${name}`],
+        { env: indexed },
+      );
     }
-    const tree = execFileSync("git", ["-C", this.repo, "write-tree"], { env: indexed, encoding: "utf8" }).trim();
+    const tree = execFileSync("git", ["-C", this.repo, "write-tree"], {
+      env: indexed,
+      encoding: "utf8",
+    }).trim();
     rmSync(index, { force: true });
     const commit = run(["commit-tree", tree, "-p", parent, "-m", message]);
     run(["update-ref", `refs/heads/${branch}`, commit, parent]);
@@ -376,7 +415,15 @@ export class Workspace {
       writeFileSync(join(this.repo, name), content);
       this.git("add", "--", name);
     }
-    this.git("-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "--allow-empty", "-qm", message);
+    this.git(
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "--no-verify",
+      "--allow-empty",
+      "-qm",
+      message,
+    );
     return this.git("rev-parse", "HEAD");
   }
 

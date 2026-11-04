@@ -44,7 +44,9 @@ suite("process health", () => {
   const workspace = workspaces();
   const socketFor = sockets();
 
-  async function setup(native = new ProcessNative()): Promise<{ ws: Workspace; socket: CodexSocket }> {
+  async function setup(
+    native = new ProcessNative(),
+  ): Promise<{ ws: Workspace; socket: CodexSocket }> {
     const ws = workspace();
     const socket = await socketFor(ws);
     native.install(socket);
@@ -53,7 +55,11 @@ suite("process health", () => {
   }
 
   /** Public observation (slot None) of P's jobs. */
-  async function observe(jobs: Json[] | Json = [job()], native = new ProcessNative(), setupFor?: (ws: Workspace) => void) {
+  async function observe(
+    jobs: Json[] | Json = [job()],
+    native = new ProcessNative(),
+    setupFor?: (ws: Workspace) => void,
+  ) {
     const { ws, socket } = await setup(native);
     manifest(ws, jobs);
     setupFor?.(ws);
@@ -70,29 +76,44 @@ suite("process health", () => {
   function sample(value: Json, slot: number, collectedAt: number): Json {
     const identity = Object.fromEntries(IDENTITY.map((k) => [k, value[k]]));
     const owner = clone(value.owner_evidence as Json);
-    return { ...identity, slot, collected_at: iso(collectedAt), provenance: "owner_attested", protected: false, owner_evidence: owner };
+    return {
+      ...identity,
+      slot,
+      collected_at: iso(collectedAt),
+      provenance: "owner_attested",
+      protected: false,
+      owner_evidence: owner,
+    };
   }
 
   function prior(ws: Workspace, samples: Json[]): void {
-    ws.write(`unblock/health/${M}.json`, JSON.stringify({ seen_slots: [], process_observations: samples }));
+    ws.write(
+      `unblock/health/${M}.json`,
+      JSON.stringify({ seen_slots: [], process_observations: samples }),
+    );
   }
 
-  contract("running is owner attested, never live verified, and reads only scoped metadata", async () => {
-    const { health, calls } = await observe();
-    const row = health.jobs[0]!;
-    expect(row.state).toBe("running");
-    expect(row.identity_provenance).toBe("owner_attested");
-    expect(row.progress_provenance).toBe("owner_attested");
-    expect(row.lineage_verified).toBe(true);
-    expect(row.invocation_verified).toBe(true);
-    expect(row.requires_owner_action).toBe(false);
-    expect(health.diagnostics).toContain("live_process_getter_unavailable");
-    expect(calls.map((c) => c.method)).toEqual(["thread/read", "thread/items/read"]);
-  });
+  contract(
+    "running is owner attested, never live verified, and reads only scoped metadata",
+    async () => {
+      const { health, calls } = await observe();
+      const row = health.jobs[0]!;
+      expect(row.state).toBe("running");
+      expect(row.identity_provenance).toBe("owner_attested");
+      expect(row.progress_provenance).toBe("owner_attested");
+      expect(row.lineage_verified).toBe(true);
+      expect(row.invocation_verified).toBe(true);
+      expect(row.requires_owner_action).toBe(false);
+      expect(health.diagnostics).toContain("live_process_getter_unavailable");
+      expect(calls.map((c) => c.method)).toEqual(["thread/read", "thread/items/read"]);
+    },
+  );
 
   contract("explicit fresh owner stall requests the exact job episode only", async () => {
     for (const kind of ["process", "container", "browser_job"]) {
-      const { health } = await observe([job({ kind, owner_evidence: evidence({ confirmed_stalled: true }) })]);
+      const { health } = await observe([
+        job({ kind, owner_evidence: evidence({ confirmed_stalled: true }) }),
+      ]);
       const row = health.jobs[0]!;
       expect(row.state).toBe("stalled");
       expect(row.requires_owner_action).toBe(true);
@@ -118,7 +139,13 @@ suite("process health", () => {
     const { ws, socket } = await setup();
     const run = await scheduled(ws, socket, 0, (slot) => {
       // The previous slot carried the identical owner evidence and confirmation time.
-      const value = job({ owner_evidence: evidence({ confirmed_at: iso(slot - 100), progress: progress(), blocked_condition: blocked() }) });
+      const value = job({
+        owner_evidence: evidence({
+          confirmed_at: iso(slot - 100),
+          progress: progress(),
+          blocked_condition: blocked(),
+        }),
+      });
       manifest(ws, [value]);
       prior(ws, [sample(value, slot - 60, slot - 55)]);
     });
@@ -129,54 +156,78 @@ suite("process health", () => {
     expect((run.health.process_observations as Json[]).map((s) => s.slot)).toEqual([run.slot]);
   });
 
-  contract("two distinct owner observations need expected progress and a corroborated block", async () => {
-    const { ws, socket } = await setup();
-    const fields = { progress: progress(), blocked_condition: blocked() };
-    const variants: Array<[string, Json, boolean]> = [
-      ["stalled", {}, true],
-      ["counter-up", { progress: progress({ counter: 11 }) }, false],
-      ["counter-down", { progress: progress({ counter: 9 }) }, false],
-      ["epoch", { progress: progress({ epoch: "new" }) }, false],
-      ["contract", { progress: progress({ contract_id: "new" }) }, false],
-      ["not-expected", { progress: progress({ expected_to_advance: false }) }, false],
-      ["bool-counter", { progress: progress({ counter: true }) }, false],
-      ["no-block", { blocked_condition: null }, false],
-      ["unconfirmed-block", { blocked_condition: blocked({ confirmed: false }) }, false],
-      ["other-block", { blocked_condition: blocked({ evidence_id: "different" }) }, false],
-      ["episode", { episode_id: "new" }, false],
-      ["stale-1900", { confirmed_at: stamp(1900) }, false],
-      ["stale", { confirmed_at: stamp(1801) }, false],
-    ];
-    const run = await scheduled(ws, socket, 0, (slot) => {
-    const old = slot - 1800;
-    const jobs: Json[] = [];
-    const samples: Json[] = [];
-    for (const [name, change] of variants) {
-      const id = `job-${name}`;
-      const previous = job({
-        job_id: id,
-        owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }),
+  contract(
+    "two distinct owner observations need expected progress and a corroborated block",
+    async () => {
+      const { ws, socket } = await setup();
+      const fields = { progress: progress(), blocked_condition: blocked() };
+      const variants: Array<[string, Json, boolean]> = [
+        ["stalled", {}, true],
+        ["counter-up", { progress: progress({ counter: 11 }) }, false],
+        ["counter-down", { progress: progress({ counter: 9 }) }, false],
+        ["epoch", { progress: progress({ epoch: "new" }) }, false],
+        ["contract", { progress: progress({ contract_id: "new" }) }, false],
+        ["not-expected", { progress: progress({ expected_to_advance: false }) }, false],
+        ["bool-counter", { progress: progress({ counter: true }) }, false],
+        ["no-block", { blocked_condition: null }, false],
+        ["unconfirmed-block", { blocked_condition: blocked({ confirmed: false }) }, false],
+        ["other-block", { blocked_condition: blocked({ evidence_id: "different" }) }, false],
+        ["episode", { episode_id: "new" }, false],
+        ["stale-1900", { confirmed_at: stamp(1900) }, false],
+        ["stale", { confirmed_at: stamp(1801) }, false],
+      ];
+      const run = await scheduled(ws, socket, 0, (slot) => {
+        const old = slot - 1800;
+        const jobs: Json[] = [];
+        const samples: Json[] = [];
+        for (const [name, change] of variants) {
+          const id = `job-${name}`;
+          const previous = job({
+            job_id: id,
+            owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }),
+          });
+          samples.push(sample(previous, old, old + 5));
+          jobs.push(job({ job_id: id, owner_evidence: evidence({ ...fields, ...change }) }));
+        }
+        // A prior sample from the same slot is not a distinct observation.
+        jobs.push(job({ job_id: "job-same-slot", owner_evidence: evidence(fields) }));
+        samples.push(
+          sample(
+            job({
+              job_id: "job-same-slot",
+              owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }),
+            }),
+            slot,
+            slot + 1,
+          ),
+        );
+        // A reused handle with a different start identity is a different resource.
+        jobs.push(job({ job_id: "job-reused", owner_evidence: evidence(fields) }));
+        samples.push(
+          sample(
+            job({
+              job_id: "job-reused",
+              start_identity: "reused-handle-new-start",
+              owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }),
+            }),
+            old,
+            old + 5,
+          ),
+        );
+        manifest(ws, jobs);
+        prior(ws, samples);
       });
-      samples.push(sample(previous, old, old + 5));
-      jobs.push(job({ job_id: id, owner_evidence: evidence({ ...fields, ...change }) }));
-    }
-    // A prior sample from the same slot is not a distinct observation.
-    jobs.push(job({ job_id: "job-same-slot", owner_evidence: evidence(fields) }));
-    samples.push(sample(job({ job_id: "job-same-slot", owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }) }), slot, slot + 1));
-    // A reused handle with a different start identity is a different resource.
-    jobs.push(job({ job_id: "job-reused", owner_evidence: evidence(fields) }));
-    samples.push(sample(job({ job_id: "job-reused", start_identity: "reused-handle-new-start", owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }) }), old, old + 5));
-    manifest(ws, jobs);
-    prior(ws, samples);
-    });
-    const rows = Object.fromEntries((run.record.process_health as Record<string, Health>)[P]!.jobs.map((r) => [r.job_id, r]));
-    for (const [name, , stalled] of variants) {
-      expect(rows[`job-${name}`]!.requires_owner_action, name).toBe(stalled);
-      if (stalled) expect(rows[`job-${name}`]!.state).toBe("stalled");
-    }
-    expect(rows["job-same-slot"]!.requires_owner_action).toBe(false);
-    expect(rows["job-reused"]!.requires_owner_action).toBe(false);
-  });
+      const rows = Object.fromEntries(
+        (run.record.process_health as Record<string, Health>)[P]!.jobs.map((r) => [r.job_id, r]),
+      );
+      for (const [name, , stalled] of variants) {
+        expect(rows[`job-${name}`]!.requires_owner_action, name).toBe(stalled);
+        if (stalled) expect(rows[`job-${name}`]!.state).toBe("stalled");
+      }
+      expect(rows["job-same-slot"]!.requires_owner_action).toBe(false);
+      expect(rows["job-reused"]!.requires_owner_action).toBe(false);
+    },
+  );
 
   contract("prior owner evidence fresh at capture survives thirty-minute jitter", async () => {
     const { ws, socket } = await setup();
@@ -188,42 +239,89 @@ suite("process health", () => {
       ["collected-future", (s, _, now) => ({ ...s, collected_at: iso(now + 3600) }), false],
       ["slot-unaligned", (s, old) => ({ ...s, slot: old + 1 }), false],
       ["native-provenance", (s) => ({ ...s, provenance: "native_verified" }), false],
-      ["evidence-stale-at-capture", (s, old) => ({ ...s, owner_evidence: evidence({ confirmed_at: iso(old - 1801), ...fields }) }), false],
-      ["evidence-after-capture", (s, old) => ({ ...s, owner_evidence: evidence({ confirmed_at: iso(old + 100), ...fields }) }), false],
-      ["no-collected-at", (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "collected_at")), false],
+      [
+        "evidence-stale-at-capture",
+        (s, old) => ({
+          ...s,
+          owner_evidence: evidence({ confirmed_at: iso(old - 1801), ...fields }),
+        }),
+        false,
+      ],
+      [
+        "evidence-after-capture",
+        (s, old) => ({
+          ...s,
+          owner_evidence: evidence({ confirmed_at: iso(old + 100), ...fields }),
+        }),
+        false,
+      ],
+      [
+        "no-collected-at",
+        (s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== "collected_at")),
+        false,
+      ],
     ];
     const run = await scheduled(ws, socket, 0, (slot) => {
       // Prior evidence is 100 seconds old at capture, so more than 1800 seconds old now.
       const old = slot - 1800;
       const now = Date.now() / 1000;
       const base = (id: string) =>
-        sample(job({ job_id: id, owner_evidence: evidence({ confirmed_at: iso(old - 90), ...fields }) }), old, old + 10);
-      manifest(ws, variants.map(([name]) => job({ job_id: `job-${name}`, owner_evidence: evidence(fields) })));
-      prior(ws, variants.map(([name, change]) => change(base(`job-${name}`), old, now)));
+        sample(
+          job({ job_id: id, owner_evidence: evidence({ confirmed_at: iso(old - 90), ...fields }) }),
+          old,
+          old + 10,
+        );
+      manifest(
+        ws,
+        variants.map(([name]) => job({ job_id: `job-${name}`, owner_evidence: evidence(fields) })),
+      );
+      prior(
+        ws,
+        variants.map(([name, change]) => change(base(`job-${name}`), old, now)),
+      );
     });
-    const rows = Object.fromEntries((run.record.process_health as Record<string, Health>)[P]!.jobs.map((r) => [r.job_id, r]));
-    for (const [name, , stalled] of variants) expect(rows[`job-${name}`]!.requires_owner_action, name).toBe(stalled);
+    const rows = Object.fromEntries(
+      (run.record.process_health as Record<string, Health>)[P]!.jobs.map((r) => [r.job_id, r]),
+    );
+    for (const [name, , stalled] of variants)
+      expect(rows[`job-${name}`]!.requires_owner_action, name).toBe(stalled);
   });
 
-  contract("public observation (no slot) never synthesizes scheduled samples or two-sample stalls", async () => {
-    const fields = { progress: progress(), blocked_condition: blocked() };
-    const minute = Math.floor(Date.now() / 60000) * 60;
-    const old = minute - 1800;
-    const previous = job({ owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }) });
-    let { health, ws } = await observe([job({ owner_evidence: evidence(fields) })], new ProcessNative(), (w) =>
-      prior(w, [sample(previous, old, old + 5)]),
-    );
-    expect(health.observations).toEqual([]);
-    expect(health.jobs[0]!.requires_owner_action).toBe(false);
-    expect(ws.readJson(`unblock/health/${M}.json`).process_observations).toHaveLength(1);
-    ({ health } = await observe([job({ owner_evidence: evidence({ confirmed_stalled: true }) })]));
-    expect(health.jobs[0]!.requires_owner_action).toBe(true);
-    expect(health.observations).toEqual([]);
-  });
+  contract(
+    "public observation (no slot) never synthesizes scheduled samples or two-sample stalls",
+    async () => {
+      const fields = { progress: progress(), blocked_condition: blocked() };
+      const minute = Math.floor(Date.now() / 60000) * 60;
+      const old = minute - 1800;
+      const previous = job({
+        owner_evidence: evidence({ confirmed_at: iso(old - 60), ...fields }),
+      });
+      const first = await observe(
+        [job({ owner_evidence: evidence(fields) })],
+        new ProcessNative(),
+        (w) => prior(w, [sample(previous, old, old + 5)]),
+      );
+      const ws = first.ws;
+      let health = first.health;
+      expect(health.observations).toEqual([]);
+      expect(health.jobs[0]!.requires_owner_action).toBe(false);
+      expect(ws.readJson(`unblock/health/${M}.json`).process_observations).toHaveLength(1);
+      ({ health } = await observe([
+        job({ owner_evidence: evidence({ confirmed_stalled: true }) }),
+      ]));
+      expect(health.jobs[0]!.requires_owner_action).toBe(true);
+      expect(health.observations).toEqual([]);
+    },
+  );
 
   contract("confirmation references do not depend on scheduled sample emission", async () => {
     const value = job({
-      owner_evidence: evidence({ confirmed_stalled: true, progress: progress(), blocked_condition: blocked(), unrelated: PR_PRIVATE }),
+      owner_evidence: evidence({
+        confirmed_stalled: true,
+        progress: progress(),
+        blocked_condition: blocked(),
+        unrelated: PR_PRIVATE,
+      }),
     });
     const ownerEvidence = value.owner_evidence as Json;
     const expected = {
@@ -258,7 +356,8 @@ suite("process health", () => {
     let native = new ProcessNative();
     native.status = "completed";
     native.exitCode = 0;
-    let row = (await observe([job({ owner_evidence: evidence({ progress: progress() }) })], native)).health.jobs[0]!;
+    let row = (await observe([job({ owner_evidence: evidence({ progress: progress() }) })], native))
+      .health.jobs[0]!;
     expect(row.state).toBe("running");
     expect(row.requires_owner_action).toBe(false);
     expect(row.closure_status).toBe("none");
@@ -272,7 +371,12 @@ suite("process health", () => {
   contract("wrong scope, lineage, invocation and missing identity fail closed", async () => {
     const out = await observe([job({ owner_parent_id: OTHER })]);
     expect(out.calls).toEqual([]);
-    for (const changes of [{ start_identity: "" }, { worker_id: OTHER }, { kind: [] }, { invocation: invocation(OTHER) }]) {
+    for (const changes of [
+      { start_identity: "" },
+      { worker_id: OTHER },
+      { kind: [] },
+      { invocation: invocation(OTHER) },
+    ]) {
       const { health } = await observe([job(changes)]);
       expect(health.jobs.some((r) => r.requires_owner_action)).toBe(false);
     }
@@ -297,20 +401,27 @@ suite("process health", () => {
       { provenance: "native_verified" },
       { state: [] },
     ]) {
-      const row = (await observe([job({ owner_evidence: evidence({ confirmed_stalled: true, ...change }) })])).health.jobs[0]!;
+      const row = (
+        await observe([job({ owner_evidence: evidence({ confirmed_stalled: true, ...change }) })])
+      ).health.jobs[0]!;
       expect(row.state).toBe("unknown");
       expect(row.requires_owner_action).toBe(false);
     }
     // The upper boundary keeps a margin for the delay before the collector runs.
     for (const age of [0, 1790]) {
-      const value = job({ owner_evidence: evidence({ confirmed_at: stamp(age), confirmed_stalled: true }) });
+      const value = job({
+        owner_evidence: evidence({ confirmed_at: stamp(age), confirmed_stalled: true }),
+      });
       expect((await observe([value])).health.jobs[0]!.requires_owner_action).toBe(true);
     }
   });
 
   contract("closure outcomes separate delivery, report and owner-verified result", async () => {
     for (const state of ["requested", "delivery_accepted", "ambiguous", "reported_closed"]) {
-      const value = job({ owner_evidence: evidence({ confirmed_stalled: true }), closure: receipt(state) });
+      const value = job({
+        owner_evidence: evidence({ confirmed_stalled: true }),
+        closure: receipt(state),
+      });
       const row = (await observe([value])).health.jobs[0]!;
       expect(row.closure_status).toBe(state);
       expect(row.closure_provenance).toBe("owner_attested");
@@ -351,7 +462,8 @@ suite("process health", () => {
       { confirmed_at: stamp(1801) },
       { invocation: invocation(C, "other") },
     ]) {
-      const row = (await observe([job({ closure: receipt("reported_closed", change) })])).health.jobs[0]!;
+      const row = (await observe([job({ closure: receipt("reported_closed", change) })])).health
+        .jobs[0]!;
       expect(row.closure_status).toBe("unknown");
     }
     for (const state of ["blocked", "retained"]) {
@@ -379,12 +491,20 @@ suite("process health", () => {
     const oversized = { version: 1, jobs: [], unknown: "x".repeat(1048576) };
     let shot = (await observe(oversized)).shot;
     expect((shot.record.process_health as Record<string, Health>)[P]!.status).toBe("unavailable");
-    expect(shot.out.process_health_source).toEqual({ status: "unavailable", diagnostics: ["process_manifest_size_exceeded"] });
+    expect(shot.out.process_health_source).toEqual({
+      status: "unavailable",
+      diagnostics: ["process_manifest_size_exceeded"],
+    });
     // The CLI refuses a manifest above 100 jobs before collection; 100 are all inspected.
     shot = (await observe(Array.from({ length: 101 }, (_, i) => job({ job_id: `job-${i}` })))).shot;
-    expect(shot.out.process_health_source).toEqual({ status: "unavailable", diagnostics: ["process_manifest_schema_unavailable"] });
+    expect(shot.out.process_health_source).toEqual({
+      status: "unavailable",
+      diagnostics: ["process_manifest_schema_unavailable"],
+    });
     expect((shot.record.process_health as Record<string, Health>)[P]!.jobs).toEqual([]);
-    ({ health } = await observe(Array.from({ length: 100 }, (_, i) => job({ job_id: `job-${i}` }))));
+    ({ health } = await observe(
+      Array.from({ length: 100 }, (_, i) => job({ job_id: `job-${i}` })),
+    ));
     expect(health.jobs).toHaveLength(100);
     expect(health.omitted_jobs).toBe(0);
     shot = (await observe({ version: true, jobs: [] })).shot;
@@ -412,7 +532,11 @@ suite("process health", () => {
     );
     native = new ProcessNative();
     const { health, calls, shot } = await observe(jobs, native);
-    expect(shot.out.collection_budget).toEqual({ max_calls: 256, calls_used: 256, reason_code: "collection_call_budget_exhausted" });
+    expect(shot.out.collection_budget).toEqual({
+      max_calls: 256,
+      calls_used: 256,
+      reason_code: "collection_call_budget_exhausted",
+    });
     expect(calls.length + 2).toBe(256);
     expect(health.budget.exhausted).toBe(true);
     expect(health.jobs.some((r) => r.state === "unknown")).toBe(true);
@@ -429,17 +553,22 @@ suite("process health", () => {
     expect(health.observations).toEqual([]);
   });
 
-  contract("a parent-owned invocation needs no child read; out-of-scope parents make no calls", async () => {
-    const value = job({ worker_id: null, invocation: invocation(P) });
-    const { health, calls } = await observe([value]);
-    expect(health.jobs[0]!.invocation_verified).toBe(true);
-    expect(calls.map((c) => c.method)).toEqual(["thread/items/read"]);
-    // A parent outside the active route is refused before any native connection.
-    const { ws, socket } = await setup();
-    manifest(ws, [job()]);
-    const result = await snapshot(ws, R, [OTHER]).catch(() => null);
-    expect(result === null || result.result.code !== 0).toBe(true);
-    expect(socket.calls).toEqual([]);
-    expect((await observe({ version: true, jobs: [] })).shot.out.process_health_source).toMatchObject({ status: "unavailable" });
-  });
+  contract(
+    "a parent-owned invocation needs no child read; out-of-scope parents make no calls",
+    async () => {
+      const value = job({ worker_id: null, invocation: invocation(P) });
+      const { health, calls } = await observe([value]);
+      expect(health.jobs[0]!.invocation_verified).toBe(true);
+      expect(calls.map((c) => c.method)).toEqual(["thread/items/read"]);
+      // A parent outside the active route is refused before any native connection.
+      const { ws, socket } = await setup();
+      manifest(ws, [job()]);
+      const result = await snapshot(ws, R, [OTHER]).catch(() => null);
+      expect(result === null || result.result.code !== 0).toBe(true);
+      expect(socket.calls).toEqual([]);
+      expect(
+        (await observe({ version: true, jobs: [] })).shot.out.process_health_source,
+      ).toMatchObject({ status: "unavailable" });
+    },
+  );
 });

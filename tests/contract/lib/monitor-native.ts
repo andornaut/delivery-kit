@@ -8,9 +8,9 @@ import { cli, type Result } from "./adapter.ts";
 import { CodexSocket, type Reply } from "./codex-socket.ts";
 import type { Workspace } from "./workspace.ts";
 
-/** Loose JSON record for snapshot and state file assertions. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type Json = Record<string, any>;
+import type { Json } from "./json.ts";
+
+export type { Json };
 
 export const TECH = "00000000-0000-0000-0000-000000000001";
 export const ART = "00000000-0000-0000-0000-000000000002";
@@ -36,7 +36,10 @@ export function pyJson(value: unknown): string {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(value);
   if (typeof value === "string") {
-    return JSON.stringify(value).replace(/[\u007f-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+    return JSON.stringify(value).replace(
+      /[\u007f-￿]/g,
+      (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+    );
   }
   if (Array.isArray(value)) return "[" + value.map(pyJson).join(", ") + "]";
   const object = value as Record<string, unknown>;
@@ -88,10 +91,13 @@ export class Native {
     ws.env.CODEX_CONTROL_SOCKET = this.socket.path;
     this.socket.on("thread/queue/list", (params: Record<string, unknown>) => {
       const thread = String(params.threadId);
-      if (this.queueError.has(thread)) return { error: { code: -32000, message: "PRIVATE_TRANSPORT_BODY" } };
+      if (this.queueError.has(thread))
+        return { error: { code: -32000, message: "PRIVATE_TRANSPORT_BODY" } };
       const offset = Number(params.cursor ?? "0");
       const values = this.queues[thread] ?? [];
-      const page: Record<string, unknown> = { data: structuredClone(values.slice(offset, offset + 1)) };
+      const page: Record<string, unknown> = {
+        data: structuredClone(values.slice(offset, offset + 1)),
+      };
       if (offset + 1 < values.length) page.nextCursor = String(offset + 1);
       return { result: page };
     });
@@ -103,7 +109,8 @@ export class Native {
       if (this.deleteResult || this.removeOnError) {
         this.queues[thread] = (this.queues[thread] ?? []).filter((row) => row.id !== identity);
       }
-      if (this.deleteError) return { error: { code: -32000, message: "private transport diagnostic" } };
+      if (this.deleteError)
+        return { error: { code: -32000, message: "private transport diagnostic" } };
       return { result: { deleted: this.deleteResult } };
     });
     this.socket.on("thread/read", (params: Record<string, unknown>) => {
@@ -111,15 +118,28 @@ export class Native {
       const value = this.threads[thread];
       if (value === undefined) {
         return {
-          result: { thread: { id: thread, canAcceptDirectInput: true, status: { type: "idle" }, updatedAt: 1 } },
+          result: {
+            thread: {
+              id: thread,
+              canAcceptDirectInput: true,
+              status: { type: "idle" },
+              updatedAt: 1,
+            },
+          },
         };
       }
-      return typeof value === "function" ? (value as (p: unknown) => unknown)(params) : { result: value };
+      return typeof value === "function"
+        ? (value as (p: unknown) => unknown)(params)
+        : { result: value };
     });
     this.socket.on("thread/turns/list", (params: Record<string, unknown>) => ({
-      result: { data: this.turns[String(params.threadId)] ?? [{ id: "latest-turn", status: "completed" }] },
+      result: {
+        data: this.turns[String(params.threadId)] ?? [{ id: "latest-turn", status: "completed" }],
+      },
     }));
-    this.socket.on("turn/start", () => ({ result: { turn: { id: `started-${++this.turnCount}` } } }));
+    this.socket.on("turn/start", () => ({
+      result: { turn: { id: `started-${++this.turnCount}` } },
+    }));
   }
 
   async listen(): Promise<this> {
@@ -146,7 +166,11 @@ export class Native {
   }
 }
 
-export function writeCodexRoute(ws: Workspace, change: Record<string, unknown> = {}, targets = [ART]): void {
+export function writeCodexRoute(
+  ws: Workspace,
+  change: Record<string, unknown> = {},
+  targets = [ART],
+): void {
   ws.writeRoute({
     version: 1,
     harness: "codex",
@@ -159,7 +183,11 @@ export function writeCodexRoute(ws: Workspace, change: Record<string, unknown> =
 }
 
 /** Recipient-bound decision marker in STATE/unblock/decisions/. */
-export function writeDecision(ws: Workspace, recipient: string, marker: Record<string, unknown>): void {
+export function writeDecision(
+  ws: Workspace,
+  recipient: string,
+  marker: Record<string, unknown>,
+): void {
   ws.write(join("unblock", "decisions", recipient + ".json"), JSON.stringify(marker));
 }
 
@@ -173,7 +201,11 @@ export interface SnapshotOutput {
   file: Json | undefined;
 }
 
-export async function snapshot(ws: Workspace, recipient: string, extra: string[] = []): Promise<SnapshotOutput> {
+export async function snapshot(
+  ws: Workspace,
+  recipient: string,
+  extra: string[] = [],
+): Promise<SnapshotOutput> {
   const result = await cli(ws, ["monitor-snapshot", "--recipient", recipient, ...extra]);
   let output: Json = {};
   try {
@@ -182,7 +214,8 @@ export async function snapshot(ws: Workspace, recipient: string, extra: string[]
     // Rejected before output.
   }
   const path = output.path as string | undefined;
-  const file = path && existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Json) : undefined;
+  const file =
+    path && existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Json) : undefined;
   return { result, public: output, file };
 }
 
@@ -201,7 +234,8 @@ export async function ack(
   const result = await cli(ws, args);
   let rows;
   try {
-    rows = (JSON.parse(result.stdout) as { results?: Array<{ queue_id: string; state: string }> }).results;
+    rows = (JSON.parse(result.stdout) as { results?: Array<{ queue_id: string; state: string }> })
+      .results;
   } catch {
     rows = undefined;
   }

@@ -9,7 +9,10 @@ export const MONITOR = "00000000-0000-0000-0000-000000000002";
 export const TARGET = "00000000-0000-0000-0000-000000000003";
 export const HELD = "00000000-0000-0000-0000-000000000004";
 
-export function v1Route(ws: Workspace, change: Record<string, unknown> = {}): Record<string, unknown> {
+export function v1Route(
+  ws: Workspace,
+  change: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     version: 1,
     harness: "codex",
@@ -42,7 +45,10 @@ export function role(id: string): string {
 }
 
 export function clearMonitor(ws: Workspace, recipient = MONITOR): void {
-  ws.write(`unblock/decisions/${recipient}.json`, JSON.stringify({ thread_id: recipient, state: "clear" }));
+  ws.write(
+    `unblock/decisions/${recipient}.json`,
+    JSON.stringify({ thread_id: recipient, state: "clear" }),
+  );
 }
 
 /** A Codex-routed game with the observer at minutes 20 and 50 and departures at 00 and 10. */
