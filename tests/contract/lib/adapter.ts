@@ -1,6 +1,6 @@
 // Implementation adapters map abstract CLI operations to command lines. DK_IMPL selects one.
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { bashImplementation } from "./bash-adapter.ts";
@@ -116,7 +116,8 @@ export function start(command: Command): Resident {
   let stderr = "";
   child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
   child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-  let offset = 0;
+  // Replay only what this run appends: an earlier run's log already belongs to that run.
+  let offset = command.logFile && existsSync(command.logFile) ? statSync(command.logFile).size : 0;
   const tail = () => {
     if (!command.logFile || !existsSync(command.logFile)) return;
     const content = readFileSync(command.logFile);

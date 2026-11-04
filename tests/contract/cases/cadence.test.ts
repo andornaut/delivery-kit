@@ -4,7 +4,7 @@
 import { writeFileSync } from "node:fs";
 import { afterAll, expect } from "vitest";
 
-import { cli, impl, startRunner } from "../lib/adapter.ts";
+import { cli, execute, impl, startRunner } from "../lib/adapter.ts";
 import {
   clearMonitor,
   codexGame,
@@ -266,15 +266,35 @@ suite("monitor cadence", () => {
     async () => {
       const ws = workspace();
       const socket = await game(ws);
-      for (const value of [[], [60], ["20+1"]]) {
-        ws.updateGameDevConfig({ wakeMinutes: value });
-        const result = await tick(ws, at(20), {
-          done: ({ stderr }) => stderr.includes("MONITOR_MINUTES"),
-        });
-        expect(result.stderr, JSON.stringify(value)).toContain(
-          impl.name === "bash" ? "MONITOR_MINUTES" : "wakeMinutes",
-        );
+      if (impl.name === "bash") {
+        // 0.9 validates MONITOR_MINUTES at each observer tick and keeps running.
+        for (const value of [[], [60], ["20+1"]]) {
+          ws.updateGameDevConfig({ wakeMinutes: value });
+          const result = await tick(ws, at(20), {
+            done: ({ stderr }) => stderr.includes("MONITOR_MINUTES"),
+          });
+          expect(result.stderr, JSON.stringify(value)).toContain("MONITOR_MINUTES");
+          expect(socket.connections).toHaveLength(0);
+        }
+      } else {
+        // 1.0: an empty list is valid and schedules no wake; other invalid values are rejected
+        // when the configuration loads, naming /wakeMinutes.
+        ws.updateGameDevConfig({ wakeMinutes: [] });
+        const none = await tick(ws, at(20));
+        expect(none.monitor).toEqual([]);
         expect(socket.connections).toHaveLength(0);
+        for (const value of [[60], ["20+1"]]) {
+          ws.updateGameDevConfig({ wakeMinutes: value });
+          ws.setClock(at(19, 30), 60);
+          const result = await execute(impl.run(ws), { timeoutMs: 15_000 });
+          expect(result.code, JSON.stringify(value)).not.toBe(0);
+          expect(result.code, JSON.stringify(value)).not.toBeNull();
+          const log = ws.exists("runner.log") ? ws.read("runner.log") : "";
+          expect(result.stdout + result.stderr + log, JSON.stringify(value)).toContain(
+            "/wakeMinutes",
+          );
+          expect(socket.connections).toHaveLength(0);
+        }
       }
       ws.updateGameDevConfig({ wakeMinutes: [10] });
       const ten = await tick(ws, at(10));
