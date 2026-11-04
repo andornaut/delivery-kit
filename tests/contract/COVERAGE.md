@@ -1,0 +1,317 @@
+# Contract coverage
+
+Each original 0.9 test (`tests/*.py`) mapped to its CLI-level contract case under `cases/`, or the reason it is excluded. Case tags:
+
+- **contract**: runs on both implementations (`DK_IMPL=bash|node`) with the same assertions.
+- **bash-config**: the input exists only in 0.9 `bus.conf` syntax or legacy keys; skipped on Node.
+- **bash-only**: a 0.9 surface with no 1.0 CLI equivalent (export and package scripts, Python argv); skipped on Node.
+- **hardened**: 1.0 durable-write ordering (plan decision 5); Node asserts the hardened behaviour, Bash the 0.9 legacy behaviour.
+- **retired**: `scheduled-once` (plan decision 6), kept as a named skipped group.
+- **partial**: ported, with the named sub-assertion not expressible at CLI level.
+
+fsync calls themselves are not observable from outside the process without syscall tracing (the offline image has no `strace`). Hardened cases assert the observable half of the durable primitive: replacement by rename (a new inode) and no leftover temporary files.
+
+## Bus, entry, requests, status, events and packaging
+
+| Original | New case | Tag |
+| --- | --- | --- |
+| verify-scripts.py: real awk load guard below/equal/above thresholds | departure: a high-load departure retains its queue and persists attempt and blocked events | contract (partial: the `<` boundary at an exact load equal to the limit needs a controlled `/proc/loadavg`, not expressible at CLI level) |
+| verify-scripts.py: `-v load=` absent from bus-common.sh | excluded: source-text check of a Bash internal | |
+| verify-scripts.py: shell syntax | excluded: `bash -n` of internals stays in scripts/check.sh until Bash is retired | |
+| verify-scripts.py: documentation-only and mixed-batch deployment scope | departure: a documentation-only batch skips deployment; a mixed batch deploys | contract |
+| verify-scripts.py: gated build SHA, push once, deploy retry without tests/build/push | departure: a failed deployment retains the gated build and retries without another gate or push | contract |
+| verify-scripts.py: explicit none mode leaves deployment state untouched | departure: deployment mode none leaves deployment state and commands untouched | contract |
+| verify-scripts.py: failed gate blocks push/deploy | departure: a failed gate never pushes, stages deployment or deletes the batch branch; a failed install never pushes, stages deployment or deletes the batch branch | contract |
+| verify-scripts.py: failed batch retains its commit branch and never deploys | departure: a failed gate never pushes, stages deployment or deletes the batch branch | contract |
+| verify-scripts.py: repair rejects wrong base/tip/tree/extra branch and preserves failed approval | departure: repair approval rejects (8 cases: branch tip, extra queued branch, remote base, failed gate, failed push, base moved during gate, approval changed during gate, scratch tree) | contract |
+| verify-scripts.py: one-shot repair requires full gate, consumes only after push, rejects replay | departure: a one-shot repair requires the full gate, is consumed only after push and rejects replay | contract |
+| verify-scripts.py: scheduled-only entry point and singleton runner/loop locks | departure: run accepts no departure arguments and enforces singleton runner and loop locks | contract |
+| verify-scripts.py: high-load departure retains queue and persists attempt/blocked events | departure: a high-load departure retains its queue and persists attempt and blocked events | contract |
+| verify-scripts.py: empty scheduled ticks add no events | departure: empty scheduled departures add no events; events: empty departures are silent | contract |
+| verify-scripts.py: scheduled red departure rejects extra queue and consumes exact repair after gate | departure: repair approval rejects an extra queued branch (queue retained, no container); a one-shot repair requires the full gate (queue drained, consumed) | contract |
+| verify-scripts.py: background CI success/failure metadata states | departure: the exact-commit CI watch records success, failure, an unrelated failed workflow, a timeout | contract |
+| verify-scripts.py: background CI releases inherited runner/merge locks | departure: a detached CI watch does not hold the runner, loop or merge locks | contract |
+| verify-scripts.py: resource sampler performs reporting only | departure: the resource report is reporting only | contract |
+| (plan: merge.sh last-push and post-push last-deploy writes without fsync) | departure: push and deployment stamps are replaced by rename, never rewritten in place | hardened (Node: new inode, no `.tmp` left; Bash: in-place truncation keeps the inode) |
+| verify-events.py: empty silence | events: empty departures are silent | contract |
+| verify-events.py: durable failed delivery, retry/dedupe | events: failed delivery stays durable, retries in order and delivers each event once | contract |
+| verify-events.py: CI/deployment completion truth | events: completion is reported once, only after CI success and deployment success | contract |
+| verify-events.py: blocked-full-gate and blocked-batch share one attempt identity | events: blocked events for one attempt deduplicate across stages | contract |
+| verify-events.py: subprocess path closes inherited flock descriptors | events: a blocked delivery holds no runner or loop lock | contract |
+| verify-events.py --delivery-only: long Unicode delivery fits 900 UTF-8 bytes | events: long Unicode delivery fits 900 UTF-8 bytes including the event ID; local metadata is retained | contract (the SHA-in-body assertion becomes the project prefix: a CLI-produced attempt message carries branches, not a SHA) |
+| verify-events.py --quiet-only: quiet kinds and stale noise suppressed | events: quiet pending and retry kinds are never delivered and stale queued noise is suppressed | contract |
+| verify-once.py (all checks) | packaging: [retired] scheduled-once group (5 named, skipped cases) | retired (decision 6) |
+| test_requests.py: test_concurrent_idempotent_capture_and_single_claim | requests: concurrent capture is idempotent and the runner claims a request once; a started request found at runner start becomes interrupted and is never claimed again | contract |
+| test_requests.py: test_queue_then_receipt_lock_order_does_not_deadlock_capture | requests: capture takes the queue lock before the request lock | contract |
+| test_requests.py: test_stale_queue_and_tip_reject_without_consumption | requests: a changed queue / tip after capture rejects the request without consuming the queue | contract |
+| test_requests.py: test_change_between_queue_reads_rejected | requests: a queue change between the departure's two queue reads rejects the request | contract (the change is injected by a pending deployment retry between the reads instead of a patched `load_ok`) |
+| test_requests.py: test_failed_request_once_and_later_schedule_has_no_leaked_context | requests: a failed request finishes once and a later scheduled departure carries no request context | contract |
+| test_requests.py: test_resident_keeps_hourly_deadline_and_skips_crossed_slot | requests: a 0s / 40s / 120s request keeps the hourly deadline and skips a crossed slot | contract (durations scaled for the virtual clock; the slot is observed in runner output) |
+| test_requests.py: test_batch_integrates_captured_tip_and_retains_advanced_branch | requests: a request integrates its captured tip and retains a branch advanced during the gate | contract (the branch advances after validation, the only point a CLI request can integrate a stale tip) |
+| test_requests.py: test_public_cli_captures_only_and_refuses_invalid_or_empty_requests | requests: the public request command captures only and refuses invalid or empty requests | contract |
+| test_requests.py: test_missing_ref_is_reported_while_valid_work_still_integrates | requests: a missing ref is reported while valid queued work still integrates | contract |
+| test_status.py: test_stale_record_with_free_lock_is_not_running | status: a stale record with a free lock is not running, idle and drained | contract |
+| test_status.py: test_held_lock_with_matching_token_is_running_with_record | status: a held lock with the matching token is running with its record | contract |
+| test_status.py: test_older_runner_lock_holder_is_running_but_unattested | status: an older runner holding the lock is running but unattested | contract |
+| test_status.py: test_missing_lock_and_record_are_not_created | status: a missing lock and record are reported absent and not created | contract |
+| test_status.py: test_active_departure_and_pending_work_are_not_idle | status: an active departure and pending work are not idle | contract |
+| test_status.py: test_unsent_events_and_running_flush_are_not_drained | status: unsent events and a running flush are not drained | contract |
+| test_status.py: test_runner_records_identity_after_lock_without_truncation | status: a refused duplicate start leaves the holder's identity token intact | contract (behavioural replacement for the source-order check) |
+| test_status.py: test_public_status_command | status: every case uses the public command; status: queued branches are counted | contract |
+| test_entry.py: test_help_requires_no_configuration_state_or_runtime_writes | entry: help requires no configuration, state or runtime writes | contract (`request-once` on Bash, `request` on Node, decision 2) |
+| test_entry.py: test_config_validation_has_no_runtime_side_effects | entry: check-config has no runtime side effects | contract |
+| test_entry.py: test_worker_parent_config_validates_canonical_unique_whitespace_list_offline | entry: worker parents must resolve to canonical, unique conversation IDs offline; WORKER_PARENT_THREADS accepts whitespace-separated lists | contract; bash-config |
+| test_entry.py: test_snapshot_forwards_only_explicit_repeated_parent_flags_to_native_entrypoint | entry: monitor-snapshot forwards only explicit repeated --parent flags to the native entrypoint | bash-only (Python argv; `--parent UUID` in help is a contract) |
+| test_entry.py: test_manual_and_unpinned_snapshot_commands_are_rejected | entry: manual departure and unpinned revision flags are rejected | contract |
+| test_entry.py: test_exported_snapshot_enforces_its_exact_revision_and_refuses_overwrite | entry: exported snapshot enforces its exact revision and refuses overwrite | bash-only (1.0 pins through node_modules) |
+| test_entry.py: test_deployment_mode_requires_explicit_supported_configuration | entry: deployment mode requires an explicit supported value | contract |
+| test_entry.py: test_resource_caps_require_positive_bounded_integers_without_runtime_activity | entry: resource caps require integers from 1 through 4 without runtime activity | contract |
+| test_entry.py: test_missing_adapter_configuration_defers_without_native_helper_call | see the unblock section | |
+| test_entry.py: test_host_matching_library_targets_are_deduplicated | see the unblock section | |
+| test_package.py: test_pinned_archive_is_reproducible_and_excludes_dirty_and_local_files | packaging: a pinned archive is reproducible and excludes dirty and local files | bash-only (P2 owns the npm pack replacement) |
+
+## Scheduled Codex monitor delivery, Codex events and legacy triage
+
+Cases drive the resident runner (`run`) under the virtual clock: a monitor wake slot or a
+departure is reached by jumping the clock, and native responses come from the fake control
+socket. Files: `cases/unblock-delivery.test.ts`, `cases/unblock-guards.test.ts`,
+`cases/unblock-briefs.test.ts`, `cases/codex-events.test.ts`, `cases/codex-triage.test.ts`.
+
+| Original | New case | Tag |
+| --- | --- | --- |
+| test_unblock.py::test_confirmed_question_first_slot_then_one_distinct_slot_escalation | unblock briefs: a confirmed question is briefed at its first slot, escalated once at a distinct slot, then quiet | contract (a second reconcile of the same slot is a module call; at CLI level a repeated slot is deduplicated, covered below) |
+| test_unblock.py::test_unknown_answered_and_unproven_questions_never_brief_or_clear_guard | unblock briefs: unknown, answered and unproven questions are never briefed, and a pending guard still defers | contract |
+| test_unblock.py::test_new_question_state_dedup_does_not_resurrect_old_pending_body | unblock briefs: an answered question is not resurrected; a replacement question is briefed as initial | contract |
+| test_unblock.py::test_own_confirmed_question_wait_never_fails_health_by_itself | unblock briefs: the monitor's own confirmed question wait never fails health by itself | contract |
+| test_unblock.py::test_answered_identity_and_older_snapshots_cannot_resurrect_pending | unblock briefs: an answered question identity cannot become pending again | contract (replaying an older snapshot at a lower slot is excluded: runner slots only advance) |
+| test_unblock.py::test_question_brief_bound_never_slices_original_options_or_dedups_omitted_rows | unblock briefs: the question brief is bounded without slicing original options | contract |
+| test_unblock.py::test_confirmed_process_stall_requests_owner_closure_once_and_keeps_guard | unblock briefs: a confirmed process stall requests owner closure once and keeps the guard | contract |
+| test_unblock.py::test_process_receipts_protected_and_unknown_never_duplicate_closure_request | unblock briefs: closure receipts, protected and unknown jobs never request closure | contract (`identity_provenance: native_verified` is excluded: the collector only emits `owner_attested`) |
+| test_unblock.py::test_ambiguous_send_is_not_accepted_closure_or_owner_outcome | unblock briefs: an ambiguous send is neither an accepted closure request nor an owner outcome | contract |
+| test_unblock.py::test_interrupted_process_send_is_guarded_across_future_slots | unblock briefs: an interrupted process send stays guarded across later slots | contract (interruption is a runner stopped mid-send) |
+| test_unblock.py::test_explicit_native_rejection_does_not_permanently_guard_process_request | unblock briefs: an explicit native rejection does not permanently guard the closure request | contract |
+| test_unblock.py::test_invalid_parent_scope_defers_without_native | unblock guards: worker parents outside the active route defer before any native connection; duplicate or noncanonical worker parents stop the runner before any native connection; unblock delivery: an empty MONITOR_ROUTE_FILE with worker parents defers without a native connection | contract, contract, bash-config |
+| test_unblock.py::test_new_worker_failure_bypasses_unchanged_queue_and_preserves_guard | unblock briefs: a new worker failure bypasses an unchanged queue and preserves the guard | contract |
+| test_unblock.py::test_worker_scope_run_duplicate_slot_collects_without_redelivery | unblock delivery: the same slot after a runner restart collects worker health again without redelivery | contract |
+| test_unblock.py::test_active_reminder_reads_all_peer_queue_pages_and_retains_only_ids | unblock delivery: an active reminder reads every peer queue page and persists only IDs | contract |
+| test_unblock.py::test_completed_idle_starts_reminder_without_model_or_permission_overrides | unblock delivery: a completed idle monitor gets turn/start without model or permission overrides | contract |
+| test_unblock.py::test_questions_approvals_and_ambiguous_or_interrupted_idle_are_preserved | unblock delivery: questions, approvals and ambiguous or interrupted states defer without mutation | contract |
+| test_unblock.py::test_only_explicit_stale_turn_rejection_refreshes_once | unblock delivery: only an explicit stale-turn rejection refreshes once with the same request ID | contract |
+| test_unblock.py::test_timeout_and_unexpected_acceptance_never_resend | unblock delivery: a lost response or unexpected acceptance is ambiguous and never resent | contract (timeout is a dropped connection and a hung reply) |
+| test_unblock.py::test_other_rpc_rejections_are_not_stale_retries | unblock delivery: other native rejections are rejected without a stale retry | contract |
+| test_unblock.py::test_sending_state_is_durable_before_mutation | unblock delivery: the receipt is durable at sending before the native mutation | contract |
+| test_unblock.py::test_prior_accepted_or_interrupted_send_still_snapshots_without_resending | unblock delivery: a prior accepted or interrupted send is deduplicated without resending and still snapshots | contract |
+| test_unblock.py::test_missing_malformed_mismatched_and_unknown_recipient_records_fail_closed | unblock guards: missing, malformed, mismatched and unknown decision records fail closed | contract |
+| test_unblock.py::test_art_pending_does_not_block_tech_clear_or_modify_legacy_evidence | unblock guards: another recipient's pending record neither blocks the monitor nor changes any record | contract |
+| test_unblock.py::test_non_uuid_recipient_is_never_clear | unblock guards: a non-UUID monitor identity is never a clear recipient | contract (proxy: a non-UUID monitor never reaches the guard; route validation rejects it) |
+| test_unblock.py::test_explicit_pending_marker_overrides_empty_active_flags | unblock guards: an explicit pending marker overrides empty active flags | contract |
+| test_unblock.py::test_marker_is_rechecked_after_metadata_before_native_mutation | unblock guards: the marker is rechecked after native metadata and before the mutation | contract |
+| test_unblock.py::test_native_question_on_later_page_overrides_empty_flags_and_clear_marker | unblock guards: a native question on a later history page overrides empty flags and a clear marker | contract |
+| test_unblock.py::test_unknown_truncated_or_question_tool_history_defers | unblock guards: unknown, truncated or question-tool history defers | contract |
+| test_unblock.py::test_later_user_message_does_not_prove_question_resolution | unblock guards: a later user message does not prove question resolution | contract |
+| test_unblock.py::test_unavailable_socket_defers_without_native_connection | unblock delivery: unavailable absolute socket paths defer without a native connection; a missing or relative socket path defers before the helper runs | contract |
+| test_unblock.py::test_explicit_socket_is_forwarded_to_mock_transport_with_guards_intact | unblock delivery: the explicit control socket carries the delivery with guards intact | contract (closing the connection exactly once is not observable through the fake socket) |
+| test_unblock.py::test_rpc_ignores_notifications_and_server_questions_without_answering_them | unblock delivery: notifications and server requests interleaved with a response are skipped, never answered | contract (skipping is proven by acceptance; the absence of a client reply frame is not recorded by the fake socket) |
+| test_unblock.py::test_omitted_optional_questions_defaults_to_no_question | unblock guards: an omitted optional questions field means no question | contract |
+| test_unblock.py::test_exact_answer_attestation_resolves_only_its_bound_question | unblock guards: an exact answer attestation resolves only its bound question | contract |
+| test_unblock.py::test_latest_turn_compaction_defers_even_with_visible_exact_proof | unblock guards: latest-turn compaction defers even with visible exact proof | contract |
+| test_unblock.py::test_older_turn_compaction_does_not_poison_clear_latest_turn | unblock guards: older-turn compaction does not poison a clear latest turn | contract |
+| test_unblock.py::test_stdout_includes_history_status_without_private_state | unblock delivery: runner output reports only status fields, never queue contents | contract |
+| test_unblock.py::test_unrelated_old_resolution_does_not_fetch_or_poison_current_clear_turn | unblock guards: an unrelated old resolution neither fetches its turns nor blocks the current clear turn | contract |
+| test_unblock.py::test_same_turn_answer_must_follow_exact_question | unblock guards: a same-turn answer must follow its exact question | contract |
+| test_event_native.py::test_active_delivery_persists_attempt_before_mutation_and_deduplicates | codex events: an active delivery persists its attempt before the mutation and deduplicates by receipt | contract |
+| test_event_native.py::test_completed_idle_starts_and_interrupted_idle_does_not | codex events: a completed idle monitor gets turn/start; an interrupted idle one gets nothing | contract |
+| test_event_native.py::test_pending_local_native_questions_and_guard_race_never_send | codex events: a pending local guard, native question or guard race never sends | contract |
+| test_event_native.py::test_stale_rejection_refreshes_turn_once_with_same_request_identity | codex events: a stale-turn rejection refreshes once with the same request identity | contract |
+| test_event_native.py::test_ambiguous_and_rejected_outcomes_never_retry_even_after_restart | codex events: ambiguous and rejected outcomes are never retried, even after a restart | contract |
+| test_event_native.py::test_monitor_route_validation_does_not_require_reporter_to_be_dispatch_host | codex events: monitor routing needs no dispatch host; other recipients and no route keep the Codex queue | contract |
+| test_event_native.py::test_invalid_unavailable_empty_and_held_routes_never_fall_back_to_queue | codex events: invalid, malformed and held routes never fall back to the Codex queue; an empty or missing MONITOR_ROUTE_FILE never falls back to the Codex queue | contract, bash-config |
+| test_event_native.py::test_subprocess_config_exports_selected_interpreter_and_unset_semantics | codex events: configuration exports the selected interpreter, route and socket to event and monitor subprocesses | bash-config (the exported default `CODEX_PYTHON=/usr/bin/python3` is excluded: only an interpreter-spawned child could observe it, and that child is the interpreter itself) |
+| test_event_native.py::test_nonmonitor_retains_codex_queue_contract | codex events: a non-monitor reporter keeps the Codex queue under active, held and absent routes | contract |
+| test_codex_adapter.py::test_shared_role_configuration_and_host_guards | codex triage: shared roles respect host, harness, coordinator and ownership guards | bash-config (SESSION_MAP_FILE, SHARED_TARGETS_FILE and CODEX_SHARED_ROLES retire in 1.0) |
+| test_codex_adapter.py::test_monitor_route_rejects_relative_project_root_even_while_held | codex triage: a monitor route rejects a relative project root even while held | bash-config (REPO is derived from config.json in 1.0) |
+| test_entry.py::test_missing_adapter_configuration_defers_without_native_helper_call | codex triage: missing socket or shared-role configuration defers triage without the native helper | bash-config |
+| test_entry.py::test_host_matching_library_targets_are_deduplicated | codex triage: host-matching library targets are deduplicated and held targets excluded | bash-config |
+
+Counts: 53 original tests ported into 57 cases (50 contract, 7 bash-config, 0 bash-only,
+0 hardened); no test is excluded outright. Partial exclusions are noted inline.
+
+## tests/test_monitor.py
+
+Files: `cases/monitor-snapshot.test.ts` (public `monitor-snapshot`), `cases/monitor-ack.test.ts` (`monitor-ack`), `cases/monitor-health.test.ts` (scheduled slots through `run`, frozen virtual clock, one slot per minute) and `cases/monitor-process.test.ts` (scheduled slots in real wall-clock minutes, because process samples must fall within their slot's real minute). Native responses come from the fake control socket; assertions read stdout, `STATE/unblock/snapshots/`, `acks/`, `retentions/`, `health/` and `STATE/events/`.
+
+| Original test | New case | Tag |
+| --- | --- | --- |
+| test_unset_process_feature_never_loads_or_inspects_resources | monitor snapshot: an unset process feature never loads or inspects resources | contract |
+| test_process_manifest_bad_paths_bounds_and_schema_do_not_block_queues | monitor snapshot: bad process manifests, bounds and schema do not block queues; a relative or missing PROCESS_HEALTH_FILE is unavailable at the feature boundary | contract; bash-config (relative and missing paths: 1.0 uses the fixed `var/games/<g>/process-health.json`) |
+| test_process_collection_explicit_route_scope_and_shared_deadline | monitor snapshot: process collection keeps the explicit route scope | contract; deadline reservation excluded: needs a patched monotonic clock |
+| test_public_snapshot_never_loads_or_persists_process_prior_samples | monitor snapshot: a public snapshot never loads or persists prior process samples | contract (the `prior_observations` argument is internal; asserted through no samples and an unchanged health record) |
+| test_scheduled_health_stores_exact_samples_without_owner_record_mutation | monitor scheduled process health: scheduled health stores exact process samples without owner record mutation | contract |
+| test_process_collection_cannot_restart_exhausted_shared_budget | monitor scheduled health: process collection cannot restart an exhausted shared budget | contract (26 recipients exhaust the 256 calls; the real collector reports incomplete instead of the mock's unavailable; deadline part excluded) |
+| test_real_process_collector_public_and_scheduled_provenance_and_closure | monitor snapshot: the real process collector reports owner-attested state publicly without samples; monitor scheduled process health: the real process collector gives scheduled provenance, one closure request and reported closure | contract; the 90-second outside-window sample excluded: needs a patched process clock |
+| test_optional_process_path_export_does_not_validate_unrelated_bus | monitor snapshot: a declared PROCESS_HEALTH_FILE is not validated with unrelated configuration | bash-config |
+| test_question_state_reads_existing_records_only_and_keeps_module_flags | monitor snapshot: question state reads existing records only and reports unknown visibility | contract (module flags and collector arguments are internal) |
+| test_questions_use_explicit_recipient_route_scope_without_native_expansion | monitor snapshot: questions use the explicit recipient route scope without native expansion | contract |
+| test_worker_and_questions_share_reserved_deadline_and_call_budget | monitor scheduled health: worker and question collection share the reserved call budget | contract; deadline part excluded: needs a patched monotonic clock |
+| test_question_failure_reports_visibility_without_queue_failure_or_raw_errors | monitor scheduled health: a question collection failure reports visibility without queue failure or raw errors | contract (proxy: a recipient-mismatched row fails the real collector; a raising collector is not reachable from native input) |
+| test_oversized_question_preserves_snapshot_choices_but_is_unknown | monitor snapshot: an oversized question keeps no partial choices and is unknown | contract; the monitor's 32 KiB brief bound is unreachable: the real collector rejects content above 16 KiB first |
+| test_real_collector_partial_old_history_and_complete_current_proof | monitor scheduled health: the real question collector keeps partial old history apart from complete current proof | contract |
+| test_child_budget_follows_inventory_reserves_delivery_and_restores_deadline | none | excluded: asserts deadline arithmetic under a patched monotonic clock; collector failure without private detail is covered by the reviewed child collector and worker collection cases |
+| test_reviewed_collector_dependency_produces_safe_failure_and_timeout_metadata | monitor snapshot: the reviewed child collector produces safe failure and timeout metadata | contract (timeout is an unanswered native call) |
+| test_parent_scope_rejects_duplicates_noncanonical_and_unowned_before_native | monitor snapshot: parent scope rejects duplicate, noncanonical and unowned parents before native calls; an empty MONITOR_ROUTE_FILE rejects worker parents | contract; bash-config |
+| test_worker_collection_is_explicit_scoped_and_failure_is_unavailable | monitor snapshot: worker collection is explicit and scoped, and failure is unavailable | contract |
+| test_worker_diagnostics_never_age_queue_starvation | monitor scheduled health: worker diagnostics never age queue starvation | contract (the same-slot repeat is not producible: the observer dispatches each minute once) |
+| test_worker_failure_requires_exact_lineage_action_and_latest_failed_turn | monitor scheduled health: a worker failure reminder requires exact lineage and a latest failed typed turn | contract (failed, invalid lineage, retrying, recovered, untyped; waiting and unverified rows are child-collector classifications covered by the child-health group) |
+| test_snapshot_paginates_and_retains_full_payload_without_stdout_leak | monitor snapshot: a snapshot paginates and retains the full payload without a stdout leak | contract |
+| test_history_refs_are_typed_paginated_and_never_store_native_message_body | monitor snapshot: history references are typed and paginated and never store native bodies | contract |
+| test_history_failure_diagnostics_preserve_safe_prefix_without_private_bodies | monitor snapshot: history failure diagnostics keep the safe prefix without private bodies | contract |
+| test_compaction_preserves_both_sides_and_pagination_without_clearance | monitor snapshot: compaction preserves both sides and pagination without clearance | contract |
+| test_metadata_degradation_does_not_age_delivery_failures_or_hide_backlog | monitor scheduled health: metadata degradation does not age delivery failures or hide backlog | contract |
+| test_snapshot_exit_depends_on_queue_inventory_not_history_availability | monitor snapshot: the snapshot exit depends on queue inventory, not history availability | contract |
+| test_queue_errors_and_delivery_deferrals_fail_even_with_degraded_history | monitor scheduled health: queue inventory deferrals fail across two slots even with degraded history; queue delivery deferrals fail across two slots even with degraded history | contract |
+| test_explicit_ack_deletes_exact_id_even_with_pending_recipient | monitor acknowledgements: explicit ack deletes the exact ID even with a pending recipient | contract |
+| test_recipient_id_and_snapshot_binding_rejects_before_mutation | monitor acknowledgements: recipient, ID and snapshot binding reject before mutation | contract |
+| test_same_id_changed_input_or_client_id_refuses_deletion | monitor acknowledgements: the same ID with changed input or client ID refuses deletion | contract |
+| test_ambiguous_result_relist_and_explicit_retry_preserve_history | monitor acknowledgements: an ambiguous result re-lists and an explicit retry preserves history | contract (a native error stands in for the transport timeout; both take the same unknown-outcome path) |
+| test_interrupted_or_timeout_delete_rechecks_absence_without_replay | monitor acknowledgements: an interrupted or failed delete rechecks absence without replay | contract |
+| test_false_delete_requires_absence_confirmation | monitor acknowledgements: a false delete requires absence confirmation | contract |
+| test_two_distinct_slots_fail_health_once_per_unchanged_episode | monitor scheduled health: two distinct slots fail health once per unchanged episode | contract (same-slot repeat not producible) |
+| test_retention_is_nonmutating_exact_and_invalidated_by_handled_attempt | monitor scheduled health: retention is nonmutating and exact, and a handled attempt invalidates it | contract |
+| test_retained_ack_confirms_absence_and_deactivates_matching_retention | monitor acknowledgements: a retained ack confirms absence and deactivates the matching retention | contract |
+| test_retained_absence_preserves_different_or_inactive_retention | monitor acknowledgements: retained absence preserves a different or inactive retention | contract |
+| test_retained_ack_with_present_unchanged_or_changed_identity | monitor acknowledgements: a retained ack with a present unchanged or changed identity | contract |
+| test_persistent_item_ages_through_arrivals_errors_edits_and_retention | monitor scheduled health: a persistent item ages through arrivals, inventory errors, edits and retention; legacy aggregate counters cannot establish a queue item's past age | contract (same-slot steps become distinct slots, so later ages are one higher than the original) |
+| test_health_failure_is_nonzero_even_after_reminder_acceptance | monitor scheduled health: a persistent item ages ... (asserts `accepted` with `monitor_status: failed`) | contract proxy; the helper's nonzero exit is excluded: the runner logs the status JSON and discards the exit code |
+
+## Question, process and child health
+
+Cases drive `monitor-snapshot` (public observation) or one scheduled monitor slot of `run`, with native responses from the fake control socket. Collector output is asserted in the persisted `STATE/unblock/snapshots/<id>.json` record and the snapshot stdout. Python mocks of `time.time()` become timestamps relative to the real clock; boundary ages keep a margin (1790 instead of 1800 seconds, future stamps 120 seconds ahead) for the delay before the collector runs. Patched `MAX_CALLS` and `max_pages` values are replaced by the production bounds (256 calls, ten pages).
+
+## tests/test_question_state.py (cases/health-questions.test.ts)
+
+| Original test | New case | Tag |
+| --- | --- | --- |
+| test_exact_fresh_owner_confirmation_and_current_native_proof_pending | exact fresh owner confirmation and current native proof is pending | contract |
+| test_generic_pending_waitflag_and_absent_reply_never_prove_pending | generic pending, wait flag and absent reply never prove pending | contract |
+| test_stale_future_non_utc_and_missing_attestations_are_unknown | stale, future, non-UTC and missing attestations are unknown | contract |
+| test_wrong_recipient_mismatch_index_options_title_and_duplicate_attestation | wrong recipient, mismatched index, options, title and duplicate attestation stay unknown | contract |
+| test_newer_turn_changed_turn_missing_waitflag_and_later_reply_unknown | newer turn, changed turn, missing wait flag and later reply stay unknown | contract |
+| test_visible_newer_turn_and_partial_exact_answer_proof_remain_unknown | visible newer turn and partial exact answer proof remain unknown | contract |
+| test_complete_paginated_history_can_prove_pending_without_body_capture | complete paginated history can prove pending without capturing bodies | contract |
+| test_compaction_unknown_malformed_and_partial_pages_never_establish_pending_or_answered | compaction, unknown, malformed and partial pages never establish pending or answered | contract |
+| test_answered_requires_exact_attestation_reply_type_and_native_order | answered requires exact attestation, reply type and native order | contract |
+| test_cross_turn_resolution_pagination_proves_order_and_recipient_binding | cross-turn resolution pagination proves order and recipient binding | contract |
+| test_verified_resolution_conflicts_with_pending_and_user_prose_never_answers | verified resolution conflicts with pending and user prose never answers | contract |
+| test_only_titles_options_rendered_and_sensitive_tool_payloads_stay_opaque | only rendered titles and options are kept; sensitive tool payloads stay opaque | contract |
+| test_cancellation_request_id_or_tool_acceptance_never_prove_lifecycle | cancellation, request ID or tool acceptance never prove lifecycle | contract |
+| test_unknown_capability_timeout_deadline_and_budget_are_safe_and_read_only | unknown capability and timeout are safe and read only | contract (partial): the expired-deadline and `MAX_CALLS=1` parts are excluded: the deadline is the CLI connection's 25-second monotonic deadline and one recipient's history (two captures of at most ten pages plus four context reads) cannot reach 256 calls |
+| test_old_compaction_or_partial_history_does_not_taint_complete_current_proof | old compaction or partial history does not taint complete current proof | contract |
+| test_stable_context_requires_integer_updated_at | stable context requires an integer updatedAt | contract |
+| test_content_limits_omit_exact_fields_without_truncating_options | content limits omit exact fields without truncating options | contract |
+| test_rendered_question_count_is_bounded_with_explicit_omission | rendered question count is bounded with explicit omission | contract |
+| test_input_bounds_and_malformed_resolution_records_fail_closed | noncanonical recipients are refused before any native call; malformed resolutions fail closed | contract (partial): duplicate recipients and `max_pages` bounds are excluded: the CLI takes one `--recipient` and has no page-bound input |
+
+## tests/test_process_health.py (cases/health-process.test.ts)
+
+| Original test | New case | Tag |
+| --- | --- | --- |
+| test_running_is_owner_attested_never_liveverified_and_only_scoped_metadata_read | running is owner attested, never live verified, and reads only scoped metadata | contract |
+| test_explicit_fresh_owner_stall_requests_exact_job_episode_only | explicit fresh owner stall requests the exact job episode only | contract |
+| test_protected_service_question_wait_and_terminal_never_request_closure | protected, service, question wait and terminal never request closure | contract |
+| test_same_owner_timestamp_across_slots_is_not_new_progress_evidence | the same owner timestamp across slots is not new progress evidence | contract (scheduled slot; prior slot sample supplied as the health record) |
+| test_two_distinct_owner_observations_need_expected_progress_and_corroborated_block | two distinct owner observations need expected progress and a corroborated block | contract (one scheduled slot, one job per variant) |
+| test_prior_owner_evidence_fresh_at_capture_survives_thirty_minute_jitter | prior owner evidence fresh at capture survives thirty-minute jitter | contract (one scheduled slot, one job per variant) |
+| test_public_observation_none_slot_does_not_synthesize_scheduled_samples | public observation (no slot) never synthesizes scheduled samples or two-sample stalls | contract |
+| test_confirmation_references_do_not_depend_on_scheduled_sample_emission | confirmation references do not depend on scheduled sample emission | contract (late slot observed through a lagging scheduled run) |
+| test_stasis_duration_native_status_and_exit_never_imply_stall_or_closed | stasis, native status and exit never imply a stall or closure | contract |
+| test_wrong_scope_lineage_invocation_and_missing_identity_fail_closed | wrong scope, lineage, invocation and missing identity fail closed | contract |
+| test_freshness_provenance_owner_and_identity_confirmation_are_mandatory | freshness, provenance, owner and identity confirmation are mandatory | contract |
+| test_closure_outcomes_separate_delivery_report_and_ownerverified_result | closure outcomes separate delivery, report and owner-verified result | contract |
+| test_closure_receipts_bind_exact_identity_and_preserve_blocker_retention | closure receipts bind exact identity and preserve blocker retention | contract |
+| test_bounds_duplicate_job_and_unsafe_extras_never_echo_raw_fields | bounds, duplicate jobs and unsafe extras never echo raw fields | contract (the collector's 101-job `omitted_jobs` path is unreachable through the CLI, which refuses a manifest above 100 jobs as `process_manifest_schema_unavailable`; asserted instead, with 100 jobs fully inspected) |
+| test_denied_visibility_deadline_and_shared_budget_never_bypass_or_mutate | denied visibility and the shared call budget never bypass or mutate | contract (partial): the expired-deadline part is excluded (connection deadline is not an input); the budget part runs 100 verified closures (300 reads) against the shared 256-call budget, whose `collection_call_budget_exhausted` trips before the collector's own equal cap because worker inventory calls share it |
+| test_timeout_latches_budget_and_new_native_failure_never_leaks | a timeout latches the budget and never leaks native failure | contract |
+| test_parent_owned_invocation_needs_no_child_scan_and_input_scope_validates_first | a parent-owned invocation needs no child read; out-of-scope parents make no calls | contract (duplicate and `None` parent scopes are refused by CLI argument validation) |
+
+## tests/test_child_health.py (cases/health-children.test.ts)
+
+| Original test | New case | Tag |
+| --- | --- | --- |
+| test_typed_failures_and_private_fields_discarded | typed failures are classified and private fields discarded | contract |
+| test_no_status_or_untyped_error_inference | no status or untyped error inference | contract |
+| test_waiting_retrying_and_long_busy_are_not_terminal | waiting, retrying and long busy children are not terminal | contract |
+| test_newer_success_or_resumed_work_supersedes_failure | newer success or resumed work supersedes a failure | contract |
+| test_invalid_lineage_never_reads_unrelated_child | invalid lineage never reads an unrelated child | contract |
+| test_active_and_archived_pagination_and_deduplication | active and archived pagination deduplicates children | contract |
+| test_partial_inventory_keeps_safe_verified_facts | a partial inventory keeps safe verified facts | contract (ten-page production bound instead of `max_pages=1`) |
+| test_partial_latest_history_never_searches_older_failures | partial latest history never searches older failures | contract |
+| test_unavailable_reads_and_schema_are_explicit_and_private | unavailable reads and schema are explicit and private | contract |
+| test_repeated_cursor_and_oversized_pages_are_bounded | repeated cursors and oversized pages are bounded | contract |
+| test_conflicting_duplicate_lineage_is_excluded | conflicting duplicate lineage is excluded | contract |
+| test_empty_or_overfull_latest_turn_page_is_explicit | empty or overfull newest-turn pages are explicit | contract |
+| test_shared_deadline_stops_calls_and_preserves_all_parent_results | (none) | excluded: requires an already expired monotonic deadline; the CLI connection deadline is fixed at 25 seconds and is not an input |
+| test_timeout_halts_native_work_and_marks_omissions | a timeout halts native work and marks every parent | contract |
+| test_all_parent_inventories_precede_child_reads_and_call_cap | every parent inventory precedes child reads, and the call cap is exact | contract (cap observed at the production 256 calls with 300 children) |
+| test_expiring_deadline_during_call_never_alerts | (none) | excluded: requires the deadline to expire between two calls; not controllable through the CLI |
+| test_recognized_rate_capacity_errors_require_terminal_failed_turn | recognized rate and capacity errors require a terminal failed turn | contract |
+| test_unknown_recent_error_clears_earlier_typed_metadata | an unknown recent error clears earlier typed metadata | contract |
+| test_125_children_ten_parents_complete_with_eight_exact_failures | 125 children across ten parents complete with eight exact failures | contract |
+| test_inventory_pages_round_robin_before_any_parent_second_page | inventory pages round-robin before any parent's second page | contract (order asserted on the call log; the reduced-cap counts are excluded) |
+| test_child_observations_round_robin_under_call_bound | child observations round-robin across parents | contract (order asserted on the call log; the reduced-cap counts are excluded) |
+| test_discovered_counts_include_listed_beyond_child_inspection_bound | discovered counts include listed children beyond the inspection bound | contract |
+| test_nonfailed_and_unknown_children_need_only_latest_turn_read | nonfailed and unknown children need only the newest-turn read | contract |
+| test_invalid_inventory_metadata_cannot_validate_failure | invalid inventory metadata cannot validate a failure | contract |
+| test_invalid_scope_and_bounds_make_no_calls | an invalid parent scope makes no native calls | contract (partial): `max_pages` bounds excluded, no CLI input |
+| test_repeated_observations_keep_exact_dedup_identity_without_delivery | repeated observations keep the exact dedup identity without delivery | contract |
+| test_notloaded_idle_and_system_error_without_failure_are_unknown | notLoaded, idle and systemError without a failure are not actionable | contract |
+
+## Claude adapter, native interpreter and monitor cadence
+
+Cases live in `cases/claude-*.test.ts`, `cases/cadence.test.ts` and `cases/native-python.test.ts`.
+Monitor slots are dispatched by the resident runner's observer under the virtual clock; the
+channel consumer is driven over stdio; Codex native calls are observed on the fake control socket.
+
+| Original | New case | Tag |
+| --- | --- | --- |
+| test_claude_adapter.py::RouteTests::test_active_route_deduplicates_and_excludes_held_targets | claude route > an active route deduplicates targets, excludes held ones and only the host dispatches | contract |
+| test_claude_adapter.py::RouteTests::test_validation_errors | claude route > invalid version 2 routes are rejected by snapshot and defer the observer | contract (relative project root subcase excluded: the project root is always the absolute game checkout at CLI level) |
+| test_claude_adapter.py::RouteTests::test_harness_selection_keeps_resolvers_disjoint | claude route > route harness selection keeps the Codex and Claude resolvers disjoint | contract (helper `--route-harness`/`--monitor-route` output observed through snapshot harness and the brief's target list) |
+| test_claude_adapter.py::SpoolTests::test_idle_and_busy_spool_once_with_slot_request_id | claude monitor slots > idle and busy monitors spool one brief per slot with the slot request ID | contract |
+| test_claude_adapter.py::SpoolTests::test_unclaimed_brief_bounds_spool_across_slots | claude monitor slots > an unclaimed brief bounds the spool across later slots | contract |
+| test_claude_adapter.py::SpoolTests::test_missing_blocked_unknown_and_unavailable_defer_without_spool | claude monitor slots > missing, blocked, unknown and unavailable monitors defer without spooling | contract |
+| test_claude_adapter.py::SpoolTests::test_clearance_and_parent_scope_guard_delivery | claude monitor slots > recipient clearance and worker-parent route scope guard delivery | contract |
+| test_claude_adapter.py::SpoolTests::test_interrupted_sending_becomes_ambiguous_without_resend | claude monitor slots > an interrupted send becomes ambiguous and is never resent | contract |
+| test_claude_adapter.py::SpoolTests::test_held_route_and_busy_lock | claude monitor slots > a busy unblock lock and a held route write no receipt | contract |
+| test_claude_adapter.py::ChannelTests::test_consumer_emits_exactly_once_per_request_id_across_restarts | claude channel consumer > the consumer emits exactly once per request ID across restarts | contract |
+| test_claude_adapter.py::ChannelTests::test_nothing_is_emitted_before_initialization_or_for_other_recipients | claude channel consumer > nothing is emitted before initialization or for another recipient | contract |
+| test_claude_adapter.py::ChannelTests::test_write_failure_and_interrupted_claim_are_ambiguous_without_resend | claude channel consumer > a failed channel write and an interrupted claim are ambiguous and never resent | contract (write failure is a closed client stdout; exit code asserted nonzero, not exactly 1) |
+| test_claude_adapter.py::EventTests::test_monitor_recipient_selects_claude_only_for_active_monitor | claude bus events > events go to the channel only for the active route monitor and never fall back to Codex | contract |
+| test_claude_adapter.py::EventTests::test_event_spooled_once_deduplicated_and_accepted_by_consumer | claude bus events > an event is spooled once, deduplicated across flushes and accepted by the consumer | contract (after acceptance the ordered outbox spools the next event; asserted as delivery order) |
+| test_claude_adapter.py::EventTests::test_interrupted_event_send_becomes_ambiguous_without_resend | claude bus events > an interrupted event send becomes ambiguous, is never resent and holds later events | contract |
+| test_claude_adapter.py::EventTests::test_missing_monitor_or_clearance_defers_without_spool | claude bus events > a missing monitor or absent clearance defers the event without spooling | contract |
+| test_claude_adapter.py::EventTests::test_outbox_flush_routes_monitor_events_through_spool | claude bus events > the outbox stays unsent until the consumer accepts, then marks the event sent | contract |
+| test_claude_adapter.py::ReportSinkTests::test_report_session_id_spools_to_the_claude_monitor | claude bus events > an event is spooled once... (recipient asserted); claude bus events > REPORT_SESSION_ID selects the Claude sink even with a legacy REPORT_THREAD set | contract; bash-config (coexisting REPORT_THREAD) |
+| test_claude_adapter.py::ReportSinkTests::test_report_session_id_never_falls_back_to_codex | claude bus events > events go to the channel only for the active route monitor and never fall back to Codex | contract |
+| test_claude_adapter.py::ReportSinkTests::test_configuration_requires_canonical_report_session_id | claude bus events > the report recipient must resolve to a canonical session UUID | contract |
+| test_claude_adapter.py::MultiProjectChannelTests::test_one_consumer_drains_each_project_state_once | claude channel consumer > one consumer drains each project state once and rejects a repeated state directory | contract |
+| test_claude_adapter.py::ClaudeMonitorTests::test_snapshot_lists_delivered_entries_and_reports_native_state_unavailable | claude monitor inventory > a snapshot lists delivered entries and reports native state unavailable | contract |
+| test_claude_adapter.py::ClaudeMonitorTests::test_handled_ack_removes_exact_entry_once | claude monitor inventory > a handled acknowledgement removes the exact entry once | contract |
+| test_claude_adapter.py::ClaudeMonitorTests::test_changed_payload_and_retention_require_exact_unchanged_entry | claude monitor inventory > a changed payload and a retention require the exact unchanged entry | contract |
+| test_claude_adapter.py::ClaudeMonitorTests::test_interrupted_removal_is_ambiguous_then_confirmed_absent | claude monitor inventory > an interrupted removal is recorded ambiguous, then confirmed absent | contract (crash state written as a state fixture) |
+| test_claude_adapter.py::ClaudeMonitorTests::test_public_cli_selects_claude_monitor_for_a_version_2_route | claude monitor inventory > the public CLI selects the Claude monitor for a version 2 route | contract |
+| test_claude_adapter.py::BusWiringTests::test_claude_route_spools_from_existing_observer | claude monitor slots > the observer spools, deduplicates a slot and defers an invalid route | contract |
+| test_claude_adapter.py::BusWiringTests::test_v1_route_output_is_identical_with_claude_adapter_installed | native interpreter > the routed observer uses monitor clearance and deduplicates a slot persistently (version 1 route keeps the Codex path, no spool) | contract (installed-versus-absent `claude_adapter.py` comparison excluded: mechanism file layout, not CLI) |
+| test_native_python.py::test_default_and_configured_interpreter_bypass_path_shadow_for_public_and_scheduled | native interpreter > the default and configured interpreters bypass a PATH python3 for public and scheduled paths | bash-config (per-script interpreter log replaced by wrapper invocation count) |
+| test_native_python.py::test_routed_observer_uses_monitor_clearance_and_persistent_slot_deduplication | native interpreter > the routed observer uses monitor clearance and deduplicates a slot persistently | contract |
+| test_native_python.py::test_invalid_declared_interpreter_never_falls_back_or_breaks_nonnative_config | native interpreter > an invalid declared interpreter never falls back or breaks nonnative configuration | bash-config |
+| test_native_python.py::test_dependency_capability_names_actual_interpreter_without_private_error_bodies | native interpreter > a missing websocket dependency names the actual interpreter...; native interpreter > a transport failure reports a generic reason without private bodies | bash-only (Python dependency); contract (transport failure) |
+| test_monitor_cadence.py::test_current_wall_minutes_only_startup_missed_slots_and_release_reporting | monitor cadence > only current wall minutes dispatch, missed startup slots are skipped and releases report separately | contract (gate-marker subassertion and the "still checking" wording excluded: `active-departure` is owned by the running loop and the observer/departure race for the deduplicated report is not deterministic at CLI level) |
+| test_monitor_cadence.py::test_scheduled_parents_use_full_active_route_independent_of_reporting_recipient | monitor cadence > scheduled parents use the full active route independently of the report recipient | contract (newline/tab separators of WORKER_PARENT_THREADS covered by the entry bash-config case) |
+| test_monitor_cadence.py::test_nonhost_global_parent_list_does_not_dispatch_or_reject | monitor cadence > a nonhost route with a parent list neither dispatches nor rejects | contract |
+| test_monitor_cadence.py::test_held_or_unrelated_parents_defer_before_native_helper | monitor cadence > held or unrelated parents defer before any native call | contract |
+| test_monitor_cadence.py::test_nonempty_parent_list_requires_valid_active_route_at_native_boundary | monitor cadence > a parent list never reaches the native boundary through an invalid or held route; monitor cadence > legacy triage with a parent list and no route defers at the native boundary | contract; bash-config (unset route: release-driven legacy triage). The boundary message itself for a present but invalid route is unreachable at CLI level: route validation defers first |
+| test_monitor_cadence.py::test_route_guards_and_monitor_disabled_reports_do_not_depend_on_reporting_flag | monitor cadence > route guards and disabled monitoring do not depend on the reporting flag | contract |
+| test_monitor_cadence.py::test_monitor_report_sink_and_route_preserve_distinct_tech_role | monitor cadence > the monitor report sink and route keep the Tech role distinct | contract (session-map byte identity replaced by registry Tech identity) |
+| test_monitor_cadence.py::test_monitor_minutes_validate_without_config_load_activity_or_release_coupling | monitor cadence > monitor minutes are validated at the observer without blocking or coupling to releases | contract |
+| test_monitor_cadence.py::test_dst_fold_slots_have_distinct_epoch_identity_at_same_wall_minute | monitor cadence > daylight-saving fold slots keep distinct epoch identities at the same wall minute | contract |
+
