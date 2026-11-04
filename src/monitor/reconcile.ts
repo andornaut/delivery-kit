@@ -656,6 +656,8 @@ export interface ReconcileTarget {
   readonly unblock: string;
   readonly coordinator: string;
   readonly slot: number;
+  /** Aborts when the runner stops. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /**
@@ -732,6 +734,7 @@ export async function reconcileSlot(
       finished: (requestId, status) =>
         processRequestResult(unblock, coordinator, requestKeys, requestId, status),
       started: (requestId) => processRequestStarted(unblock, coordinator, requestKeys, requestId),
+      stopping: () => target.signal?.aborted === true,
     },
     { ownWait, path, recipient: coordinator, text },
     state,

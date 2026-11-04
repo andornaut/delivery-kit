@@ -48,13 +48,18 @@ export class CiTasks {
 }
 
 /** One observer pass: monitor wakes, scheduled-slot reports and an event flush. */
-export async function observe(context: BusContext, after: number, now: number): Promise<void> {
+export async function observe(
+  context: BusContext,
+  after: number,
+  now: number,
+  signal?: AbortSignal,
+): Promise<void> {
   const { config, layout } = context;
   const wake = currentMinuteSlot(layout.config.timezone, layout.config.wakeMinutes, after, now);
   if (wake !== undefined) {
     try {
       // "" means this runner does not dispatch the slot; a deferral is its own line.
-      const outcome = await deliverScheduledWake(layout, context.game, wake);
+      const outcome = await deliverScheduledWake(layout, context.game, wake, signal);
       if (outcome.startsWith(DEFERRED_PREFIX)) {
         context.log(outcome);
         process.stderr.write(`${outcome}\n`);
@@ -82,7 +87,7 @@ async function observer(context: BusContext, signal: AbortSignal): Promise<void>
     const now = context.clock.now();
     // The observer is sequential by design.
     // eslint-disable-next-line no-await-in-loop
-    await observe(context, previous, now).catch((error: unknown) =>
+    await observe(context, previous, now, signal).catch((error: unknown) =>
       context.log(`bus: observer: ${String(error)}`),
     );
     previous = now;

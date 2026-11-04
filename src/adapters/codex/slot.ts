@@ -26,6 +26,19 @@ export interface SlotHooks {
   /** False when another request already holds an unresolved delivery. */
   readonly started: (requestId: string) => boolean;
   readonly finished: (requestId: string, status: SendResult) => void;
+  /** True once the runner is stopping: an unresolved send then keeps its sending receipt. */
+  readonly stopping?: () => boolean;
+}
+
+/**
+ * The runner stopped while a send was unresolved. Nothing more is recorded, so the receipt and
+ * the process request stay `sending`, as a runner killed mid-send leaves them.
+ */
+export class SlotInterrupted extends Error {
+  constructor() {
+    super("runner stopped during a native send");
+    this.name = "SlotInterrupted";
+  }
 }
 
 /** json.dumps(state, sort_keys=True) plus a newline, written durably. */
@@ -126,6 +139,9 @@ export async function sendSlot(
       // eslint-disable-next-line no-await-in-loop
       response = await client.call(selected.method, params);
     } catch (error) {
+      if (hooks.stopping?.() === true) {
+        throw new SlotInterrupted();
+      }
       if (error instanceof RpcError) {
         hooks.finished(requestId, "rejected");
         finish({ errorCode: error.code ?? null, status: "rejected" });

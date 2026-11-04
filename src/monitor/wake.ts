@@ -10,7 +10,7 @@ import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { SOCKET_MISSING } from "../adapters/codex/index.ts";
 import { queueEntries, queuePayload } from "../adapters/codex/inventory.ts";
 import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
-import { persistSlot, previousSlot } from "../adapters/codex/slot.ts";
+import { persistSlot, previousSlot, SlotInterrupted } from "../adapters/codex/slot.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord, pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import {
@@ -154,6 +154,7 @@ interface Wake {
   readonly slot: number;
   readonly socket: string;
   readonly emit: HealthEmit;
+  readonly signal?: AbortSignal | undefined;
 }
 
 function capture(wake: Wake, client: RpcClient | null, deadline: number): Promise<Json> {
@@ -203,13 +204,20 @@ async function runSlot(wake: Wake): Promise<Json> {
       }
       const deadline = performance.now() + CONNECT_MS;
       client = new SerialClient(await connectControl(deadline, wake.socket));
+      // Stopping closes the connection so an unresolved send ends now, still `sending`.
+      const open = client;
+      wake.signal?.addEventListener("abort", () => open.close(), { once: true });
       // Inventory precedes decision guards and reminder deduplication.
       snapshot = await capture(wake, client, deadline);
       const previous = previousSlot(path);
       let state: Json;
       let outcome: Json;
       if (previous === undefined) {
-        state = await reconcileSlot(client, { coordinator, slot, unblock }, snapshot);
+        state = await reconcileSlot(
+          client,
+          { coordinator, signal: wake.signal, slot, unblock },
+          snapshot,
+        );
         outcome = state;
       } else {
         state = { previousStatus: previous.status, status: "deduplicated" };
@@ -219,7 +227,10 @@ async function runSlot(wake: Wake): Promise<Json> {
       state.snapshot_id = snapshot.snapshot_id;
       state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
       return state;
-    } catch {
+    } catch (error) {
+      if (error instanceof SlotInterrupted) {
+        throw error;
+      }
       // Never log queue contents, native error messages or transport data.
       let state: Json;
       const stored = existsSync(path) ? readJson(path) : undefined;
@@ -251,6 +262,7 @@ async function codexSlot(
   parents: readonly string[],
   project: string,
   slot: number,
+  signal: AbortSignal | undefined,
 ): Promise<string> {
   const socket = process.env.CODEX_CONTROL_SOCKET;
   if (socket === undefined || !isAbsolute(socket)) {
@@ -262,6 +274,7 @@ async function codexSlot(
     emit: (kind, key, message) => emitEvent(game, { project }, kind, key, message),
     parents,
     peers: scope.peers,
+    signal,
     slot,
     socket,
     unblock: unblockDir(game.busDir),
@@ -277,6 +290,7 @@ export async function deliverScheduledWake(
   layout: Layout,
   game: GameLayout,
   slot: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
     let route: RoleRoute | null;
@@ -307,7 +321,13 @@ export async function deliverScheduledWake(
     const members = new Set([route.monitor, ...route.targets]);
     const parentRoles = config.reports.workerParents.map((role) => resolveRole(registry, role));
     if (parentRoles.some((role) => !members.has(role))) {
-      return `${DEFERRED_PREFIX}workerParents requires parents in the active monitor route`;
+      // The Codex observer reports a scope deferral on its own line; the Claude helper as status.
+      return registry.harness === "codex"
+        ? `${DEFERRED_PREFIX}workerParents requires parents in the active monitor route`
+        : line({
+            reason: "worker parents must be in the active monitor route",
+            status: "deferred",
+          });
     }
     const parents = parentRoles.map((role) => roleConversation(registry, role));
     if (parents.some((parent) => parent === null)) {
@@ -318,7 +338,7 @@ export async function deliverScheduledWake(
     }
     const unique = [...new Set(parents as string[])];
     if (registry.harness === "codex") {
-      return await codexSlot(game, scope, unique, config.reports.project, slot);
+      return await codexSlot(game, scope, unique, config.reports.project, slot, signal);
     }
     return line(
       spoolMonitorBrief(process.env, game.busDir, scope, slot, unique) as unknown as Record<
@@ -326,7 +346,10 @@ export async function deliverScheduledWake(
         unknown
       >,
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof SlotInterrupted) {
+      return "";
+    }
     return line({ reason: "monitor route or state unavailable", status: "blocked" });
   }
 }

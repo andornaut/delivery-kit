@@ -3,7 +3,8 @@ import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
 import { RunnerRefused, runRunner } from "../bus/runner.ts";
 import { testOptions } from "../bus/testOverrides.ts";
-import { EXIT_OK, type Handler } from "../io.ts";
+import { EXIT_INVALID, EXIT_OK, type Handler } from "../io.ts";
+import { readRegistry, RegistryMissing } from "../registry/store.ts";
 
 const USAGE = "usage: delivery-kit run --game ID";
 
@@ -13,6 +14,16 @@ export const run: Handler = async (io, root, args) => {
     return resolved;
   }
   const { config, game, layout } = resolved;
+  // A registry with non-canonical conversation IDs stops the runner before any native call;
+  // every send still resolves the registry again at send time.
+  try {
+    readRegistry(layout);
+  } catch (error) {
+    if (!(error instanceof RegistryMissing)) {
+      io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+      return EXIT_INVALID;
+    }
+  }
   const controller = new AbortController();
   let exit = EXIT_OK;
   const stop = (code: number) => (): void => {
