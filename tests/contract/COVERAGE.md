@@ -9,6 +9,8 @@ Each original 0.9 test (`tests/*.py`) mapped to its CLI-level contract case unde
 - **retired**: `scheduled-once` (plan decision 6), kept as a named skipped group.
 - **partial**: ported, with the named sub-assertion not expressible at CLI level.
 
+The Bash adapter runs the verified v0.9.1 release, which reaches the Codex control socket through websocket-client. A receive timeout there raises `WebSocketTimeoutException`, not `TimeoutError`, so v0.9.1 records a generic failure and keeps calling where the 0.9 unit tests (with a mocked `TimeoutError`) expected a latched `native_timeout`. Four cases assert the specified latching on Node and the observed v0.9.1 behaviour on Bash (`RECEIVE_TIMEOUT_LATCHES` in `lib/cases.ts`): child health timeout, process health timeout, question state timeout and the monitor history transport failure.
+
 fsync calls themselves are not observable from outside the process without syscall tracing (the offline image has no `strace`). Hardened cases assert the observable half of the durable primitive: replacement by rename (a new inode) and no leftover temporary files.
 
 ## Bus, entry, requests, status, events and packaging

@@ -4,7 +4,7 @@
 import { expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, RECEIVE_TIMEOUT_LATCHES, suite, workspaces } from "../lib/cases.ts";
 import type { CodexSocket } from "../lib/codex-socket.ts";
 import {
   C,
@@ -232,6 +232,11 @@ suite("child health", () => {
     const native = new ChildNative();
     native.hang = "thread/list";
     const { all, calls } = await collect(native, [P, N]);
+    if (!RECEIVE_TIMEOUT_LATCHES) {
+      // v0.9.1: the timeout is not recognized, so native work continues past it.
+      expect(calls.length).toBeGreaterThan(1);
+      return;
+    }
     expect(calls).toHaveLength(1);
     for (const health of Object.values(all)) {
       expect(health.diagnostics).toContain("native_timeout");

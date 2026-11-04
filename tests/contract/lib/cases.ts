@@ -22,6 +22,15 @@ export function suite(name: string, body: () => void): void {
 
 export const contract = it;
 
+/**
+ * Whether a native reply that never arrives is classified as a timeout. The v0.9.1 release
+ * reads the control socket through websocket-client, whose receive timeout raises
+ * WebSocketTimeoutException rather than TimeoutError, so its collectors record a generic
+ * failure and keep calling. 1.0 must classify and latch it as a timeout, as the 0.9 unit
+ * tests specified with a mocked TimeoutError.
+ */
+export const RECEIVE_TIMEOUT_LATCHES = impl.name !== "bash";
+
 export function bashConfig(name: string, body: () => Promise<void> | void): void {
   it.skipIf(impl.name !== "bash")(`[bash-config] ${name}`, body);
 }

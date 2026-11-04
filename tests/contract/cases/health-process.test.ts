@@ -5,7 +5,7 @@
 // STATE/unblock/health/<monitor>.json record a previous scheduled slot would have written.
 import { expect } from "vitest";
 
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, RECEIVE_TIMEOUT_LATCHES, suite, workspaces } from "../lib/cases.ts";
 import {
   blocked,
   C,
@@ -547,6 +547,12 @@ suite("process health", () => {
     const native = new ProcessNative();
     native.hang = "thread/read";
     const { health, calls } = await observe([job(), job({ job_id: "other" })], native);
+    if (!RECEIVE_TIMEOUT_LATCHES) {
+      // v0.9.1: the timeout is not recognized, so the second job is still read.
+      expect(calls.length).toBeGreaterThan(1);
+      expect(health.observations).toEqual([]);
+      return;
+    }
     expect(calls).toHaveLength(1);
     expect(health.budget.reason_code).toBe("native_timeout");
     expect(health.jobs.every((r) => r.state === "unknown")).toBe(true);

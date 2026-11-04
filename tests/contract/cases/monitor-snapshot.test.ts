@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { bashConfig, contract, suite, workspaces } from "../lib/cases.ts";
+import { bashConfig, contract, RECEIVE_TIMEOUT_LATCHES, suite, workspaces } from "../lib/cases.ts";
 import {
   ART,
   entry,
@@ -433,7 +433,10 @@ suite("monitor snapshot", () => {
       expect(compacted.complete).toBe(false);
       // A native call that never answers within the five-second transport bound.
       const failedSnapshot = await history({ hang: true });
-      expect(failedSnapshot.history[TECH].reason_code).toBe("transport_failure");
+      // v0.9.1 does not recognize the receive timeout and reports a metadata failure.
+      expect(failedSnapshot.history[TECH].reason_code).toBe(
+        RECEIVE_TIMEOUT_LATCHES ? "transport_failure" : "metadata_failure",
+      );
       expect(failedSnapshot.errors).toEqual({});
       expect(failedSnapshot.queues[TECH]).toEqual([entry("one"), entry("two")]);
       expect(JSON.stringify([malformed, unknown, compacted, failedSnapshot])).not.toContain(
