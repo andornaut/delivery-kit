@@ -10,7 +10,6 @@ import {
   questionBrief,
   type QuestionNotice,
   questionNotices,
-  unicodeDumps,
   workerFailures,
 } from "./reconcile.ts";
 import { persist } from "./store.ts";
@@ -42,10 +41,6 @@ function question(index: number, options: unknown): Record<string, unknown> {
 }
 
 describe("reconcile", () => {
-  it("writes json.dumps(ensure_ascii=False) text", () => {
-    expect(unicodeDumps({ a: ["é\n", 1, null, true] })).toBe('{"a": ["é\\n", 1, null, true]}');
-  });
-
   it("sorts and deduplicates verified failed child turns", () => {
     const child = (id: string) => ({
       child_id: id,

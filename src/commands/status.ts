@@ -1,8 +1,8 @@
 // status --game ID: read-only runner, idle and drain report as one JSON line.
 // status --harness <claude|codex>: the handoff readiness probe; exit 0 when ready, 1 when not.
-import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
+import { dumpsJson, pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import { resolveGame } from "../bus/command.ts";
-import { busPaths, pyDumps } from "../bus/state.ts";
+import { busPaths } from "../bus/state.ts";
 import { statusReport } from "../bus/status.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type Layout, loadLayout } from "../layout.ts";
@@ -62,6 +62,6 @@ export const status: Handler = (io, root, args) => {
     return resolved;
   }
   // CI is monitored for every 1.x game: git.remote and git.github are required.
-  io.out(`${pyDumps(statusReport(busPaths(resolved.game.busDir), true))}\n`);
+  io.out(`${dumpsJson(statusReport(busPaths(resolved.game.busDir), true))}\n`);
   return EXIT_OK;
 };

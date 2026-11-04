@@ -104,33 +104,6 @@ export function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
-/**
- * The bus record encoding (request records, `status` output): sorted keys, ", " and ": "
- * separators and ASCII escapes.
- */
-export function pyDumps(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(pyDumps).join(", ")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, item]) => item !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([key, item]) => `${asciiJson(key)}: ${pyDumps(item)}`).join(", ")}}`;
-  }
-  return asciiJson(value);
-}
-
-function asciiJson(value: unknown): string {
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-  return (JSON.stringify(value) ?? "null").replace(
-    /[\u0080-￿]/g,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-  );
-}
-
 export function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(sortKeys);

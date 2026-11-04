@@ -5,7 +5,7 @@
 import { performance } from "node:perf_hooks";
 
 import { decisionRecord } from "../shared/decisions.ts";
-import { isRecord } from "../shared/pyjson.ts";
+import { isRecord, unicodeDumps } from "../shared/pyjson.ts";
 import type { Collected, CollectRequest } from "../types.ts";
 import { workerHealth } from "./collectors/childHealth.ts";
 import { collectQuestionState } from "./collectors/questionState.ts";
@@ -67,19 +67,6 @@ function questionUnavailable(code: string): Json {
     status: "unavailable",
     ui_visibility: "unknown",
   };
-}
-
-/** json.dumps(value, ensure_ascii=False) with default separators, for byte bounds only. */
-function unicodeDumps(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => unicodeDumps(item)).join(", ")}]`;
-  }
-  if (isRecord(value)) {
-    return `{${Object.entries(value)
-      .map(([key, item]) => `${JSON.stringify(key)}: ${unicodeDumps(item)}`)
-      .join(", ")}}`;
-  }
-  return JSON.stringify(value ?? null);
 }
 
 const COLLECTED: ReadonlySet<unknown> = new Set(["complete", "partial", "unavailable"]);

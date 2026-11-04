@@ -20,6 +20,7 @@ import {
   type PyJson,
   pyJsonDumps,
   sameJson,
+  unicodeDumps,
 } from "../adapters/shared/pyjson.ts";
 import { type Json, type QueueEntry, readRecord, retained, snapshotPath } from "./store.ts";
 
@@ -55,51 +56,6 @@ function ascii(value: unknown): string {
 
 function bytes(text: string): number {
   return Buffer.byteLength(text, "utf8");
-}
-
-const TEXT_ESCAPES: Readonly<Record<string, string>> = {
-  "\b": "\\b",
-  "\t": "\\t",
-  "\n": "\\n",
-  "\f": "\\f",
-  "\r": "\\r",
-  '"': '\\"',
-  "\\": "\\\\",
-};
-
-function textString(value: string): string {
-  let text = '"';
-  for (const char of value) {
-    const escape = TEXT_ESCAPES[char];
-    const code = char.codePointAt(0) ?? 0;
-    if (escape !== undefined) {
-      text += escape;
-    } else if (code < 0x20) {
-      text += `\\u${code.toString(16).padStart(4, "0")}`;
-    } else {
-      text += char;
-    }
-  }
-  return `${text}"`;
-}
-
-/** json.dumps(value, ensure_ascii=False). */
-export function unicodeDumps(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "null";
-  }
-  if (typeof value === "string") {
-    return textString(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${(value as unknown[]).map(unicodeDumps).join(", ")}]`;
-  }
-  if (isRecord(value)) {
-    return `{${Object.entries(value)
-      .map(([key, item]) => `${textString(key)}: ${unicodeDumps(item)}`)
-      .join(", ")}}`;
-  }
-  return ascii(value);
 }
 
 export function healthPath(unblock: string, recipient: string): string {

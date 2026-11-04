@@ -4,10 +4,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { dumpsJson } from "../adapters/shared/pyjson.ts";
 import { fsyncDirectory, writeDurable } from "../durable.ts";
 import { holdLockAsync } from "../lock.ts";
 import type { Exec } from "./exec.ts";
-import { type BusPaths, ensureDir, pyDumps } from "./state.ts";
+import { type BusPaths, ensureDir } from "./state.ts";
 import { mainHead, skipReason } from "./trunk.ts";
 
 export const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -49,7 +50,7 @@ function recordPath(store: RequestStore, id: string): string {
 }
 
 function writeRecord(path: string, record: RequestRecord): void {
-  writeDurable(path, `${pyDumps(record)}\n`, { mode: 0o644 });
+  writeDurable(path, `${dumpsJson(record)}\n`, { mode: 0o644 });
 }
 
 function readRecord(path: string): RequestRecord {
@@ -102,7 +103,7 @@ export function captureRequest(store: RequestStore, id: string): Promise<string>
     }
     const record: RequestRecord = { head, id, state: "pending" };
     writeRecord(path, record);
-    return `${pyDumps(record)}\n`;
+    return `${dumpsJson(record)}\n`;
   });
 }
 

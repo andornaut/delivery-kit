@@ -1,6 +1,8 @@
-// Python json.dumps output (default separators, ensure_ascii). Briefs, receipts, events, state
-// records and monitor digests use this encoding, so persisted records and the digests that key
-// existing acknowledgements and retentions stay byte-identical.
+// Python json.dumps output with its default separators: the one encoder for briefs, receipts,
+// events, bus and monitor state records, status output and monitor digests, so persisted records
+// and the digests that key existing acknowledgements and retentions stay byte-identical. It
+// follows Python where a JavaScript serializer differs: keys sort by code point, ensure_ascii
+// escapes U+007F, ensure_ascii=False leaves lone surrogates unescaped, and floats use repr().
 //
 // JSON.parse cannot tell 1 from 1.0, so an integral float read back from a persisted record is
 // written as an integer. Python reads both as equal numbers, so digests of parsed values and
@@ -17,7 +19,7 @@ const SHORT_ESCAPES: Readonly<Record<string, string>> = {
   "\\": "\\\\",
 };
 
-function encodeString(value: string): string {
+function encodeString(value: string, ensureAscii: boolean): string {
   let text = '"';
   for (let index = 0; index < value.length; index += 1) {
     const char = value.charAt(index);
@@ -25,7 +27,7 @@ function encodeString(value: string): string {
     const short = SHORT_ESCAPES[char];
     if (short !== undefined) {
       text += short;
-    } else if (code < 0x20 || code > 0x7e) {
+    } else if (code < 0x20 || (ensureAscii && code > 0x7e)) {
       // UTF-16 code units, as Python's ensure_ascii writes surrogate pairs.
       text += `\\u${code.toString(16).padStart(4, "0")}`;
     } else {
@@ -33,6 +35,20 @@ function encodeString(value: string): string {
     }
   }
   return `${text}"`;
+}
+
+/**
+ * float.__repr__: the shortest round-trip digits, positional for a decimal exponent from -4 to
+ * 15 and otherwise scientific with a signed exponent of at least two digits.
+ */
+export function pyFloat(value: number): string {
+  const [mantissa = "", power = "0"] = value.toExponential().split("e");
+  const exponent = Number(power);
+  if (exponent < -4 || exponent >= 16) {
+    const sign = exponent < 0 ? "-" : "+";
+    return `${mantissa}e${sign}${String(Math.abs(exponent)).padStart(2, "0")}`;
+  }
+  return String(value);
 }
 
 function compareCodePoints(left: string, right: string): number {
@@ -59,6 +75,8 @@ export type PyJson =
 
 export interface DumpOptions {
   readonly sortKeys?: boolean;
+  /** Escape every code unit outside printable ASCII (Python's default); false writes them as is. */
+  readonly ensureAscii?: boolean;
   /** Write non-integer numbers with String(); otherwise they are refused. */
   readonly floats?: boolean;
   /** Leave out object keys whose value is undefined; otherwise they are written as null. */
@@ -76,13 +94,17 @@ function dump(value: unknown, options: DumpOptions): string {
     return value.toString();
   }
   if (typeof value === "number") {
-    if (Number.isInteger(value) || (options.floats === true && Number.isFinite(value))) {
+    if (Number.isInteger(value)) {
       return String(value);
+    }
+    if (options.floats === true && Number.isFinite(value)) {
+      return pyFloat(value);
     }
     throw new Error("only integer numbers are supported");
   }
+  const ensureAscii = options.ensureAscii !== false;
   if (typeof value === "string") {
-    return encodeString(value);
+    return encodeString(value, ensureAscii);
   }
   if (Array.isArray(value)) {
     return `[${value.map((item) => dump(item, options)).join(", ")}]`;
@@ -97,7 +119,7 @@ function dump(value: unknown, options: DumpOptions): string {
       keys.sort(compareCodePoints);
     }
     return `{${keys
-      .map((key) => `${encodeString(key)}: ${dump(object[key], options)}`)
+      .map((key) => `${encodeString(key, ensureAscii)}: ${dump(object[key], options)}`)
       .join(", ")}}`;
   }
   throw new Error(`unsupported JSON value: ${typeof value}`);
@@ -108,8 +130,13 @@ export function pyJsonDumps(value: unknown, sortKeys = false, floats = false): s
   return dump(value, { floats, sortKeys });
 }
 
+/** json.dumps(value, ensure_ascii=False), insertion order: brief text and its byte bounds. */
+export function unicodeDumps(value: unknown): string {
+  return dump(value, { ensureAscii: false, floats: true });
+}
+
 /** json.dumps(value, sort_keys=True) as persist() writes it: state files and receipts. */
-export function dumpsJson(value: PyJson): string {
+export function dumpsJson(value: unknown): string {
   return dump(value, { floats: true, omitUndefined: true, sortKeys: true });
 }
 
