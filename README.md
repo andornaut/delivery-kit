@@ -772,7 +772,18 @@ a successful native verification result. The library does not inspect command or
 output semantics or claim direct host verification. Missing verification never
 upgrades a reported closure; absence never establishes closure.
 
-## Claude monitor route (version 2)
+## 0.8.0 Claude monitor route (version 2)
+
+This minor release is additive: additive public features increment the minor
+version. It changes no existing CLI, configuration or state contract. Version 1
+Codex routes, their resolver output, native unblock and event delivery are
+unchanged, and configurations without a version 2 route need no edits. New
+optional values are `CLAUDE_PYTHON` and `CLAUDE_AGENTS_COMMAND`; new state is
+`STATE/unblock/claude-spool/`. Adopting a Claude monitor requires an owner-managed
+version 2 route file, the consumer in that monitor session's MCP configuration
+with development channels enabled, and the normal idle cutover of the resident
+runner to the reviewed 0.8.0 snapshot.
+
 
 A Claude Code monitor uses a version 2 route selected through the existing
 `MONITOR_ROUTE_FILE`, for example
