@@ -30,7 +30,7 @@ export function sockets(): (ws: Workspace) => Promise<CodexSocket> {
     open.push(socket);
     ws.env.CODEX_CONTROL_SOCKET = socket.path;
     // The fake Codex control socket serves a Codex registry on 1.0.
-    if (process.env.DK_IMPL === "node") ws.writeRegistry({ ...ws.registry(), harness: "codex" });
+    ws.writeRegistry({ ...ws.registry(), harness: "codex" });
     socket.on("thread/queue/list", { data: [], nextCursor: null });
     socket.on("thread/items/list", { data: [], nextCursor: null });
     return socket;
@@ -40,7 +40,7 @@ export function sockets(): (ws: Workspace) => Promise<CodexSocket> {
 /** An active version 1 route: monitor coordinator plus active targets. */
 export function codexRoute(ws: Workspace, targets: string[], monitor = M): void {
   // A Codex route runs under a Codex registry; the Node adapter registers its conversations.
-  if (process.env.DK_IMPL === "node") ws.writeRegistry({ ...ws.registry(), harness: "codex" });
+  ws.writeRegistry({ ...ws.registry(), harness: "codex" });
   ws.writeRoute({
     version: 1,
     harness: "codex",

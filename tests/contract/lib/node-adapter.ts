@@ -23,8 +23,7 @@ const CLI = join(KIT_ROOT, "dist", "cli.js");
 
 /**
  * Complete the 1.0 required fields a case leaves out with neutral defaults. Fields a case sets,
- * including deliberately invalid values, pass through unchanged; `ws.omit` names JSON paths
- * (for example "deploy.mode") a case wants absent.
+ * including deliberately invalid values, pass through unchanged.
  */
 export function nodeConfig(ws: Workspace): Record<string, unknown> {
   const c = structuredClone(ws.config) as Record<string, Record<string, unknown>>;
@@ -40,16 +39,10 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
     recipient: "monitor",
     workerParents: [],
   });
-  // 0.9 spells "no exclusions" as an empty pattern; 1.0 omits the field. Same behaviour.
+  // Cases spell "no exclusions" as an empty pattern; the configuration omits the field.
   if (c.deploy?.skipPattern === "") delete c.deploy.skipPattern;
-  // 0.9 spells "no CI watch" as an empty GitHub slug; 1.0 requires a slug and always watches.
-  // The fixture slug keeps those cases runnable; cases asserting CI-disabled behaviour diverge.
+  // A slug is required and CI is always watched; an empty slug becomes the fixture slug.
   if (c.git?.github === "") c.git.github = "fixture/game";
-  for (const path of ws.omit) {
-    const [section, key] = path.split(".");
-    if (section && key && c[section]) delete c[section]![key];
-    else if (section) delete c[section];
-  }
   return c;
 }
 

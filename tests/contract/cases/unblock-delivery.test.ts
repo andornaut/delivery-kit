@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { CodexSocket, type RpcCall } from "../lib/codex-socket.ts";
-import { bashConfig, CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { rpcError, STALE, TECH, ART, GAMEPLAY } from "../lib/unblock-native.ts";
 import { Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
@@ -291,17 +291,4 @@ suite("unblock delivery", () => {
     expect(tick.output).not.toContain("private user content");
     expect(tick.output).not.toContain("queue-one");
   });
-
-  bashConfig(
-    "an empty MONITOR_ROUTE_FILE with worker parents defers without a native connection",
-    async () => {
-      const m = await routed();
-      m.ws.config.reports = { workerParents: ["art"] };
-      m.ws.legacyConf = "MONITOR_ROUTE_FILE=''\n";
-      await m.start();
-      const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
-      expect(output).toContain("MONITOR_ROUTE_FILE must be an absolute route path");
-      expect(m.socket.connections).toEqual([]);
-    },
-  );
 });

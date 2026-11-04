@@ -1,11 +1,9 @@
-// Implementation adapters map abstract CLI operations to command lines. DK_IMPL selects one.
+// The implementation adapter maps abstract CLI operations to command lines for the built CLI.
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
 
-import { bashImplementation } from "./bash-adapter.ts";
 import { nodeImplementation } from "./node-adapter.ts";
-import { KIT_ROOT, type Workspace } from "./workspace.ts";
+import type { Workspace } from "./workspace.ts";
 
 export interface Result {
   code: number | null;
@@ -26,7 +24,7 @@ export interface Command {
 }
 
 export interface Implementation {
-  readonly name: "bash" | "node";
+  readonly name: "node";
   /** True when runnable; otherwise the reason its cases are skipped. */
   readonly available: true | string;
   /** `--help` or `help` without any configuration or state. */
@@ -36,8 +34,8 @@ export interface Implementation {
   /** A command line without configuration or state context. */
   bare(ws: Workspace, words: string[]): Command;
   /**
-   * Make new work available to the next departure. 0.9 queues the branches; 1.0 is trunk-based,
-   * so local main moves to the scripted commit (an empty list leaves nothing new).
+   * Make new work available to the next departure: local main moves to the scripted commit (an
+   * empty list leaves nothing new).
    */
   offer(ws: Workspace, branches: string[]): void;
   checkConfig(ws: Workspace): Command;
@@ -51,15 +49,7 @@ export interface Implementation {
   channel(ws: Workspace, args: string[]): Command;
 }
 
-// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
-// The bash implementation, DK_IMPL selection and the bash clock pause in startRunner; Node becomes
-// the only implementation.
-export const IMPL_NAME = (process.env.DK_IMPL ?? "bash") as "bash" | "node";
-if (IMPL_NAME !== "bash" && IMPL_NAME !== "node")
-  throw new Error(`DK_IMPL must be bash or node, not ${IMPL_NAME}`);
-export const impl: Implementation = IMPL_NAME === "bash" ? bashImplementation : nodeImplementation;
-export const NODE_CLI = join(KIT_ROOT, "dist", "cli.js");
-export const nodeBuilt = existsSync(NODE_CLI);
+export const impl: Implementation = nodeImplementation;
 
 export function execute(
   command: Command,
@@ -129,7 +119,7 @@ export function start(command: Command): Resident {
     if (!command.logFile || !existsSync(command.logFile)) return;
     const content = readFileSync(command.logFile);
     if (content.length > offset) {
-      // 1.0 writes one log where 0.9 split stdout and stderr; cases see it on both streams.
+      // The runner writes one log; cases see it on both streams.
       child.stdout.emit("data", content.subarray(offset));
       child.stderr.emit("data", content.subarray(offset));
       offset = content.length;
@@ -187,64 +177,10 @@ export function start(command: Command): Resident {
   };
 }
 
-/**
- * Start the resident runner. On Bash the virtual clock is paused until the runner holds its
- * lock and its loops have reached their first wait, then resumed at its speed: a slow start
- * under host load cannot move virtual time past the slot a case is aiming at. The 1.0 runner
- * reads its clock file once at startup, so its clock is not paused.
- */
+/** Start the resident runner. It reads its clock file once at startup. */
 export function startRunner(ws: Workspace): Resident {
-  const speed = impl.name === "bash" && ws.pauseAtStart ? ws.pauseClock() : undefined;
-  const sleepers = ws.sleepers();
-  const resident = start(impl.run(ws));
-  if (speed === undefined) return resident;
-  let resumed = false;
-  const resume = () => {
-    if (!resumed) ws.resumeClock(speed);
-    resumed = true;
-  };
-  const ready = (async () => {
-    const deadline = Date.now() + READY_CEILING_MS;
-    // Ready: the identity record (written under the runner lock), the loop's pid file (written
-    // under the loop lock, just before its first clock read), and the reporter and notifier at
-    // their first fake `sleep`. A short settle lets the loop finish that first read.
-    const hadPid = ws.exists("codex-bus.pid") ? ws.read("codex-bus.pid") : undefined;
-    while (
-      Date.now() < deadline &&
-      !(
-        ws.exists("runner.identity.json") &&
-        ws.exists("codex-bus.pid") &&
-        ws.read("codex-bus.pid") !== hadPid &&
-        ws.sleepers() >= sleepers + 2
-      )
-    ) {
-      if (resident.child.exitCode !== null) break;
-      await new Promise((r) => setTimeout(r, 25));
-    }
-    await new Promise((r) => setTimeout(r, 300));
-    resume();
-  })();
-  return {
-    ...resident,
-    child: resident.child,
-    done: resident.done,
-    async until(predicate, timeoutMs) {
-      await ready;
-      return resident.until(predicate, timeoutMs);
-    },
-    async stop() {
-      resume();
-      return resident.stop();
-    },
-    async terminateLeader() {
-      resume();
-      return resident.terminateLeader();
-    },
-  };
+  return start(impl.run(ws));
 }
-
-/** The real-time ceiling for a runner to reach its first wait while the clock is paused. */
-const READY_CEILING_MS = 120_000;
 
 /** The least real time any condition wait allows; virtual-time conditions usually end sooner. */
 export const WAIT_CEILING_MS = 120_000;

@@ -1,11 +1,8 @@
 // Verification in isolated containers running as uid 19001, which owns nothing on the host.
 // The checkout is bound read-only and read through its group (--group-add), then copied into
-// container scratch; the npm cache and the verified v0.9.1 parity release live in a named
-// volume. A first container populates that volume with network access; every check, the
-// contract cases included, then runs with no network. Nothing is written to the host.
-//
-// The contract cases gate on both implementations: the v0.9.1 parity release and the 1.0
-// bundle.
+// container scratch; the npm cache lives in a named volume. A first container populates that
+// volume with network access; every check, the contract cases on the built bundle included,
+// then runs with no network. Nothing is written to the host.
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -24,20 +21,15 @@ import {
   sourceList,
 } from "./guards.ts";
 
-// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
-// The bash parity release install (parity.ts, parity-install.ts) in POPULATE, and the
-// DK_IMPL=bash contract run in CHECK.
 const POPULATE = `
-  mkdir -p /tmp/fetch/tests/contract/lib
+  mkdir -p /tmp/fetch/tests/contract
   cp /source/package.json /source/package-lock.json /tmp/fetch/
   cd /source/tests/contract
   cp package.json package-lock.json /tmp/fetch/tests/contract/
-  cp lib/parity.ts lib/parity-install.ts /tmp/fetch/tests/contract/lib/
   cd /tmp/fetch
   npm ci --prefer-offline --ignore-scripts --no-audit --no-fund
   cd tests/contract
   npm ci --prefer-offline --ignore-scripts --no-audit --no-fund
-  node lib/parity-install.ts
 `;
 
 const CHECK = `
@@ -53,8 +45,7 @@ const CHECK = `
   cd tests/contract
   npm ci --offline --ignore-scripts --no-audit --no-fund
   npx tsc
-  DK_IMPL=bash npx vitest run --maxWorkers=4
-  DK_IMPL=node npx vitest run --maxWorkers=4
+  npx vitest run --maxWorkers=4
 `;
 
 function main(): number {
@@ -87,8 +78,6 @@ function main(): number {
       ...groupAdds([root, list]),
       "-e",
       "npm_config_cache=/var/tmp/npm",
-      "-e",
-      "DK_PARITY_DIR=/var/tmp/parity",
       "--mount",
       `type=bind,src=${root},dst=/source,readonly`,
       "--mount",
@@ -101,7 +90,7 @@ function main(): number {
       "/tmp",
     ];
     requireLoad();
-    console.log("delivery-kit: populating the npm cache and contract parity volume in a container");
+    console.log("delivery-kit: populating the npm cache volume in a container");
     status = run("docker", [...container, image, "sh", "-ec", POPULATE]);
     if (status === 0) {
       requireLoad();

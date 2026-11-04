@@ -27,12 +27,8 @@ export function uuid5(name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/**
- * A brief's target line. 0.9 names targets by their version 2 route `name`; 1.0 names them by
- * the registry role key that holds the conversation.
- */
+/** A brief's target line: the registry role key that holds the conversation, and its ID. */
 export function briefTarget(ws: Workspace, name: string, id: string): string {
-  if (impl.name === "bash") return `${name}: ${id}`;
   const registry = ws.registry();
   const role = Object.entries(registry.roles).find(([, r]) => r.conversations.claude === id)?.[0];
   return `${role ?? name}: ${id}`;

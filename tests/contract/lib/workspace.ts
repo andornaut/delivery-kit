@@ -19,17 +19,7 @@ import { fileURLToPath } from "node:url";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 export const KIT_ROOT = join(HERE, "..", "..", "..");
-export const FAKE_TOOLS = [
-  "claude",
-  "codex",
-  "date",
-  "docker",
-  "gh",
-  "git",
-  "node",
-  "sleep",
-  "wrangler",
-] as const;
+export const FAKE_TOOLS = ["claude", "codex", "docker", "gh", "git", "wrangler"] as const;
 export type FakeTool = (typeof FAKE_TOOLS)[number];
 
 export const SHA = "a".repeat(40);
@@ -41,7 +31,7 @@ export interface GameConfig {
   git?: { main?: unknown; remote?: unknown; github?: unknown };
   schedule?: { departures?: unknown; timezone?: unknown };
   gate?: { image?: unknown; install?: unknown; steps?: unknown };
-  /** `maxWorkers` is 0.9's MAX_WORKERS; 1.0 rejects it as an unknown key. */
+  /** `maxWorkers` is a removed key that check-config rejects as unknown. */
   resources?: { cpus?: unknown; maxWorkers?: unknown; loadLimit?: unknown };
   ci?: { requiredNames?: unknown; pollSeconds?: unknown; timeoutSeconds?: unknown };
   deploy?: { mode?: unknown; skipPattern?: unknown };
@@ -73,10 +63,6 @@ export interface GameOptions {
   /** Key in game-dev `config.json`; the checkout is created beside game-dev. */
   game?: string;
   config?: GameConfig;
-  /** Raw Bash lines appended to the rendered bus.conf (Bash adapter only; 0.9 legacy keys). */
-  legacyConf?: string;
-  /** Omit a rendered bus.conf key entirely (Bash) or the matching JSON path (Node). */
-  omit?: string[];
   /** Use a real Git repository instead of the scripted fake. */
   realGit?: boolean;
   /** Harness-only; see Workspace.hostLoad. */
@@ -158,8 +144,6 @@ export class Workspace {
   readonly repo: string;
   readonly state: string;
   config: GameConfig;
-  legacyConf: string;
-  omit: string[];
   readonly realGit: boolean;
   /**
    * Harness-only fixture flag, never written to delivery-kit.json. "ignore" (the default)
@@ -167,11 +151,6 @@ export class Workspace {
    * against the actual load, which cases use with loadLimit 0 to force a load block.
    */
   hostLoad: HostLoad;
-  /**
-   * Pause the virtual clock while a Bash runner starts (see startRunner). Cases whose collectors
-   * compare slots with the real time run the clock at wall speed and turn this off.
-   */
-  pauseAtStart = true;
   /** Extra environment for every CLI invocation (adapter overrides such as CODEX_CONTROL_SOCKET). */
   env: Record<string, string> = {};
 
@@ -187,8 +166,6 @@ export class Workspace {
     this.repo = join(this.root, this.game);
     this.state = join(this.gameDev, "var", "games", this.game, "bus");
     this.config = options.config ?? defaultConfig();
-    this.legacyConf = options.legacyConf ?? "";
-    this.omit = options.omit ?? [];
     this.realGit = options.realGit ?? false;
     this.hostLoad = options.hostLoad ?? "ignore";
     for (const path of [this.xdgState, this.fakeBin, this.repo, this.state])
@@ -196,8 +173,8 @@ export class Workspace {
     // Docker would create a missing bind source as root; consumers keep this cache in state.
     mkdirSync(join(this.state, "npm-cache"));
     this.installFakes();
-    // CI reports the default required check green unless a case scripts gh; 0.9 calls gh only
-    // when a case configures a GitHub slug, while 1.0 always watches CI before deploying.
+    // CI reports the default required check green unless a case scripts gh: every departure
+    // watches CI before deploying.
     const gh = { default: [{ conclusion: "success", id: 1, name: "Test", status: "completed" }] };
     this.setControl(this.realGit ? { gh, git: { real: true } } : { gh });
     this.writeGameDev();
@@ -272,14 +249,6 @@ export class Workspace {
     return JSON.parse(readFileSync(join(this.gameDev, "var", "registry.json"), "utf8"));
   }
 
-  /** Resolve a role name to its conversation ID for the active harness. */
-  conversation(role: string): string | undefined {
-    const registry = this.registry();
-    const record = registry.roles[role];
-    const value = record?.conversations[registry.harness];
-    return value ?? undefined;
-  }
-
   get routeFile(): string {
     return join(this.gameDev, "var", "route.json");
   }
@@ -288,8 +257,8 @@ export class Workspace {
   legacyRoute: unknown;
 
   /**
-   * Write a 0.x monitor route (version 1 Codex or version 2 Claude, or raw text). Bash reads it
-   * as is; the Node adapter rewrites var/route.json as a schema 1 role-name route at each command.
+   * Write a 0.x monitor route (version 1 Codex or version 2 Claude, or raw text). The adapter
+   * rewrites var/route.json as a schema 1 role-name route at each command.
    */
   writeRoute(route: unknown): void {
     this.legacyRoute = route;
@@ -340,14 +309,9 @@ export class Workspace {
     return tool ? rows.filter((row) => row.tool === tool) : rows;
   }
 
-  clearCalls(): void {
-    rmSync(join(this.fakeDir, "calls.jsonl"), { force: true });
-  }
-
   /**
    * Virtual clock for `run`: virtual = epoch + offsets + wall elapsed * speed.
-   * The Bash adapter reads it through fake `date` and `sleep`; the Node implementation must
-   * honour the same file through DELIVERY_KIT_TEST_CLOCK.
+   * The runner reads the file through DELIVERY_KIT_TEST_CLOCK.
    */
   setClock(epoch: number, speed = 60): void {
     rmSync(join(this.fakeDir, "clock-offsets"), { force: true });
@@ -360,54 +324,12 @@ export class Workspace {
   }
 
   /**
-   * The real-time cap on one sleep: fake `sleep` reads control.maxRealSleep, and the 1.0 runner
-   * reads clock.json's optional maxRealSleep (seconds), so both follow the same fixture value.
+   * The real-time cap on one runner sleep: control.maxRealSleep (seconds), written into
+   * clock.json's optional maxRealSleep.
    */
   private realSleepCap(): { maxRealSleep?: number } {
     const cap = this.control().maxRealSleep;
     return cap !== undefined && cap > 0 ? { maxRealSleep: cap } : {};
-  }
-
-  /**
-   * Hold virtual time where it is (speed 0) and return the speed to restore. Offsets already
-   * stepped stay in place. Fake `date` and `sleep` read the clock on every call.
-   */
-  pauseClock(): number | undefined {
-    if (!existsSync(this.clockFile)) return undefined;
-    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as {
-      epoch: number;
-      realStartMs: number;
-      speed: number;
-    };
-    const now = clock.epoch + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
-    writeJson(this.clockFile, {
-      epoch: now,
-      realStartMs: Date.now(),
-      speed: 0,
-      ...this.realSleepCap(),
-    });
-    return clock.speed;
-  }
-
-  /** Resume a paused clock at `speed` from the virtual time it was held at. */
-  resumeClock(speed: number): void {
-    const clock = JSON.parse(readFileSync(this.clockFile, "utf8")) as {
-      epoch: number;
-      speed: number;
-    };
-    if (clock.speed !== 0) return;
-    writeJson(this.clockFile, {
-      epoch: clock.epoch,
-      realStartMs: Date.now(),
-      speed,
-      ...this.realSleepCap(),
-    });
-  }
-
-  /** How many fake `sleep` calls have started so far. */
-  sleepers(): number {
-    const path = join(this.fakeDir, "sleepers");
-    return existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).length : 0;
   }
 
   get clockFile(): string {
@@ -444,10 +366,6 @@ export class Workspace {
       HOME: this.home,
       XDG_STATE_HOME: this.xdgState,
       DK_FAKE_DIR: this.fakeDir,
-      // CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed
-      // one clean departure cycle.
-      // The fake gate checks the selected implementation's container contract.
-      DK_IMPL: process.env.DK_IMPL ?? "bash",
       LANG: "C.UTF-8",
       GIT_AUTHOR_NAME: "Fixture",
       GIT_AUTHOR_EMAIL: "fixture@example.invalid",
@@ -471,33 +389,6 @@ export class Workspace {
       env: this.baseEnv(),
       encoding: "utf8",
     }).trim();
-  }
-
-  /** Create a commit on `branch` with plumbing only, leaving every checkout untouched. */
-  commitOnto(branch: string, message: string, files: Record<string, string>): string {
-    const env = this.baseEnv();
-    const run = (args: string[], input?: string) =>
-      execFileSync("git", ["-C", this.repo, ...args], { env, encoding: "utf8", input }).trim();
-    const parent = run(["rev-parse", `refs/heads/${branch}`]);
-    const index = join(this.root, `index-${process.pid}-${Date.now()}`);
-    const indexed = { ...env, GIT_INDEX_FILE: index };
-    execFileSync("git", ["-C", this.repo, "read-tree", parent], { env: indexed });
-    for (const [name, content] of Object.entries(files)) {
-      const blob = run(["hash-object", "-w", "--stdin"], content);
-      execFileSync(
-        "git",
-        ["-C", this.repo, "update-index", "--add", "--cacheinfo", `100644,${blob},${name}`],
-        { env: indexed },
-      );
-    }
-    const tree = execFileSync("git", ["-C", this.repo, "write-tree"], {
-      env: indexed,
-      encoding: "utf8",
-    }).trim();
-    rmSync(index, { force: true });
-    const commit = run(["commit-tree", tree, "-p", parent, "-m", message]);
-    run(["update-ref", `refs/heads/${branch}`, commit, parent]);
-    return commit;
   }
 
   commit(message: string, files: Record<string, string> = {}): string {
@@ -535,19 +426,6 @@ export class Workspace {
     return existsSync(this.path(...parts));
   }
 
-  /** The Wrangler entry a passing gate's install leaves in a retained deployment worktree. */
-  plantWrangler(work: string): void {
-    const entry = join(work, "node_modules", "wrangler", "bin");
-    mkdirSync(entry, { recursive: true });
-    const script = join(HERE, "fake-tool.mjs");
-    writeFileSync(
-      join(entry, "wrangler.js"),
-      `import { spawnSync } from "node:child_process";\n` +
-        `const r = spawnSync(process.execPath, [${JSON.stringify(script)}, "wrangler", ...process.argv.slice(2)], { stdio: "inherit" });\n` +
-        `process.exit(r.status ?? 1);\n`,
-    );
-  }
-
   write(name: string, content: string): void {
     mkdirSync(dirname(this.path(name)), { recursive: true });
     writeFileSync(this.path(name), content);
@@ -560,10 +438,6 @@ export class Workspace {
 
   inode(...parts: string[]): number {
     return statSync(this.path(...parts)).ino;
-  }
-
-  queue(branches: string[]): void {
-    this.write("bus-queue", branches.map((b) => `${b}\n`).join(""));
   }
 
   /** Outbox events, oldest first. */

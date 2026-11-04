@@ -4,10 +4,9 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { ciDisabled, contract, queueModel, suite, workspaces } from "../lib/cases.ts";
+import { contract, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at } from "../lib/time.ts";
-import { BASH_ROOT } from "../lib/parity.ts";
 import { KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 interface Report {
@@ -24,7 +23,6 @@ interface Report {
 }
 
 function kitVersion(): string {
-  if (impl.name === "bash") return readFileSync(join(BASH_ROOT, "VERSION"), "utf8").trim();
   return (JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as { version: string })
     .version;
 }
@@ -145,22 +143,6 @@ suite("status", () => {
     }
   });
 
-  ciDisabled("without CI configured, an unrecorded pushed SHA is not a blocker", async () => {
-    const ws = workspace();
-    quiet(ws, false);
-    ws.write("active-departure", "1793556000\n");
-    ws.write("deploy-pending", "a".repeat(40) + "\n");
-    ws.write(`ci/${"b".repeat(40)}.status`, "running\n");
-    ws.write("last-push.sha", "d".repeat(40) + "\n");
-    ws.write("requests/one.json", JSON.stringify({ state: "started" }));
-    expect((await report(ws)).idle_blockers).toEqual([
-      "active_departure",
-      "deploy_retry_pending",
-      `ci_watch:${"b".repeat(40)}`,
-      "request_started:one",
-    ]);
-  });
-
   contract("unsent events and a running flush are not drained", async () => {
     const ws = workspace();
     quiet(ws);
@@ -191,12 +173,5 @@ suite("status", () => {
     } finally {
       await runner.stop();
     }
-  });
-
-  queueModel("queued branches are counted", async () => {
-    const ws = workspace();
-    quiet(ws);
-    ws.queue(["bus/one", "bus/two"]);
-    expect((await report(ws)).queued_branches).toBe(2);
   });
 });

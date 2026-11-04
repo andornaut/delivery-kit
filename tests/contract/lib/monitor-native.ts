@@ -172,7 +172,7 @@ export function writeCodexRoute(
   targets = [ART],
 ): void {
   // A Codex route runs under a Codex registry; the Node adapter registers its conversations.
-  if (process.env.DK_IMPL === "node") ws.writeRegistry({ ...ws.registry(), harness: "codex" });
+  ws.writeRegistry({ ...ws.registry(), harness: "codex" });
   ws.writeRoute({
     version: 1,
     harness: "codex",
@@ -249,10 +249,6 @@ export function receipt(ws: Workspace): Json {
   const names = ws.list("unblock", "acks").filter((name) => name.endsWith(".json"));
   if (names.length !== 1) throw new Error(`expected one ack record, found ${names.join(",")}`);
   return ws.readJson<Json>(join("unblock", "acks", names[0]!));
-}
-
-export function ackFiles(ws: Workspace): string[] {
-  return ws.list("unblock", "acks").filter((name) => name.endsWith(".json"));
 }
 
 export function mode(path: string): number {

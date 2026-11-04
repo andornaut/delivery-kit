@@ -4,7 +4,7 @@
 import { expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { contract, RECEIVE_TIMEOUT_LATCHES, suite, workspaces } from "../lib/cases.ts";
+import { contract, suite, workspaces } from "../lib/cases.ts";
 import {
   clone,
   decision,
@@ -348,14 +348,8 @@ suite("question state", () => {
     native = new QuestionNative();
     native.hangItemsCall = 2;
     const result = await collect(native, record({ state: "clear", pending: false }));
-    if (RECEIVE_TIMEOUT_LATCHES) {
-      expect(result.state.diagnostics).toContain("native_timeout");
-      expect(result.calls.map((c) => c.method)).toEqual(["thread/items/list"]);
-    } else {
-      // v0.9.1: the timeout is not recognized as one, and nothing is proven.
-      expect(result.state.diagnostics).not.toContain("native_timeout");
-      expect(result.state.status).not.toBe("clear");
-    }
+    expect(result.state.diagnostics).toContain("native_timeout");
+    expect(result.calls.map((c) => c.method)).toEqual(["thread/items/list"]);
   });
 
   contract("old compaction or partial history does not taint complete current proof", async () => {

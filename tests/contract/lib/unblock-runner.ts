@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { impl, type Resident, startRunner } from "./adapter.ts";
+import { type Resident, startRunner } from "./adapter.ts";
 import { CodexSocket } from "./codex-socket.ts";
 import { at, sleep } from "./time.ts";
 import { ART, GAMEPLAY, NativeWorld, TECH } from "./unblock-native.ts";
@@ -140,13 +140,6 @@ export class Monitored {
       () => !this.ws.exists("active-departure") || this.ws.read("active-departure") === "",
       timeoutMs,
     );
-    // The loop clears active-departure before it reads the clock for its next deadline; wait
-    // until it is back in its short sleeps, so that read cannot see the jumped time.
-    // The 1.0 runner sleeps in-process and has no such window, so only Bash waits here.
-    if (impl.name === "bash") {
-      const sleeping = this.ws.sleepers();
-      await this.runner!.until(() => this.ws.sleepers() >= sleeping + 2, timeoutMs);
-    }
     const mark = this.output.length;
     const now = virtualNow(this.ws);
     if (epoch + 1 <= now) throw new Error(`clock already past ${epoch}`);

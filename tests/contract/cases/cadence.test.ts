@@ -1,7 +1,7 @@
 // Wall-clock monitor cadence on a Codex route, independent of release ticks (from
 // tests/test_monitor_cadence.py). The native boundary is the fake control socket: one
 // connection per dispatched slot, queue reads name the route members, thread/list names parents.
-import { writeFileSync } from "node:fs";
+
 import { afterAll, expect } from "vitest";
 
 import { cli, execute, impl, startRunner } from "../lib/adapter.ts";
@@ -18,7 +18,6 @@ import {
 } from "../lib/claude-codex.ts";
 import { threads, tick, virtualNow } from "../lib/claude-fixture.ts";
 import {
-  bashConfig,
   CASE_TIMEOUT_MS,
   contract,
   suite,
@@ -28,9 +27,6 @@ import {
 import { CodexSocket } from "../lib/codex-socket.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
-
-// The 0.9 text, for the Bash-only legacy triage case.
-const ROUTE_PARENTS = "WORKER_PARENT_THREADS requires parents in the active monitor route";
 
 function monitorLines(text: string): string[] {
   return text.split("\n").filter((line) => /monitor|unblock/.test(line));
@@ -119,9 +115,7 @@ suite("monitor cadence", () => {
       const result = await tick(ws, at(20));
       expect(result.monitor.map((row) => row.slot)).toEqual([at(20)]);
       expect(result.stderr).not.toContain("monitor deferred");
-      expect(result.stderr).not.toContain(
-        impl.name === "bash" ? "WORKER_PARENT_THREADS" : WORKER_PARENTS_ROUTE_MESSAGE,
-      );
+      expect(result.stderr).not.toContain(WORKER_PARENTS_ROUTE_MESSAGE);
       expect(threads(socket, "thread/list", "parentThreadId")).toEqual(parents);
       expect(threads(socket, "thread/queue/list")[0]).toBe(MONITOR);
       expect(threads(socket, "thread/queue/list")).not.toContain(TECH);
@@ -185,24 +179,6 @@ suite("monitor cadence", () => {
       }
     },
     CASE_TIMEOUT_MS,
-  );
-
-  bashConfig(
-    "legacy triage with a parent list and no route defers at the native boundary",
-    async () => {
-      const ws = workspace();
-      const socket = await game(ws);
-      const map = `${ws.root}/sessions.json`;
-      writeFileSync(map, JSON.stringify({ codex: { tech: TECH, art: TARGET, gameplay: HELD } }));
-      ws.writeRoute("");
-      // No MONITOR_ROUTE_FILE: the departure's release-driven triage runs instead.
-      ws.legacyConf = `unset MONITOR_ROUTE_FILE\nWORKER_PARENT_THREADS=${MONITOR}\nCODEX_SHARED_ROLES=''\nSESSION_MAP_FILE=${map}\nSHARED_TARGETS_FILE=''\n`;
-      const result = await tick(ws, at(0), {
-        done: ({ stderr }) => stderr.includes(ROUTE_PARENTS),
-      });
-      expect(result.stderr).toContain(ROUTE_PARENTS);
-      expect(socket.calls).toEqual([]);
-    },
   );
 
   contract(
@@ -302,36 +278,25 @@ suite("monitor cadence", () => {
     async () => {
       const ws = workspace();
       const socket = await game(ws);
-      if (impl.name === "bash") {
-        // 0.9 validates MONITOR_MINUTES at each observer tick and keeps running.
-        for (const value of [[], [60], ["20+1"]]) {
-          ws.updateGameDevConfig({ wakeMinutes: value });
-          const result = await tick(ws, at(20), {
-            done: ({ stderr }) => stderr.includes("MONITOR_MINUTES"),
-          });
-          expect(result.stderr, JSON.stringify(value)).toContain("MONITOR_MINUTES");
-          expect(socket.connections).toHaveLength(0);
-        }
-      } else {
-        // 1.0: an empty list is valid and schedules no wake; other invalid values are rejected
-        // when the configuration loads, naming /wakeMinutes.
-        ws.updateGameDevConfig({ wakeMinutes: [] });
-        const none = await tick(ws, at(20));
-        expect(none.monitor).toEqual([]);
+      // 1.0: an empty list is valid and schedules no wake; other invalid values are rejected
+      // when the configuration loads, naming /wakeMinutes.
+      ws.updateGameDevConfig({ wakeMinutes: [] });
+      const none = await tick(ws, at(20));
+      expect(none.monitor).toEqual([]);
+      expect(socket.connections).toHaveLength(0);
+      for (const value of [[60], ["20+1"]]) {
+        ws.updateGameDevConfig({ wakeMinutes: value });
+        ws.setClock(at(19, 30), 60);
+        const result = await execute(impl.run(ws), { timeoutMs: 15_000 });
+        expect(result.code, JSON.stringify(value)).not.toBe(0);
+        expect(result.code, JSON.stringify(value)).not.toBeNull();
+        const log = ws.exists("runner.log") ? ws.read("runner.log") : "";
+        expect(result.stdout + result.stderr + log, JSON.stringify(value)).toContain(
+          "/wakeMinutes",
+        );
         expect(socket.connections).toHaveLength(0);
-        for (const value of [[60], ["20+1"]]) {
-          ws.updateGameDevConfig({ wakeMinutes: value });
-          ws.setClock(at(19, 30), 60);
-          const result = await execute(impl.run(ws), { timeoutMs: 15_000 });
-          expect(result.code, JSON.stringify(value)).not.toBe(0);
-          expect(result.code, JSON.stringify(value)).not.toBeNull();
-          const log = ws.exists("runner.log") ? ws.read("runner.log") : "";
-          expect(result.stdout + result.stderr + log, JSON.stringify(value)).toContain(
-            "/wakeMinutes",
-          );
-          expect(socket.connections).toHaveLength(0);
-        }
       }
+
       ws.updateGameDevConfig({ wakeMinutes: [10] });
       const ten = await tick(ws, at(10));
       expect(ten.monitor.map((row) => row.slot)).toEqual([at(10)]);

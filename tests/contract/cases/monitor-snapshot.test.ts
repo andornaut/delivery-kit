@@ -5,14 +5,7 @@ import { dirname } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import {
-  bashConfig,
-  CASE_TIMEOUT_MS,
-  contract,
-  RECEIVE_TIMEOUT_LATCHES,
-  suite,
-  workspaces,
-} from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import {
   ART,
   entry,
@@ -178,14 +171,6 @@ suite("monitor snapshot", () => {
     },
   );
 
-  bashConfig("an empty MONITOR_ROUTE_FILE rejects worker parents", async () => {
-    const { ws, native } = await setup();
-    ws.legacyConf = "MONITOR_ROUTE_FILE=''\n";
-    const result = await cli(ws, ["monitor-snapshot", "--recipient", TECH, "--parent", TECH]);
-    expect(result.code).toBe(2);
-    expect(native.socket.connections).toEqual([]);
-  });
-
   contract("worker collection is explicit and scoped, and failure is unavailable", async () => {
     const { ws, native } = await setup();
     native.socket.on("thread/list", { data: [] });
@@ -315,10 +300,7 @@ suite("monitor snapshot", () => {
       expect(compacted.complete).toBe(false);
       // A native call that never answers within the five-second transport bound.
       const failedSnapshot = await history({ hang: true });
-      // v0.9.1 does not recognize the receive timeout and reports a metadata failure.
-      expect(failedSnapshot.history[TECH].reason_code).toBe(
-        RECEIVE_TIMEOUT_LATCHES ? "transport_failure" : "metadata_failure",
-      );
+      expect(failedSnapshot.history[TECH].reason_code).toBe("transport_failure");
       expect(failedSnapshot.errors).toEqual({});
       expect(failedSnapshot.queues[TECH]).toEqual([entry("one"), entry("two")]);
       expect(JSON.stringify([malformed, unknown, compacted, failedSnapshot])).not.toContain(

@@ -4,23 +4,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import {
-  CASE_TIMEOUT_MS,
-  CI_POLL_SECONDS,
-  contract,
-  hardened,
-  QUEUE_MODEL,
-  queueModel,
-  suite,
-  workspaces,
-} from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
-import { BASE, SHA, type Workspace } from "../lib/workspace.ts";
+import { SHA, type Workspace } from "../lib/workspace.ts";
 
 const MONITOR = "00000000-0000-4000-8000-000000000001";
 const EVERY_MINUTE = Array.from({ length: 60 }, (_, m) => String(m).padStart(2, "0"));
-const REPAIR = "bus/ci-repair";
 const WRANGLER = "node_modules/wrangler/bin/wrangler.js";
 
 /** The gate outputs 1.0 copies out of its container with docker cp. */
@@ -54,8 +44,8 @@ function pushes(ws: Workspace): number {
 }
 
 /**
- * Gate container steps: one install and one full gate per gated tree. 0.9 runs each as its own
- * `docker run`; 1.0 runs them as `docker exec` steps in one created container.
+ * Gate container steps: one install and one full gate per gated tree, run as `docker exec` steps
+ * in one created container.
  */
 function containers(ws: Workspace) {
   return ws.calls("docker").filter((call) => {
@@ -67,19 +57,11 @@ function containers(ws: Workspace) {
 }
 
 function deploys(ws: Workspace) {
-  return ws
-    .calls()
-    .filter(
-      (call) => call.tool === "wrangler" || (call.tool === "node" && call.args.includes("deploy")),
-    );
+  return ws.calls("wrangler");
 }
 
 function kinds(ws: Workspace): string[] {
   return ws.events().map((event) => String(event.kind));
-}
-
-function blockedEvent(ws: Workspace): boolean {
-  return kinds(ws).some((kind) => kind.startsWith("blocked-"));
 }
 
 async function departOnce(ws: Workspace, done: () => boolean, speed = 30): Promise<Resident> {
@@ -87,16 +69,6 @@ async function departOnce(ws: Workspace, done: () => boolean, speed = 30): Promi
   const runner = startRunner(ws);
   await runner.until(done, 30_000);
   return runner;
-}
-
-function prepareRepair(ws: Workspace): string {
-  const approval = ws.path("ci-repair-approval");
-  ws.remoteHead = BASE;
-  ws.write("last-push.sha", BASE + "\n");
-  ws.write(`ci/${BASE}.status`, "failure\n");
-  ws.write("ci-repair-approval", `${BASE}\n${REPAIR}\n${SHA}\n`);
-  ws.queue([REPAIR]);
-  return approval;
 }
 
 suite("departure", () => {
@@ -168,26 +140,24 @@ suite("departure", () => {
     const runner = await departOnce(ws, () => kinds(ws).includes("deploy_success"));
     await runner.stop();
     expect(deploys(ws).length).toBe(1);
-    if (impl.name === "node") {
-      expect(copiedOut(ws)).toEqual([
-        "/tmp/gate-logs/.",
-        "/tmp/work/dist/.",
-        "/tmp/work/node_modules/.",
-      ]);
-      // Copied after the gate script and before the deployment.
-      const calls = ws.calls();
-      const gate = calls.findIndex(
-        (call) => call.tool === "docker" && (call.args.at(-1) ?? "").startsWith("set -e"),
-      );
-      const copy = calls.findIndex(
-        (call) =>
-          call.tool === "docker" && (call.args.at(-2) ?? "").endsWith(":/tmp/work/node_modules/."),
-      );
-      const deploy = calls.findIndex((call) => call.tool === "wrangler");
-      expect(gate).toBeGreaterThanOrEqual(0);
-      expect(copy).toBeGreaterThan(gate);
-      expect(deploy).toBeGreaterThan(copy);
-    }
+    expect(copiedOut(ws)).toEqual([
+      "/tmp/gate-logs/.",
+      "/tmp/work/dist/.",
+      "/tmp/work/node_modules/.",
+    ]);
+    // Copied after the gate script and before the deployment.
+    const calls = ws.calls();
+    const gate = calls.findIndex(
+      (call) => call.tool === "docker" && (call.args.at(-1) ?? "").startsWith("set -e"),
+    );
+    const copy = calls.findIndex(
+      (call) =>
+        call.tool === "docker" && (call.args.at(-2) ?? "").endsWith(":/tmp/work/node_modules/."),
+    );
+    const deploy = calls.findIndex((call) => call.tool === "wrangler");
+    expect(gate).toBeGreaterThanOrEqual(0);
+    expect(copy).toBeGreaterThan(gate);
+    expect(deploy).toBeGreaterThan(copy);
   });
 
   contract(
@@ -208,11 +178,9 @@ suite("departure", () => {
       expect(existsSync(`${work}/${WRANGLER}`)).toBe(false);
       expect(deploys(ws)).toEqual([]);
       expect(kinds(ws)).not.toContain("deploy_success");
-      if (impl.name === "node") {
-        expect(result.stdout).toContain(
-          `deployment of ${SHA} refused: ${WRANGLER} is missing from the gated worktree`,
-        );
-      }
+      expect(result.stdout).toContain(
+        `deployment of ${SHA} refused: ${WRANGLER} is missing from the gated worktree`,
+      );
     },
   );
 
@@ -232,7 +200,7 @@ suite("departure", () => {
   });
 
   contract(
-    "a failed gate or install never pushes, stages deployment or deletes the batch branch",
+    "a failed gate or install never pushes or stages deployment",
     async () => {
       for (const failure of ["gateFail", "installFail"] as const) {
         const ws = workspace();
@@ -242,112 +210,16 @@ suite("departure", () => {
         const runner = await departOnce(ws, () =>
           kinds(ws).includes("blocked-" + (failure === "gateFail" ? "full-gate" : "install")),
         );
-        if (QUEUE_MODEL)
-          await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
-        const result = await runner.stop();
+        await runner.stop();
         expect(pushes(ws), failure).toBe(0);
         expect(ws.exists("deploy-pending"), failure).toBe(false);
         expect(deploys(ws), failure).toEqual([]);
-        // 1.0 copies only the gate logs out of a failed gate; 0.9 has no copy-out step.
+        // Only the gate logs are copied out of a failed gate.
         const outputs = copiedOut(ws).filter((source) => source !== "/tmp/gate-logs/.");
         expect(outputs, failure).toEqual([]);
-        if (QUEUE_MODEL) expect(result.stdout, failure).toContain("kept branch batch-");
-        const deleted = ws
-          .calls("git")
-          .some((call) => call.args.includes("branch") && call.args.includes("-D"));
-        expect(deleted, failure).toBe(false);
       }
     },
     CASE_TIMEOUT_MS,
-  );
-
-  for (const [title, setup, rejectedAtDeparture] of [
-    [
-      "a branch tip other than the approved one",
-      (ws: Workspace) => ws.updateControl((c) => (c.git = { branchTip: "8".repeat(40) })),
-      true,
-    ],
-    ["an extra queued branch", (ws: Workspace) => ws.queue([REPAIR, "bus/extra"]), true],
-    [
-      "a remote base other than the failed push",
-      (ws: Workspace) => (ws.remoteHead = "7".repeat(40)),
-      true,
-    ],
-    [
-      "a failed gate",
-      (ws: Workspace) => ws.updateControl((c) => (c.docker = { gateFail: true })),
-      false,
-    ],
-    [
-      "a failed push",
-      (ws: Workspace) => ws.updateControl((c) => (c.git = { pushFail: true })),
-      false,
-    ],
-    [
-      "a base moved during the gate",
-      (ws: Workspace) => ws.updateControl((c) => (c.docker = { moveBase: true })),
-      false,
-    ],
-    [
-      "an approval changed during the gate",
-      (ws: Workspace) =>
-        ws.updateControl((c) => (c.docker = { changeApproval: ws.path("ci-repair-approval") })),
-      false,
-    ],
-    [
-      "a scratch tree other than the approved tip",
-      (ws: Workspace) => ws.updateControl((c) => (c.git = { wrongTree: "0".repeat(40) })),
-      false,
-    ],
-  ] as const) {
-    queueModel(`repair approval rejects ${title} and preserves the approval`, async () => {
-      const ws = workspace();
-      bus(ws);
-      prepareRepair(ws);
-      setup(ws);
-      const queued = ws.read("bus-queue");
-      const runner = await departOnce(ws, () => blockedEvent(ws));
-      await runner.stop();
-      expect(ws.exists("ci-repair-approval")).toBe(true);
-      expect(ws.exists("ci-repair-approval.consumed")).toBe(false);
-      if (title !== "a failed push") expect(pushes(ws)).toBe(0);
-      if (rejectedAtDeparture) {
-        // A red departure validates its complete queue before draining it.
-        expect(ws.read("bus-queue")).toBe(queued);
-        expect(containers(ws)).toEqual([]);
-      }
-    });
-  }
-
-  queueModel(
-    "a one-shot repair requires the full gate, is consumed only after push and rejects replay",
-    async () => {
-      const ws = workspace();
-      bus(ws);
-      prepareRepair(ws);
-      const runner = await departOnce(
-        ws,
-        () => ws.exists("ci-repair-approval.consumed") && kinds(ws).includes("push"),
-      );
-      await runner.stop();
-      expect(ws.exists("ci-repair-approval")).toBe(false);
-      expect(ws.read("bus-queue")).toBe("");
-      expect(containers(ws).length).toBe(2);
-      expect(pushes(ws)).toBe(1);
-      expect(ws.read(`ci/${BASE}.status`).trim()).toBe("failure");
-      // Reintroducing the same approval cannot reuse it, even with the remote reset.
-      ws.remoteHead = BASE;
-      ws.write("last-push.sha", BASE + "\n");
-      ws.write("ci-repair-approval", ws.read("ci-repair-approval.consumed"));
-      ws.queue([REPAIR]);
-      ws.clearCalls();
-      const replay = await departOnce(ws, () => kinds(ws).includes("blocked-CI"));
-      await replay.stop();
-      expect(pushes(ws)).toBe(0);
-      expect(containers(ws)).toEqual([]);
-      expect(ws.exists("ci-repair-approval")).toBe(true);
-      expect(ws.exists("ci-repair-approval.consumed")).toBe(true);
-    },
   );
 
   contract(
@@ -387,7 +259,6 @@ suite("departure", () => {
       impl.offer(ws, ["bus/queued"]);
       const runner = await departOnce(ws, () => kinds(ws).includes("blocked-load"));
       await runner.stop();
-      if (QUEUE_MODEL) expect(ws.read("bus-queue")).toBe("bus/queued\n");
       expect(new Set(kinds(ws))).toEqual(new Set(["attempt", "blocked-load"]));
       expect(containers(ws)).toEqual([]);
     },
@@ -445,7 +316,7 @@ suite("departure", () => {
         const ws = workspace();
         bus(ws, { github: "fixture/project" });
         ws.config.deploy = { mode: "none", skipPattern: "" };
-        ws.config.ci = { requiredNames: ["Test"], pollSeconds: CI_POLL_SECONDS, timeoutSeconds: 1 };
+        ws.config.ci = { requiredNames: ["Test"], pollSeconds: 1, timeoutSeconds: 1 };
         ws.updateControl((c) => (c.gh = { checks: { [SHA]: [...runs] } }));
         impl.offer(ws, ["bus/feature"]);
         const runner = await departOnce(
@@ -482,15 +353,12 @@ suite("departure", () => {
     );
     // Let the departure itself finish; only the detached watcher should remain.
     await runner.until(
-      () =>
-        runner.output().stdout.includes(QUEUE_MODEL ? "landed bus/feature" : `pushed ${SHA}`) &&
-        ws.read("active-departure") === "",
+      () => runner.output().stdout.includes(`pushed ${SHA}`) && ws.read("active-departure") === "",
     );
     await runner.terminateLeader();
     await sleep(300);
     try {
-      // merge.lock is the 0.9 batch lock; 1.0 has no batch.
-      for (const name of ["runner.lock", "loop.lock", ...(QUEUE_MODEL ? ["merge.lock"] : [])]) {
+      for (const name of ["runner.lock", "loop.lock"]) {
         const probe = await hold(ws.path(name), "5>>");
         await probe.release();
       }
@@ -509,8 +377,9 @@ suite("departure", () => {
     expect(ws.calls("docker").map((call) => call.args[0])).toEqual(["ps"]);
   });
 
-  hardened("push and deployment stamps are replaced by rename, never rewritten in place", {
-    node: async () => {
+  contract(
+    "push and deployment stamps are replaced by rename, never rewritten in place",
+    async () => {
       const ws = workspace();
       bus(ws);
       const stamps = ["last-push", "last-push.sha", "last-deploy", "last-deploy.sha"];
@@ -522,18 +391,5 @@ suite("departure", () => {
       for (const name of stamps) expect(ws.inode(name), name).not.toBe(before[name]);
       expect(ws.list().filter((name) => name.endsWith(".tmp"))).toEqual([]);
     },
-    bash: async () => {
-      // 0.9 truncates these stamps in place (no temp file, no fsync).
-      const ws = workspace();
-      bus(ws);
-      const stamps = ["last-push", "last-push.sha", "last-deploy", "last-deploy.sha"];
-      for (const name of stamps) ws.write(name, "old\n");
-      const before = Object.fromEntries(stamps.map((name) => [name, ws.inode(name)]));
-      impl.offer(ws, ["bus/feature"]);
-      const runner = await departOnce(ws, () => ws.read("last-deploy.sha").trim() === SHA);
-      await runner.stop();
-      for (const name of stamps) expect(ws.inode(name), name).toBe(before[name]);
-      expect(ws.read("last-push.sha").trim()).toBe(SHA);
-    },
-  });
+  );
 });

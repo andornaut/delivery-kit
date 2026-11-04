@@ -1,21 +1,12 @@
 // Bus events for the confirmed Codex monitor, flushed by the resident runner's observer
 // (from tests/test_event_native.py).
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
-import { cli, impl } from "../lib/adapter.ts";
-import {
-  bashConfig,
-  CASE_TIMEOUT_MS,
-  CODEX_QUEUE_REMOVED,
-  contract,
-  retiredOnNode,
-  suite,
-  workspaces,
-} from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { sleep } from "../lib/time.ts";
-import { ART, rpcError, STALE, TECH } from "../lib/unblock-native.ts";
+import { rpcError, STALE, TECH } from "../lib/unblock-native.ts";
 import { codexRoute, Monitored } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -164,7 +155,7 @@ suite("codex events", () => {
       }
       await m.start();
       await m.runner!.until(() => receiptStatus(m.ws) === "deferred");
-      if (impl.name === "node" && (mode === "local" || mode === "race")) {
+      if (mode === "local" || mode === "race") {
         // 1.0 defers from the local record alone with no handshake: later flushes open no
         // connection either (in race mode the record turns pending during the first flush).
         // Step the clock across three flush intervals and look.
@@ -239,46 +230,6 @@ suite("codex events", () => {
     CASE_TIMEOUT_MS,
   );
 
-  retiredOnNode(
-    CODEX_QUEUE_REMOVED,
-    "codex-queue",
-    "monitor routing needs no dispatch host; other recipients and no route keep the Codex queue",
-    async () => {
-      const native = await reporter();
-      await native.start();
-      await native.runner!.until(() => sent(native.ws));
-      expect(native.world.mutations()).toHaveLength(1);
-      expect(native.ws.calls("codex")).toEqual([]);
-
-      for (const options of [{ recipient: "art" }, { route: null }]) {
-        const m = await reporter(options);
-        await m.start();
-        await m.runner!.until(() => sent(m.ws));
-        expect(m.ws.calls("codex")).toHaveLength(1);
-        expect(m.socket.connections).toEqual([]);
-      }
-
-      for (const change of [
-        { state: "held" },
-        { version: 2 },
-        { targets: [] },
-        { harness: "other" },
-      ]) {
-        const ws = workspace();
-        const m = await reporter({
-          ws,
-          route: codexRoute(ws, { host_project_root: join(ws.root, "dispatch-host"), ...change }),
-        });
-        await m.start();
-        await sleep(2500);
-        expect(m.socket.connections, JSON.stringify(change)).toEqual([]);
-        expect(m.ws.calls("codex")).toEqual([]);
-        expect(sent(m.ws)).toBe(false);
-      }
-    },
-    CASE_TIMEOUT_MS,
-  );
-
   contract(
     "invalid, malformed and held routes never fall back to the Codex queue",
     async () => {
@@ -302,91 +253,5 @@ suite("codex events", () => {
       }
     },
     CASE_TIMEOUT_MS,
-  );
-
-  bashConfig(
-    "an empty or missing MONITOR_ROUTE_FILE never falls back to the Codex queue",
-    async () => {
-      for (const value of ["''", "/nonexistent/route.json"]) {
-        const m = await reporter();
-        m.ws.legacyConf = `MONITOR_ROUTE_FILE=${value}\n`;
-        await m.start();
-        await sleep(2500);
-        expect(m.ws.calls("codex"), value).toEqual([]);
-        expect(m.socket.connections, value).toEqual([]);
-        expect(sent(m.ws)).toBe(false);
-      }
-    },
-  );
-
-  bashConfig(
-    "configuration exports the selected interpreter, route and socket to event and monitor subprocesses",
-    async () => {
-      const ws = workspace();
-      const log = join(ws.root, "environment.log");
-      const wrapper = join(ws.root, "native-python");
-      const lines = ["#!/bin/sh", `{ printf '%s\\n' "$1"`];
-      for (const name of ["MONITOR_ROUTE_FILE", "CODEX_CONTROL_SOCKET", "CODEX_PYTHON"]) {
-        lines.push(`printf '${name}=%s\\n' "\${${name}-__unset__}"`);
-      }
-      lines.push(`} >> '${log}'`, "");
-      writeFileSync(wrapper, lines.join("\n"));
-      chmodSync(wrapper, 0o755);
-      const m = await reporter({ ws });
-      delete ws.env.CODEX_CONTROL_SOCKET;
-      ws.legacyConf = `CODEX_PYTHON='${wrapper}'\nCODEX_CONTROL_SOCKET=/fixture/control.sock\n`;
-      await m.start();
-      await m.runner!.until(() => existsSync(log));
-      await m.stop();
-      const [argv, ...env] = readFileSync(log, "utf8").split("\n");
-      expect(argv?.endsWith("/event_native.py")).toBe(true);
-      expect(env.slice(0, 3)).toEqual([
-        `MONITOR_ROUTE_FILE=${ws.routeFile}`,
-        "CODEX_CONTROL_SOCKET=/fixture/control.sock",
-        `CODEX_PYTHON=${wrapper}`,
-      ]);
-
-      rmSync(ws.routeFile);
-      for (const [extra, value] of [
-        ["", "__unset__"],
-        ["MONITOR_ROUTE_FILE=''\nCODEX_CONTROL_SOCKET=''\n", ""],
-      ] as const) {
-        writeFileSync(log, "");
-        ws.legacyConf = `CODEX_PYTHON='${wrapper}'\n${extra}`;
-        const result = await cli(ws, ["monitor-snapshot", "--recipient", TECH]);
-        expect(result.code, result.stderr).toBe(0);
-        const rows = readFileSync(log, "utf8").split("\n");
-        expect(rows.slice(1, 4)).toEqual([
-          `MONITOR_ROUTE_FILE=${value}`,
-          `CODEX_CONTROL_SOCKET=${value}`,
-          `CODEX_PYTHON=${wrapper}`,
-        ]);
-      }
-    },
-  );
-
-  retiredOnNode(
-    CODEX_QUEUE_REMOVED,
-    "codex-queue",
-    "a non-monitor reporter keeps the Codex queue under active, held and absent routes",
-    async () => {
-      for (const state of ["active", "held", "absent"]) {
-        const ws = workspace();
-        const m = await reporter({
-          ws,
-          recipient: "art",
-          route:
-            state === "absent"
-              ? null
-              : codexRoute(ws, { host_project_root: join(ws.root, "dispatch-host"), state }),
-        });
-        await m.start();
-        await m.runner!.until(() => sent(m.ws));
-        const [call] = m.ws.calls("codex");
-        expect(call?.args.slice(0, 4), state).toEqual(["queue", "--thread", ART, "--message"]);
-        expect(m.ws.events().every((event) => event.sent === true)).toBe(true);
-        expect(m.socket.connections).toEqual([]);
-      }
-    },
   );
 });

@@ -7,23 +7,14 @@ import { expect } from "vitest";
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
 import {
   agents,
-  ARCHIE,
   Channel,
-  CHIBI,
   clear,
   claudeGame,
   claudeRoute,
   eventRequestId,
   MONITOR,
 } from "../lib/claude-fixture.ts";
-import {
-  bashConfig,
-  CASE_TIMEOUT_MS,
-  contract,
-  EXIT_INVALID_CONFIG,
-  suite,
-  workspaces,
-} from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
@@ -209,24 +200,6 @@ suite("claude bus events", () => {
           (ws) => (ws.config.reports = { project: "Fixture", recipient: "archie-tech" }),
         ],
         ["route held", (ws) => ws.writeRoute(claudeRoute(ws, { state: "held" }))],
-        // On Node a converted version 1 route delivers: routes carry no harness
-        // (ROUTES_CARRY_NO_HARNESS), so this sub-case is Bash parity only.
-        ...(impl.name !== "bash"
-          ? []
-          : ([
-              [
-                "version 1 route",
-                (ws) =>
-                  ws.writeRoute({
-                    version: 1,
-                    harness: "codex",
-                    host_project_root: ws.repo,
-                    state: "active",
-                    monitor_thread_id: ARCHIE,
-                    targets: [{ thread_id: CHIBI, ownership: "active" }],
-                  }),
-              ],
-            ] as Array<[string, (ws: Workspace) => void]>)),
       ];
       for (const [name, change] of cases) {
         const ws = workspace();
@@ -250,31 +223,13 @@ suite("claude bus events", () => {
     CASE_TIMEOUT_MS,
   );
 
-  bashConfig(
-    "REPORT_SESSION_ID selects the Claude sink even with a legacy REPORT_THREAD set",
-    async () => {
-      const ws = workspace();
-      blockedDeparture(ws);
-      ws.legacyConf = `REPORT_THREAD=${ARCHIE}\n`;
-      const runner = startRunner(ws);
-      try {
-        await runner.until(() => spooled(ws).length === 1);
-      } finally {
-        await runner.stop();
-      }
-      expect(spooled(ws)[0]!.recipient).toBe(MONITOR);
-      expect(ws.calls("codex")).toEqual([]);
-      expect(events(ws)[0]!.sent).toBe(false);
-    },
-  );
-
   contract("the report recipient must resolve to a canonical session UUID", async () => {
     const ws = workspace();
     claudeGame(ws, { recipient: true });
     for (const [value, expected] of [
       [MONITOR, 0],
-      ["AAAAAAAA-0000-4000-8000-000000000001", EXIT_INVALID_CONFIG],
-      ["not-a-uuid", EXIT_INVALID_CONFIG],
+      ["AAAAAAAA-0000-4000-8000-000000000001", EXIT_INVALID],
+      ["not-a-uuid", EXIT_INVALID],
     ] as const) {
       ws.writeRegistry({
         schema: 1,

@@ -1,8 +1,7 @@
 // Contract harness in isolated containers, following check.ts: uid 19001 in the checkout's
-// group, no host mount, the source streamed in as a tar, and the npm cache and the verified
-// v0.9.1 parity release (tests/contract/lib/parity.ts) in a named volume. A first container
-// fills the volume with network access; the build and both implementations' cases then run
-// with no network, and both gate. Nothing is written back to the host.
+// group, no host mount, the source streamed in as a tar, and the npm cache in a named volume. A
+// first container fills the volume with network access; the build and the cases then run with
+// no network. Nothing is written back to the host.
 // Usage: contract.ts [--lock] [vitest args]
 //   --lock  regenerate tests/contract/package-lock.json; the file leaves through stdout.
 import { spawnSync } from "node:child_process";
@@ -30,14 +29,10 @@ const LOCK = `
   cat package-lock.json
 `;
 
-// CLEANUP (added 2026-11-04): remove once both games run delivery-kit 1.x and have completed one clean departure cycle.
-// The bash parity release install in POPULATE and POPULATE_FILES, and the DK_IMPL=bash run in
-// CASES.
 const POPULATE = `
   mkdir /tmp/fetch && tar -x -C /tmp/fetch
   cd /tmp/fetch && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
   cd tests/contract && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund >/dev/null
-  node lib/parity-install.ts
 `;
 
 const CASES = `
@@ -48,12 +43,7 @@ const CASES = `
   cd tests/contract
   npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null
   npx tsc
-  status=0
-  echo "contract: DK_IMPL=bash"
-  DK_IMPL=bash npx vitest run --maxWorkers=4 $DK_VITEST_ARGS || status=1
-  echo "contract: DK_IMPL=node"
-  DK_IMPL=node npx vitest run --maxWorkers=4 $DK_VITEST_ARGS || status=1
-  exit "$status"
+  npx vitest run --maxWorkers=4 $DK_VITEST_ARGS
 `;
 
 const POPULATE_FILES = [
@@ -61,8 +51,6 @@ const POPULATE_FILES = [
   "package-lock.json",
   "tests/contract/package.json",
   "tests/contract/package-lock.json",
-  "tests/contract/lib/parity.ts",
-  "tests/contract/lib/parity-install.ts",
 ];
 
 /** Write a tar of `names` under `cwd` to `path`, for a container's stdin. */
@@ -109,8 +97,6 @@ function main(args: string[]): number {
     "HOME=/tmp",
     "-e",
     "npm_config_cache=/var/tmp/npm",
-    "-e",
-    "DK_PARITY_DIR=/var/tmp/parity",
     "--mount",
     `type=volume,src=${volume},dst=/var/tmp`,
     "--tmpfs",
@@ -143,7 +129,7 @@ function main(args: string[]): number {
     let status = 1;
     try {
       requireLoad();
-      console.log("contract: populating the npm cache and parity release volume (network)");
+      console.log("contract: populating the npm cache volume (network)");
       const populate = join(scratch, "populate.tar");
       tarFile(root, POPULATE_FILES, populate);
       status = withStdin(populate, (fd) =>

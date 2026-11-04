@@ -2,7 +2,7 @@
 // RouteTests). Observed through the scheduled brief and monitor-snapshot.
 import { expect } from "vitest";
 
-import { cli, impl } from "../lib/adapter.ts";
+import { cli } from "../lib/adapter.ts";
 import {
   ARCHIE,
   briefTarget,
@@ -12,15 +12,7 @@ import {
   MONITOR,
   tick,
 } from "../lib/claude-fixture.ts";
-import {
-  CASE_TIMEOUT_MS,
-  contract,
-  NO_VERSION_2_ROUTE,
-  retiredOnNode,
-  ROUTE_INVALID_MESSAGE,
-  suite,
-  workspaces,
-} from "../lib/cases.ts";
+import { contract, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
 
 const SLOT = at(20);
@@ -61,51 +53,6 @@ suite("claude route", () => {
     },
   );
 
-  retiredOnNode(
-    NO_VERSION_2_ROUTE,
-    "version-2-route",
-    "invalid version 2 routes are rejected by snapshot and defer the observer",
-    async () => {
-      const ws = workspace();
-      claudeGame(ws);
-      const base = claudeRoute(ws);
-      const monitor = base.monitor as Record<string, unknown>;
-      const target = (base.targets as Array<Record<string, unknown>>)[0]!;
-      const cases: Record<string, Record<string, unknown>> = {
-        version: { version: true },
-        harness: { harness: "codex" },
-        state: { state: "paused" },
-        relative_root: { host_project_root: "relative" },
-        extra_key: { monitor_thread_id: MONITOR },
-        noncanonical: {
-          targets: [{ ...target, session_id: "AAAAAAAA-0000-4000-8000-000000000002" }],
-        },
-        endpoint_key: { targets: [{ ...target, thread_id: ARCHIE }] },
-        name: { targets: [{ ...target, name: "bad\nname" }] },
-        ownership: { targets: [{ ...target, ownership: "owned" }] },
-        conflict: { targets: [target, { ...target, ownership: "held" }] },
-        monitor_target: { targets: [{ ...target, session_id: MONITOR }] },
-        monitor_missing: { monitor: { ...monitor, session_id: null } },
-        monitor_held: { monitor: { ...monitor, ownership: "held" } },
-        no_active_targets: { targets: [{ ...target, ownership: "held" }] },
-      };
-      for (const [name, change] of Object.entries(cases)) {
-        ws.writeRoute(claudeRoute(ws, change));
-        const result = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
-        expect(result.code, name).not.toBe(0);
-        expect(result.stdout, name).not.toContain('"harness": "claude"');
-      }
-      expect(ws.list("unblock", "snapshots")).toEqual([]);
-      for (const name of ["version", "conflict", "no_active_targets"]) {
-        ws.writeRoute(claudeRoute(ws, cases[name]));
-        const deferred = await tick(ws, SLOT);
-        expect(deferred.stderr, name).toContain(ROUTE_INVALID_MESSAGE);
-        expect(ws.exists(`unblock/${MONITOR}-${SLOT}.json`)).toBe(false);
-      }
-    },
-    CASE_TIMEOUT_MS,
-  );
-
   contract("route harness selection keeps the Codex and Claude resolvers disjoint", async () => {
     const ws = workspace();
     claudeGame(ws);
@@ -119,24 +66,17 @@ suite("claude route", () => {
     };
     ws.writeRoute(v1);
     const codex = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
-    if (impl.name === "bash") {
-      // 0.9 selects the adapter by route version: a version 1 route takes the Codex path,
-      // which needs its control socket.
-      expect(codex.code).toBe(1);
-      expect(JSON.parse(codex.stdout).reason).toContain("CODEX_CONTROL_SOCKET");
-    } else {
-      // 1.0 selects the adapter by the registry's active harness: under a Claude registry a
-      // version 1 route is rejected or deferred and never takes the Codex path.
-      let status: unknown;
-      try {
-        status = (JSON.parse(codex.stdout) as { status?: unknown }).status;
-      } catch {
-        status = undefined;
-      }
-      expect(codex.code !== 0 || status === "deferred", codex.stdout + codex.stderr).toBe(true);
-      expect(codex.stdout + codex.stderr).not.toContain("CODEX_CONTROL_SOCKET");
-      expect(codex.stdout).not.toContain('"harness": "codex"');
+    // The registry's active harness selects the adapter: under a Claude registry a version 1
+    // route is rejected or deferred and never takes the Codex path.
+    let status: unknown;
+    try {
+      status = (JSON.parse(codex.stdout) as { status?: unknown }).status;
+    } catch {
+      status = undefined;
     }
+    expect(codex.code !== 0 || status === "deferred", codex.stdout + codex.stderr).toBe(true);
+    expect(codex.stdout + codex.stderr).not.toContain("CODEX_CONTROL_SOCKET");
+    expect(codex.stdout).not.toContain('"harness": "codex"');
     ws.writeRoute(claudeRoute(ws));
     const claude = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
     expect(claude.code).toBe(0);

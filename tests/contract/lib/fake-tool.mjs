@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join } from "node:path";
 
 const [, , tool, ...args] = process.argv;
 const dir = process.env.DK_FAKE_DIR;
@@ -54,25 +54,6 @@ function realBinary(name) {
 function passthrough(binary, argv) {
   const result = spawnSync(binary, argv, { stdio: "inherit" });
   process.exit(result.status ?? 1);
-}
-
-function virtualNow() {
-  return Math.floor(preciseNow());
-}
-
-/** Virtual seconds with the fraction, from clock.json and the clock-offsets steps. */
-function preciseNow() {
-  const clock = readJson(join(dir, "clock.json"), null);
-  if (!clock) return Date.now() / 1000;
-  let offset = 0;
-  try {
-    for (const line of readFileSync(join(dir, "clock-offsets"), "utf8").split("\n")) {
-      if (line.trim()) offset += Number(line);
-    }
-  } catch {
-    // No offsets recorded.
-  }
-  return clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000;
 }
 
 function advanceClock(seconds) {
@@ -175,10 +156,9 @@ function writableBinds(argv) {
 }
 
 /**
- * Write the Wrangler entry an install leaves in `nodeModules`. Both implementations deploy with
- * `node node_modules/wrangler/bin/wrangler.js` from the gated worktree; the entry forwards to the
- * fake `wrangler`. Only a modelled install provides it: 0.9 installs into its bound worktree,
- * and 1.0 copies node_modules/ out of a passing gate container.
+ * Write the Wrangler entry an install leaves in `nodeModules`. The runner deploys with
+ * `node_modules/wrangler/bin/wrangler.js` from the gated worktree; the entry forwards to the fake
+ * `wrangler`. Only a passing gate container provides it, through the node_modules/ copy-out.
  */
 function plantWrangler(nodeModules) {
   const entry = join(nodeModules, "wrangler", "bin");
@@ -310,58 +290,7 @@ function docker() {
   const behaviour = control.docker ?? {};
   log();
   if (args[0] === "ps") return 0;
-  if (process.env.DK_IMPL === "node") return gateProtocol(behaviour);
-  const fail = (reason) => {
-    process.stderr.write(`fake docker: ${reason}\n`);
-    return 99;
-  };
-  const cpus = args[args.indexOf("--cpus") + 1];
-  if (cpus !== String(behaviour.cpus ?? 4)) return fail(`unexpected --cpus ${cpus}`);
-  // Scripted Git stamps the control SHA; a real repository stamps its own scratch HEAD.
-  const stamp = args.find((x) => x.startsWith("WORKERS_CI_COMMIT_SHA="))?.slice(22) ?? "";
-  if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha)
-    return fail("missing exact commit stamp");
-  {
-    // 0.9.1 interim: the invoking user, with the npm cache created before it is mounted.
-    const user = args.indexOf("-u");
-    const ids = `${process.getuid()}:${process.getgid()}`;
-    if (user < 0 || args[user + 1] !== ids) return fail("gate must run as the invoking user");
-    // 0.9.0 uses `-v SRC:/npmcache`; 0.9.1 uses `--mount type=bind,src=SRC,dst=/npmcache`.
-    const cache =
-      args
-        .find((x) => x.endsWith(",dst=/npmcache"))
-        ?.split(",")
-        .find((x) => x.startsWith("src="))
-        ?.slice(4) ?? args.find((x) => x.endsWith(":/npmcache"))?.slice(0, -":/npmcache".length);
-    if (!cache || !existsSync(cache))
-      return fail("npm cache bind source must exist before mounting");
-  }
-  if (behaviour.blockWhile) {
-    // Hold the gate open while the file exists, so a case can act mid-departure.
-    while (existsSync(behaviour.blockWhile))
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  }
-  if (args.includes("--network")) {
-    if (behaviour.gateFail) return 1;
-    if (behaviour.moveBase) writeFileSync(remoteHeadFile, "9".repeat(40));
-    if (behaviour.changeApproval) writeFileSync(behaviour.changeApproval, "changed");
-    if (behaviour.advanceClock) advanceClock(behaviour.advanceClock);
-    const mount = args.find((x) => x.endsWith(":/app"));
-    if (mount) {
-      const work = mount.slice(0, -":/app".length);
-      mkdirSync(join(work, "dist"), { recursive: true });
-      writeFileSync(join(work, "dist", "index.html"), sha.slice(0, 8));
-    }
-  } else if (behaviour.installFail) {
-    return 1;
-  } else {
-    // 0.9 installs into the worktree it binds at /app.
-    const mount = args.find((x) => x.endsWith(":/app"));
-    if (mount && !behaviour.noWrangler) {
-      plantWrangler(join(mount.slice(0, -":/app".length), "node_modules"));
-    }
-  }
-  return 0;
+  return gateProtocol(behaviour);
 }
 
 function gh() {
@@ -403,54 +332,12 @@ function codex() {
   return 0;
 }
 
-function date() {
-  if (args.length === 1 && args[0] === "+%s") {
-    process.stdout.write(`${virtualNow()}\n`);
-    return 0;
-  }
-  const real = realBinary("date");
-  if (args.includes("-d") || args.some((x) => x.startsWith("--date"))) passthrough(real, args);
-  passthrough(real, ["-d", `@${virtualNow()}`, ...args]);
-  return 0;
-}
-
-function sleep() {
-  const seconds = Number(args[0] ?? 0);
-  // Record the sleeper, so the harness knows a resident loop has reached its first wait.
-  appendFileSync(join(dir, "sleepers"), `${process.ppid}\n`);
-  // Sleep in virtual time: wake when the clock has advanced by `seconds`, however fast it runs,
-  // so a paused, slowed or stepped clock holds and releases sleepers consistently. The real
-  // wait is still capped.
-  const target = preciseNow() + seconds;
-  const deadline = Date.now() + (control.maxRealSleep ?? 30) * 1000;
-  const cell = new Int32Array(new SharedArrayBuffer(4));
-  while (preciseNow() < target && Date.now() < deadline) Atomics.wait(cell, 0, 0, 25);
-  return 0;
-}
-
-function node() {
-  // The Bash deployment runs `node node_modules/wrangler/bin/wrangler.js deploy ...`, which
-  // fails, as Node does, when the install left no such entry in the worktree.
-  if (args[0] && basename(args[0]) === "wrangler.js") {
-    if (!existsSync(resolve(args[0]))) {
-      process.stderr.write(`Error: Cannot find module '${resolve(args[0])}'\n`);
-      return 1;
-    }
-    return wrangler(args.slice(1));
-  }
-  passthrough(process.execPath, args);
-  return 0;
-}
-
 const handlers = {
   claude,
   codex,
-  date,
   docker,
   gh,
   git,
-  node,
-  sleep,
   wrangler: () => wrangler(args),
 };
 const handler = handlers[tool];
