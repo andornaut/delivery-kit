@@ -188,7 +188,7 @@ export async function watchCi(
         sha,
         [
           `CI FAILED for pushed ${sha}; monitor stopped on red; deployment state tracked separately;`,
-          "inspect checks, fix and queue repair. No automatic CI rerun.",
+          "inspect checks and merge a fix on main. No automatic CI rerun.",
         ].join(" "),
       );
     } else {

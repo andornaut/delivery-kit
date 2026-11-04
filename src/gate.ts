@@ -138,7 +138,7 @@ function docker(
 
 /**
  * Remove every gate container left for this game, for example by a stopped runner. Called
- * under merge.lock, so no gate of this game is running.
+ * under departure.lock, so no gate of this game is running.
  */
 export async function removeLeftoverGates(context: BusContext): Promise<string[]> {
   const listed = await docker(context, [

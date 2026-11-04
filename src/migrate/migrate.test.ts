@@ -112,8 +112,6 @@ function buildTree(): Tree {
   }
   put(join(archieBus, "last-push.sha"), `${SHA}\n`);
   put(join(archieBus, `ci/${SHA}.status`), "success\n");
-  writeJson(join(archieBus, "feature-queued.json"), { branch: "bus/feature" });
-  writeJson(join(archieBus, "feature-ready.json"), { branch: "bus/feature" });
   writeJson(join(archieBus, "requests/one.json"), { id: "one", state: "finished" });
   writeJson(join(archieBus, "unblock/claude-spool/brief.json"), { text: "pending" });
   put(join(archieBus, "npm-cache/_cacache/index"), "cache\n");
@@ -121,7 +119,7 @@ function buildTree(): Tree {
   put(join(archieBus, "tests/wiring.py"), "# nested scripts are state\n");
   link(join(archieBus, "last-push.link"), "last-push.sha");
   link(join(archieBus, "check/venv/bin/node"), "/usr/bin/node");
-  chmodSync(join(archieBus, "feature-ready.json"), 0o640);
+  chmodSync(join(archieBus, "requests/one.json"), 0o640);
 
   for (const name of ["batch.sh", "bus-common.sh", "event.py", "unblock.py"]) {
     link(join(chibiBus, name), join(archieBus, name));
@@ -334,8 +332,6 @@ describe("migrate", () => {
       "events",
       "events/dispatch.lock",
       "events/state.lock",
-      "feature-queued.json",
-      "feature-ready.json",
       "last-push.link",
       "last-push.sha",
       "loop.lock",
@@ -355,7 +351,7 @@ describe("migrate", () => {
     expect(readFileSync(join(archie.busDir, "codex-bus.log"), "utf8")).toBe("older log\n");
     expect(readlinkSync(join(archie.busDir, "last-push.link"))).toBe("last-push.sha");
     expect(readlinkSync(join(archie.busDir, "check/venv/bin/node"))).toBe("/usr/bin/node");
-    expect(statSync(join(archie.busDir, "feature-ready.json")).mode & 0o777).toBe(0o640);
+    expect(statSync(join(archie.busDir, "requests/one.json")).mode & 0o777).toBe(0o640);
     expect(existsSync(join(tree.archieBus, "runner.log"))).toBe(false);
 
     expect(listing(chibi.busDir)).toEqual([
@@ -478,7 +474,7 @@ describe("migrate", () => {
   it("stops when the source changed after migration", async () => {
     expect((await run(tree)).status).toBe(0);
     chmodSync(tree.archieBus, 0o700);
-    put(join(tree.archieBus, "late-queued.json"), "{}\n");
+    put(join(tree.archieBus, "late-state.json"), "{}\n");
     const result = await run(tree, "--game", ARCHIE);
     expect(result.status).toBe(1);
     expect(result.err).toContain("changed since it was migrated");
@@ -601,6 +597,26 @@ describe("migrate preconditions", () => {
       "a queue lock is held",
       (t) => locks.push(holdLock(join(t.archieBus, "bus-queue.lock"))),
       "bus-queue.lock",
+    ],
+    [
+      "the 0.x queue has a branch",
+      (t) => put(join(t.archieBus, "bus-queue"), "bus/feature\n"),
+      "bus-queue: bus/feature is queued",
+    ],
+    [
+      "an admitted queue entry exists",
+      (t) => writeJson(join(t.archieBus, "feature-queued.json"), { branch: "bus/feature" }),
+      "feature-queued.json: admitted 0.x queue entry",
+    ],
+    [
+      "a ready queue entry exists",
+      (t) => writeJson(join(t.archieBus, "feature-ready.json"), { branch: "bus/feature" }),
+      "feature-ready.json: ready 0.x queue entry",
+    ],
+    [
+      "a request is pending",
+      (t) => writeJson(join(t.archieBus, "requests/two.json"), { id: "two", state: "pending" }),
+      "requests/two.json: request is pending",
     ],
     [
       "a CI watch is running",
@@ -734,8 +750,6 @@ describe("migrate --remove-legacy", () => {
         "ci",
         "codex-bus.log",
         "events",
-        "feature-queued.json",
-        "feature-ready.json",
         "last-push.link",
         "last-push.sha",
         "loop.lock",

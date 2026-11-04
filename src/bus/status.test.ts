@@ -23,7 +23,7 @@ describe("status report", () => {
       idle: true,
       idle_blockers: [],
       loop_lock_held: false,
-      queued_branches: 0,
+      gate_failed: [],
       reporter_blockers: [],
       runner_lock_held: false,
       status: "not running",
@@ -66,7 +66,8 @@ describe("status report", () => {
     writeFileSync(join(bus.requestsDir, "r1.json"), '{"state": "pending"}\n');
     mkdirSync(bus.eventsDir);
     writeFileSync(join(bus.eventsDir, "e.json"), '{"sent": false}\n');
-    writeFileSync(bus.queue, "bus/a\nbus/b\n");
+    mkdirSync(bus.gateFailedDir);
+    writeFileSync(join(bus.gateFailedDir, "c".repeat(40)), "failed\n");
     expect(statusReport(bus, true)).toMatchObject({
       drained: false,
       idle: false,
@@ -77,7 +78,7 @@ describe("status report", () => {
         `ci_watch_unrecorded:${"a".repeat(40)}`,
         "request_pending:r1",
       ],
-      queued_branches: 2,
+      gate_failed: ["c".repeat(40)],
       reporter_blockers: ["unsent_events:1"],
     });
   });

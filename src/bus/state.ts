@@ -1,4 +1,4 @@
-// The bus state layout under var/games/<g>/bus/. File names are unchanged from 0.9.x.
+// The bus state layout under var/games/<g>/bus/. Kept files keep their 0.9.x names.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -6,14 +6,12 @@ import { writeDurable } from "../durable.ts";
 
 export interface BusPaths {
   readonly dir: string;
-  readonly queue: string;
-  readonly queueLock: string;
   readonly loopLock: string;
   readonly runnerLock: string;
-  readonly mergeLock: string;
-  readonly approval: string;
-  readonly approvalConsumed: string;
-  readonly approvalLock: string;
+  /** Serializes scheduled and requested departures: gate, push and deploy staging. */
+  readonly departureLock: string;
+  /** One file per main SHA whose gate failed; that SHA is never gated again. */
+  readonly gateFailedDir: string;
   readonly activeDeparture: string;
   readonly busPid: string;
   readonly lastPush: string;
@@ -32,22 +30,20 @@ export interface BusPaths {
   readonly runnerJson: string;
   readonly resourcesLog: string;
   readonly runnerLog: string;
-  readonly npmCache: string;
 }
 
 export function busPaths(dir: string): BusPaths {
   const at = (name: string): string => join(dir, name);
   return {
     activeDeparture: at("active-departure"),
-    approval: at("ci-repair-approval"),
-    approvalConsumed: at("ci-repair-approval.consumed"),
-    approvalLock: at("ci-repair-approval.lock"),
     busPid: at("codex-bus.pid"),
     ciDir: at("ci"),
+    departureLock: at("departure.lock"),
     deployDir: at("deploy"),
     deployPending: at("deploy-pending"),
     dir,
     eventsDir: at("events"),
+    gateFailedDir: at("gate-failed"),
     gateLogsDir: at("gate-logs"),
     identity: at("runner.identity.json"),
     lastDeploy: at("last-deploy"),
@@ -56,10 +52,6 @@ export function busPaths(dir: string): BusPaths {
     lastPush: at("last-push"),
     lastPushSha: at("last-push.sha"),
     loopLock: at("loop.lock"),
-    mergeLock: at("merge.lock"),
-    npmCache: at("npm-cache"),
-    queue: at("bus-queue"),
-    queueLock: at("bus-queue.lock"),
     requestsDir: at("requests"),
     requestsLock: join(dir, "requests", "requests.lock"),
     resourcesLog: at("resources.log"),
@@ -67,6 +59,10 @@ export function busPaths(dir: string): BusPaths {
     runnerLock: at("runner.lock"),
     runnerLog: at("runner.log"),
   };
+}
+
+export function gateFailedFile(paths: BusPaths, sha: string): string {
+  return join(paths.gateFailedDir, sha);
 }
 
 export function ciStatusFile(paths: BusPaths, sha: string): string {

@@ -1,18 +1,38 @@
-// One scheduled or requested departure. A nonempty queue is one gated
-// push and deployment; queue reads and consumption happen under bus-queue.lock.
-import { deployPendingExists, retryDeploy } from "../deploy.ts";
+// One scheduled or requested trunk-based departure, under departure.lock:
+//
+// 1. Read local refs/heads/<main> in the canonical checkout.
+// 2. Skip when that HEAD is the last pushed SHA or its gate already failed.
+// 3. Gate it on a detached scratch worktree at HEAD (merge commits included).
+// 4. Push exactly that SHA to the remote main, never forced; a non-fast-forward is reported.
+// 5. Watch CI for that SHA; the deployment runs when CI passes.
+//
+// There is no cherry-pick, rewrite or revert: a failure is fixed forward by a new merge on main.
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+
+import {
+  deployNeeded,
+  deployPendingExists,
+  removeWorktree,
+  retryDeploy,
+  stageDeploy,
+} from "../deploy.ts";
+import { runGate, treeFingerprint } from "../gate.ts";
 import { holdLockAsync } from "../lock.ts";
-import { runBatch } from "./batch.ts";
 import { type BusContext, loadOk } from "./context.ts";
-import { gitOk } from "./exec.ts";
-import { readQueue } from "./queue.ts";
-import { ciGreenOrUnknown, ciNotRed } from "./repair.ts";
-import { loadRequest, type RequestRecord, type RequestStore, validateRequest } from "./requests.ts";
-import { nonEmpty, readTrimmed, truncate } from "./state.ts";
+import { git } from "./exec.ts";
+import { type RequestStore, validateRequest } from "./requests.ts";
+import { ensureDir, gateFailedFile, nonEmpty, writeLines } from "./state.ts";
 import { latestScheduledSlot, stamp } from "./time.ts";
+import { mainHead, remoteMain, skipReason } from "./trunk.ts";
 
 export function requestStore(context: BusContext): RequestStore {
-  return { exec: context.exec, paths: context.paths, repo: context.game.repo };
+  return {
+    exec: context.exec,
+    main: context.config.git.main,
+    paths: context.paths,
+    repo: context.game.repo,
+  };
 }
 
 /** One deduplicated report per departure slot. */
@@ -36,151 +56,241 @@ export function slotDetail(context: BusContext): string {
       "attempt outcomes are reported separately.",
     ].join(" ");
   }
-  if (readQueue(paths.queue).length > 0) {
-    return "queued work is waiting for the scheduled loop; attempt outcomes are reported separately.";
-  }
   if (nonEmpty(paths.deployPending)) {
     return "deployment is pending; its retry and outcome are reported separately.";
   }
-  return "queue empty; no departure is currently active.";
+  return "no departure is currently active; main departs when it has a new commit.";
 }
 
-async function underQueueLock<T>(context: BusContext, fn: () => Promise<T>): Promise<T> {
-  const lock = await holdLockAsync(context.paths.queueLock);
+interface Attempt {
+  readonly key: string;
+  readonly when: string;
+  readonly slot: number;
+  readonly requestId?: string;
+}
+
+function blocked(context: BusContext, attempt: Attempt, stage: string, message: string): number {
+  context.log(`${attempt.when} bus: blocked at ${stage}: ${message}`);
+  context.events.emit(
+    `blocked-${stage}`,
+    attempt.key,
+    `${attempt.when} blocked at ${stage}: ${message}; operator fix or a new merge on main required.`,
+  );
+  return 1;
+}
+
+/** 0 when the departure pushed or had nothing new, otherwise 1. */
+export async function depart(context: BusContext, requestId?: string): Promise<number> {
+  const lock = await holdLockAsync(context.paths.departureLock);
   try {
-    return await fn();
+    const now = context.clock.now();
+    const { departures, timezone } = context.config.schedule;
+    const attempt: Attempt = {
+      key: requestId === undefined ? String(now) : `request-${requestId}`,
+      slot: latestScheduledSlot(timezone, departures, now),
+      when: stamp(timezone, now),
+      ...(requestId === undefined ? {} : { requestId }),
+    };
+    return await departLocked(context, attempt);
   } finally {
     lock.release();
   }
 }
 
-/** depart: 0 when the departure completed or had nothing waiting, otherwise 1. */
-export async function depart(context: BusContext, requestId?: string): Promise<number> {
+async function departLocked(context: BusContext, attempt: Attempt): Promise<number> {
   const { config, paths } = context;
-  const timezone = config.schedule.timezone;
-  const attemptTime = context.clock.now();
-  const attempt = requestId === undefined ? String(attemptTime) : `request-${requestId}`;
-  const pushBefore = readTrimmed(paths.lastPushSha) ?? "";
-  const when = stamp(timezone, attemptTime);
-  const slot = latestScheduledSlot(timezone, config.schedule.departures, attemptTime);
-  const store = requestStore(context);
-  let branches: string[] = [];
-  const blocked = (stage: string, message: string): number => {
-    if (branches.length > 0) {
-      const current = readTrimmed(paths.lastPushSha) ?? "";
-      const truth =
-        current === pushBefore
-          ? "no successful new push recorded; no candidate deployment started"
-          : `pushed ${current}; deployment state tracked separately`;
-      context.events.emit(
-        `blocked-${stage}`,
-        attempt,
-        `${when} blocked at ${stage}: ${message}; ${truth}; operator fix or next scheduled retry required.`,
-      );
-    }
+  const scheduled = attempt.requestId === undefined;
+  if (
+    attempt.requestId !== undefined &&
+    !(await validateRequest(requestStore(context), attempt.requestId))
+  ) {
+    context.log(
+      `${attempt.when} bus: request ${attempt.requestId} rejected: main moved since the request`,
+    );
     return 1;
-  };
-  const fetched = (): Promise<boolean> =>
-    gitOk(context.exec, context.game.repo, ["fetch", "-q", config.git.remote]);
-
-  const first = await underQueueLock(context, async () => {
-    if (requestId !== undefined && !(await validateRequest(store, requestId))) {
-      return 1;
-    }
-    branches = readQueue(paths.queue);
-    if (requestId !== undefined) {
-      context.events.emit(
-        "attempt",
-        attempt,
-        [
-          `${when} user-authorized one-off request ${requestId}: ${branches.join(" ")};`,
-          "push not started; deployment not started.",
-        ].join(" "),
-      );
-    } else if (branches.length > 0) {
-      reportScheduledTick(
-        context,
-        slot,
-        "queued work is being checked; attempt and outcome reports follow separately.",
-      );
-      context.events.emit(
-        "attempt",
-        attempt,
-        `${when} scheduled attempt: ${branches.join(" ")}; push not started; deployment not started.`,
-      );
-    } else if (nonEmpty(paths.deployPending)) {
-      reportScheduledTick(
-        context,
-        slot,
-        "deployment retry is being checked; its outcome is reported separately.",
-      );
-    } else {
-      reportScheduledTick(context, slot, "queue empty; no new batch is queued.");
-    }
-    if (!(await fetched())) {
-      return blocked("fetch", "remote fetch failed");
-    }
-    if (!(await ciNotRed(context, branches))) {
-      return blocked("CI", "previous CI red or repair approval invalid");
-    }
-    return 0;
-  });
-  if (first !== 0) {
-    return first;
   }
   if (deployPendingExists(context)) {
-    if (!(await ciGreenOrUnknown(context))) {
-      context.log("bus: repair approval cannot retry a previous pending deployment");
-      return blocked("deployment", "repair cannot retry previous deployment");
-    }
-    if (!(await retryDeploy(context))) {
-      return blocked("deployment", "previous deployment retry failed; retained assets");
-    }
+    // A failed retry is reported and kept; it does not hold back a newer main.
+    await retryDeploy(context);
   }
+  let head: string;
+  try {
+    head = await mainHead(context.exec, context.game.repo, config.git.main);
+  } catch (error) {
+    return blocked(
+      context,
+      attempt,
+      "main",
+      `local ${config.git.main} is unreadable (${String(error)})`,
+    );
+  }
+  const skip = skipReason(paths, head);
+  if (skip !== undefined) {
+    const detail =
+      skip === "pushed"
+        ? "nothing new on main; no departure."
+        : `the gate already failed for main ${head}; waiting for a fix merged on main.`;
+    if (scheduled) {
+      reportScheduledTick(context, attempt.slot, detail);
+    }
+    context.log(`${attempt.when} bus: ${detail}`);
+    return 0;
+  }
+  if (scheduled) {
+    reportScheduledTick(
+      context,
+      attempt.slot,
+      `main ${head.slice(0, 12)} is being checked; outcome reports follow separately.`,
+    );
+  }
+  context.events.emit(
+    "attempt",
+    attempt.key,
+    `${attempt.when} ${
+      scheduled ? "scheduled attempt" : `user-authorized one-off request ${attempt.requestId ?? ""}`
+    }: main ${head}; push not started; deployment not started.`,
+  );
   if (!loadOk(context)) {
-    const limit = config.resources.loadLimit;
-    context.log(`${when} bus: load at or above ${limit}; queue retained`);
-    return blocked("load", `load at or above ${limit}; queue retained`);
+    return blocked(
+      context,
+      attempt,
+      "load",
+      `load at or above ${config.resources.loadLimit}; main retained`,
+    );
   }
-  let request: RequestRecord | undefined;
-  const second = await underQueueLock(context, async () => {
-    if (requestId !== undefined && !(await validateRequest(store, requestId))) {
-      return 1;
-    }
-    branches = readQueue(paths.queue);
-    if (!(await fetched())) {
-      return blocked("fetch", "remote fetch failed");
-    }
-    if (!(await ciNotRed(context, branches))) {
-      return blocked("CI", "previous CI red or repair approval invalid");
-    }
-    if (requestId !== undefined) {
-      if (!(await validateRequest(store, requestId))) {
-        return 1;
-      }
-      // Pin integration inputs while validation and queue consumption share this lock.
-      request = loadRequest(paths, requestId);
-    }
-    truncate(paths.queue);
-    return 0;
-  });
-  if (second !== 0) {
-    return second;
+  let remote: string | undefined;
+  try {
+    remote = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
+  } catch (error) {
+    return blocked(context, attempt, "fetch", `the remote main is unreadable (${String(error)})`);
   }
-  if (branches.length === 0) {
-    context.log(`${when} bus: nothing waiting`);
+  if (remote === head) {
+    // Already on the remote, for example pushed before a crash recorded it: record and watch.
+    recordPush(context, head);
+    context.startCi(head);
     return 0;
   }
-  context.log(`${when} bus departs with: ${branches.join(" ")}`);
-  const prefixed: BusContext = { ...context, log: (line) => context.log(`${when}  ${line}`) };
-  const pushed = await runBatch(prefixed, {
+  if (remote !== undefined) {
+    const ancestor = await context.exec({
+      args: ["-C", context.game.repo, "merge-base", "--is-ancestor", remote, head],
+      command: "git",
+    });
+    // Status 1 means the remote main is known here and is not in local main; other failures
+    // (an unknown remote commit) leave the decision to the push itself.
+    if (ancestor.status === 1) {
+      return nonFastForward(context, attempt, head, remote);
+    }
+  }
+  return gateAndPush(context, attempt, head, remote);
+}
+
+function nonFastForward(
+  context: BusContext,
+  attempt: Attempt,
+  head: string,
+  remote: string | undefined,
+): number {
+  return blocked(
+    context,
     attempt,
-    branches,
-    ...(request === undefined ? {} : { request }),
-  });
-  if (!pushed) {
-    blocked("batch", "integration or full gate failed; inspect retained batch and requeue a fix");
-    return 1;
+    "push",
+    [
+      `non-fast-forward: the remote main${remote === undefined ? "" : ` ${remote}`} is not in local main ${head};`,
+      "nothing pushed; Tech merges the remote main into local main",
+    ].join(" "),
+  );
+}
+
+function recordPush(context: BusContext, sha: string): void {
+  writeLines(context.paths.lastPush, String(context.clock.now()));
+  writeLines(context.paths.lastPushSha, sha);
+}
+
+async function gateAndPush(
+  context: BusContext,
+  attempt: Attempt,
+  head: string,
+  remote: string | undefined,
+): Promise<number> {
+  const { config, game, paths } = context;
+  const short = head.slice(0, 12);
+  const work = join(paths.dir, `gate-${head}`);
+  // A worktree left by an interrupted departure is replaced.
+  await removeWorktree(context, work);
+  await git(context.exec, game.repo, ["worktree", "add", "-q", "--detach", work, head]);
+  const gateDir = join(paths.gateLogsDir, `gate-${short}`);
+  mkdirSync(gateDir, { recursive: true });
+  const logs = mkdtempSync(join(gateDir, "attempt."));
+  writeLines(join(logs, "commit.sha"), head);
+  context.log(`${attempt.when} bus departs with main ${head}; gate logs: ${logs}`);
+  const before = await treeFingerprint(context, work);
+  const outcome = await runGate(context, { batch: short, logs, sha: head, work }, async () =>
+    (await treeFingerprint(context, work)) === before
+      ? undefined
+      : "gate discarded: Git status or reported-file fingerprints changed during checks",
+  );
+  if (!outcome.ok) {
+    ensureDir(paths.gateFailedDir);
+    writeLines(
+      gateFailedFile(paths, head),
+      attempt.when,
+      outcome.stage,
+      outcome.reason.split("\n")[0] ?? "",
+    );
+    context.log(outcome.reason);
+    await removeWorktree(context, work);
+    return blocked(
+      context,
+      attempt,
+      outcome.stage,
+      `the gate failed for main ${head}; main stays unpushed and this SHA is not gated again; merge a fix on main`,
+    );
   }
+  for (const line of outcome.output.split("\n").filter((row) => row !== "")) {
+    context.log(`${attempt.when}  ${line}`);
+  }
+  writeLines(join(work, ".bus-built.sha"), head);
+  const push = await context.exec({
+    args: [
+      "-C",
+      game.repo,
+      "push",
+      "--porcelain",
+      config.git.remote,
+      `${head}:refs/heads/${config.git.main}`,
+    ],
+    command: "git",
+  });
+  if (push.status !== 0) {
+    await removeWorktree(context, work);
+    const output = `${push.stdout}\n${push.stderr}`;
+    if (/\[rejected\]|non-fast-forward|fetch first/.test(output)) {
+      return nonFastForward(context, attempt, head, undefined);
+    }
+    return blocked(
+      context,
+      attempt,
+      "push",
+      `push of main ${head} failed: ${push.stderr.trim() || "no diagnostic"}`,
+    );
+  }
+  recordPush(context, head);
+  context.events.emit(
+    "push",
+    head,
+    [
+      `${stamp(config.schedule.timezone, context.clock.now())} departed exact pushed SHA ${head}: main;`,
+      "full gate passed; CI pending; deployment pending.",
+    ].join(" "),
+  );
+  context.log(`${attempt.when} bus: pushed ${head}`);
+  try {
+    await stageDeploy(context, { sha: head, work }, await deployNeeded(context, remote, head));
+  } catch (error) {
+    context.log(
+      `bus: deployment staging failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  context.startCi(head);
   return 0;
 }

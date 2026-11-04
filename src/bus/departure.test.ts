@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { deployAfterCi } from "../deploy.ts";
 import { depart, requestStore } from "./departure.ts";
 import { captureRequest } from "./requests.ts";
 import {
@@ -11,7 +13,8 @@ import {
   gateDocker,
   gitSync,
   makeGame,
-  queueBranch,
+  mergeFastForward,
+  mergeWithCommit,
   recordingEvents,
   testContext,
   type TestGame,
@@ -22,195 +25,205 @@ function originMain(test: TestGame): string {
 }
 
 function setup(mode: "none" | "wrangler" = "none") {
-  return makeGame((config) => {
+  const test = makeGame((config) => {
     (config.deploy as Record<string, unknown>).mode = mode;
     delete (config.deploy as Record<string, unknown>).skipPattern;
   });
+  const events = recordingEvents();
+  const started: string[] = [];
+  const failGate = { value: false };
+  const wrangler = { status: 0 };
+  const exec = fakeExec((spec) => {
+    if (spec.command === process.execPath) {
+      return { status: wrangler.status, stderr: "", stdout: "" };
+    }
+    return gateDocker({
+      gate: () =>
+        failGate.value
+          ? { status: 1, stderr: "", stdout: "lint FAIL\n" }
+          : { status: 0, stderr: "", stdout: "lint ok\n" },
+    })(spec);
+  });
+  const context = testContext(test, { events, exec, startCi: (sha) => started.push(sha) });
+  const kinds = (): string[] => events.list.map(([kind]) => kind);
+  const creates = (): number => exec.calls.filter((call) => call.args[0] === "create").length;
+  return { context, creates, events, exec, failGate, kinds, started, test, wrangler };
 }
 
-describe("depart", () => {
-  it("gates, pushes the exact batch, records last-push and starts CI", async () => {
-    const test = setup();
-    queueBranch(test, "bus/feature");
-    const events = recordingEvents();
-    const exec = fakeExec(gateDocker());
-    const started: string[] = [];
-    const context = testContext(test, { events, exec, startCi: (sha) => started.push(sha) });
+function ciStatus(test: TestGame, sha: string, value: string): void {
+  const directory = join(test.game.busDir, "ci");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, `${sha}.status`), `${value}\n`);
+}
+
+describe("trunk-based departures", () => {
+  it("gates and pushes a fast-forward main HEAD, then watches its CI", async () => {
+    const { context, exec, kinds, started, test } = setup();
+    const head = mergeFastForward(test, "feature");
     expect(await depart(context)).toBe(0);
-    const pushed = originMain(test);
-    expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${pushed}\n`);
-    expect(gitSync(test.origin, "show", "--name-only", "--format=", "main")).toBe(
-      "bus-feature.txt",
+    expect(originMain(test)).toBe(head);
+    expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
+    expect(started).toEqual([head]);
+    expect(kinds()).toEqual(["scheduled-status", "attempt", "push"]);
+    const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
+    expect(create[2]).toBe(`delivery-kit-gate-archies-dog-walks-${head.slice(0, 12)}`);
+    expect(create).toContain(
+      `type=bind,src=${join(test.game.busDir, `gate-${head}`)},dst=/src,readonly`,
     );
-    expect(started).toEqual([pushed]);
-    expect(readFileSync(context.paths.queue, "utf8")).toBe("");
-    expect(events.list.map(([kind]) => kind)).toEqual(["scheduled-status", "attempt", "push"]);
-    expect(gitSync(test.repo, "branch", "--list", "bus/feature")).toBe("");
-    const docker = exec.calls.map((call) => call.args);
-    const name = docker.find((args) => args[0] === "create")?.[2] ?? "";
-    expect(name).toMatch(/^delivery-kit-gate-archies-dog-walks-batch-\d+$/);
-    const create = docker.find((args) => args[0] === "create") ?? [];
-    expect(create).toEqual(
-      expect.arrayContaining(["--label", "game-bus=owner/game", "node:24.21.0"]),
-    );
-    expect(create).toContain("type=volume,src=delivery-kit-npm-archies-dog-walks,dst=/var/tmp");
-    // The only bind is the scratch worktree, read-only, read through its group.
-    const binds = create.filter((arg) => arg.startsWith("type=bind"));
-    expect(binds).toEqual([
-      expect.stringMatching(/^type=bind,src=.*\/bus\/batch-\d+,dst=\/src,readonly$/),
-    ]);
-    const verbs = docker.map((args) => args.slice(0, 2).join(" "));
-    expect(verbs.indexOf("network disconnect")).toBeGreaterThan(
-      verbs.findIndex((verb) => verb.startsWith("exec")),
-    );
-    expect(docker.at(-1)).toEqual(["rm", "--force", name]);
-    expect(context.lines.some((line) => line.endsWith("merged"))).toBe(true);
+    expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", create[2]]);
+    // The gate worktree was detached at HEAD and is gone after a push with no deployment.
+    expect(existsSync(join(test.game.busDir, `gate-${head}`))).toBe(false);
+    expect(gitSync(test.repo, "worktree", "list", "--porcelain")).not.toContain("gate-");
+    expect(gitSync(test.repo, "rev-parse", "HEAD")).toBe(head);
+    expect(gitSync(test.repo, "status", "--porcelain", "--untracked-files=no")).toBe("");
   });
 
-  it("reports nothing waiting for an empty queue and blocks no push", async () => {
-    const test = setup();
-    const events = recordingEvents();
-    const context = testContext(test, { events });
+  it("gates and pushes a merge-commit HEAD as it is", async () => {
+    const { context, test } = setup();
+    const head = mergeWithCommit(test, "feature");
+    expect(gitSync(test.repo, "rev-list", "--parents", "-n", "1", head).split(" ")).toHaveLength(3);
+    expect(await depart(context)).toBe(0);
+    expect(originMain(test)).toBe(head);
+  });
+
+  it("does not depart an unchanged HEAD", async () => {
+    const { context, creates, events, test } = setup();
+    mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(0);
+    const before = events.list.length;
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(1);
+    expect(events.list.slice(before).map(([kind, , message]) => [kind, message])).toEqual([
+      ["scheduled-status", expect.stringContaining("nothing new on main; no departure.")],
+    ]);
+  });
+
+  it("records a failed gate, never re-gates it and departs the fix merged next", async () => {
+    const { context, creates, failGate, kinds, test } = setup();
     const before = originMain(test);
-    expect(await depart(context)).toBe(0);
+    const broken = mergeFastForward(test, "broken");
+    failGate.value = true;
+    expect(await depart(context)).toBe(1);
     expect(originMain(test)).toBe(before);
-    expect(events.list).toEqual([
-      [
-        "scheduled-status",
-        expect.any(String),
-        expect.stringContaining("scheduled slot: queue empty; no new batch is queued."),
-      ],
-    ]);
+    expect(readFileSync(join(test.game.busDir, "gate-failed", broken), "utf8")).toContain(
+      "full-gate",
+    );
+    expect(kinds()).toContain("blocked-full-gate");
+    failGate.value = false;
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(1);
+    const fixed = mergeFastForward(test, "fix");
+    expect(await depart(context)).toBe(0);
+    expect(originMain(test)).toBe(fixed);
+    expect(gitSync(test.repo, "merge-base", "--is-ancestor", broken, fixed)).toBe("");
   });
 
-  it("retains the queue at high load and reports the blocked stage", async () => {
-    const test = setup();
-    queueBranch(test, "bus/feature");
+  it("reports a non-fast-forward rejection and pushes nothing", async () => {
+    const { context, events, test } = setup();
+    // Someone else advanced the remote main with a commit this checkout does not have.
+    const other = join(test.base, "other");
+    execFileSync("git", ["clone", "-q", test.origin, other]);
+    commitFile(other, "elsewhere.txt", "elsewhere\n");
+    gitSync(other, "push", "-q", "origin", "main");
+    const remote = originMain(test);
+    mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(1);
+    expect(originMain(test)).toBe(remote);
+    expect(events.list.at(-1)).toEqual([
+      "blocked-push",
+      expect.any(String),
+      expect.stringContaining("non-fast-forward"),
+    ]);
+    expect(existsSync(join(test.game.busDir, "gate-failed"))).toBe(false);
+  });
+
+  it("departs a fix merged after red CI, with no repair approval", async () => {
+    const { context, started, test } = setup();
+    const red = mergeFastForward(test, "red");
+    expect(await depart(context)).toBe(0);
+    ciStatus(test, red, "failure");
+    const fix = mergeFastForward(test, "fix");
+    expect(await depart(context)).toBe(0);
+    expect(originMain(test)).toBe(fix);
+    expect(started).toEqual([red, fix]);
+  });
+
+  it("departs the current HEAD for a request and rejects one whose HEAD moved", async () => {
+    const { context, kinds, test } = setup();
+    const head = mergeFastForward(test, "feature");
+    const receipt = await captureRequest(requestStore(context), "r1");
+    expect(receipt).toBe(`{"head": "${head}", "id": "r1", "state": "pending"}\n`);
+    expect(await depart(context, "r1")).toBe(0);
+    expect(originMain(test)).toBe(head);
+    expect(kinds()).toEqual(["attempt", "push"]);
+    await expect(captureRequest(requestStore(context), "r2")).rejects.toThrow(
+      "nothing new to depart",
+    );
+    mergeFastForward(test, "next");
+    await captureRequest(requestStore(context), "r3");
+    mergeFastForward(test, "later");
+    expect(await depart(context, "r3")).toBe(1);
+    expect(
+      JSON.parse(readFileSync(join(test.game.busDir, "requests", "r3.json"), "utf8")),
+    ).toMatchObject({
+      reason: "main moved since the request",
+      state: "rejected",
+    });
+  });
+
+  it("holds main at high load", async () => {
+    const test = makeGame();
     const events = recordingEvents();
     const context = testContext(test, { events, load: 30 });
-    expect(await depart(context)).toBe(1);
-    expect(readFileSync(context.paths.queue, "utf8")).toBe("bus/feature\n");
-    expect(events.list.at(-1)?.[0]).toBe("blocked-load");
-  });
-
-  it("keeps the queue and pushes nothing while the last push has red CI", async () => {
-    const test = setup();
-    queueBranch(test, "bus/feature");
-    const context = testContext(test);
-    const red = originMain(test);
-    writeFileSync(context.paths.lastPushSha, `${red}\n`);
-    mkdirSync(context.paths.ciDir, { recursive: true });
-    writeFileSync(join(context.paths.ciDir, `${red}.status`), "failure\n");
-    expect(await depart(context)).toBe(1);
-    expect(originMain(test)).toBe(red);
-    expect(context.lines).toContain(`bus: previous push ${red} has failing CI; queue retained`);
-  });
-
-  it("does not push a failed gate and keeps the batch branch", async () => {
-    const test = setup();
-    queueBranch(test, "bus/feature");
-    const events = recordingEvents();
-    const exec = fakeExec(
-      gateDocker({ gate: () => ({ status: 1, stderr: "", stdout: "lint FAIL\n" }) }),
-    );
-    const context = testContext(test, { events, exec });
     const before = originMain(test);
+    mergeFastForward(test, "feature");
     expect(await depart(context)).toBe(1);
     expect(originMain(test)).toBe(before);
-    expect(events.list.map(([kind]) => kind)).toEqual(
-      expect.arrayContaining(["blocked-full-gate", "blocked-batch"]),
-    );
-    expect(gitSync(test.repo, "branch", "--list", "batch-*")).not.toBe("");
+    expect(events.list.at(-1)?.[0]).toBe("blocked-load");
   });
+});
 
-  it("skips a conflicting branch and lands the rest", async () => {
-    const test = setup();
-    queueBranch(test, "bus/a", "same.txt");
-    gitSync(test.repo, "checkout", "-q", "-b", "bus/b", "main");
-    commitFile(test.repo, "same.txt", "different\n");
-    gitSync(test.repo, "checkout", "-q", "main");
-    writeFileSync(join(test.game.busDir, "bus-queue"), "bus/b\n", { flag: "a" });
-    const events = recordingEvents();
-    const context = testContext(test, { events, exec: fakeExec(gateDocker()) });
+describe("deployment after CI", () => {
+  it("stages the deployment at push and deploys only when CI passes", async () => {
+    const { context, exec, kinds, test } = setup("wrangler");
+    const head = mergeFastForward(test, "feature");
     expect(await depart(context)).toBe(0);
-    expect(events.list.map(([kind]) => kind)).toContain("conflict-bus/b");
-    expect(gitSync(test.repo, "branch", "--list", "bus/b")).not.toBe("");
-  });
-
-  it("integrates a request's pinned tips and retains a branch advanced during the batch", async () => {
-    const test = setup();
-    queueBranch(test, "bus/feature");
-    const exec = fakeExec((spec) => {
-      if (spec.args.at(-1)?.startsWith("set -e") === true) {
-        gitSync(test.repo, "checkout", "-q", "bus/feature");
-        commitFile(test.repo, "later.txt", "later\n");
-        gitSync(test.repo, "checkout", "-q", "main");
-      }
-      return gateDocker()(spec);
-    });
-    const events = recordingEvents();
-    const context = testContext(test, { events, exec });
-    await captureRequest(requestStore(context), "r1");
-    expect(await depart(context, "r1")).toBe(0);
-    expect(gitSync(test.origin, "show", "--name-only", "--format=", "main")).toBe(
-      "bus-feature.txt",
-    );
-    expect(gitSync(test.repo, "branch", "--list", "bus/feature")).not.toBe("");
-    expect(events.list[0]).toEqual([
-      "attempt",
-      "request-r1",
-      expect.stringContaining("user-authorized one-off request r1: bus/feature;"),
-    ]);
-  });
-
-  it("deploys gated assets through Wrangler and records the deployment", async () => {
-    const test = setup("wrangler");
-    queueBranch(test, "bus/feature");
-    const events = recordingEvents();
-    const exec = fakeExec(gateDocker());
-    const context = testContext(test, { events, exec });
-    expect(await depart(context)).toBe(0);
-    const sha = originMain(test);
-    const wrangler = exec.calls.find((call) => call.command === process.execPath);
-    expect(wrangler?.args).toEqual([
+    expect(exec.calls.some((call) => call.command === process.execPath)).toBe(false);
+    const [pending, work = ""] = readFileSync(context.paths.deployPending, "utf8").split("\n");
+    expect(pending).toBe(head);
+    ciStatus(test, head, "success");
+    expect(await deployAfterCi(context, head)).toBe(true);
+    expect(exec.calls.find((call) => call.command === process.execPath)?.args).toEqual([
       "node_modules/wrangler/bin/wrangler.js",
       "deploy",
       "--config",
       "wrangler.jsonc",
       "--no-bundle",
       "--tag",
-      sha.slice(0, 8),
+      head.slice(0, 8),
       "--message",
-      `Scheduled bus ${sha}`,
+      `Scheduled bus ${head}`,
     ]);
-    expect(readFileSync(context.paths.lastDeploySha, "utf8")).toBe(`${sha}\n`);
-    expect(existsSync(join(context.paths.deployDir, `${sha}.completed`))).toBe(true);
-    expect(events.list.map(([kind]) => kind)).toEqual(
-      expect.arrayContaining(["deploy_retry", "deploy_success"]),
-    );
+    expect(existsSync(join(context.paths.deployDir, `${head}.completed`))).toBe(true);
+    expect(existsSync(work)).toBe(false);
+    expect(kinds()).toEqual(expect.arrayContaining(["deploy_retry", "deploy_success"]));
   });
 
-  it("retains a failed deployment and retries it at the next departure", async () => {
-    const test = setup("wrangler");
-    queueBranch(test, "bus/feature");
-    let wranglerStatus = 1;
-    const exec = fakeExec((spec) =>
-      spec.command === process.execPath
-        ? { status: wranglerStatus, stderr: "", stdout: "" }
-        : gateDocker()(spec),
-    );
-    const events = recordingEvents();
-    const context = testContext(test, { events, exec });
+  it("retries a failed deployment at the next departure and lets a newer push supersede it", async () => {
+    const { context, test, wrangler } = setup("wrangler");
+    const first = mergeFastForward(test, "first");
     expect(await depart(context)).toBe(0);
-    const sha = originMain(test);
-    const [pendingSha, work] = readFileSync(context.paths.deployPending, "utf8").split("\n");
-    expect(pendingSha).toBe(sha);
-    expect(existsSync(join(work ?? "", ".bus-built.sha"))).toBe(true);
-    expect(events.list.map(([kind]) => kind)).toContain("deploy_failure");
-    wranglerStatus = 0;
+    ciStatus(test, first, "success");
+    wrangler.status = 1;
+    expect(await deployAfterCi(context, first)).toBe(false);
+    wrangler.status = 0;
     expect(await depart(context)).toBe(0);
-    expect(existsSync(context.paths.deployPending)).toBe(false);
-    expect(existsSync(work ?? "")).toBe(false);
-    expect(events.list.map(([kind]) => kind)).toContain("deploy_success");
+    expect(existsSync(join(context.paths.deployDir, `${first}.completed`))).toBe(true);
+    const second = mergeFastForward(test, "second");
+    expect(await depart(context)).toBe(0);
+    const third = mergeFastForward(test, "third");
+    expect(await depart(context)).toBe(0);
+    expect(existsSync(join(context.paths.deployDir, `${second}.superseded`))).toBe(true);
+    expect(readFileSync(context.paths.deployPending, "utf8").split("\n")[0]).toBe(third);
   });
 });

@@ -13,8 +13,8 @@ import {
   fakeExec,
   makeGame,
   manualClock,
+  mergeFastForward,
   ok,
-  queueBranch,
   recordingEvents,
   testContext,
   type TestGame,
@@ -92,7 +92,7 @@ describe("runRunner", () => {
     const test = makeGame((config) => {
       (config.deploy as Record<string, unknown>).mode = "none";
     });
-    queueBranch(test, "bus/feature");
+    mergeFastForward(test, "feature");
     const events = recordingEvents();
     const clock = manualClock(Date.UTC(2026, 10, 4, 3, 15, 0) / 1000);
     const controller = new AbortController();

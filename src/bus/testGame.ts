@@ -229,15 +229,25 @@ export function testContext(
   return Object.assign(context, { lines });
 }
 
-/** Create `bus/<name>` in the game checkout with one commit and queue it. */
-export function queueBranch(
+/** Tech's merge: a feature branch with one commit, fast-forwarded into local main. */
+export function mergeFastForward(
   test: TestGame,
   name: string,
   file = `${name.replace(/\W/g, "-")}.txt`,
 ): string {
   gitSync(test.repo, "checkout", "-q", "-b", name, "main");
-  const tip = commitFile(test.repo, file, `${name}\n`);
+  commitFile(test.repo, file, `${name}\n`);
   gitSync(test.repo, "checkout", "-q", "main");
-  writeFileSync(join(test.game.busDir, "bus-queue"), `${name}\n`, { flag: "a" });
-  return tip;
+  gitSync(test.repo, "merge", "-q", "--ff-only", name);
+  return gitSync(test.repo, "rev-parse", "HEAD");
+}
+
+/** Tech's merge: a feature branch merged into a main that moved meanwhile, as a merge commit. */
+export function mergeWithCommit(test: TestGame, name: string): string {
+  gitSync(test.repo, "checkout", "-q", "-b", name, "main");
+  commitFile(test.repo, `${name.replace(/\W/g, "-")}.txt`, `${name}\n`);
+  gitSync(test.repo, "checkout", "-q", "main");
+  commitFile(test.repo, `main-${name.replace(/\W/g, "-")}.txt`, "main\n");
+  gitSync(test.repo, "-c", "core.hooksPath=/dev/null", "merge", "-q", "--no-ff", "--no-edit", name);
+  return gitSync(test.repo, "rev-parse", "HEAD");
 }

@@ -1,13 +1,14 @@
-// Durable user-authorized one-off request receipts. Callers that validate hold
-// bus-queue.lock; every operation also holds requests/requests.lock.
+// Durable operator-authorized one-off request receipts. A request departs the local main HEAD
+// it captured, under the same rules as a scheduled departure; it never admits queue entries.
+// Every operation holds requests/requests.lock.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fsyncDirectory, writeDurable } from "../durable.ts";
 import { holdLockAsync } from "../lock.ts";
-import { type Exec, git, gitOk } from "./exec.ts";
-import { readQueue } from "./queue.ts";
+import type { Exec } from "./exec.ts";
 import { type BusPaths, ensureDir, pyDumps } from "./state.ts";
+import { mainHead, skipReason } from "./trunk.ts";
 
 export const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -16,8 +17,8 @@ export type RequestState = "finished" | "interrupted" | "pending" | "rejected" |
 export interface RequestRecord {
   id: string;
   state: RequestState;
-  /** Ordered [branch, exact tip] pairs captured under the queue lock. */
-  entries: [string, string][];
+  /** The exact local main SHA captured at request time. */
+  head: string;
   reason?: string;
   departure_exit?: number;
   completion?: string;
@@ -33,8 +34,9 @@ export class RequestError extends Error {
 export interface RequestStore {
   readonly exec: Exec;
   readonly paths: BusPaths;
-  /** The game repository whose branch tips are captured. */
+  /** The canonical game checkout whose main HEAD is captured. */
   readonly repo: string;
+  readonly main: string;
 }
 
 function recordPath(store: RequestStore, id: string): string {
@@ -61,26 +63,6 @@ function recordFiles(store: RequestStore): string[] {
     .map((name) => join(store.paths.requestsDir, name));
 }
 
-/** The queued branches and their exact tips; throws when a name or ref is invalid. */
-export async function snapshotQueue(store: RequestStore): Promise<[string, string][]> {
-  const entries: [string, string][] = [];
-  for (const branch of readQueue(store.paths.queue)) {
-    // Sequential: the snapshot is an ordered capture of the queue.
-    // eslint-disable-next-line no-await-in-loop
-    if (!(await gitOk(store.exec, store.repo, ["check-ref-format", `refs/heads/${branch}`]))) {
-      throw new RequestError(`delivery-kit: invalid queued branch name ${branch}`);
-    }
-    // eslint-disable-next-line no-await-in-loop
-    const tip = await git(store.exec, store.repo, [
-      "rev-parse",
-      "--verify",
-      `refs/heads/${branch}^{commit}`,
-    ]);
-    entries.push([branch, tip]);
-  }
-  return entries;
-}
-
 async function withRequests<T>(store: RequestStore, fn: () => Promise<T> | T): Promise<T> {
   ensureDir(store.paths.requestsDir);
   // Persist the requests directory entry before acknowledging any captured receipt.
@@ -93,31 +75,35 @@ async function withRequests<T>(store: RequestStore, fn: () => Promise<T> | T): P
   }
 }
 
-/** Capture the queue under bus-queue.lock. Repeating an ID returns its existing receipt text. */
-export async function captureRequest(store: RequestStore, id: string): Promise<string> {
+/**
+ * Capture the current local main HEAD. Repeating an ID returns its existing receipt text. A HEAD
+ * with nothing new (already pushed) or whose gate already failed is refused.
+ */
+export function captureRequest(store: RequestStore, id: string): Promise<string> {
   ensureDir(store.paths.dir);
-  const queueLock = await holdLockAsync(store.paths.queueLock);
-  try {
-    return await withRequests(store, async () => {
-      const path = recordPath(store, id);
-      try {
-        return readFileSync(path, "utf8");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
-        }
+  return withRequests(store, async () => {
+    const path = recordPath(store, id);
+    try {
+      return readFileSync(path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
       }
-      const entries = await snapshotQueue(store);
-      if (entries.length === 0) {
-        throw new RequestError("delivery-kit: request requires a nonempty queue");
-      }
-      const record: RequestRecord = { entries, id, state: "pending" };
-      writeRecord(path, record);
-      return `${pyDumps(record)}\n`;
-    });
-  } finally {
-    queueLock.release();
-  }
+    }
+    const head = await mainHead(store.exec, store.repo, store.main);
+    const skip = skipReason(store.paths, head);
+    if (skip === "pushed") {
+      throw new RequestError(`delivery-kit: main ${head} is already pushed; nothing new to depart`);
+    }
+    if (skip === "gate-failed") {
+      throw new RequestError(
+        `delivery-kit: the gate already failed for main ${head}; merge a fix first`,
+      );
+    }
+    const record: RequestRecord = { head, id, state: "pending" };
+    writeRecord(path, record);
+    return `${pyDumps(record)}\n`;
+  });
 }
 
 /** Mark the first pending request started and return its ID. */
@@ -148,20 +134,20 @@ export function recoverRequests(store: RequestStore): Promise<void> {
   });
 }
 
-/** Called under bus-queue.lock. A changed queue or tip rejects the request. */
+/** Called under departure.lock. A main HEAD that moved since capture rejects the request. */
 export function validateRequest(store: RequestStore, id: string): Promise<boolean> {
   return withRequests(store, async () => {
     const path = recordPath(store, id);
     const record = readRecord(path);
     let matches: boolean;
     try {
-      matches = JSON.stringify(await snapshotQueue(store)) === JSON.stringify(record.entries);
+      matches = (await mainHead(store.exec, store.repo, store.main)) === record.head;
     } catch {
       matches = false;
     }
     if (!matches) {
       record.state = "rejected";
-      record.reason = "queue or branch tips changed";
+      record.reason = "main moved since the request";
       writeRecord(path, record);
     }
     return matches;
@@ -181,15 +167,6 @@ export function finishRequest(store: RequestStore, id: string, exit: number): Pr
       writeRecord(path, record);
     }
   });
-}
-
-/** The pinned tip of `branch` in a request record. */
-export function pinnedTip(record: RequestRecord, branch: string): string {
-  const tip = new Map(record.entries).get(branch);
-  if (tip === undefined) {
-    throw new RequestError(`delivery-kit: request ${record.id} does not pin ${branch}`);
-  }
-  return tip;
 }
 
 export function loadRequest(paths: BusPaths, id: string): RequestRecord {

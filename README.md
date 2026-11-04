@@ -1,7 +1,7 @@
 # delivery-kit
 
-Local scheduled Git delivery: one isolated gate per integrated tree, a single push, exact-commit
-CI monitoring and deployment of the already-gated build. The kit owns the mechanisms. Each game
+Local scheduled trunk-based Git delivery: each departure gates the game's local `main` HEAD in
+isolation, pushes that exact commit, monitors its CI and deploys the already-gated build on a pass. The kit owns the mechanisms. Each game
 owns its repository, `delivery-kit.json`, credentials and schedule; game-dev owns `config.json`,
 the registry and all mutable state under `var/`.
 
@@ -33,7 +33,7 @@ directory. `--root` comes before the command.
 | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `run --game ID`                                                                                                                         | The resident runner for one game.                                                                                              |
 | `check-config [--game ID]`                                                                                                              | Validate `config.json`, `var/registry.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
-| `request --game ID --request-id SAFE_ID`                                                                                                | Record a user-authorized one-off departure of the current nonempty queue. The runner performs it.                              |
+| `request --game ID --request-id SAFE_ID`                                                                                                | Record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                      |
 | `status --game ID`                                                                                                                      | Read-only runner identity, singleton, idle and drain report.                                                                   |
 | `resource-report --game ID`                                                                                                             | Reporting-only resource information.                                                                                           |
 | `migrate [--game ID] [--dry-run] [--harness claude\|codex]`                                                                             | Move 0.9.x state into `var/` (see [Upgrading from 0.9.x](#upgrading-from-09x)).                                                |
@@ -70,8 +70,9 @@ Committed in each game and owned by its Tech role. See `examples/delivery-kit.js
 - `resources`: `cpus`, `maxWorkers` and `loadLimit`, capped at 4, 4 and 24.
 - `ci`: `requiredNames` (check names that must exist and pass for the exact pushed commit),
   `pollSeconds` and `timeoutSeconds`.
-- `deploy`: `mode` is `wrangler` or `none`; `skipPattern` is a regular expression over the batch
-  diff, and a batch whose every changed path matches it skips deployment.
+- `deploy`: `mode` is `wrangler` or `none`; `skipPattern` is a regular expression over the pushed
+  range (the remote `main` to the pushed SHA), and a push whose every changed path matches it
+  skips deployment.
 - `reports`: `project` (must equal the game's name in `config.json`), `scheduledTicks`, and the
   role names `recipient` and `workerParents`, resolved through the registry.
 
@@ -87,9 +88,10 @@ All mutable state lives in game-dev's ignored `var/`:
 - `route.json`: the monitor route.
 - `handoffs/`: checkpoints the registry references.
 - `game-dev/`: monitor review snapshots, health history, acknowledgements and retentions.
-- `games/<g>/bus/`: the bus (queue, locks, `active-departure`, scratch batches, gate logs, CI and
-  deployment state, events, requests, the delivery spool), plus `npm-cache/` for the gate,
-  `runner.json` and `runner.log`.
+- `games/<g>/bus/`: the bus (locks, `active-departure`, `gate-failed/`, the detached gate worktree
+  kept for a pending deployment, gate logs, CI and deployment state, events, requests, the
+  delivery spool), plus `runner.json` and `runner.log`. The gate's npm cache is the Docker volume
+  `delivery-kit-npm-<game>`.
 - `games/<g>/process-health.json`: the optional owner-registered process manifest.
 
 Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
@@ -121,17 +123,33 @@ replacement resumes every CI watch whose `ci/<sha>.status` is still running.
 
 ### Departures
 
-- A departure integrates the queued branches in a scratch worktree, runs the gate once in an
-  isolated container, pushes the exact gated SHA once, then deploys the retained build.
-- The gate compares Git-status fingerprints before and after its steps and stamps the build
-  commit.
-- CI monitoring waits for every `requiredNames` check, and every other registered check, on the
-  exact pushed commit. A red result blocks later pushes, except through the one-shot repair
-  approval for that exact failed commit.
-- A failed deployment keeps its pointer and artifacts for a later departure; CI and deployment
-  are tracked and reported separately.
-- One-off requests pin the queue and branch tips at capture; the departure rejects a request
-  whose queue or tips changed.
+Tech merges each reviewed feature branch into the game's local `main`, as a real merge or a
+fast-forward, and never pushes. Each departure, under `departure.lock`:
+
+1. Reads `refs/heads/main` in the canonical checkout.
+2. Skips when that HEAD is the last pushed SHA or has a `gate-failed/<sha>` record. Nothing new
+   means nothing departs.
+3. Gates it on a detached scratch worktree at HEAD, so merge commits are gated as they are.
+4. Pushes with `git push origin <sha>:refs/heads/main`, never forced. A non-fast-forward rejection
+   is reported and nothing is pushed.
+5. Watches CI for that exact SHA and deploys the gated build when CI passes.
+
+The runner never fetches, checks out or moves a ref in the canonical checkout: it reads
+`refs/heads/main`, asks the remote for its `main` with `git ls-remote` and pushes the exact SHA.
+
+- **Fix forward:** there is no cherry-pick, rewrite or revert. A red gate leaves `main` unpushed
+  and records `gate-failed/<sha>`, so that SHA is never gated again; the next departure runs once
+  Tech merges a fix. Red CI or a failed deployment is fixed the same way.
+- **Gate:** one uid 19001 container per gated SHA reads the worktree through a read-only bind,
+  checks that its copy is the commit's tree, installs with network, then runs every step with
+  none. Its logs and `dist/` are copied out and the container is removed, also after a failure.
+- **CI:** waits for every `requiredNames` check, and every other registered check, on the exact
+  pushed commit.
+- **Deployment:** staged at the push in `deploy-pending` with its worktree, run when CI passes,
+  retried at a later departure after a failure, and superseded by a newer push.
+- **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
+  rules and receipts. A HEAD that is already pushed or failed its gate is refused, and a request
+  whose HEAD moved before it departs is rejected.
 
 ## Monitor and harnesses
 
@@ -170,8 +188,11 @@ delivery-kit writes only `operations.*.lastAdoption`; the skills own every other
 
 1.0 replaces the Bash and Python mechanisms, `bus.conf` and the per-game state directories.
 Configuration moves into `delivery-kit.json` and `config.json`, Codex and Claude session maps into
-`var/registry.json`, and every state file into `var/`. The bus layout inside
-`var/games/<g>/bus/` keeps the 0.9.x file names, statuses and request IDs.
+`var/registry.json`, and every state file into `var/`. Delivery becomes trunk-based: the queue,
+admission and ready records, batch merges, cherry-picks and the CI-repair approval are gone, and
+1.x ignores `bus-queue`, `bus-queue.lock`, `merge.lock` and the `ci-repair-approval*` files that
+migration copies. The other bus files keep their 0.9.x names and statuses; request receipts now
+record `head` instead of `entries`.
 
 ### Migration
 
@@ -184,12 +205,13 @@ npx delivery-kit migrate --harness claude
 
 - **Preconditions**, checked after taking the old queue, request, delivery and event locks plus
   `var/registry.lock`: the old `runner.lock` and `loop.lock` are free, `active-departure` is empty,
-  no `ci/*.lock` is held, no request is `started`, no spool entry is `.claimed` and there is no
-  `deploy-pending`. Any failure stops the migration before its first write.
+  no `ci/*.lock` is held, no request is `started` or `pending`, no spool entry is `.claimed` and
+  there is no `deploy-pending`. The 0.x queue must be empty: no branch in `bus-queue` and no
+  admitted (`*-queued.json`) or ready (`*-ready.json`) record; each one is listed for Tech to land
+  on `main` or drop. Any failure stops the migration before its first write.
 - **Copy:** each game's `.claude/bus/` goes to `var/games/<g>/bus/` and game-dev's
   `.claude/monitor/codex/` to `var/game-dev/`, through a staging directory, with symlinks
-  preserved and both sides hashed. Tech's approval files (`*-queued.json`, `*-ready.json`) are
-  copied. Legacy scripts, `bus.conf`, 0.x snapshots, `__pycache__` and `npm-cache` are not.
+  preserved and both sides hashed. Legacy scripts, `bus.conf`, 0.x snapshots, `__pycache__` and `npm-cache` are not.
 - **Runner log:** `runner.log`, or Chibi's `codex-bus.log`, moves to `var/games/<g>/bus/runner.log`.
 - **Route:** the route host game's `.claude/monitor/route.json` is copied to `var/route.json` when
   its `host_project_root` names that game.

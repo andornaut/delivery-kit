@@ -129,6 +129,34 @@ function nonEmptyFile(path: string): boolean {
   }
 }
 
+// Tech's 0.x admission and ready records beside the queue.
+const ADMISSION_PATTERN = /^[^/]+-(queued|ready)\.json$/;
+
+/**
+ * 1.x delivers local main and has no queue, so the 0.x queue must be empty: no queued branch,
+ * admitted record or ready record. Each entry is listed for Tech to land or drop first.
+ */
+export function queueBlockers(unit: Unit, entries: readonly Entry[]): string[] {
+  const problems: string[] = [];
+  let queue = "";
+  try {
+    queue = readFileSync(join(unit.source, "bus-queue"), "utf8");
+  } catch {
+    // No queue file is an empty queue.
+  }
+  for (const branch of new Set(queue.split("\n").filter((line) => line.trim() !== ""))) {
+    problems.push(`bus-queue: ${branch} is queued; 1.x delivers local main and has no queue`);
+  }
+  for (const entry of entries) {
+    const match = entry.kind === "file" ? ADMISSION_PATTERN.exec(entry.path) : null;
+    if (match !== null) {
+      const kind = match[1] === "queued" ? "admitted" : "ready";
+      problems.push(`${entry.path}: ${kind} 0.x queue entry; land it on main or drop it first`);
+    }
+  }
+  return problems;
+}
+
 /**
  * Reasons the unit cannot be migrated now. The caller holds `unit.locks` first, so nothing can
  * start a departure, request or delivery while these are read.
@@ -151,6 +179,7 @@ export function blockers(unit: Unit, entries: readonly Entry[]): string[] {
   if (nonEmptyFile(join(unit.source, "active-departure"))) {
     problems.push("active-departure is not empty: a departure is in progress");
   }
+  problems.push(...queueBlockers(unit, entries));
   if (exists(join(unit.source, "deploy-pending"))) {
     problems.push("deploy-pending exists: it names a worktree under the old bus");
   }
@@ -169,6 +198,9 @@ export function blockers(unit: Unit, entries: readonly Entry[]): string[] {
     }
     if (state === "started") {
       problems.push(`${entry.path}: request is started`);
+    }
+    if (state === "pending") {
+      problems.push(`${entry.path}: request is pending with 0.x queue entries`);
     }
   }
   return problems;

@@ -5,6 +5,7 @@ import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { unfinishedCi, watchCi } from "../ci.ts";
+import { deployAfterCi } from "../deploy.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { deliverScheduledWake } from "../monitor/wake.ts";
 import type { BusContext } from "./context.ts";
@@ -33,7 +34,9 @@ export class CiTasks {
     if (this.#running.has(sha) || this.#signal.aborted) {
       return;
     }
+    // The deployment of a pushed SHA runs once its CI passes.
     const task = watchCi(context, sha, { signal: this.#signal })
+      .then((result) => (result === "success" ? deployAfterCi(context, sha) : undefined))
       .catch((error: unknown) => context.log(`bus: CI watch ${sha} failed: ${String(error)}`))
       .finally(() => this.#running.delete(sha));
     this.#running.set(sha, task);
@@ -99,9 +102,6 @@ export async function departureLoop(
   const store = requestStore(context);
   ensureDir(paths.dir);
   writeLines(paths.busPid, String(process.pid));
-  if (readTrimmed(paths.queue) === undefined) {
-    truncate(paths.queue);
-  }
   context.log(
     `bus: scheduled ${departures.join(" ")} (${timezone}), deployment route ${config.deploy.mode}`,
   );

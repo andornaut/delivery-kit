@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -13,7 +13,7 @@ import {
   validateRequest,
 } from "./requests.ts";
 import { busPaths } from "./state.ts";
-import { commitFile, gitSync, makeGame, queueBranch, type TestGame } from "./testGame.ts";
+import { makeGame, mergeFastForward, type TestGame } from "./testGame.ts";
 
 function store(): RequestStore & { file: (id: string) => string; test: TestGame } {
   const test = makeGame();
@@ -21,6 +21,7 @@ function store(): RequestStore & { file: (id: string) => string; test: TestGame 
   return {
     exec: spawnExec,
     file: (id) => join(paths.requestsDir, `${id}.json`),
+    main: "main",
     paths,
     repo: test.repo,
     test,
@@ -28,25 +29,29 @@ function store(): RequestStore & { file: (id: string) => string; test: TestGame 
 }
 
 describe("one-off requests", () => {
-  it("captures the ordered queue with exact tips in the 0.9.x record format, once per ID", async () => {
+  it("captures the current main HEAD once per ID and refuses one with nothing new", async () => {
     const requests = store();
-    const first = queueBranch(requests.test, "bus/one");
-    const second = queueBranch(requests.test, "bus/two");
-    const entries = `[["bus/one", "${first}"], ["bus/two", "${second}"]]`;
-    const expected = `{"entries": ${entries}, "id": "r1", "state": "pending"}\n`;
+    const head = mergeFastForward(requests.test, "feature");
+    const expected = `{"head": "${head}", "id": "r1", "state": "pending"}\n`;
     expect(await captureRequest(requests, "r1")).toBe(expected);
     expect(readFileSync(requests.file("r1"), "utf8")).toBe(expected);
-    writeFileSync(requests.paths.queue, "");
     expect(await captureRequest(requests, "r1")).toBe(expected);
-    await expect(captureRequest(requests, "r2")).rejects.toThrow(
-      "request requires a nonempty queue",
-    );
+    writeFileSync(requests.paths.lastPushSha, `${head}\n`);
+    await expect(captureRequest(requests, "r2")).rejects.toThrow("nothing new to depart");
     await expect(captureRequest(requests, "-bad")).rejects.toThrow("request ID must be 1-64");
+  });
+
+  it("refuses a HEAD whose gate already failed", async () => {
+    const requests = store();
+    const head = mergeFastForward(requests.test, "feature");
+    mkdirSync(requests.paths.gateFailedDir, { recursive: true });
+    writeFileSync(join(requests.paths.gateFailedDir, head), "failed\n");
+    await expect(captureRequest(requests, "r1")).rejects.toThrow("gate already failed");
   });
 
   it("claims, validates, finishes and recovers through the documented states", async () => {
     const requests = store();
-    queueBranch(requests.test, "bus/one");
+    mergeFastForward(requests.test, "feature");
     await captureRequest(requests, "a1");
     await captureRequest(requests, "b1");
     expect(await claimRequest(requests)).toBe("a1");
@@ -63,16 +68,14 @@ describe("one-off requests", () => {
     expect(await claimRequest(requests)).toBeUndefined();
   });
 
-  it("rejects a request whose branch tip moved after capture", async () => {
+  it("rejects a request whose main HEAD moved after capture", async () => {
     const requests = store();
-    queueBranch(requests.test, "bus/one");
+    mergeFastForward(requests.test, "feature");
     await captureRequest(requests, "r1");
-    gitSync(requests.repo, "checkout", "-q", "bus/one");
-    commitFile(requests.repo, "later.txt", "later\n");
-    gitSync(requests.repo, "checkout", "-q", "main");
+    mergeFastForward(requests.test, "later");
     expect(await validateRequest(requests, "r1")).toBe(false);
     expect(JSON.parse(readFileSync(requests.file("r1"), "utf8"))).toMatchObject({
-      reason: "queue or branch tips changed",
+      reason: "main moved since the request",
       state: "rejected",
     });
   });

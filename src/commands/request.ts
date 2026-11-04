@@ -1,5 +1,6 @@
-// request --game ID --request-id SAFE_ID: capture the current nonempty queue as a one-off
-// request. It records the request only; the resident runner performs the departure.
+// request --game ID --request-id SAFE_ID: an operator-authorized one-off departure of the
+// current local main HEAD. It records the request only; the resident runner departs it under
+// the same rules as a scheduled departure.
 import { resolveGame } from "../bus/command.ts";
 import { spawnExec } from "../bus/exec.ts";
 import { captureRequest } from "../bus/requests.ts";
@@ -21,6 +22,7 @@ export const request: Handler = async (io, root, args) => {
   try {
     const store = {
       exec: spawnExec,
+      main: resolved.config.git.main,
       paths: busPaths(resolved.game.busDir),
       repo: resolved.game.repo,
     };

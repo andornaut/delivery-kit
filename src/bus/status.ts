@@ -163,15 +163,15 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
   if (unsent > 0) {
     reporters.push(`unsent_events:${unsent}`);
   }
-  const queue = readTrimmed(paths.queue);
+  const gateFailed = jsonFiles(paths.gateFailedDir, "");
   return {
     drained: blockers.length === 0 && reporters.length === 0,
+    gate_failed: gateFailed,
     identity,
     identity_status: identityStatus,
     idle: blockers.length === 0,
     idle_blockers: blockers,
     loop_lock_held: lockHeld(paths.loopLock),
-    queued_branches: queue ? queue.split(/\s+/).length : 0,
     reporter_blockers: reporters,
     runner_lock_held: running,
     status: running ? "running" : "not running",

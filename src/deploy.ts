@@ -1,19 +1,21 @@
-// Deployment of already-gated assets. A failed deployment keeps its pending
-// pointer and worktree, and is retried only at a later departure.
+// Deployment of already-gated assets after the exact pushed SHA passes CI. The gated worktree
+// is kept with its pending pointer until the deployment succeeds; a failed deployment is
+// retried at a later departure, and a newer push supersedes it.
 import { existsSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BusContext } from "./bus/context.ts";
-import { git, gitOk, WRANGLER_ENTRY } from "./bus/exec.ts";
-import { ensureDir, readText, readTrimmed, writeLines } from "./bus/state.ts";
+import { gitOk, WRANGLER_ENTRY } from "./bus/exec.ts";
+import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "./bus/state.ts";
+import { remoteMain } from "./bus/trunk.ts";
 import { fsyncDirectory } from "./durable.ts";
 
 const SHA = /^[0-9a-f]{40}$/;
 
 export interface PendingDeploy {
   readonly sha: string;
+  /** The detached gate worktree holding the built dist/. */
   readonly work: string;
-  readonly branch: string;
 }
 
 export function readPending(context: BusContext): PendingDeploy | undefined {
@@ -21,23 +23,40 @@ export function readPending(context: BusContext): PendingDeploy | undefined {
   if (text === undefined || text === "") {
     return undefined;
   }
-  const [sha = "", work = "", branch = ""] = text.split("\n");
-  return { branch, sha, work };
+  const [sha = "", work = ""] = text.split("\n");
+  return { sha, work };
 }
 
-/** The batch diff from `from` to `to` changes a file outside the configured skip pattern. */
+export function deployPendingExists(context: BusContext): boolean {
+  return existsSync(context.paths.deployPending) && readPending(context) !== undefined;
+}
+
+/**
+ * The pushed range changes a file outside the configured skip pattern. A first push, or a
+ * previous remote SHA this checkout does not have, always needs a deployment.
+ */
 export async function deployNeeded(
   context: BusContext,
-  from: string,
+  from: string | undefined,
   to: string,
 ): Promise<boolean> {
   const pattern = context.config.deploy.skipPattern;
-  if (pattern === undefined || pattern === "") {
+  if (pattern === undefined || pattern === "" || from === undefined) {
     return true;
   }
-  const names = await git(context.exec, context.game.repo, ["diff", "--name-only", from, to]);
+  const diff = await context.exec({
+    args: ["-C", context.game.repo, "diff", "--name-only", from, to],
+    command: "git",
+  });
+  if (diff.status !== 0) {
+    return true;
+  }
   const skip = new RegExp(pattern);
-  return names.split("\n").some((name) => name !== "" && !skip.test(name));
+  return diff.stdout.split("\n").some((name) => name !== "" && !skip.test(name));
+}
+
+export async function removeWorktree(context: BusContext, work: string): Promise<void> {
+  await gitOk(context.exec, context.game.repo, ["worktree", "remove", "--force", work]);
 }
 
 function failureEvent(context: BusContext, sha: string): void {
@@ -47,26 +66,28 @@ function failureEvent(context: BusContext, sha: string): void {
       sha,
       [
         `Deployment blocked/failed for pushed ${sha}; retained pending assets; inspect configuration,`,
-        "base and artifacts before next scheduled retry. CI tracked separately.",
+        "the remote main and artifacts before the next retry. Fix forward with a new merge on main.",
       ].join(" "),
     );
   }
 }
 
 async function finishPending(context: BusContext, pending: PendingDeploy): Promise<boolean> {
-  const { paths } = context;
+  const { config, paths } = context;
   const { sha, work } = pending;
-  if (context.config.deploy.mode !== "wrangler") {
+  if (config.deploy.mode !== "wrangler") {
     context.log(`deployment pending for ${sha}; deploy.mode must be wrangler before retrying`);
     return false;
   }
-  if (!(await gitOk(context.exec, context.game.repo, ["fetch", "-q", context.config.git.remote]))) {
-    return false;
-  }
-  const current = await git(context.exec, context.game.repo, ["rev-parse", context.base]);
+  const current = await remoteMain(
+    context.exec,
+    context.game.repo,
+    config.git.remote,
+    config.git.main,
+  );
   if (current !== sha) {
     context.log(
-      `deployment pending ${sha} differs from ${context.base} (${current}); queue retained for operator review`,
+      `deployment pending ${sha} differs from the remote main (${current ?? "absent"}); retained`,
     );
     return false;
   }
@@ -87,7 +108,7 @@ async function finishPending(context: BusContext, pending: PendingDeploy): Promi
   context.events.emit(
     "deploy_retry",
     sha,
-    `Deployment pending/retrying exact pushed ${sha} using retained gated assets; CI tracked separately.`,
+    `Deployment pending/retrying exact pushed ${sha} using retained gated assets; CI passed.`,
   );
   context.log(`deploying gated assets for ${sha}; log ${log}`);
   const result = await context.exec({
@@ -106,54 +127,97 @@ async function finishPending(context: BusContext, pending: PendingDeploy): Promi
     cwd: work,
     logFile: log,
   });
-  if (result.status === 0) {
-    writeLines(paths.lastDeploySha, sha);
-    writeLines(paths.lastDeploy, String(context.clock.now()));
-    renameSync(paths.deployPending, join(paths.deployDir, `${sha}.completed`));
-    fsyncDirectory(paths.dir);
-    fsyncDirectory(paths.deployDir);
+  if (result.status !== 0) {
     context.events.emit(
-      "deploy_success",
+      "deploy_failure",
       sha,
-      `Deployment success for exact pushed ${sha}; CI completion tracked separately.`,
+      [
+        `Deployment FAILED for pushed ${sha}; gated assets retained;`,
+        "retry at the next departure, or fix forward with a new merge on main.",
+      ].join(" "),
     );
-    context.log(`deployed ${sha}`);
+    context.log(`DEPLOY FAILED ${sha}; retained assets for the next departure; see ${log}`);
+    return false;
+  }
+  writeLines(paths.lastDeploySha, sha);
+  writeLines(paths.lastDeploy, String(context.clock.now()));
+  renameSync(paths.deployPending, join(paths.deployDir, `${sha}.completed`));
+  fsyncDirectory(paths.dir);
+  fsyncDirectory(paths.deployDir);
+  context.events.emit(
+    "deploy_success",
+    sha,
+    `Deployment success for exact pushed ${sha}; CI passed.`,
+  );
+  context.log(`deployed ${sha}`);
+  await removeWorktree(context, work);
+  return true;
+}
+
+/** Deploy `pending`, reporting a failure; true once deployed. */
+async function attempt(context: BusContext, pending: PendingDeploy): Promise<boolean> {
+  if (await finishPending(context, pending)) {
     return true;
   }
-  context.events.emit(
-    "deploy_failure",
-    sha,
-    [
-      `Deployment FAILED for pushed ${sha}; gated assets retained;`,
-      "retry at next scheduled departure; CI tracked separately.",
-    ].join(" "),
-  );
-  context.log(`DEPLOY FAILED ${sha}; retained assets for the next scheduled departure; see ${log}`);
+  failureEvent(context, pending.sha);
   return false;
 }
 
-/** Retry a pending deployment. True when nothing is pending or the retry deployed and cleaned up. */
+/** After CI passes for `sha`: deploy it when it is the pending deployment. */
+export async function deployAfterCi(context: BusContext, sha: string): Promise<boolean> {
+  const pending = readPending(context);
+  if (pending?.sha !== sha) {
+    return false;
+  }
+  return attempt(context, pending);
+}
+
+/**
+ * At a departure: retry a pending deployment whose CI has passed. True when nothing is pending,
+ * CI has not passed yet, or the retry deployed. A red CI waits for a fix merged on main.
+ */
 export async function retryDeploy(context: BusContext): Promise<boolean> {
   const pending = readPending(context);
   if (pending === undefined) {
     return true;
   }
-  if (!(await finishPending(context, pending))) {
-    failureEvent(context, pending.sha);
-    return false;
+  const ci = readTrimmed(ciStatusFile(context.paths, pending.sha));
+  if (ci !== "success") {
+    if (ci === "failure") {
+      context.log(
+        `deployment pending ${pending.sha} has failing CI; it waits for a fix merged on main`,
+      );
+    }
+    return true;
   }
-  // The retained worktree and batch branch belong only to this bus.
-  await gitOk(context.exec, context.game.repo, ["worktree", "remove", "--force", pending.work]);
-  await gitOk(context.exec, context.game.repo, ["branch", "-D", pending.branch]);
-  return true;
+  return attempt(context, pending);
 }
 
-/** Stage and deploy after a successful push. */
+/** Supersede an older pending deployment by a newer push: keep its record, drop its worktree. */
+async function supersede(context: BusContext, sha: string): Promise<void> {
+  const previous = readPending(context);
+  if (previous === undefined || previous.sha === sha) {
+    return;
+  }
+  ensureDir(context.paths.deployDir);
+  renameSync(
+    context.paths.deployPending,
+    join(context.paths.deployDir, `${previous.sha}.superseded`),
+  );
+  fsyncDirectory(context.paths.dir);
+  context.log(`deployment pending ${previous.sha} superseded by pushed ${sha}`);
+  await removeWorktree(context, previous.work);
+}
+
+/**
+ * After a successful push: record the pending deployment, which runs once CI passes, or skip it
+ * and drop the worktree. Never deploys before CI.
+ */
 export async function stageDeploy(
   context: BusContext,
   pending: PendingDeploy,
   needed: boolean,
-): Promise<boolean> {
+): Promise<void> {
   const { sha } = pending;
   if (!needed) {
     writeLines(context.paths.lastDeploySkippedSha, sha);
@@ -162,21 +226,16 @@ export async function stageDeploy(
       sha,
       `Deployment skipped for pushed ${sha}: documentation/art-source exclusions; CI pending until verified.`,
     );
-    context.log("deploy skipped: entire batch matches documentation/art-source exclusions");
-    return true;
+    context.log("deploy skipped: the pushed range matches documentation/art-source exclusions");
+    await removeWorktree(context, pending.work);
+    return;
   }
   if (context.config.deploy.mode === "none") {
     context.log(`deployment disabled for ${sha}`);
-    return true;
+    await removeWorktree(context, pending.work);
+    return;
   }
-  writeLines(context.paths.deployPending, pending.sha, pending.work, pending.branch);
-  if (await finishPending(context, pending)) {
-    return true;
-  }
-  failureEvent(context, sha);
-  return false;
-}
-
-export function deployPendingExists(context: BusContext): boolean {
-  return existsSync(context.paths.deployPending) && readPending(context) !== undefined;
+  await supersede(context, sha);
+  writeLines(context.paths.deployPending, pending.sha, pending.work);
+  context.log(`deployment of ${sha} staged; it runs when CI passes`);
 }

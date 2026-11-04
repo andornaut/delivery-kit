@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { GAME, makeGame, queueBranch } from "../bus/testGame.ts";
+import { GAME, makeGame, mergeFastForward } from "../bus/testGame.ts";
 import { main } from "../cli.ts";
 
 async function run(root: string, ...argv: string[]) {
@@ -25,9 +25,9 @@ describe("bus commands", () => {
     expect(result.out).toMatch(/^\{"drained": true, /);
   });
 
-  it("request captures the queue and requires a game and an ID", async () => {
+  it("request captures the main HEAD and requires a game and an ID", async () => {
     const test = makeGame();
-    queueBranch(test, "bus/feature");
+    mergeFastForward(test, "feature");
     const result = await run(test.layout.root, "request", "--game", GAME, "--request-id", "r1");
     expect(result.code).toBe(0);
     expect(readFileSync(join(test.game.busDir, "requests", "r1.json"), "utf8")).toBe(result.out);
