@@ -62,7 +62,6 @@ export interface GameLayout {
   readonly stateDir: string;
   /** var/games/<g>/bus/: the bus state directory (file names in bus/state.ts). */
   readonly busDir: string;
-  readonly npmCacheDir: string;
   readonly processHealthFile: string;
   readonly migratedFile: string;
 }
@@ -177,7 +176,6 @@ export function gameLayout(layout: Layout, game: string): GameLayout {
     id: game,
     migratedFile: resolve(stateDir, "migrated.json"),
     name: entry.name,
-    npmCacheDir: resolve(busDir, "npm-cache"),
     processHealthFile: resolve(stateDir, "process-health.json"),
     repo,
     stateDir,

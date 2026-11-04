@@ -1,5 +1,6 @@
-// CLEANUP (added 2026-11-03): the 0.x singleton guard. Remove once every game has completed a
-// clean 1.x cycle and no process references the old bus path (the plan's convergence step).
+// CLEANUP (added 2026-11-03): the 0.x singleton guard. Remove once both games run delivery-kit
+// 1.x, each has completed one clean scheduled departure on it, and no process holds a lock or
+// open file under the 0.x bus path `<game>/.claude/bus`.
 // Until then a 1.x runner also takes flock -n on the 0.x runner.lock and loop.lock, which are
 // different files from the 1.x ones, so a 0.x and a 1.x runner never run together.
 import { join } from "node:path";

@@ -1,9 +1,10 @@
 // The isolated gate for one integrated tree.
 //
-// One container per batch, named deterministically and labelled with its game, runs as uid
-// 19001 in the checkout's group. The scratch worktree, checked out at the batch SHA, is bound
-// read-only; the container copies it into its own /tmp/work and verifies that the copy's tree
-// is the commit's tree, so the gate never writes the checkout and runs on the exact commit.
+// One container per departure, named deterministically and labelled with its game, runs as uid
+// 19001 in the checkout's group. The scratch worktree, checked out at the local main HEAD SHA
+// the departure gates, is bound read-only; the container copies it into its own /tmp/work and
+// verifies that the copy's tree is the commit's tree, so the gate never writes the checkout and
+// runs on the exact commit.
 // The install step runs with network access, the container is then disconnected from every
 // network, and the gate steps run. The host copies the gate logs out with docker cp, and, from a
 // passing and verified gate only, dist/ and node_modules/, so the deployment runs the Wrangler
@@ -95,7 +96,7 @@ export async function treeFingerprint(context: BusContext, work: string): Promis
   return digest.digest("hex");
 }
 
-/** The deterministic container name of one batch's gate. */
+/** The deterministic container name of one departure's gate, keyed by its short HEAD SHA. */
 export function gateContainerName(game: string, batch: string): string {
   return `delivery-kit-gate-${game}-${batch}`;
 }
@@ -290,7 +291,7 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
 }
 
 /**
- * Run install then the offline gate in one batch container, copy results out and remove it.
+ * Run install then the offline gate in one departure container, copy results out and remove it.
  * `verify` runs after a passing gate and returns a reason to discard it.
  */
 export async function runGate(

@@ -18,7 +18,6 @@ describe("loadLayout", () => {
     expect(game.repo).toBe(join(base, "archies-dog-walks"));
     expect(game.configFile).toBe(join(base, "archies-dog-walks/delivery-kit.json"));
     expect(game.busDir).toBe(join(root, "var/games/archies-dog-walks/bus"));
-    expect(game.npmCacheDir).toBe(join(root, "var/games/archies-dog-walks/bus/npm-cache"));
     expect(() => gameLayout(layout, "unknown")).toThrow(UnknownGame);
     expect(roleKeys(layout.config)).toContain("chibis-way-home/tech");
     expect(roleKeys(layout.config)).toContain("game-dev");
