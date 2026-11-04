@@ -77,18 +77,21 @@ describe("role-name route", () => {
     });
   });
 
-  it.each([
-    ["a conversation ID as monitor", { monitor: CLAUDE_GAME_DEV }],
-    ["an unknown role", { targets: ["archies-dog-walks/qa"] }],
-    ["an unknown host", { host: "other-game" }],
-    ["the monitor as a target", { targets: ["game-dev"] }],
-    ["duplicate targets", { targets: ["art-kit", "art-kit"] }],
-    ["an active route without targets", { targets: [] }],
-    ["another schema", { schema: 2 }],
-    ["a 0.x key", { monitor_thread_id: CLAUDE_GAME_DEV }],
-  ])("refuses %s", (_name, change) => {
-    const layout = setup({ ...ROUTE, ...change });
-    expect(() => readRoleRoute(layout)).toThrow(RouteError);
+  it("refuses every malformed route", () => {
+    const changes: [string, Record<string, unknown>][] = [
+      ["a conversation ID as monitor", { monitor: CLAUDE_GAME_DEV }],
+      ["an unknown role", { targets: ["archies-dog-walks/qa"] }],
+      ["an unknown host", { host: "other-game" }],
+      ["the monitor as a target", { targets: ["game-dev"] }],
+      ["duplicate targets", { targets: ["art-kit", "art-kit"] }],
+      ["an active route without targets", { targets: [] }],
+      ["another schema", { schema: 2 }],
+      ["a 0.x key", { monitor_thread_id: CLAUDE_GAME_DEV }],
+    ];
+    for (const [name, change] of changes) {
+      const layout = setup({ ...ROUTE, ...change });
+      expect(() => readRoleRoute(layout), name).toThrow(RouteError);
+    }
   });
 
   it("is null when no route is declared", () => {

@@ -79,11 +79,13 @@ describe("check-config", () => {
 });
 
 describe("dispatcher", () => {
-  it.each(COMMANDS)("%s has a handler", async (command) => {
+  it("has a handler for every command", async () => {
     const { root } = makeFixture();
-    expect((await run(root, command, "--help-unknown-option")).err).not.toContain(
-      "not implemented",
-    );
+    for (const command of COMMANDS) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await run(root, command, "--help-unknown-option");
+      expect(result.err, command).not.toContain("not implemented");
+    }
   });
 
   it("prints usage for help and rejects unknown commands", async () => {

@@ -341,14 +341,21 @@ describe("codexAdapter.deliver", () => {
 });
 
 describe("codexAdapter.status", () => {
-  it.each([
-    [{ activeFlags: [], type: "idle" }, "available"],
-    [{ activeFlags: [], type: "active" }, "busy"],
-    [{ activeFlags: ["waitingOnApproval"], type: "active" }, "blocked"],
-    [{ type: "notLoaded" }, "unavailable"],
-  ])("maps %j to %s", async (status, expected) => {
-    const context = await setup({ status });
-    await expect(adapter(context).status(MONITOR)).resolves.toMatchObject({ status: expected });
+  it("maps each native thread status to an adapter status", async () => {
+    const rows: [{ type: string; activeFlags?: string[] }, string][] = [
+      [{ activeFlags: [], type: "idle" }, "available"],
+      [{ activeFlags: [], type: "active" }, "busy"],
+      [{ activeFlags: ["waitingOnApproval"], type: "active" }, "blocked"],
+      [{ type: "notLoaded" }, "unavailable"],
+    ];
+    for (const [status, expected] of rows) {
+      // eslint-disable-next-line no-await-in-loop
+      const context = await setup({ status });
+      // eslint-disable-next-line no-await-in-loop
+      await expect(adapter(context).status(MONITOR), expected).resolves.toMatchObject({
+        status: expected,
+      });
+    }
   });
 });
 

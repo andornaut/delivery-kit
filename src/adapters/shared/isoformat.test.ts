@@ -33,12 +33,16 @@ const REFUSED: readonly string[] = [
 ];
 
 describe("utcStamp", () => {
-  it.each(ACCEPTED)("accepts %s as Python does", (value, expected) => {
-    expect(utcStamp(value)).toBeCloseTo(expected, 6);
+  it("accepts every timestamp form Python accepts, at Python's value", () => {
+    for (const [value, expected] of ACCEPTED) {
+      expect(utcStamp(value), value).toBeCloseTo(expected, 6);
+    }
   });
 
-  it.each(REFUSED)("refuses %s as Python does", (value) => {
-    expect(utcStamp(value)).toBeNull();
+  it("refuses every form Python refuses", () => {
+    for (const value of REFUSED) {
+      expect(utcStamp(value), value).toBeNull();
+    }
   });
 
   it("refuses a value that is not a string", () => {

@@ -93,10 +93,13 @@ describe("runnerFromNodeModules", () => {
       "is not installed",
     ],
   ];
-  it.each(cases)("rejects %s", (_name, arrange, using, reason) => {
-    arrange();
-    const result = runnerFromNodeModules(using(), game);
-    expect(result.ok).toBe(false);
-    expect(result.ok ? "" : result.reason).toContain(reason);
+  it("rejects each runner that is not the live node_modules copy", () => {
+    for (const [name, arrange, using, reason] of cases) {
+      rmSync(join(game.busDir, "runner.json"), { force: true });
+      arrange();
+      const result = runnerFromNodeModules(using(), game);
+      expect(result.ok, name).toBe(false);
+      expect(result.ok ? "" : result.reason, name).toContain(reason);
+    }
   });
 });

@@ -860,15 +860,23 @@ describe("migrate preconditions", () => {
       "CI watch is running",
     ],
   ];
-  it.each(cases)("stops before writing when %s", async (_name, arrange, reason) => {
-    arrange(tree);
-    const result = await run(tree);
-    expect(result.status).toBe(1);
-    expect(result.err).toContain(reason);
-    const layout = loadLayout(tree.fixture.root);
-    expect(existsSync(layout.registryFile)).toBe(false);
-    expect(existsSync(join(layout.varDir, "games"))).toBe(false);
-    expect(writable(tree.archieBus)).toBe(true);
+  it("stops before writing at each unfinished-work blocker", async () => {
+    for (const [name, arrange, reason] of cases) {
+      const fresh = buildTree();
+      arrange(fresh);
+      // eslint-disable-next-line no-await-in-loop
+      const result = await run(fresh);
+      expect(result.status, name).toBe(1);
+      expect(result.err, name).toContain(reason);
+      const layout = loadLayout(fresh.fixture.root);
+      expect(existsSync(layout.registryFile), name).toBe(false);
+      expect(existsSync(join(layout.varDir, "games")), name).toBe(false);
+      expect(writable(fresh.archieBus), name).toBe(true);
+      for (const lock of locks.splice(0)) {
+        lock.release();
+      }
+      removeOwnedTree(fresh.fixture.base);
+    }
   });
 
   it("stops when the active harness is ambiguous, and accepts --harness", async () => {

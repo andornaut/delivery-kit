@@ -135,23 +135,24 @@ describe("runGate", () => {
       "docker network disconnect failed: Error: network bridge not found",
     ],
   ];
-  for (const [verb, result, reason] of DOCKER_FAILURES) {
-    it(`reports a failed docker ${verb} as an infrastructure failure`, async () => {
+  it("reports a failed docker create, start or network detach as an infrastructure failure", async () => {
+    for (const [verb, result, reason] of DOCKER_FAILURES) {
       const test = makeGame();
       const exec = fakeExec((spec) => (spec.args[0] === verb ? result : gateDocker()(spec)));
       const context = testContext(test, { exec });
+      // eslint-disable-next-line no-await-in-loop
       const outcome = await runGate(context, {
         departure: "departure-1",
         logs: mkdtempSync(join(tmpdir(), "logs-")),
         sha: gitSync(test.repo, "rev-parse", "HEAD"),
         work: test.repo,
       });
-      expect(outcome).toEqual({ failure: "infrastructure", ok: false, reason });
+      expect(outcome, verb).toEqual({ failure: "infrastructure", ok: false, reason });
       const ranSteps = exec.calls.some((call) => call.args.at(-1)?.startsWith("set -e") === true);
-      expect(ranSteps).toBe(false);
-      expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
-    });
-  }
+      expect(ranSteps, verb).toBe(false);
+      expect(exec.calls.at(-1)?.args, verb).toEqual(["rm", "--force", NAME]);
+    }
+  });
 
   it("names the tool the gate image lacks", async () => {
     const test = makeGame();

@@ -25,19 +25,26 @@ function staticSpecifiers(source: string): string[] {
   return [...source.matchAll(pattern)].map((match) => match[1] ?? match[2] ?? "");
 }
 
-describe.each(BUNDLES)("%s", (bundle) => {
-  const source = (): string => readFileSync(join(root, bundle), "utf8");
+describe("every bundle", () => {
+  const source = (bundle: string): string => readFileSync(join(root, bundle), "utf8");
 
   it("has no dynamic import, relative require or source map", () => {
-    expect(source()).not.toMatch(/\bimport\s*\(/);
-    expect(source()).not.toMatch(/\brequire\s*\(\s*["'`]\.{1,2}\//);
-    expect(source()).not.toMatch(/sourceMappingURL/);
+    for (const bundle of BUNDLES) {
+      expect(source(bundle), bundle).not.toMatch(/\bimport\s*\(/);
+      expect(source(bundle), bundle).not.toMatch(/\brequire\s*\(\s*["'`]\.{1,2}\//);
+      expect(source(bundle), bundle).not.toMatch(/sourceMappingURL/);
+    }
   });
 
   it("imports only node: builtins", () => {
-    const specifiers = staticSpecifiers(source());
-    expect(specifiers.length).toBeGreaterThan(0);
-    expect(specifiers.filter((specifier) => !specifier.startsWith("node:"))).toEqual([]);
+    for (const bundle of BUNDLES) {
+      const specifiers = staticSpecifiers(source(bundle));
+      expect(specifiers.length, bundle).toBeGreaterThan(0);
+      expect(
+        specifiers.filter((specifier) => !specifier.startsWith("node:")),
+        bundle,
+      ).toEqual([]);
+    }
   });
 });
 

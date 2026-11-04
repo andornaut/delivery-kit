@@ -212,23 +212,24 @@ function json(value: unknown): string {
 }
 
 describe("collectChildHealth", () => {
-  for (const [code, classification] of Object.entries(ERROR_CLASSES)) {
-    it(`classifies a typed ${code} failure and discards private fields`, async () => {
+  it("classifies every typed failure code and discards private fields", async () => {
+    for (const [code, classification] of Object.entries(ERROR_CLASSES)) {
       const native = new Native();
       native.turn = turn("failed", code);
+      // eslint-disable-next-line no-await-in-loop
       const result = await snapshot(native);
       const child = result.children[0];
-      expect(result.complete).toBe(true);
-      expect(child?.requires_parent_action).toBe(true);
-      expect(child?.lineage_verified).toBe(true);
-      expect(child?.classification).toBe(classification);
-      expect(child?.error_code).toBe(code);
-      expect(child?.turn_id).toBe(T);
-      expect(json(result)).not.toContain(PRIVATE);
-      expect(json(result)).not.toContain("older-private-cursor");
-      expect(native.calls).toHaveLength(5);
-    });
-  }
+      expect(result.complete, code).toBe(true);
+      expect(child?.requires_parent_action, code).toBe(true);
+      expect(child?.lineage_verified, code).toBe(true);
+      expect(child?.classification, code).toBe(classification);
+      expect(child?.error_code, code).toBe(code);
+      expect(child?.turn_id, code).toBe(T);
+      expect(json(result), code).not.toContain(PRIVATE);
+      expect(json(result), code).not.toContain("older-private-cursor");
+      expect(native.calls, code).toHaveLength(5);
+    }
+  });
 
   it("infers nothing from a status or an untyped error", async () => {
     const codes: unknown[] = [

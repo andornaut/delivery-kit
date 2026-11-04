@@ -212,14 +212,16 @@ describe("shell policy", () => {
   };
   const repo = resolve(scripts, "..");
 
-  it.each(Object.entries(wrappers))("%s only execs its Node script", (path, target) => {
-    const body = readFileSync(join(repo, path), "utf8")
-      .split("\n")
-      .filter((line) => line !== "" && !line.startsWith("#"));
-    expect(body).toEqual([
-      "set -euo pipefail",
-      `exec node "$(dirname -- "\${BASH_SOURCE[0]}")/${target}" "$@"`,
-    ]);
+  it("keeps each wrapper to an exec of its Node script", () => {
+    for (const [path, target] of Object.entries(wrappers)) {
+      const body = readFileSync(join(repo, path), "utf8")
+        .split("\n")
+        .filter((line) => line !== "" && !line.startsWith("#"));
+      expect(body, path).toEqual([
+        "set -euo pipefail",
+        `exec node "$(dirname -- "\${BASH_SOURCE[0]}")/${target}" "$@"`,
+      ]);
+    }
   });
 
   it("has no other shell or Python file in scripts/ or tests/contract/", () => {
