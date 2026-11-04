@@ -272,7 +272,9 @@ suite("entry", () => {
     const ws = workspace();
     minimal(ws);
     const before = ws.list();
-    ws.config.resources = { cpus: 4, loadLimit: 24 };
+    ws.config.resources = MAX_WORKERS_REMOVED
+      ? { cpus: 4, maxWorkers: 4, loadLimit: 24 }
+      : { cpus: 4, loadLimit: 24 };
     const result = await execute(impl.checkConfig(ws));
     if (MAX_WORKERS_REMOVED) {
       expect(result.code, result.stderr).toBe(EXIT_INVALID_CONFIG);
