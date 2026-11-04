@@ -234,11 +234,12 @@ suite("requests", () => {
         ws.queue(["bus/feature"]);
         expect((await capture(ws, "one")).code).toBe(0);
         if (duration) ws.updateControl((c) => (c.docker = { advanceClock: duration }));
-        // Thirty seconds before the next hourly slot; a 40s or 120s request crosses it.
+        // Thirty seconds before the next hourly slot; a 40s or 120s request crosses it. The 0s
+        // request runs on a slower clock so a slow host still finishes it before the slot.
         const start = at(59, 30);
-        ws.setClock(start, 10);
+        ws.setClock(start, duration ? 10 : 3);
         const runner = startRunner(ws);
-        await runner.until(() => ws.virtualNow() >= start + 160, 40_000);
+        await runner.until(() => ws.virtualNow() >= start + 160, duration ? 40_000 : 90_000);
         const result = await runner.stop();
         expect(record(ws).state).toBe("finished");
         expect(gates(ws)).toBe(1);
