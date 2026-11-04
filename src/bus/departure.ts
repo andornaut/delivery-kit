@@ -10,9 +10,11 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
+import { resumeStoppedCi } from "../ci.ts";
 import {
   deployNeeded,
   deployPendingExists,
+  readPending,
   removeWorktree,
   retryDeploy,
   stageDeploy,
@@ -22,7 +24,7 @@ import { holdLockAsync } from "../lock.ts";
 import { type BusContext, loadOk } from "./context.ts";
 import { assertNotInterrupted, git, Interrupted } from "./exec.ts";
 import { type RequestStore, validateRequest } from "./requests.ts";
-import { ensureDir, gateFailedFile, nonEmpty, writeLines } from "./state.ts";
+import { ensureDir, gateFailedFile, nonEmpty, readTrimmed, writeLines } from "./state.ts";
 import { latestScheduledSlot, stamp } from "./time.ts";
 import { mainHead, remoteMain, skipReason } from "./trunk.ts";
 
@@ -125,6 +127,8 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
     );
     return 1;
   }
+  // A watch that timed out or lost authentication resumes, so a pending deployment can follow.
+  resumeStoppedCi(context, [readPending(context)?.sha, readTrimmed(paths.lastPushSha)]);
   if (deployPendingExists(context)) {
     // A failed retry is reported and kept; it does not hold back a newer main.
     await retryDeploy(context);

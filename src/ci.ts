@@ -1,5 +1,6 @@
 // Exact-commit CI monitoring, run as an in-runner task. A replacement runner
 // resumes every watch whose ci/<sha>.status is still running, keeping the original deadline.
+// A watch that timed out or lost GitHub authentication is restarted by the next departure.
 import { appendFileSync, readdirSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
@@ -8,7 +9,21 @@ import { ciStatusFile, ensureDir, readTrimmed, writeLines } from "./bus/state.ts
 import { writeDurable } from "./durable.ts";
 import { holdLock, LockBusy } from "./lock.ts";
 
-export type CiResult = "busy" | "failure" | "success" | "timeout";
+export type CiResult = "busy" | "failure" | "success" | "timeout" | "unauthenticated";
+
+/** Watch results the next departure restarts: the checks may still finish or become readable. */
+const RESUMABLE: ReadonlySet<string> = new Set(["timeout", "unauthenticated"]);
+
+/** GitHub refused the check-run query for lack of authentication. */
+export class GitHubAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitHubAuthError";
+  }
+}
+
+/** `gh` exits 4 when a command needs authentication. */
+const GH_AUTH_REQUIRED = 4;
 
 export interface CheckRun {
   readonly id: number;
@@ -44,6 +59,9 @@ export const githubChecks: CheckSource = async (context, sha) => {
       command: "gh",
       timeoutMs: 25_000,
     });
+    if (result.status === GH_AUTH_REQUIRED || /HTTP 401/.test(result.stderr)) {
+      throw new GitHubAuthError("the GitHub CLI is not authenticated; check gh auth status");
+    }
     if (result.status !== 0) {
       throw new Error(`GitHub CLI metadata query failed (exit ${String(result.status)})`);
     }
@@ -53,6 +71,9 @@ export const githubChecks: CheckSource = async (context, sha) => {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "scheduled-game-bus" },
     signal: AbortSignal.timeout(20_000),
   });
+  if (response.status === 401) {
+    throw new GitHubAuthError("the GitHub API refused the request as unauthenticated (401)");
+  }
   if (!response.ok) {
     throw new Error(`GitHub API returned ${response.status}`);
   }
@@ -135,6 +156,9 @@ async function poll(
       }
     } catch (error) {
       say(`${error instanceof Error ? `${error.name} ${error.message}` : String(error)}`);
+      if (error instanceof GitHubAuthError) {
+        return "unauthenticated";
+      }
     }
     // eslint-disable-next-line no-await-in-loop
     await context.clock.sleep(ci.pollSeconds, options.signal);
@@ -191,19 +215,40 @@ export async function watchCi(
           "inspect checks and merge a fix on main. No automatic CI rerun.",
         ].join(" "),
       );
+    } else if (result === "unauthenticated") {
+      context.events.emit(
+        "ci_auth_failed",
+        sha,
+        [
+          `CI status unknown for pushed ${sha}: GitHub authentication failed; completion not`,
+          "confirmed. Restore the gh login on the runner host; the next departure resumes the",
+          "watch, and a pending deployment runs once CI passes.",
+        ].join(" "),
+      );
     } else {
       context.events.emit(
         "ci_timeout",
         sha,
         [
-          `CI status unknown for pushed ${sha}: monitor timed out or metadata query failed;`,
-          "inspect checks and restart monitoring; completion not confirmed.",
+          `CI status unknown for pushed ${sha}: the watch timed out after`,
+          `${String(context.config.ci.timeoutSeconds)} seconds; completion not confirmed. The`,
+          "next departure resumes the watch, and a pending deployment runs once CI passes.",
         ].join(" "),
       );
     }
     return result;
   } finally {
     lock.release();
+  }
+}
+
+/** Restart the watch of each SHA whose last watch timed out or lost authentication. */
+export function resumeStoppedCi(context: BusContext, shas: readonly (string | undefined)[]): void {
+  for (const sha of new Set(shas)) {
+    if (sha !== undefined && RESUMABLE.has(readTrimmed(ciStatusFile(context.paths, sha)) ?? "")) {
+      context.log(`bus: resuming the CI watch of ${sha}`);
+      context.startCi(sha);
+    }
   }
 }
 
