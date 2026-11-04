@@ -1,0 +1,19 @@
+{
+  "name": "delivery-kit-contract-harness",
+  "private": true,
+  "description": "Black-box CLI contract cases shared by the Bash 0.9.x and Node 1.0 implementations.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.21.0"
+  },
+  "scripts": {
+    "check": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  }
+}
