@@ -170,14 +170,14 @@ export function statusReport(paths: BusPaths, ciEnabled: boolean): StatusReport 
     }
   }
   const reporters: string[] = [];
-  if (lockHeld(join(paths.eventsDir, "dispatch.lock"))) {
+  const events = jsonFiles(paths.eventsDir, ".json");
+  if (events === null) {
+    // Its dispatch lock cannot be probed either.
+    reporters.push("events_dir_unreadable");
+  } else if (lockHeld(join(paths.eventsDir, "dispatch.lock"))) {
     reporters.push("event_flush_running");
   }
   let unsent = 0;
-  const events = jsonFiles(paths.eventsDir, ".json");
-  if (events === null) {
-    reporters.push("events_dir_unreadable");
-  }
   for (const name of events ?? []) {
     let event: unknown;
     try {
