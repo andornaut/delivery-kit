@@ -8,9 +8,12 @@
 //   (Date.now() - realStartMs) * speed / 1000. Timers scale by the same speed.
 // - CODEX_CONTROL_SOCKET and CLAUDE_AGENTS_COMMAND: adapter overrides (plan: retired keys).
 // - PATH supplies fake git, docker, gh, wrangler, claude and codex.
-// - ws.hostLoad: pending. Once the bus port names its test-only load reading, "ignore" maps to
-//   a load below every limit and "real" leaves the host reading in place.
-import { existsSync } from "node:fs";
+// - DELIVERY_KIT_TEST_LOADAVG: a decimal load reading. ws.hostLoad "ignore" sets it to 0;
+//   "real" leaves it unset, so the host's load applies.
+// - The built package is installed into the game's node_modules with a package-lock entry, so
+//   the pin guard sees the installed identity equal to the loaded one.
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Command, Implementation } from "./adapter.ts";
@@ -50,13 +53,47 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
   return c;
 }
 
+const PACKAGE = "@andornaut/delivery-kit";
+
+/** Install the built bundle as the game's pinned package, once per workspace. */
+function installPackage(ws: Workspace): void {
+  const installed = join(ws.repo, "node_modules", PACKAGE);
+  if (existsSync(join(installed, "dist", "cli.js"))) return;
+  const manifest = JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as {
+    version: string;
+  };
+  mkdirSync(join(installed, "dist"), { recursive: true });
+  copyFileSync(CLI, join(installed, "dist", "cli.js"));
+  writeJson(join(installed, "package.json"), {
+    name: PACKAGE,
+    type: "module",
+    version: manifest.version,
+  });
+  const integrity = `sha512-${createHash("sha512").update(readFileSync(CLI)).digest("base64")}`;
+  writeJson(join(ws.repo, "package-lock.json"), {
+    lockfileVersion: 3,
+    name: ws.game,
+    packages: {
+      "": { devDependencies: { [PACKAGE]: manifest.version }, name: ws.game },
+      [`node_modules/${PACKAGE}`]: { dev: true, integrity, version: manifest.version },
+    },
+  });
+}
+
+function env(ws: Workspace): Record<string, string> {
+  const base: Record<string, string> = { ...ws.baseEnv(), DELIVERY_KIT_ROOT: ws.gameDev };
+  if (ws.hostLoad === "ignore") base.DELIVERY_KIT_TEST_LOADAVG = "0";
+  return base;
+}
+
 function command(ws: Workspace, words: string[]): Command {
   writeJson(ws.configFile, nodeConfig(ws));
+  installPackage(ws);
   const [verb = "", ...rest] = words;
   return {
     argv: [process.execPath, CLI, verb, "--game", ws.game, ...rest],
     cwd: ws.gameDev,
-    env: { ...ws.baseEnv(), DELIVERY_KIT_ROOT: ws.gameDev },
+    env: env(ws),
   };
 }
 
@@ -84,6 +121,6 @@ export const nodeImplementation: Implementation = {
   channel: (ws, args) => ({
     argv: [process.execPath, CLI, "channel", ...args],
     cwd: ws.gameDev,
-    env: { ...ws.baseEnv(), DELIVERY_KIT_ROOT: ws.gameDev },
+    env: env(ws),
   }),
 };

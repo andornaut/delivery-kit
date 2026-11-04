@@ -44,6 +44,9 @@ export const ROUTE_INVALID_MESSAGE =
     ? "MONITOR_ROUTE_FILE is unavailable or invalid"
     : "monitor route is unavailable or invalid; its owner must verify identities and ownership";
 
+/** The fastest CI poll: 0 in 0.9; 1.0 rejects 0, and 1 second runs fast under the test clock. */
+export const CI_POLL_SECONDS = impl.name === "bash" ? 0 : 1;
+
 /** check-config's exit status for invalid configuration: 2 in 0.9, EXIT_INVALID (1) in 1.0. */
 export const EXIT_INVALID_CONFIG = impl.name === "bash" ? 2 : 1;
 

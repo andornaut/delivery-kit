@@ -5,7 +5,15 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, QUEUE_MODEL, queueModel, suite, workspaces } from "../lib/cases.ts";
+import {
+  CI_POLL_SECONDS,
+  contract,
+  QUEUE_MODEL,
+  queueModel,
+  retiredOnNode,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
 import { SHA, type Workspace } from "../lib/workspace.ts";
@@ -91,7 +99,7 @@ suite("events", () => {
     async () => {
       const ws = workspace();
       bus(ws, { github: "fixture/project" });
-      ws.config.ci = { requiredNames: ["Test"], pollSeconds: 0, timeoutSeconds: 5 };
+      ws.config.ci = { requiredNames: ["Test"], pollSeconds: CI_POLL_SECONDS, timeoutSeconds: 5 };
       ws.updateControl((c) => {
         c.gh = {
           checks: { [SHA]: [{ id: 1, name: "Test", status: "completed", conclusion: "success" }] },
@@ -133,7 +141,7 @@ suite("events", () => {
     async () => {
       const ws = workspace();
       bus(ws, { github: "fixture/project" });
-      ws.config.ci = { requiredNames: ["Test"], pollSeconds: 0, timeoutSeconds: 5 };
+      ws.config.ci = { requiredNames: ["Test"], pollSeconds: CI_POLL_SECONDS, timeoutSeconds: 5 };
       ws.updateControl((c) => {
         c.gh = {
           checks: { [SHA]: [{ id: 1, name: "Test", status: "completed", conclusion: "success" }] },
@@ -213,31 +221,36 @@ suite("events", () => {
     expect(blocked[0]!.kind).toBe("blocked-full-gate");
   });
 
-  contract("a blocked delivery holds no runner or loop lock", async () => {
-    const ws = workspace();
-    bus(ws);
-    // A zero limit against the real host load forces a load block.
-    ws.hostLoad = "real";
-    ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
-    const gate = join(ws.root, "hold-delivery");
-    writeFileSync(gate, "");
-    ws.updateControl((c) => (c.codex = { blockWhile: gate }));
-    impl.offer(ws, ["bus/feature"]);
-    const runner = start(ws);
-    await runner.until(() => kinds(ws).includes("blocked-load"));
-    await runner.until(() => ws.read("active-departure") === "");
-    await runner.terminateLeader();
-    await sleep(300);
-    try {
-      // The detached flush is still delivering.
-      await expect(hold(ws.path("events", "dispatch.lock"), "5>>")).rejects.toThrow();
-      for (const name of ["runner.lock", "loop.lock"])
-        await (await hold(ws.path(name), "5>>")).release();
-    } finally {
-      rmSync(gate);
-      await runner.stop();
-    }
-  });
+  retiredOnNode(
+    "events flush inside the runner; there is no detached flusher",
+    "detached-flush",
+    "a blocked delivery holds no runner or loop lock",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      // A zero limit against the real host load forces a load block.
+      ws.hostLoad = "real";
+      ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
+      const gate = join(ws.root, "hold-delivery");
+      writeFileSync(gate, "");
+      ws.updateControl((c) => (c.codex = { blockWhile: gate }));
+      impl.offer(ws, ["bus/feature"]);
+      const runner = start(ws);
+      await runner.until(() => kinds(ws).includes("blocked-load"));
+      await runner.until(() => ws.read("active-departure") === "");
+      await runner.terminateLeader();
+      await sleep(300);
+      try {
+        // The detached flush is still delivering.
+        await expect(hold(ws.path("events", "dispatch.lock"), "5>>")).rejects.toThrow();
+        for (const name of ["runner.lock", "loop.lock"])
+          await (await hold(ws.path(name), "5>>")).release();
+      } finally {
+        rmSync(gate);
+        await runner.stop();
+      }
+    },
+  );
 
   queueModel(
     "long Unicode delivery fits 900 UTF-8 bytes including the event ID; local metadata is retained",

@@ -106,6 +106,9 @@ function git() {
         out(`${last === "HEAD" ? sha : remoteHead()}\n`);
       }
       return 0;
+    case "ls-remote":
+      out(`${remoteHead()}\trefs/heads/main\n`);
+      return 0;
     case "merge-base":
       out(`${control.base ?? "b".repeat(40)}\n`);
       return 0;
@@ -165,25 +168,121 @@ function writableBinds(argv) {
   return found;
 }
 
+function holdWhile(path) {
+  while (path && existsSync(path)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+}
+
+/**
+ * The 1.0 gate protocol (src/gate.ts): create, start, exec copy with EXPECTED_TREE, exec install,
+ * network disconnect, exec the loopback check, exec the gate script, cp logs and dist out, rm.
+ * Container state lives in DK_FAKE_DIR/containers/<name>.json.
+ */
+function gateProtocol(behaviour) {
+  const fail = (reason) => {
+    process.stderr.write(`fake docker: ${reason}\n`);
+    return 99;
+  };
+  const containers = join(dir, "containers");
+  const stateOf = (name) => join(containers, `${name}.json`);
+  const load = (name) => readJson(stateOf(name), null);
+  const save = (name, state) => {
+    mkdirSync(containers, { recursive: true });
+    writeFileSync(stateOf(name), JSON.stringify(state));
+  };
+  const [verb] = args;
+  if (verb === "create") {
+    const name = args[args.indexOf("--name") + 1];
+    const cpus = args[args.indexOf("--cpus") + 1];
+    if (cpus !== String(behaviour.cpus ?? 4)) return fail(`unexpected --cpus ${cpus}`);
+    const stamp = args.find((x) => x.startsWith("WORKERS_CI_COMMIT_SHA="))?.slice(22) ?? "";
+    if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha)
+      return fail("missing exact commit stamp");
+    const user = args.indexOf("--user");
+    if (user < 0 || args[user + 1] !== "19001:19001")
+      return fail("gate must run as --user 19001:19001");
+    const writable = writableBinds(args);
+    if (writable.length) return fail(`writable bind mount: ${writable.join(" ")}`);
+    // Checkouts are group-readable only, so the gate joins each bound checkout's group.
+    const groups = args.flatMap((x, i) => (x === "--group-add" ? [args[i + 1]] : []));
+    const binds = args.flatMap((x, i) =>
+      x === "--mount" && args[i + 1].split(",").includes("type=bind")
+        ? [
+            args[i + 1]
+              .split(",")
+              .find((f) => f.startsWith("src="))
+              ?.slice(4),
+          ]
+        : [],
+    );
+    if (!binds.length) return fail("gate must bind the scratch checkout read-only");
+    for (const source of binds) {
+      const gid = String(statSync(source).gid);
+      if (!groups.includes(gid))
+        return fail(`gate must pass --group-add ${gid} (the checkout gid of ${source})`);
+    }
+    save(name, { built: false, started: false, work: binds[0] });
+    process.stdout.write(`${name}\n`);
+    return 0;
+  }
+  if (verb === "rm") return 0;
+  if (verb === "start") {
+    const name = args.at(-1);
+    const state = load(name);
+    if (!state) return fail(`no container ${name}`);
+    save(name, { ...state, started: true });
+    return 0;
+  }
+  if (verb === "network") return args[1] === "disconnect" ? 0 : 0;
+  if (verb === "cp") {
+    const [from, to] = args.slice(-2);
+    const name = from.split(":")[0];
+    const state = load(name);
+    if (!state) return fail(`no container ${name}`);
+    mkdirSync(to, { recursive: true });
+    if (from.endsWith("/tmp/work/dist/.")) {
+      if (!state.built) return fail("dist/ does not exist");
+      writeFileSync(join(to, "index.html"), sha.slice(0, 8));
+    }
+    return 0;
+  }
+  if (verb === "exec") {
+    let i = 1;
+    const env = {};
+    while (args[i] === "-e") {
+      const [key, ...value] = args[i + 1].split("=");
+      env[key] = value.join("=");
+      i += 2;
+    }
+    const name = args[i];
+    const command = args.slice(i + 1);
+    const state = load(name);
+    if (!state?.started) return fail(`container ${name} is not running`);
+    const script = command[0] === "sh" ? (command[2] ?? "") : "";
+    if (command[0] === "test") return state.built ? 0 : 1;
+    if ("EXPECTED_TREE" in env) {
+      return behaviour.copyMismatch || env.EXPECTED_TREE !== "f".repeat(40) ? 1 : 0;
+    }
+    if (script.includes("/sys/class/net")) return behaviour.networkLeak ? 1 : 0;
+    if (script.startsWith("set -e")) {
+      holdWhile(behaviour.blockWhile);
+      if (behaviour.gateFail) return 1;
+      if (behaviour.moveBase) writeFileSync(remoteHeadFile, "9".repeat(40));
+      if (behaviour.changeApproval) writeFileSync(behaviour.changeApproval, "changed");
+      if (behaviour.advanceClock) advanceClock(behaviour.advanceClock);
+      save(name, { ...state, built: true });
+      return 0;
+    }
+    // Anything else is the install step: `cd /tmp/work && <install>`.
+    return behaviour.installFail ? 1 : 0;
+  }
+  return fail(`unmodelled docker ${verb}`);
+}
+
 function docker() {
   const behaviour = control.docker ?? {};
   log();
   if (args[0] === "ps") return 0;
-  if (process.env.DK_IMPL === "node") {
-    // Container lifecycle for the 1.0 gate. `cp CONTAINER:/app/dist HOST` delivers the build.
-    if (["create", "start", "rm", "wait", "volume", "kill", "stop"].includes(args[0])) {
-      if (args[0] === "create") process.stdout.write("fakecontainer\n");
-      return 0;
-    }
-    if (args[0] === "cp") {
-      const [from, to] = args.slice(-2);
-      if (from.includes(":") && !from.startsWith("/") && /\/dist\/?$/.test(from)) {
-        mkdirSync(to, { recursive: true });
-        writeFileSync(join(to, "index.html"), sha.slice(0, 8));
-      }
-      return 0;
-    }
-  }
+  if (process.env.DK_IMPL === "node") return gateProtocol(behaviour);
   const fail = (reason) => {
     process.stderr.write(`fake docker: ${reason}\n`);
     return 99;
@@ -194,19 +293,7 @@ function docker() {
   const stamp = args.find((x) => x.startsWith("WORKERS_CI_COMMIT_SHA="))?.slice(22) ?? "";
   if (control.git?.real ? !/^[0-9a-f]{40}$/.test(stamp) : stamp !== sha)
     return fail("missing exact commit stamp");
-  if (process.env.DK_IMPL === "node") {
-    // 1.0 gate: a fixed unprivileged user and read-only binds; outputs leave by `docker cp`.
-    const user = args.indexOf("--user");
-    if (user < 0 || args[user + 1] !== "19001:19001")
-      return fail("gate must run as --user 19001:19001");
-    // Checkouts are group-readable only, so the gate joins the checkout's group.
-    const group = args.indexOf("--group-add");
-    const gid = String(statSync(process.env.DK_FAKE_CHECKOUT).gid);
-    if (group < 0 || args[group + 1] !== gid)
-      return fail(`gate must pass --group-add ${gid} (the checkout gid)`);
-    const writable = writableBinds(args);
-    if (writable.length) return fail(`writable bind mount: ${writable.join(" ")}`);
-  } else {
+  {
     // 0.9.1 interim: the invoking user, with the npm cache created before it is mounted.
     const user = args.indexOf("-u");
     const ids = `${process.getuid()}:${process.getgid()}`;

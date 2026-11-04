@@ -4,7 +4,15 @@ import { readFileSync } from "node:fs";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, hardened, QUEUE_MODEL, queueModel, suite, workspaces } from "../lib/cases.ts";
+import {
+  CI_POLL_SECONDS,
+  contract,
+  hardened,
+  QUEUE_MODEL,
+  queueModel,
+  suite,
+  workspaces,
+} from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
 import { BASE, SHA, type Workspace } from "../lib/workspace.ts";
@@ -351,7 +359,7 @@ suite("departure", () => {
       const ws = workspace();
       bus(ws, { github: "fixture/project" });
       ws.config.deploy = { mode: "none", skipPattern: "" };
-      ws.config.ci = { requiredNames: ["Test"], pollSeconds: 0, timeoutSeconds: 1 };
+      ws.config.ci = { requiredNames: ["Test"], pollSeconds: CI_POLL_SECONDS, timeoutSeconds: 1 };
       ws.updateControl((c) => (c.gh = { checks: { [SHA]: [...runs] } }));
       impl.offer(ws, ["bus/feature"]);
       const runner = await departOnce(
