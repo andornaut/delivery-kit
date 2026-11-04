@@ -42,9 +42,7 @@ export interface RequestStore {
 
 function recordPath(store: RequestStore, id: string): string {
   if (!REQUEST_ID_PATTERN.test(id)) {
-    throw new RequestError(
-      "request ID must be 1-64 ASCII letters, digits, underscores or hyphens",
-    );
+    throw new RequestError("request ID must be 1-64 ASCII letters, digits, underscores or hyphens");
   }
   return join(store.paths.requestsDir, `${id}.json`);
 }
@@ -97,9 +95,7 @@ export function captureRequest(store: RequestStore, id: string): Promise<string>
       throw new RequestError(`main ${head} is already pushed; nothing new to depart`);
     }
     if (skip === "gate-failed") {
-      throw new RequestError(
-        `the gate already failed for main ${head}; merge a fix first`,
-      );
+      throw new RequestError(`the gate already failed for main ${head}; merge a fix first`);
     }
     const record: RequestRecord = { head, id, state: "pending" };
     writeRecord(path, record);

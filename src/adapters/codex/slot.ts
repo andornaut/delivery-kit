@@ -135,7 +135,7 @@ export async function sendSlot(
         throw new SlotInterrupted();
       }
       if (error instanceof RpcError) {
-          finish({ errorCode: error.code ?? null, status: "rejected" });
+        finish({ errorCode: error.code ?? null, status: "rejected" });
         if (selected.method === "turn/steer" && error.staleTurn && attempt === 0) {
           continue;
         }

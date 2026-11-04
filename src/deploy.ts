@@ -11,7 +11,6 @@ import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "./bu
 import { remoteMain } from "./bus/trunk.ts";
 import { fsyncDirectory } from "./durable.ts";
 
-
 export interface PendingDeploy {
   readonly sha: string;
   /** The detached gate worktree holding the gated dist/ and node_modules/. */

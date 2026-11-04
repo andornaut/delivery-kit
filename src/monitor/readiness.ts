@@ -64,7 +64,9 @@ function adapterStatus(env: NodeJS.ProcessEnv, harness: Harness): Promise<string
 function routeRoles(layout: Layout, registry: Registry): string[] | null {
   try {
     const route = readRoleRoute(layout);
-    return route === null ? [resolveRole(registry, MONITOR_ROLE)] : [route.monitor, ...route.targets];
+    return route === null
+      ? [resolveRole(registry, MONITOR_ROLE)]
+      : [route.monitor, ...route.targets];
   } catch {
     return null;
   }
