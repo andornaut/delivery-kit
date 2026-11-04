@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { holdLock } from "../../lock.ts";
 import {
+  activeRoute,
   type ClaudeFixture,
   claudeFixture,
   idle,
@@ -13,17 +14,14 @@ import {
   TECH,
 } from "../../monitor/fixtures.ts";
 import { eventRequestId, slotRequestId } from "../shared/ids.ts";
+import type { ActiveScope } from "../shared/route.ts";
 import { deliverPending } from "./channel.ts";
-import { resolveRouteV2 } from "./route.ts";
 import { spoolDir, spoolEvent, spoolMonitorBrief } from "./spool.ts";
 
-type Active = Extract<ReturnType<typeof resolveRouteV2>, { status: "active" }>;
+type Active = ActiveScope;
 
 function active(fixture: ClaudeFixture): Active {
-  const route = resolveRouteV2(fixture.layout.routeFile, fixture.game.repo);
-  if (route.status !== "active") {
-    throw new Error("fixture route must be active");
-  }
+  const route = activeRoute(fixture);
   return route;
 }
 
@@ -77,8 +75,8 @@ describe("spoolMonitorBrief", () => {
       receipt: `unblock/${MONITOR}-${SLOT}.json`,
       slot: SLOT,
     });
-    expect(entry.text).toContain(`Archie tech: ${TECH}`);
-    expect(entry.text).not.toContain("Chibi tech");
+    expect(entry.text).toContain(`archies-dog-walks/tech: ${TECH}`);
+    expect(entry.text).not.toContain("chibis-way-home/tech");
     expect(entry.text).toContain(
       '{"kind": "queue_inventory", "status": "unavailable", "reason_code": "claude_no_native_api"}',
     );

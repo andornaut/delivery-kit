@@ -12,18 +12,21 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { gameLayout } from "../../layout.ts";
-import { type ClaudeFixture, claudeFixture, MONITOR, SLOT, TECH } from "../../monitor/fixtures.ts";
+import {
+  activeRoute,
+  type ClaudeFixture,
+  claudeFixture,
+  MONITOR,
+  SLOT,
+  TECH,
+} from "../../monitor/fixtures.ts";
 import { slotRequestId } from "../shared/ids.ts";
 import { deliverPending, handle, serve } from "./channel.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
-import { resolveRouteV2 } from "./route.ts";
 import { deliveredDir, spoolDir, spoolMonitorBrief } from "./spool.ts";
 
 function spool(fixture: ClaudeFixture, busDir = fixture.game.busDir, slot = SLOT): void {
-  const route = resolveRouteV2(fixture.layout.routeFile, fixture.game.repo);
-  if (route.status !== "active") {
-    throw new Error("fixture route must be active");
-  }
+  const route = activeRoute(fixture);
   expect(spoolMonitorBrief(fixture.env, busDir, route, slot).status).toBe("sending");
 }
 

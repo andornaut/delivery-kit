@@ -5,6 +5,7 @@
 // flushEvents delivers unsent events in creation order under the non-blocking dispatch.lock,
 // through the active harness's adapter, and marks an event sent only after its delivery is
 // accepted. The first event not accepted stops the flush; a later flush resumes there.
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -13,12 +14,13 @@ import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
 import { eventRequestId } from "./adapters/shared/ids.ts";
 import { dumpsJson, type PyJson } from "./adapters/shared/pyjson.ts";
+import { readRoleRoute, type RoleRoute } from "./adapters/shared/route.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
 import { loadProjectConfig } from "./config.ts";
 import { readJson, writeDurable } from "./durable.ts";
 import { type GameLayout, type Layout, loadLayout } from "./layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "./lock.ts";
-import { resolveConversation } from "./registry/resolve.ts";
+import { resolveConversation, resolveRole } from "./registry/resolve.ts";
 import type { Harness } from "./registry/schema.ts";
 import { readRegistry } from "./registry/store.ts";
 
@@ -247,6 +249,46 @@ function gameDevRoot(game: GameLayout): string {
   return resolve(game.stateDir, "..", "..", "..");
 }
 
+/**
+ * Codex event routing by role: the route's monitor gets native delivery while the route is
+ * active, any other recipient (or no route at all) the Codex queue, and an invalid route, or a
+ * held one for its monitor, defers every event. A route never queues for its own monitor.
+ */
+export function codexRouting(layout: Layout, recipientRole: string): "defer" | "native" | "queue" {
+  let route: RoleRoute | null;
+  try {
+    route = readRoleRoute(layout);
+  } catch {
+    return "defer";
+  }
+  if (route === null) {
+    return "queue";
+  }
+  if (route.monitor !== recipientRole) {
+    return "queue";
+  }
+  return route.state === "active" ? "native" : "defer";
+}
+
+const QUEUE_TIMEOUT_MS = 20_000;
+
+/** `codex queue --thread ID --message TEXT`: accepted when it exits zero within 20 seconds. */
+export const codexQueue: EventAdapter = {
+  ack: () => Promise.reject(new Error("the Codex queue has no acknowledgement")),
+  deliver: (_receiptPath, requestId, conversationId, text) =>
+    new Promise((settle) => {
+      execFile(
+        "codex",
+        ["queue", "--thread", conversationId, "--message", text],
+        { timeout: QUEUE_TIMEOUT_MS },
+        (error) => settle({ requestId, status: error === null ? "accepted" : "rejected" }),
+      );
+    }),
+  harness: "codex",
+  inventory: () => Promise.resolve({ entries: [], status: "unavailable" }),
+  status: () => Promise.resolve({ status: "unavailable" }),
+};
+
 interface Destination {
   readonly adapter: EventAdapter;
   readonly recipient: string;
@@ -261,6 +303,15 @@ function destination(adapters: AdapterFactories, game: GameLayout): Destination 
     const factory = adapters[registry.harness];
     if (recipient === null || factory === undefined) {
       return null;
+    }
+    if (registry.harness === "codex") {
+      const route = codexRouting(layout, resolveRole(registry, role));
+      if (route === "defer") {
+        return null;
+      }
+      if (route === "queue") {
+        return { adapter: codexQueue, recipient };
+      }
     }
     return { adapter: factory(layout, game), recipient };
   } catch {

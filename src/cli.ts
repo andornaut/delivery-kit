@@ -43,12 +43,18 @@ Commands:
                           validate config.json, var/registry.json and each delivery-kit.json
   request                 record a user-authorized one-off departure request
   status                  print read-only runner and delivery status
+  status --harness claude|codex
+                          probe whether that harness can deliver; exit 0 when ready
   resource-report         print reporting-only resource information
   migrate                 move 0.x state into var/ (run from game-dev)
   channel                 run the Claude channel consumer
-  monitor-snapshot [--parent UUID ...]
+  monitor-snapshot --game ID [--recipient ROLE|UUID] [--parent ROLE|UUID ...]
                           capture the monitor review snapshot
-  monitor-ack             acknowledge one monitor queue item
+  monitor-ack --game ID --snapshot UUID --queue-id ID --disposition D [--reason TEXT]
+                          acknowledge monitor queue items
+
+--recipient and --parent take a role name resolved through var/registry.json, or a
+conversation UUID registered for the active harness. Repeat --parent UUID for each parent.
   help, --help            print this text
   --version               print the version
 

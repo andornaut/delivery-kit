@@ -9,8 +9,8 @@ import { holdLock, LockBusy } from "../../lock.ts";
 import { decisionClear } from "../shared/decisions.ts";
 import { eventRequestId, slotRequestId } from "../shared/ids.ts";
 import { pyJsonDumps } from "../shared/pyjson.ts";
+import type { ActiveScope } from "../shared/route.ts";
 import { type AgentEntry, listingOrNull, monitorReady, roleDiagnostics } from "./agents.ts";
-import type { ResolvedRoute } from "./route.ts";
 
 export const UNBLOCK = "unblock";
 export const SPOOL = "claude-spool";
@@ -118,7 +118,7 @@ function ordered(pairs: readonly (readonly [string, string])[]): Diagnostic {
 
 export function brief(
   slot: number,
-  route: Extract<ResolvedRoute, { status: "active" }>,
+  route: ActiveScope,
   diagnostics: readonly Diagnostic[],
 ): string {
   const targets = route.targets.map((target) => `${target.name}: ${target.sessionId}`).join("\n");
@@ -171,7 +171,7 @@ function unavailableDiagnostics(
 export function spoolMonitorBrief(
   env: NodeJS.ProcessEnv,
   busDir: string,
-  route: Extract<ResolvedRoute, { status: "active" }>,
+  route: ActiveScope,
   slot: number,
   parents: readonly string[] = [],
 ): SlotOutcome {

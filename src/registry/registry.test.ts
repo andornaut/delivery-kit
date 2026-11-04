@@ -133,6 +133,16 @@ describe("updateRegistry", () => {
     expect(readdirSync(layout.varDir).sort()).toEqual(["registry.json", "registry.lock"]);
   });
 
+  it("requires conversation IDs in the canonical lowercase form", () => {
+    const layout = setup();
+    expect(() =>
+      updateRegistry(layout, 1, (draft) => {
+        draft.roles["game-dev"]!.conversations.claude = "ABCDEF00-0000-4000-8000-000000000003";
+      }),
+    ).toThrow(ValidationError);
+    expect(readRegistry(layout).roles["game-dev"]?.conversations.claude).toBe(CLAUDE_GAME_DEV);
+  });
+
   it("serializes concurrent writers in separate processes without losing an update", async () => {
     const layout = setup();
     const writers = 6;

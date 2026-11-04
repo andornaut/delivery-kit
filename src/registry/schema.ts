@@ -11,9 +11,9 @@ import {
   checkObject,
   checkRelativePath,
   checkString,
+  CONVERSATION_ID_PATTERN,
   ID_PATTERN,
   Issues,
-  UUID_PATTERN,
 } from "../validate.ts";
 
 export const HARNESSES = ["claude", "codex"] as const;
@@ -107,7 +107,7 @@ function checkConversations(issues: Issues, at: string, value: unknown): void {
   for (const harness of HARNESSES) {
     const id = value[harness];
     if (id !== undefined && id !== null) {
-      checkString(issues, `${at}/${harness}`, UUID_PATTERN, id);
+      checkString(issues, `${at}/${harness}`, CONVERSATION_ID_PATTERN, id);
     }
   }
 }
