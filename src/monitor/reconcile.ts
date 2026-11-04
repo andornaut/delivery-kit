@@ -378,8 +378,8 @@ export function reminder(
       ? `\nVerified latest failed child turns (parent, child, turn, typed code): ${ascii(brief.workerFailures)}.` +
         " Live deliver these exact references to the owning parent only after checking its " +
         "recipient guards and native questions. Request that parent checkpoint and quiesce affected " +
-        "approved work before reassigning to a healthy existing worker or replacement, within eight " +
-        "useful workers and ten total spawns. Preserve WIP, worktrees, jobs, exact decisions and " +
+        "approved work before reassigning to a healthy existing worker or replacement, within the " +
+        "session's worker limits. Preserve WIP, worktrees, jobs, exact decisions and " +
         "unanswered questions. Parent decides and confirms handling; acceptance is delivery only. " +
         "Do not contact or mutate children, spawn workers, clear guards, or infer stalls from silence."
       : "";
