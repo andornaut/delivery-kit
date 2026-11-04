@@ -133,6 +133,12 @@ export class Monitored {
     predicate: (output: string) => boolean,
     timeoutMs = 20_000,
   ): Promise<string> {
+    // A departure still finishing when the clock jumps would cross the slot, which the loop
+    // never replays; wait for the previous one to end first.
+    await this.runner!.until(
+      () => !this.ws.exists("active-departure") || this.ws.read("active-departure") === "",
+      timeoutMs,
+    );
     const mark = this.output.length;
     const now = virtualNow(this.ws);
     if (epoch + 1 <= now) throw new Error(`clock already past ${epoch}`);

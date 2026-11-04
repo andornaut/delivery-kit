@@ -1,10 +1,12 @@
 // User-authorized one-off requests with real scratch Git (from tests/test_requests.py).
+// 0.9 requests capture and pin queue entries; 1.0 requests depart local main HEAD, so the
+// capture, claim and validation cases are queue-model parity cases.
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
 import { execute, impl, startRunner } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, queueModel, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
@@ -69,7 +71,7 @@ function gates(ws: Workspace): number {
 suite("requests", () => {
   const workspace = workspaces();
 
-  contract("concurrent capture is idempotent and the runner claims a request once", async () => {
+  queueModel("concurrent capture is idempotent and the runner claims a request once", async () => {
     const ws = workspace({ realGit: true });
     setup(ws);
     const tip = ws.git("rev-parse", "bus/feature");
@@ -91,7 +93,7 @@ suite("requests", () => {
     expect(JSON.parse((await capture(ws, "one")).stdout).state).toBe("finished");
   });
 
-  contract(
+  queueModel(
     "a started request found at runner start becomes interrupted and is never claimed again",
     async () => {
       const ws = workspace({ realGit: true });
@@ -115,7 +117,7 @@ suite("requests", () => {
     },
   );
 
-  contract("capture takes the queue lock before the request lock", async () => {
+  queueModel("capture takes the queue lock before the request lock", async () => {
     const ws = workspace({ realGit: true });
     setup(ws);
     expect((await capture(ws, "one")).code).toBe(0);
@@ -133,7 +135,7 @@ suite("requests", () => {
   });
 
   for (const change of ["queue", "tip"] as const) {
-    contract(
+    queueModel(
       `a changed ${change} after capture rejects the request without consuming the queue`,
       async () => {
         const ws = workspace({ realGit: true });
@@ -158,7 +160,7 @@ suite("requests", () => {
     );
   }
 
-  contract(
+  queueModel(
     "a queue change between the departure's two queue reads rejects the request",
     async () => {
       const ws = workspace({ realGit: true });
@@ -181,7 +183,7 @@ suite("requests", () => {
     },
   );
 
-  contract(
+  queueModel(
     "a failed request finishes once and a later scheduled departure carries no request context",
     async () => {
       const ws = workspace({ realGit: true });
@@ -222,7 +224,7 @@ suite("requests", () => {
   );
 
   for (const duration of [0, 40, 120]) {
-    contract(
+    queueModel(
       `a ${duration}s request keeps the hourly deadline and skips a crossed slot`,
       async () => {
         const ws = workspace({ realGit: true });
@@ -245,7 +247,7 @@ suite("requests", () => {
     );
   }
 
-  contract(
+  queueModel(
     "a request integrates its captured tip and retains a branch advanced during the gate",
     async () => {
       const ws = workspace({ realGit: true });
@@ -269,7 +271,18 @@ suite("requests", () => {
     },
   );
 
-  contract(
+  contract("request IDs must be 1 to 64 safe characters and an invalid ID departs nothing", async () => {
+    const ws = workspace({ realGit: true });
+    setup(ws);
+    for (const id of ["../escape", "-option", "a".repeat(65), ""]) {
+      const result = await capture(ws, id);
+      expect(result.code, id).not.toBe(0);
+    }
+    expect(ws.list("requests").filter((name) => name.endsWith(".json"))).toEqual([]);
+    expect(containers(ws)).toEqual([]);
+  });
+
+  queueModel(
     "the public request command captures only and refuses invalid or empty requests",
     async () => {
       const ws = workspace({ realGit: true });
@@ -288,7 +301,7 @@ suite("requests", () => {
     },
   );
 
-  contract("a missing ref is reported while valid queued work still integrates", async () => {
+  queueModel("a missing ref is reported while valid queued work still integrates", async () => {
     const ws = workspace({ realGit: true });
     setup(ws, { reports: true });
     ws.updateControl((c) => (c.codex = { fail: true }));

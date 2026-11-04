@@ -51,7 +51,7 @@ function blockedDeparture(ws: Workspace): void {
   ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
   // Keep monitor slots out of the event window.
   ws.updateGameDevConfig({ wakeMinutes: [45] });
-  ws.queue(["bus/queued"]);
+  impl.offer(ws, ["bus/queued"]);
   ws.setClock(at(-1, 50));
 }
 

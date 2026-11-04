@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Command, Implementation } from "./adapter.ts";
-import { KIT_ROOT, type Workspace, writeJson } from "./workspace.ts";
+import { KIT_ROOT, SHA, type Workspace, writeJson } from "./workspace.ts";
 
 const CLI = join(KIT_ROOT, "dist", "cli.js");
 
@@ -68,6 +68,10 @@ export const nodeImplementation: Implementation = {
     cwd: ws.gameDev,
     env: ws.baseEnv(),
   }),
+  offer: (ws, branches) =>
+    ws.updateControl((c) => {
+      c.git = { ...c.git, localMain: branches.length ? (c.sha ?? SHA) : ws.remoteHead };
+    }),
   checkConfig: (ws) => command(ws, ["check-config"]),
   status: (ws) => command(ws, ["status"]),
   resourceReport: (ws) => command(ws, ["resource-report"]),

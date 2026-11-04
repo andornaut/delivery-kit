@@ -8,6 +8,8 @@
 // - hardened: 1.0 durability ordering (decision 5). Node asserts the hardened behaviour;
 //   Bash asserts the 0.9 legacy behaviour where it differs.
 // - retired: commands removed in 1.0 (decision 6); kept as a skipped, named group.
+// - queueModel: the 0.9 bus queue, admission, batch and cherry-pick model. 1.0 is trunk-based
+//   (local main HEAD departs), so these run on Bash only and are retired for Node.
 import { afterEach, describe, it } from "vitest";
 
 import { impl } from "./adapter.ts";
@@ -38,6 +40,16 @@ export function bashConfig(name: string, body: () => Promise<void> | void): void
 export function bashOnly(name: string, body: () => Promise<void> | void): void {
   it.skipIf(impl.name !== "bash")(`[bash-only] ${name}`, body);
 }
+
+export function queueModel(name: string, body: () => Promise<void> | void): void {
+  it.skipIf(impl.name !== "bash")(
+    `${impl.name === "bash" ? "[queue-model]" : "[retired: trunk-based delivery]"} ${name}`,
+    body,
+  );
+}
+
+/** Assertions on queue, batch or branch artefacts inside an otherwise shared case. */
+export const QUEUE_MODEL = impl.name === "bash";
 
 export function hardened(
   name: string,

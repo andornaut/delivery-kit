@@ -106,6 +106,8 @@ export interface Control {
   maxRealSleep?: number;
   git?: {
     real?: boolean;
+    /** Local main HEAD for `rev-parse main` (1.0 trunk-based departures). */
+    localMain?: string;
     wrongTree?: string;
     branchTip?: string;
     tips?: Record<string, string | null>;

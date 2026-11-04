@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, queueModel, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at } from "../lib/time.ts";
 import { BASH_ROOT } from "../lib/parity.ts";
@@ -185,7 +185,7 @@ suite("status", () => {
     }
   });
 
-  contract("queued branches are counted", async () => {
+  queueModel("queued branches are counted", async () => {
     const ws = workspace();
     quiet(ws);
     ws.queue(["bus/one", "bus/two"]);

@@ -4,8 +4,8 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
-import { type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { impl, type Resident, startRunner } from "../lib/adapter.ts";
+import { contract, QUEUE_MODEL, queueModel, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
 import { SHA, type Workspace } from "../lib/workspace.ts";
@@ -62,7 +62,7 @@ suite("events", () => {
       bus(ws);
       ws.config.deploy = { mode: "none", skipPattern: "" };
       ws.updateControl((c) => (c.codex = { fail: true }));
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = start(ws);
       await runner.until(() => kinds(ws).includes("push"));
       await sleep(1500);
@@ -98,7 +98,7 @@ suite("events", () => {
         };
         c.wrangler = { fail: true };
       });
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = start(ws);
       await runner.until(
         () => kinds(ws).includes("ci_success") && kinds(ws).includes("deploy_failure"),
@@ -153,7 +153,7 @@ suite("events", () => {
           }),
         );
       }
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = start(ws);
       await runner.until(() => kinds(ws).includes("deploy_failure"));
       ws.updateControl((c) => (c.wrangler = {}));
@@ -199,9 +199,13 @@ suite("events", () => {
       c.docker = { gateFail: true };
       c.codex = { fail: true };
     });
-    ws.queue(["bus/feature"]);
+    impl.offer(ws, ["bus/feature"]);
     const runner = start(ws);
-    await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
+    await runner.until(() =>
+      QUEUE_MODEL
+        ? runner.output().stdout.includes("kept branch batch-")
+        : kinds(ws).some((kind) => kind.startsWith("blocked-")),
+    );
     await sleep(500);
     await runner.stop();
     const blocked = ws.events().filter((event) => String(event.kind).startsWith("blocked-"));
@@ -216,7 +220,7 @@ suite("events", () => {
     const gate = join(ws.root, "hold-delivery");
     writeFileSync(gate, "");
     ws.updateControl((c) => (c.codex = { blockWhile: gate }));
-    ws.queue(["bus/feature"]);
+    impl.offer(ws, ["bus/feature"]);
     const runner = start(ws);
     await runner.until(() => kinds(ws).includes("blocked-load"));
     await runner.until(() => ws.read("active-departure") === "");
@@ -233,7 +237,7 @@ suite("events", () => {
     }
   });
 
-  contract(
+  queueModel(
     "long Unicode delivery fits 900 UTF-8 bytes including the event ID; local metadata is retained",
     async () => {
       const ws = workspace();

@@ -30,6 +30,11 @@ export interface Implementation {
   command(ws: Workspace, words: string[]): Command;
   /** A command line without configuration or state context. */
   bare(ws: Workspace, words: string[]): Command;
+  /**
+   * Make new work available to the next departure. 0.9 queues the branches; 1.0 is trunk-based,
+   * so local main moves to the scripted commit (an empty list leaves nothing new).
+   */
+  offer(ws: Workspace, branches: string[]): void;
   checkConfig(ws: Workspace): Command;
   status(ws: Workspace): Command;
   resourceReport(ws: Workspace): Command;

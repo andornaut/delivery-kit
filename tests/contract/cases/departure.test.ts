@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, hardened, suite, workspaces } from "../lib/cases.ts";
+import { contract, hardened, QUEUE_MODEL, queueModel, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
 import { BASE, SHA, type Workspace } from "../lib/workspace.ts";
@@ -82,7 +82,7 @@ suite("departure", () => {
       const ws = workspace();
       bus(ws);
       ws.updateControl((c) => (c.git = { files }));
-      ws.queue(["bus/docs"]);
+      impl.offer(ws, ["bus/docs"]);
       const runner = await departOnce(
         ws,
         () =>
@@ -104,7 +104,7 @@ suite("departure", () => {
       const ws = workspace();
       bus(ws);
       ws.updateControl((c) => (c.wrangler = { fail: true }));
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = await departOnce(
         ws,
         () => ws.exists("deploy-pending") && kinds(ws).includes("deploy_failure"),
@@ -136,7 +136,7 @@ suite("departure", () => {
     bus(ws);
     ws.config.deploy = { mode: "none", skipPattern: "(\\.md$|^art/|^gameplay/)" };
     ws.write("last-deploy.sha", "c".repeat(40) + "\n");
-    ws.queue(["bus/feature"]);
+    impl.offer(ws, ["bus/feature"]);
     const runner = await departOnce(ws, () => kinds(ws).includes("push"));
     await sleep(500);
     const result = await runner.stop();
@@ -153,16 +153,16 @@ suite("departure", () => {
         const ws = workspace();
         bus(ws);
         ws.updateControl((c) => (c.docker = { [failure]: true }));
-        ws.queue(["bus/test-input"]);
+        impl.offer(ws, ["bus/test-input"]);
         const runner = await departOnce(ws, () =>
           kinds(ws).includes("blocked-" + (failure === "gateFail" ? "full-gate" : "install")),
         );
-        await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
+        if (QUEUE_MODEL) await runner.until(() => runner.output().stdout.includes("kept branch batch-"));
         const result = await runner.stop();
         expect(pushes(ws)).toBe(0);
         expect(ws.exists("deploy-pending")).toBe(false);
         expect(deploys(ws)).toEqual([]);
-        expect(result.stdout).toContain("kept branch batch-");
+        if (QUEUE_MODEL) expect(result.stdout).toContain("kept branch batch-");
         expect(
           ws.calls("git").some((call) => call.args.includes("branch") && call.args.includes("-D")),
         ).toBe(false);
@@ -209,7 +209,7 @@ suite("departure", () => {
       false,
     ],
   ] as const) {
-    contract(`repair approval rejects ${title} and preserves the approval`, async () => {
+    queueModel(`repair approval rejects ${title} and preserves the approval`, async () => {
       const ws = workspace();
       bus(ws);
       prepareRepair(ws);
@@ -228,7 +228,7 @@ suite("departure", () => {
     });
   }
 
-  contract(
+  queueModel(
     "a one-shot repair requires the full gate, is consumed only after push and rejects replay",
     async () => {
       const ws = workspace();
@@ -291,10 +291,10 @@ suite("departure", () => {
       const ws = workspace();
       bus(ws);
       ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 0 };
-      ws.queue(["bus/queued"]);
+      impl.offer(ws, ["bus/queued"]);
       const runner = await departOnce(ws, () => kinds(ws).includes("blocked-load"));
       await runner.stop();
-      expect(ws.read("bus-queue")).toBe("bus/queued\n");
+      if (QUEUE_MODEL) expect(ws.read("bus-queue")).toBe("bus/queued\n");
       expect(new Set(kinds(ws))).toEqual(new Set(["attempt", "blocked-load"]));
       expect(containers(ws)).toEqual([]);
     },
@@ -303,7 +303,7 @@ suite("departure", () => {
   contract("empty scheduled departures add no events", async () => {
     const ws = workspace();
     bus(ws);
-    ws.queue([]);
+    impl.offer(ws, []);
     ws.setClock(at(59, 58), 60);
     const runner = startRunner(ws);
     await runner.until(() => ws.virtualNow() >= at(3, 0, 1), 20_000);
@@ -350,7 +350,7 @@ suite("departure", () => {
       ws.config.deploy = { mode: "none", skipPattern: "" };
       ws.config.ci = { requiredNames: ["Test"], pollSeconds: 0, timeoutSeconds: 1 };
       ws.updateControl((c) => (c.gh = { checks: { [SHA]: [...runs] } }));
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = await departOnce(
         ws,
         () =>
@@ -377,7 +377,7 @@ suite("departure", () => {
       (c) =>
         (c.gh = { default: [{ id: 1, name: "Test", status: "in_progress", conclusion: null }] }),
     );
-    ws.queue(["bus/feature"]);
+    impl.offer(ws, ["bus/feature"]);
     const runner = await departOnce(
       ws,
       () => ws.exists("ci", `${SHA}.status`) && ws.read("ci", `${SHA}.status`).trim() === "running",
@@ -390,7 +390,8 @@ suite("departure", () => {
     await runner.terminateLeader();
     await sleep(300);
     try {
-      for (const name of ["runner.lock", "loop.lock", "merge.lock"]) {
+      // merge.lock is the 0.9 batch lock; 1.0 has no batch.
+      for (const name of ["runner.lock", "loop.lock", ...(QUEUE_MODEL ? ["merge.lock"] : [])]) {
         const probe = await hold(ws.path(name), "5>>");
         await probe.release();
       }
@@ -416,7 +417,7 @@ suite("departure", () => {
       const stamps = ["last-push", "last-push.sha", "last-deploy", "last-deploy.sha"];
       for (const name of stamps) ws.write(name, "old\n");
       const before = Object.fromEntries(stamps.map((name) => [name, ws.inode(name)]));
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = await departOnce(ws, () => ws.read("last-deploy.sha").trim() === SHA);
       await runner.stop();
       for (const name of stamps) expect(ws.inode(name), name).not.toBe(before[name]);
@@ -429,7 +430,7 @@ suite("departure", () => {
       const stamps = ["last-push", "last-push.sha", "last-deploy", "last-deploy.sha"];
       for (const name of stamps) ws.write(name, "old\n");
       const before = Object.fromEntries(stamps.map((name) => [name, ws.inode(name)]));
-      ws.queue(["bus/feature"]);
+      impl.offer(ws, ["bus/feature"]);
       const runner = await departOnce(ws, () => ws.read("last-deploy.sha").trim() === SHA);
       await runner.stop();
       for (const name of stamps) expect(ws.inode(name), name).toBe(before[name]);

@@ -97,6 +97,8 @@ function git() {
           process.exit(128);
         }
         out(`${tip}\n`);
+      } else if (behaviour.localMain && ["main", "refs/heads/main", "refs/heads/main^{commit}"].includes(last)) {
+        out(`${behaviour.localMain}\n`);
       } else {
         out(`${last === "HEAD" ? sha : remoteHead()}\n`);
       }

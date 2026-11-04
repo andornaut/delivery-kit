@@ -112,6 +112,7 @@ export const bashImplementation: Implementation = {
   help: (ws, word) => ({ argv: ["bash", ENTRY, word], cwd: ws.root, env: env(ws) }),
   command: contextual,
   bare: (ws, words) => ({ argv: ["bash", ENTRY, ...words], cwd: ws.root, env: env(ws) }),
+  offer: (ws, branches) => ws.queue(branches),
   checkConfig: (ws) => contextual(ws, ["check-config"]),
   status: (ws) => contextual(ws, ["status"]),
   resourceReport: (ws) => contextual(ws, ["resource-report"]),
