@@ -98,7 +98,11 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`; a departure names
   the tool an image lacks. An empty `install` skips the install step, and an empty `steps` list
   gates with no checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
-  rejected.
+  rejected. Every step is treated alike: each needs a unique name (a letter or digit, then up
+  to 63 letters, digits, `_`, `.` or `-`), steps run in list order, and the first failure stops
+  the gate. No step name has special meaning. The
+  canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
+  `art`), so every game lists the shared steps the same way and opts into extras by adding them.
 - `resources`: `cpus` (1 to 4) and `loadLimit` (0 to 24). A departure starts only below
   `loadLimit`, so 0 holds every departure.
 - `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
