@@ -150,7 +150,8 @@ function ensureRouteRoles(ws: Workspace): void {
   if (missing.length === 0) return;
   // By exact name: another role may hold the same conversation since the registry was rewritten.
   const roles = { ...registry.roles };
-  for (const name of missing) roles[name] = { conversations: { [registry.harness]: name.slice(2) } };
+  for (const name of missing)
+    roles[name] = { conversations: { [registry.harness]: name.slice(2) } };
   ws.writeRegistry({ ...registry, roles });
 }
 
