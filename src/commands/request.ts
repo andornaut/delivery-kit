@@ -1,4 +1,4 @@
-// request --game ID --request-id SAFE_ID: an operator-authorized one-off departure of the
+// request --game ID --id SAFE_ID: an operator-authorized one-off departure of the
 // current local main HEAD. It records the request only; the resident runner departs it under
 // the same rules as a scheduled departure.
 import { resolveGame } from "../bus/command.ts";
@@ -15,7 +15,7 @@ export const request: Handler = async (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  const id = resolved.values["request-id"];
+  const id = resolved.values.id;
   if (typeof id !== "string") {
     io.err(`${USAGE}\n`);
     return EXIT_USAGE;

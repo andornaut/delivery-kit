@@ -1,4 +1,4 @@
-// Question state through `monitor-snapshot`. No route is
+// Question state through `monitor snapshot`. No route is
 // declared, so the recipient is in scope; native history comes from the fake control socket and
 // owner attestations from STATE/unblock/decisions/<recipient>.json.
 import { expect } from "vitest";
@@ -452,7 +452,7 @@ suite("question state", () => {
       for (const recipient of [P.toUpperCase().replace("00000000", "ABCDEFAB"), "invalid"]) {
         const ws = workspace();
         const socket = await socketFor(ws);
-        const result = await cli(ws, ["monitor-snapshot", "--recipient", recipient]);
+        const result = await cli(ws, ["monitor", "snapshot", "--recipient", recipient]);
         expect(result.code).toBe(2);
         expect(socket.calls).toEqual([]);
       }

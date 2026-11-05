@@ -23,7 +23,7 @@ suite("harness", () => {
     try {
       ws.env.CODEX_CONTROL_SOCKET = socket.path;
       socket.on("thread/queue/list", { data: [], nextCursor: null });
-      const result = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
+      const result = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
       expect(socket.methods()[0]).toBe("initialize");
       expect(result.stdout + result.stderr).not.toBe("");
     } finally {

@@ -29,7 +29,7 @@ async function delivered(ws: Workspace): Promise<void> {
 }
 
 async function snapshot(ws: Workspace, recipient = MONITOR): Promise<Json> {
-  const result = await cli(ws, ["monitor-snapshot", "--recipient", recipient]);
+  const result = await cli(ws, ["monitor", "snapshot", "--recipient", recipient]);
   expect(result.code, result.stdout + result.stderr).toBe(0);
   return JSON.parse(result.stdout);
 }
@@ -55,7 +55,7 @@ async function ack(
     ...extra,
   ];
   for (const id of ids) args.push("--queue-id", id);
-  const result = await cli(ws, ["monitor-ack", ...args]);
+  const result = await cli(ws, ["monitor", "ack", ...args]);
   return {
     ...result,
     json: result.stdout ? (JSON.parse(result.stdout) as Json) : {},
@@ -108,7 +108,7 @@ suite("claude monitor inventory", () => {
     agents(ws, "fail");
     expect((await snapshot(ws)).session_status[MONITOR]).toBe("unavailable");
     agents(ws, "idle");
-    const other = await cli(ws, ["monitor-snapshot", "--recipient", ARCHIE]);
+    const other = await cli(ws, ["monitor", "snapshot", "--recipient", ARCHIE]);
     expect(other.code).toBe(1);
     expect(JSON.parse(other.stdout).status).toBe("unavailable");
   });
@@ -184,7 +184,7 @@ suite("claude monitor inventory", () => {
   contract("the public CLI selects the Claude monitor for a version 2 route", async () => {
     const ws = workspace();
     await delivered(ws);
-    const result = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
+    const result = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
     expect(result.code, result.stdout + result.stderr).toBe(0);
     const output = JSON.parse(result.stdout);
     expect([output.harness, output.queue_ids]).toEqual(["claude", [REQUEST]]);

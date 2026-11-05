@@ -24,37 +24,38 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
 runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
-`channel` and the monitor commands.
+`claude channel`, the readiness probes and the monitor commands.
 
 ## Commands
 
-Every command resolves game-dev from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
-directory. `--root` comes before the command.
+Top-level verbs are game operations; `monitor`, `claude` and `codex` are noun groups that take a
+verb. Every command resolves game-dev from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
+directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
+explicit; it is never inferred from the working directory.
 
-| Command                                                                                                                                                    | Purpose                                                                                                                        |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `run --game ID`                                                                                                                                            | The resident runner for one game.                                                                                              |
-| `check-config [--game ID]`                                                                                                                                 | Validate `config.json`, `var/registry.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
-| `request --game ID --request-id SAFE_ID`                                                                                                                   | Record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                      |
-| `status --game ID`                                                                                                                                         | Read-only runner identity, singleton, idle and drain report as one JSON line.                                                  |
-| `status --harness claude\|codex`                                                                                                                           | The handoff readiness probe (see [Readiness probe](#readiness-probe)).                                                         |
-| `resource-report --game ID`                                                                                                                                | Reporting-only resource information.                                                                                           |
-| `channel [--game ID]... [--poll-seconds N] [--monitor UUID] [--state-dir DIR]...`                                                                          | The Claude channel consumer, a stdio MCP server the monitor session launches.                                                  |
-| `monitor-snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Capture the monitor review snapshot.                                                                                           |
-| `monitor-ack --game ID [--recipient ROLE] [--parent ROLE]... --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT]` | Acknowledge queue items from that snapshot. `retained` requires a reason.                                                      |
-| `help`, `--help`, `--version`                                                                                                                              | Usage and version.                                                                                                             |
+| Command                                                                                                                                                    | Purpose                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run --game ID`                                                                                                                                            | Game operation: the resident runner for one game.                                                                                                          |
+| `status --game ID [--resources]`                                                                                                                           | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information. |
+| `check-config [--game ID]`                                                                                                                                 | Game operation: validate `config.json`, `var/registry.json` and each `delivery-kit.json` together, with no Git, network or container activity.             |
+| `request --game ID --id SAFE_ID`                                                                                                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                  |
+| `monitor snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Monitor (game-dev): capture the monitor review snapshot.                                                                                                   |
+| `monitor ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Monitor (game-dev): acknowledge queue items from that snapshot. `retained` requires a reason.                                                              |
+| `claude ready`, `codex ready`                                                                                                                              | Harness: the handoff readiness probe (see [Readiness probe](#readiness-probe)).                                                                            |
+| `claude channel [--game ID]... [--monitor UUID] [--state-dir DIR]... [--poll-seconds N]`                                                                   | Harness: the stdio MCP server the Claude monitor session starts.                                                                                           |
+| `help`, `--help`, `--version`                                                                                                                              | Usage and version.                                                                                                                                         |
 
 - `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
 - `status --game`: an unreadable `ci/`, `events/`, `requests/` or `gate-failed/` directory is a
   blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
   `unreadable` with the `identity_unreadable` blocker.
-- `channel`: by default it drains every game's spool (or each `--game`) for the registry's
+- `claude channel`: by default it drains every game's spool (or each `--game`) for the registry's
   `monitor` conversation and requires `harness` to be `claude`. `--monitor UUID` and repeated
   absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
   `--state-dir` excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory
   and drains only spools that already exist, so it can start before any game state. Without
   `--monitor`, an absent registry stops it with exit 1.
-- `monitor-snapshot` and `monitor-ack`: `--recipient` defaults to the `monitor` duty. `--recipient`
+- `monitor snapshot` and `monitor ack`: `--recipient` defaults to the `monitor` duty. `--recipient`
   and `--parent` take a role name, or a canonical conversation UUID registered for the active
   harness. With Claude the recipient must be the active route's monitor and every parent a route
   member; with Codex every parent must belong to the active route. `--history-cursor` applies to
@@ -64,7 +65,7 @@ directory. `--root` comes before the command.
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
 read or a refused runner start, and 2 for a usage error or an unexpected failure. `run` exits 130
 on `SIGINT` and 143 on `SIGTERM`. Errors, a refused runner start and a refused request go to
-stderr prefixed `delivery-kit:`. `monitor-snapshot` and `monitor-ack` keep their JSON result on
+stderr prefixed `delivery-kit:`. `monitor snapshot` and `monitor ack` keep their JSON result on
 stdout and also name the error on stderr. `--help` is generated from each command's parser
 options, so it lists every flag a command accepts.
 
@@ -149,7 +150,7 @@ only reads them, and a missing or invalid record is never clearance.
 
 ### Readiness probe
 
-`status --harness claude|codex` sends nothing and reports whether that adapter can deliver now:
+`claude ready` and `codex ready` send nothing and reports whether that adapter can deliver now:
 
 - Claude: `claude agents --json` returns a listing.
 - Codex: `CODEX_CONTROL_SOCKET` names an absolute socket path that accepts a connection.
@@ -194,7 +195,7 @@ cannot be read. Run it before flipping `harness`.
 ## Harness adapters
 
 - **Claude:** briefs and events are spooled under the bus's `unblock/` directory with a `sending`
-  receipt written first. `delivery-kit channel` claims each entry, delivers it once to the
+  receipt written first. `delivery-kit claude channel` claims each entry, delivers it once to the
   monitor session, records the delivery, marks the receipt `accepted`, then removes the entry. A
   `sending` receipt with no spool entry becomes `ambiguous` and is never resent. The channel server
   is configured in the monitor session's MCP settings; see `examples/claude-channel.mcp.json`.
@@ -340,7 +341,7 @@ containers for the game are removed before the next gate.
 ### Test overrides
 
 Two environment variables are test-only overrides for the contract harness, never configuration.
-`run` and `resource-report` honour them; an invalid value stops the command.
+`run` and `status --resources` honour them; an invalid value stops the command.
 
 - `DELIVERY_KIT_TEST_CLOCK` names a JSON file `{epoch, realStartMs, speed, maxRealSleep?}`.
   Virtual time is `epoch` plus the sum of a `clock-offsets` file beside it (one number per line)
@@ -371,6 +372,33 @@ subject last.
 - `resolveRole(registry, role)` and `resolveConversation(registry, role)`, which throw
   `UnknownRole` or `AmbiguousRole`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.
+
+## 2.0.0 changes
+
+2.0.0 reshapes the CLI. An old form exits 2 with a one-line hint naming its replacement; there are
+no aliases.
+
+| 1.x form                                 | 2.0.0 form                           |
+| ---------------------------------------- | ------------------------------------ |
+| `channel ...`                            | `claude channel ...`                 |
+| `monitor-snapshot ...`                   | `monitor snapshot ...`               |
+| `monitor-ack ...`                        | `monitor ack ...`                    |
+| `resource-report --game ID`              | `status --game ID --resources`       |
+| `status --harness claude`                | `claude ready`                       |
+| `status --harness codex`                 | `codex ready`                        |
+| `request --game ID --request-id ID`      | `request --game ID --id ID`          |
+| `migrate ...`, `migrate --remove-legacy` | removed; upgrade 0.9.x through 1.0.3 |
+
+Callers change:
+
+- game-dev's channel MCP configuration: the server command ends in `claude channel` instead of
+  `channel` (see `examples/claude-channel.mcp.json`);
+- the monitor instructions: `monitor snapshot` and `monitor ack` replace `monitor-snapshot` and
+  `monitor-ack`, with the same options;
+- adoption and handoff checks: `claude ready` or `codex ready` replaces `status --harness claude`
+  or `status --harness codex`, with the same JSON output and exit codes;
+- request scripts: `--id` replaces `--request-id`; reporting scripts: `status --resources`
+  replaces `resource-report`.
 
 ## Development
 

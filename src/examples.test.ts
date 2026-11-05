@@ -43,6 +43,6 @@ describe("examples", () => {
     };
     const server = mcp.mcpServers["delivery-kit-monitor"];
     expect(server?.command).toBe("npx");
-    expect(server?.args.slice(-1)).toEqual(["channel"]);
+    expect(server?.args.slice(-2)).toEqual(["claude", "channel"]);
   });
 });

@@ -245,9 +245,12 @@ function command(ws: Workspace, words: string[]): Command {
   ensureRecipient(ws);
   applyRoute(ws);
   registerUsedConversations(ws, words);
-  const [verb = "", ...rest] = words;
+  // A noun group (monitor, claude, codex) takes a verb; the other commands are one word.
+  const width = ["monitor", "claude", "codex"].includes(words[0] ?? "") ? 2 : 1;
+  const verb = words.slice(0, width);
+  const rest = words.slice(width);
   return {
-    argv: [process.execPath, CLI, verb, "--game", ws.game, ...rest],
+    argv: [process.execPath, CLI, ...verb, "--game", ws.game, ...rest],
     cwd: ws.gameDev,
     env: env(ws),
   };
@@ -269,13 +272,13 @@ export const nodeImplementation: Implementation = {
     }),
   checkConfig: (ws) => command(ws, ["check-config"]),
   status: (ws) => command(ws, ["status"]),
-  resourceReport: (ws) => command(ws, ["resource-report"]),
-  request: (ws, id) => command(ws, ["request", "--request-id", id]),
-  monitorSnapshot: (ws, args) => command(ws, ["monitor-snapshot", ...args]),
-  monitorAck: (ws, args) => command(ws, ["monitor-ack", ...args]),
+  resourceReport: (ws) => command(ws, ["status", "--resources"]),
+  request: (ws, id) => command(ws, ["request", "--id", id]),
+  monitorSnapshot: (ws, args) => command(ws, ["monitor", "snapshot", ...args]),
+  monitorAck: (ws, args) => command(ws, ["monitor", "ack", ...args]),
   run: (ws) => ({ ...command(ws, ["run"]), logFile: join(ws.state, "runner.log") }),
   channel: (ws, args) => ({
-    argv: [process.execPath, CLI, "channel", ...args],
+    argv: [process.execPath, CLI, "claude", "channel", ...args],
     cwd: ws.gameDev,
     env: env(ws),
   }),

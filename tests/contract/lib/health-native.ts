@@ -62,7 +62,7 @@ export interface Snapshot {
   text: string;
 }
 
-/** Public `monitor-snapshot`; returns stdout JSON and the persisted snapshot record. */
+/** Public `monitor snapshot`; returns stdout JSON and the persisted snapshot record. */
 export async function snapshot(
   ws: Workspace,
   recipient: string,
@@ -70,7 +70,7 @@ export async function snapshot(
 ): Promise<Snapshot> {
   const result = await cli(
     ws,
-    ["monitor-snapshot", "--recipient", recipient, ...parents.flatMap((p) => ["--parent", p])],
+    ["monitor", "snapshot", "--recipient", recipient, ...parents.flatMap((p) => ["--parent", p])],
     {
       timeoutMs: 60_000,
     },

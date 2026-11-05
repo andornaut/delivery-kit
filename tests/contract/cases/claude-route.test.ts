@@ -1,5 +1,5 @@
 // Version 2 Claude route resolution and harness selection. Observed through the scheduled brief and
-// monitor-snapshot.
+// `monitor snapshot`.
 import { expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
@@ -25,7 +25,7 @@ suite("claude route", () => {
     async () => {
       const ws = workspace();
       claudeGame(ws);
-      const snapshot = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
+      const snapshot = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
       expect(snapshot.code, snapshot.stdout + snapshot.stderr).toBe(0);
       const output = JSON.parse(snapshot.stdout);
       expect(Object.keys(output.target_queue_status)).toEqual([ARCHIE]);
@@ -65,7 +65,7 @@ suite("claude route", () => {
       targets: [{ thread_id: ARCHIE, ownership: "active" }],
     };
     ws.writeRoute(v1);
-    const codex = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
+    const codex = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
     // The registry's active harness selects the adapter: under a Claude registry a version 1
     // route is rejected or deferred and never takes the Codex path.
     let status: unknown;
@@ -78,7 +78,7 @@ suite("claude route", () => {
     expect(codex.stdout + codex.stderr).not.toContain("CODEX_CONTROL_SOCKET");
     expect(codex.stdout).not.toContain('"harness": "codex"');
     ws.writeRoute(claudeRoute(ws));
-    const claude = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
+    const claude = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
     expect(claude.code).toBe(0);
     expect(JSON.parse(claude.stdout).harness).toBe("claude");
     for (const route of [
@@ -88,7 +88,7 @@ suite("claude route", () => {
       { version: "2", harness: "claude" },
     ]) {
       ws.writeRoute(route);
-      const result = await cli(ws, ["monitor-snapshot", "--recipient", MONITOR]);
+      const result = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
       expect(result.code, JSON.stringify(route)).not.toBe(0);
       expect(result.stdout).not.toContain('"harness": "claude"');
     }

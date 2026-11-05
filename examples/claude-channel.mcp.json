@@ -2,7 +2,7 @@
   "mcpServers": {
     "delivery-kit-monitor": {
       "command": "npx",
-      "args": ["--no-install", "delivery-kit", "--root", "/absolute/path/to/game-dev", "channel"]
+      "args": ["--no-install", "delivery-kit", "--root", "/absolute/path/to/game-dev", "claude", "channel"]
     }
   }
 }

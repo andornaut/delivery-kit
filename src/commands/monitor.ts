@@ -1,4 +1,4 @@
-// `delivery-kit monitor-snapshot` and `monitor-ack` for one game. The recipient is a role name
+// `delivery-kit monitor snapshot` and `monitor ack` for one game. The recipient is a role name
 // (default: the monitor duty) resolved through the registry for its active harness.
 import { parseArgs } from "node:util";
 
@@ -224,7 +224,7 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
 export const monitorSnapshot: Handler = (io, root, args) => {
   const { values } = parseArgs({
     args,
-    options: SPECS["monitor-snapshot"].options,
+    options: SPECS["monitor snapshot"].options,
     strict: true,
   });
   return guarded(io, () =>
@@ -239,13 +239,13 @@ export const monitorSnapshot: Handler = (io, root, args) => {
 export const monitorAck: Handler = (io, root, args) => {
   const { values } = parseArgs({
     args,
-    options: SPECS["monitor-ack"].options,
+    options: SPECS["monitor ack"].options,
     strict: true,
   });
   const queueIds = values["queue-id"] ?? [];
   const disposition = values.disposition as Disposition | undefined;
   if (values.snapshot === undefined || queueIds.length === 0 || disposition === undefined) {
-    io.err("delivery-kit: monitor-ack requires --snapshot, --queue-id and --disposition\n");
+    io.err("delivery-kit: monitor ack requires --snapshot, --queue-id and --disposition\n");
     return EXIT_USAGE;
   }
   if (!DISPOSITIONS.includes(disposition)) {

@@ -1,68 +1,33 @@
-// status --game ID: read-only runner, idle and drain report as one JSON line.
-// status --harness <claude|codex>: the handoff readiness probe; exit 0 when ready, 1 when not.
-import { dumpsJson, pyJsonDumps } from "../adapters/shared/pyjson.ts";
+// status --game ID [--resources]: the read-only runner, idle and drain report as one JSON line, or
+// with --resources the reporting-only resource information.
+import { dumpsJson } from "../adapters/shared/pyjson.ts";
 import { resolveGame } from "../bus/command.ts";
+import { busContext } from "../bus/context.ts";
+import { resourceReport } from "../bus/resources.ts";
 import { busPaths } from "../bus/state.ts";
 import { statusReport } from "../bus/status.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
-import { type Layout, loadLayout } from "../layout.ts";
-import { harnessReadiness } from "../monitor/readiness.ts";
-import type { Registry } from "../registry/schema.ts";
-import { readRegistry } from "../registry/store.ts";
+import { testOptions } from "../bus/testOverrides.ts";
+import { EXIT_OK, type Handler } from "../io.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("status");
 
-async function readiness(io: Io, root: string, harness: string | undefined): Promise<number> {
-  if (harness !== "claude" && harness !== "codex") {
-    io.err(`${USAGE}\n`);
-    return EXIT_USAGE;
-  }
-  let layout: Layout;
-  let registry: Registry;
-  try {
-    layout = loadLayout(root);
-    registry = readRegistry(layout);
-  } catch (error) {
-    // A missing registry or an invalid layout means not ready, not a usage error.
-    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
-    return EXIT_INVALID;
-  }
-  const report = await harnessReadiness(io.env, layout, registry, harness);
-  const ordered = Object.fromEntries([
-    ["harness", report.harness],
-    [
-      "adapter",
-      Object.fromEntries([
-        ["status", report.adapter.status],
-        ["reason", report.adapter.reason],
-      ]),
-    ],
-    [
-      "roles",
-      report.roles.map((row) =>
-        Object.fromEntries([
-          ["role", row.role],
-          ["conversation", row.conversation],
-          ["status", row.status],
-        ]),
-      ),
-    ],
-    ["ready", report.ready],
-  ]);
-  io.out(`${pyJsonDumps(ordered)}\n`);
-  return report.ready ? EXIT_OK : EXIT_INVALID;
-}
-
-export const status: Handler = (io, root, args) => {
-  if (args[0] === "--harness") {
-    return readiness(io, root, args.length === 2 ? args[1] : undefined);
-  }
-  // --harness is a separate form, read above; the game form takes --game alone.
-  const resolved = resolveGame(io, root, { game: SPECS.status.options.game }, USAGE, args);
+export const status: Handler = async (io, root, args) => {
+  const resolved = resolveGame(io, root, SPECS.status.options, USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }
-  io.out(`${dumpsJson(statusReport(busPaths(resolved.game.busDir)))}\n`);
+  const { config, game, layout, values } = resolved;
+  if (values.resources === true) {
+    const context = busContext(
+      { ...testOptions(io.env), log: (line) => io.err(`${line}\n`) },
+      layout,
+      game,
+      config,
+    );
+    io.out(await resourceReport(context));
+    return EXIT_OK;
+  }
+  io.out(`${dumpsJson(statusReport(busPaths(game.busDir)))}\n`);
   return EXIT_OK;
 };

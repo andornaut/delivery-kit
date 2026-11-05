@@ -47,7 +47,7 @@ async function delivered(): Promise<{ fixture: ClaudeFixture; requestId: string 
 }
 
 async function snapshot(fixture: ClaudeFixture): Promise<Record<string, unknown>> {
-  const result = await run(fixture, "monitor-snapshot", "--game", GAME);
+  const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
   expect(result.code, result.err + result.out).toBe(EXIT_OK);
   return JSON.parse(result.out) as Record<string, unknown>;
 }
@@ -56,7 +56,7 @@ function ack(fixture: ClaudeFixture, id: string, disposition: string, ...extra: 
   return async (snapshotId: string) =>
     run(
       fixture,
-      "monitor-ack",
+      "monitor", "ack",
       "--game",
       GAME,
       "--snapshot",
@@ -103,7 +103,7 @@ describe("monitor-snapshot (claude)", () => {
     const { fixture } = await delivered();
     const result = await run(
       fixture,
-      "monitor-snapshot",
+      "monitor", "snapshot",
       "--game",
       GAME,
       "--recipient",
@@ -115,7 +115,7 @@ describe("monitor-snapshot (claude)", () => {
       status: "unavailable",
     });
     expect(result.err).toBe("delivery-kit: recipient must be the active route monitor\n");
-    expect((await run(fixture, "monitor-snapshot")).code).toBe(EXIT_USAGE);
+    expect((await run(fixture, "monitor", "snapshot")).code).toBe(EXIT_USAGE);
   });
 
   it("reports an unreadable channel spool under the snapshot's errors", async () => {
@@ -123,7 +123,7 @@ describe("monitor-snapshot (claude)", () => {
     const spool = spoolDir(fixture.game.busDir);
     rmSync(spool, { force: true, recursive: true });
     writeFileSync(spool, "");
-    const result = await run(fixture, "monitor-snapshot", "--game", GAME);
+    const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
     expect(result.code).toBe(EXIT_INVALID);
     const output = JSON.parse(result.out) as { complete: boolean; path: string };
     expect(output.complete).toBe(false);
@@ -134,7 +134,7 @@ describe("monitor-snapshot (claude)", () => {
   it("accepts a registered conversation UUID and refuses an unregistered one", async () => {
     const { fixture } = await delivered();
     const recipient = (id: string) =>
-      run(fixture, "monitor-snapshot", "--game", GAME, "--recipient", id);
+      run(fixture, "monitor", "snapshot", "--game", GAME, "--recipient", id);
     expect((await recipient(MONITOR)).code).toBe(EXIT_OK);
     expect((await recipient("00000000-0000-4000-8000-0000000000ff")).code).toBe(EXIT_USAGE);
   });

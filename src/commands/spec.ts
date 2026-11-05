@@ -18,18 +18,28 @@ export interface CommandSpec {
 const VALUES: Readonly<Record<string, string>> = {
   disposition: "handled|superseded|retained",
   game: "ID",
-  harness: "claude|codex",
   "history-cursor": "CURSOR",
+  id: "SAFE_ID",
   monitor: "UUID",
   parent: "ROLE|UUID",
   "poll-seconds": "SECONDS",
   "queue-id": "ID",
   reason: "TEXT",
   recipient: "ROLE|UUID",
-  "request-id": "SAFE_ID",
   snapshot: "UUID",
   "state-dir": "STATE/unblock",
 };
+
+/** Help groups, in help order. */
+export const GROUPS = {
+  game: "game operations",
+  harness: "harness (claude, codex)",
+  monitor: "monitor (game-dev)",
+} as const;
+
+export interface GroupedSpec extends CommandSpec {
+  readonly group: keyof typeof GROUPS;
+}
 
 const GAME = { game: { type: "string" } } as const;
 const MONITOR = {
@@ -37,25 +47,38 @@ const MONITOR = {
   parent: { multiple: true, type: "string" },
   recipient: { type: "string" },
 } as const;
+const READY: GroupedSpec = {
+  forms: [[]],
+  group: "harness",
+  options: {},
+  summary:
+    "probe whether this harness can deliver now; prints one JSON line, exits 0 when ready, 1 when not",
+};
 
+/** Commands by their words: a top-level game verb, or a noun group and its verb. */
 export const SPECS = {
-  channel: {
+  "check-config": {
+    forms: [["game?"]],
+    group: "game",
+    options: GAME,
+    summary: "validate config.json, var/registry.json and each delivery-kit.json",
+  },
+  "claude channel": {
     forms: [["game?", "monitor?", "state-dir?", "poll-seconds?"]],
+    group: "harness",
     options: {
       game: { multiple: true, type: "string" },
       monitor: { type: "string" },
       "poll-seconds": { type: "string" },
       "state-dir": { multiple: true, type: "string" },
     },
-    summary: "run the Claude channel consumer",
+    summary: "the stdio server the Claude monitor session starts; delivers the channel spool",
   },
-  "check-config": {
-    forms: [["game?"]],
-    options: GAME,
-    summary: "validate config.json, var/registry.json and each delivery-kit.json",
-  },
-  "monitor-ack": {
+  "claude ready": READY,
+  "codex ready": READY,
+  "monitor ack": {
     forms: [["game", "snapshot", "queue-id", "disposition", "reason?", "recipient?", "parent?"]],
+    group: "monitor",
     options: {
       ...MONITOR,
       disposition: { type: "string" },
@@ -63,36 +86,33 @@ export const SPECS = {
       reason: { type: "string" },
       snapshot: { type: "string" },
     },
-    summary: "acknowledge monitor queue items",
+    summary: "acknowledge monitor queue items from a snapshot",
   },
-  "monitor-snapshot": {
+  "monitor snapshot": {
     forms: [["game", "recipient?", "parent?", "history-cursor?"]],
+    group: "monitor",
     options: { ...MONITOR, "history-cursor": { type: "string" } },
     summary: "capture the monitor review snapshot",
   },
   request: {
-    forms: [["game", "request-id"]],
-    options: { ...GAME, "request-id": { type: "string" } },
+    forms: [["game", "id"]],
+    group: "game",
+    options: { ...GAME, id: { type: "string" } },
     summary: "record a user-authorized one-off departure request",
-  },
-  "resource-report": {
-    forms: [["game"]],
-    options: GAME,
-    summary: "print reporting-only resource information",
   },
   run: {
     forms: [["game"]],
+    group: "game",
     options: GAME,
     summary: "run one game's resident delivery runner",
   },
   status: {
-    forms: [["game"], ["harness"]],
-    options: { ...GAME, harness: { type: "string" } },
-    summary:
-      "print read-only runner and delivery status, or probe whether a harness can deliver " +
-      "(exit 0 when ready)",
+    forms: [["game", "resources?"]],
+    group: "game",
+    options: { ...GAME, resources: { type: "boolean" } },
+    summary: "print the read-only runner and delivery status, or with --resources the resource report",
   },
-} as const satisfies Readonly<Record<string, CommandSpec>>;
+} as const satisfies Readonly<Record<string, GroupedSpec>>;
 
 export type Command = keyof typeof SPECS;
 
@@ -110,7 +130,7 @@ function flag(spec: CommandSpec, token: string): string {
 
 /** One `delivery-kit COMMAND ...` line per accepted form. */
 export function synopsis(command: Command): string[] {
-  const spec: CommandSpec = SPECS[command];
+  const spec: GroupedSpec = SPECS[command];
   return spec.forms.map((form) => [command, ...form.map((token) => flag(spec, token))].join(" "));
 }
 

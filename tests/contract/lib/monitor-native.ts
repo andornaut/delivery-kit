@@ -1,5 +1,5 @@
 // Native fixture for monitor cases: queues, history and delivery targets scripted on the fake
-// Codex control socket, plus monitor-snapshot and monitor-ack wrappers.
+// Codex control socket, plus `monitor snapshot` and `monitor ack` wrappers.
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -208,7 +208,7 @@ export async function snapshot(
   recipient: string,
   extra: string[] = [],
 ): Promise<SnapshotOutput> {
-  const result = await cli(ws, ["monitor-snapshot", "--recipient", recipient, ...extra]);
+  const result = await cli(ws, ["monitor", "snapshot", "--recipient", recipient, ...extra]);
   let output: Json = {};
   try {
     output = JSON.parse(result.stdout) as Json;
@@ -229,7 +229,7 @@ export async function ack(
   disposition: string,
   reason?: string,
 ): Promise<{ result: Result; rows: Array<{ queue_id: string; state: string }> | undefined }> {
-  const args = ["monitor-ack", "--recipient", recipient, "--snapshot", snapshotId];
+  const args = ["monitor", "ack", "--recipient", recipient, "--snapshot", snapshotId];
   for (const id of ids) args.push("--queue-id", id);
   args.push("--disposition", disposition);
   if (reason !== undefined) args.push("--reason", reason);

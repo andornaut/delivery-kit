@@ -1,14 +1,15 @@
-// delivery-kit command dispatcher. Every command resolves game-dev from --root,
+// delivery-kit command dispatcher. Top-level verbs are game operations; the monitor, claude and
+// codex groups take a verb. Every command resolves game-dev from --root (in any position, once),
 // DELIVERY_KIT_ROOT or the working directory, in that order.
 import { parseArgs } from "node:util";
 
 import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
 import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
+import { claudeReady, codexReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
-import { resourceReport } from "./commands/resourceReport.ts";
 import { run } from "./commands/run.ts";
-import { type Command, SPECS, synopsis } from "./commands/spec.ts";
+import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import { addressedRoles, loadProjectConfig, type ProjectConfig } from "./config.ts";
 import { readJsonIfExists } from "./durable.ts";
@@ -24,24 +25,29 @@ export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.
 
 export const COMMANDS = [
   "run",
+  "status",
   "check-config",
   "request",
-  "status",
-  "resource-report",
-  "channel",
-  "monitor-snapshot",
-  "monitor-ack",
+  "monitor snapshot",
+  "monitor ack",
+  "claude ready",
+  "codex ready",
+  "claude channel",
 ] as const satisfies readonly Command[];
 export type { Command };
 
-/** Help text, generated from each command's parser options. */
+const GROUP_ORDER = ["game", "monitor", "harness"] as const;
+
+/** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
-  "usage: delivery-kit [--root GAME_DEV_ROOT] COMMAND [options]",
-  "",
-  "Commands:",
-  ...COMMANDS.flatMap((command) => [
-    ...synopsis(command).map((line) => `  ${line}`),
-    `      ${SPECS[command].summary}`,
+  "usage: delivery-kit COMMAND [options] [--root GAME_DEV_ROOT]",
+  ...GROUP_ORDER.flatMap((group) => [
+    "",
+    `${GROUPS[group][0]?.toUpperCase() ?? ""}${GROUPS[group].slice(1)}:`,
+    ...COMMANDS.filter((command) => SPECS[command].group === group).flatMap((command) => [
+      ...synopsis(command).map((line) => `  ${line}`),
+      `      ${SPECS[command].summary}`,
+    ]),
   ]),
   "",
   "--recipient and --parent take a role name resolved through var/registry.json, or a",
@@ -50,9 +56,34 @@ export const USAGE = [
   "  help, --help    print this text",
   "  --version       print the version",
   "",
-  "game-dev is --root, else DELIVERY_KIT_ROOT, else the working directory.",
+  "game-dev is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
   "",
 ].join("\n");
+
+/** Removed 1.x command forms and the 2.0.0 form that replaces each. */
+const REMOVED: Readonly<Record<string, string>> = {
+  channel: "delivery-kit claude channel",
+  "monitor-ack": "delivery-kit monitor ack",
+  "monitor-snapshot": "delivery-kit monitor snapshot",
+  "resource-report": "delivery-kit status --game ID --resources",
+};
+
+/** The removed form a command line uses, with its replacement, or undefined. */
+function removedForm(args: readonly string[]): string | undefined {
+  const [first] = args;
+  if (first === undefined) {
+    return undefined;
+  }
+  if (first === "status" && args.includes("--harness")) {
+    const harness = args[args.indexOf("--harness") + 1];
+    const word = harness === "codex" ? "codex" : "claude";
+    return `"status --harness" was removed in 2.0.0; use "delivery-kit ${word} ready"`;
+  }
+  const replacement = REMOVED[first];
+  return replacement === undefined
+    ? undefined
+    : `"${first}" was removed in 2.0.0; use "${replacement}"`;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -131,42 +162,76 @@ function checkConfig(io: Io, root: string, args: string[]): number {
 }
 
 const HANDLERS: Readonly<Record<Command, Handler>> = {
-  channel,
   "check-config": checkConfig,
-  "monitor-ack": monitorAck,
-  "monitor-snapshot": monitorSnapshot,
+  "claude channel": channel,
+  "claude ready": claudeReady,
+  "codex ready": codexReady,
+  "monitor ack": monitorAck,
+  "monitor snapshot": monitorSnapshot,
   request,
-  "resource-report": resourceReport,
   run,
   status,
 };
 
+/** Take every `--root DIR` out of the arguments; at most one is allowed. */
+function extractRoot(args: string[]): { root?: string; error?: string } {
+  const at = args.indexOf("--root");
+  if (at < 0) {
+    return {};
+  }
+  const value = args[at + 1];
+  if (value === undefined || value.startsWith("--")) {
+    return { error: "--root needs a directory" };
+  }
+  args.splice(at, 2);
+  if (args.includes("--root")) {
+    return { error: "--root is given more than once" };
+  }
+  return { root: value };
+}
+
+/** The command a line names: two words for a noun group, otherwise one. */
+function commandOf(args: readonly string[]): { command: Command; rest: string[] } | undefined {
+  const [first = "", second = ""] = args;
+  const pair = `${first} ${second}`;
+  if ((COMMANDS as readonly string[]).includes(pair)) {
+    return { command: pair as Command, rest: args.slice(2) };
+  }
+  if ((COMMANDS as readonly string[]).includes(first)) {
+    return { command: first as Command, rest: args.slice(1) };
+  }
+  return undefined;
+}
+
 export async function main(io: Io, argv: readonly string[]): Promise<number> {
   const args = [...argv];
-  let root = io.env.DELIVERY_KIT_ROOT ?? io.cwd;
-  if (args[0] === "--root") {
-    if (args[1] === undefined) {
-      io.err(USAGE);
-      return EXIT_USAGE;
-    }
-    root = args[1];
-    args.splice(0, 2);
+  const extracted = extractRoot(args);
+  if (extracted.error !== undefined) {
+    io.err(`delivery-kit: ${extracted.error}\n${USAGE}`);
+    return EXIT_USAGE;
   }
-  const [command, ...rest] = args;
-  if (command === "help" || command === "--help") {
+  const root = extracted.root ?? io.env.DELIVERY_KIT_ROOT ?? io.cwd;
+  const [word] = args;
+  if (word === "help" || word === "--help") {
     io.out(USAGE);
     return EXIT_OK;
   }
-  if (command === "--version") {
+  if (word === "--version") {
     io.out(`${VERSION}\n`);
     return EXIT_OK;
   }
-  if (command === undefined || !(COMMANDS as readonly string[]).includes(command)) {
+  const removed = removedForm(args);
+  if (removed !== undefined) {
+    io.err(`delivery-kit: ${removed}\n`);
+    return EXIT_USAGE;
+  }
+  const found = commandOf(args);
+  if (found === undefined) {
     io.err(USAGE);
     return EXIT_USAGE;
   }
   try {
-    return await HANDLERS[command as Command](io, root, rest);
+    return await HANDLERS[found.command](io, root, found.rest);
   } catch (error) {
     io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_USAGE;

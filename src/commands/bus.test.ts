@@ -28,11 +28,11 @@ describe("bus commands", () => {
   it("request captures the main HEAD and requires a game and an ID", async () => {
     const test = makeGame();
     mergeFastForward(test, "feature");
-    const result = await run(test.layout.root, "request", "--game", GAME, "--request-id", "r1");
+    const result = await run(test.layout.root, "request", "--game", GAME, "--id", "r1");
     expect(result.code).toBe(0);
     expect(readFileSync(join(test.game.busDir, "requests", "r1.json"), "utf8")).toBe(result.out);
     expect((await run(test.layout.root, "request", "--game", GAME)).code).toBe(2);
-    expect((await run(test.layout.root, "request", "--game", GAME, "--request-id", "!")).code).toBe(
+    expect((await run(test.layout.root, "request", "--game", GAME, "--id", "!")).code).toBe(
       1,
     );
     expect((await run(test.layout.root, "status", "--game", "unknown")).code).toBe(2);
@@ -41,7 +41,7 @@ describe("bus commands", () => {
 
   it("resource-report prints the clock and load lines", async () => {
     const test = makeGame();
-    const result = await run(test.layout.root, "resource-report", "--game", GAME);
+    const result = await run(test.layout.root, "status", "--game", GAME, "--resources");
     expect(result.code).toBe(0);
     expect(result.out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+\nup .*load average: /);
   });

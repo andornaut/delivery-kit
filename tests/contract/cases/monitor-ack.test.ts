@@ -1,4 +1,4 @@
-// Snapshot-bound explicit acknowledgements through monitor-ack.
+// Snapshot-bound explicit acknowledgements through `monitor ack`.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";

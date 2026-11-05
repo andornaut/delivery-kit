@@ -1,4 +1,4 @@
-// Scoped child (worker) health through `monitor-snapshot --recipient R --parent ...`
+// Scoped child (worker) health through `monitor snapshot --recipient R --parent ...`
 //. R is outside the active route, so only the child
 // collector makes scoped native calls; parents must be active route members.
 import { expect } from "vitest";
@@ -384,7 +384,7 @@ suite("child health", () => {
       const ws = workspace();
       const socket = await socketFor(ws);
       codexRoute(ws, [P]);
-      const result = await cli(ws, ["monitor-snapshot", "--recipient", R, "--parent", parent]);
+      const result = await cli(ws, ["monitor", "snapshot", "--recipient", R, "--parent", parent]);
       expect(result.code).toBe(2);
       expect(socket.calls).toEqual([]);
     }

@@ -1,4 +1,4 @@
-// `delivery-kit channel`: the Claude channel consumer, a stdio MCP server that the monitor session
+// `delivery-kit claude channel`: the Claude channel consumer, a stdio MCP server that the monitor session
 // launches from game-dev's node_modules. By default it drains every game's spool for the
 // registry monitor. `--monitor UUID` and repeatable `--state-dir STATE/unblock` select them
 // explicitly. It creates no state directory: only spools that already
@@ -93,7 +93,7 @@ export async function runChannel(
   try {
     const { values } = parseArgs({
       args,
-      options: SPECS.channel.options,
+      options: SPECS["claude channel"].options,
       strict: true,
     });
     pollSeconds = Number(values["poll-seconds"] ?? DEFAULT_POLL_SECONDS);

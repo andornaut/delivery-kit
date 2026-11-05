@@ -83,7 +83,7 @@ describe("dispatcher", () => {
     const { root } = makeFixture();
     for (const command of COMMANDS) {
       // eslint-disable-next-line no-await-in-loop
-      const result = await run(root, command, "--help-unknown-option");
+      const result = await run(root, ...command.split(" "), "--help-unknown-option");
       expect(result.err, command).not.toContain("not implemented");
     }
   });
@@ -94,19 +94,62 @@ describe("dispatcher", () => {
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
     expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
   });
+
+  it("accepts --root once, in any position", async () => {
+    const { root } = makeFixture();
+    const io = () => {
+      const seen = { err: "", out: "" };
+      const value = {
+        cwd: "/nonexistent",
+        env: {},
+        err: (text: string) => (seen.err += text),
+        out: (text: string) => (seen.out += text),
+      };
+      return { seen, value };
+    };
+    const after = io();
+    expect(await main(after.value, ["check-config", "--root", root])).toBe(EXIT_OK);
+    expect(after.seen.out).toContain("configuration accepted");
+    const twice = io();
+    expect(await main(twice.value, ["--root", root, "check-config", "--root", root])).toBe(
+      EXIT_USAGE,
+    );
+    expect(twice.seen.err).toContain("--root is given more than once");
+  });
+
+  it("names the 2.0.0 form of each removed command and runs nothing", async () => {
+    const { root } = makeFixture();
+    const cases: [string[], string][] = [
+      [["channel"], "delivery-kit claude channel"],
+      [["monitor-snapshot", "--game", "x"], "delivery-kit monitor snapshot"],
+      [["monitor-ack"], "delivery-kit monitor ack"],
+      [["resource-report", "--game", "x"], "delivery-kit status --game ID --resources"],
+      [["status", "--harness", "codex"], "delivery-kit codex ready"],
+      [["status", "--harness", "claude"], "delivery-kit claude ready"],
+    ];
+    for (const [argv, replacement] of cases) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await run(root, ...argv);
+      expect(result.code, argv.join(" ")).toBe(EXIT_USAGE);
+      expect(result.out, argv.join(" ")).toBe("");
+      expect(result.err, argv.join(" ")).toMatch(
+        new RegExp(`^delivery-kit: ".*" was removed in 2\\.0\\.0; use "${replacement}"\\n$`),
+      );
+    }
+  });
 });
 
-describe("status --harness", () => {
+describe("claude ready and codex ready", () => {
   it("reports a missing registry or an unreadable layout as not ready, not as a usage error", async () => {
     const { base, root } = makeFixture();
-    const absent = await run(root, "status", "--harness", "codex");
+    const absent = await run(root, "codex", "ready");
     expect(absent.code).toBe(EXIT_INVALID);
     expect(absent.out).toBe("");
     expect(absent.err).toMatch(/^delivery-kit: /);
-    const missing = await run(join(base, "no-game-dev"), "status", "--harness", "claude");
+    const missing = await run(join(base, "no-game-dev"), "claude", "ready");
     expect(missing.code).toBe(EXIT_INVALID);
     expect(missing.err).toMatch(/^delivery-kit: /);
-    expect((await run(root, "status", "--harness", "other")).code).toBe(EXIT_USAGE);
+    expect((await run(root, "claude", "ready", "--extra")).code).toBe(EXIT_USAGE);
   });
 });
 
@@ -121,5 +164,10 @@ describe("help", () => {
       }
     }
     expect(Object.keys(SPECS).sort()).toEqual([...COMMANDS].sort());
+    const groups = ["Game operations:", "Monitor (game-dev):", "Harness (claude, codex):"];
+    expect(groups.map((heading) => USAGE.indexOf(heading))).toEqual(
+      groups.map((heading) => USAGE.indexOf(heading)).sort((x, y) => x - y),
+    );
+    expect(groups.every((heading) => USAGE.includes(heading))).toBe(true);
   });
 });

@@ -97,7 +97,7 @@ suite("codex observer", () => {
     const ws = workspace();
     const socket = await nativeGame(ws, sockets);
     socket.on("initialize", { close: true });
-    const result = await cli(ws, ["monitor-snapshot", "--recipient", TECH]);
+    const result = await cli(ws, ["monitor", "snapshot", "--recipient", TECH]);
     expect(result.code).toBe(1);
     expect(result.stdout + result.stderr).not.toContain("PRIVATE_");
   });

@@ -1,4 +1,4 @@
-// Public monitor-snapshot inventory, history, question and worker metadata
+// Public `monitor snapshot` inventory, history, question and worker metadata
 //. Assertions read stdout and STATE/unblock/snapshots/<id>.json.
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -153,7 +153,8 @@ suite("monitor snapshot", () => {
       const { ws, native } = await setup();
       for (const parents of [[TECH, TECH], [TECH.replace("00000000", "ABCDEFAB")], [OTHER]]) {
         const result = await cli(ws, [
-          "monitor-snapshot",
+          "monitor",
+          "snapshot",
           "--recipient",
           TECH,
           ...parents.flatMap((p) => ["--parent", p]),
@@ -162,7 +163,7 @@ suite("monitor snapshot", () => {
       }
       for (const change of [{ state: "held" }, { version: 99 }]) {
         writeCodexRoute(ws, change);
-        const result = await cli(ws, ["monitor-snapshot", "--recipient", TECH, "--parent", TECH]);
+        const result = await cli(ws, ["monitor", "snapshot", "--recipient", TECH, "--parent", TECH]);
         expect(result.code, JSON.stringify(change)).not.toBe(0);
       }
       expect(native.socket.connections).toEqual([]);
