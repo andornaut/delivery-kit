@@ -12,7 +12,7 @@ import { pyJsonDumps } from "../shared/pyjson.ts";
 import type { ActiveScope } from "../shared/route.ts";
 import { type AgentEntry, listingOrNull, monitorReady, roleDiagnostics } from "./agents.ts";
 
-export const UNBLOCK = "unblock";
+const UNBLOCK = "unblock";
 export const SPOOL = "claude-spool";
 export const DELIVERED = "claude-delivered";
 export const LOCK_FILE = "unblock.lock";

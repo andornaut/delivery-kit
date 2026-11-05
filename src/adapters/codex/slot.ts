@@ -17,8 +17,6 @@ const INTERRUPTED = "previous send interrupted; do not resend";
 
 export type SlotState = Record<string, unknown>;
 
-export type SendResult = "accepted" | "ambiguous" | "rejected";
-
 /** Runner state observed around each send attempt. */
 export interface SlotHooks {
   /** True once the runner is stopping: an unresolved send then keeps its sending receipt. */

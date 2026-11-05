@@ -18,10 +18,10 @@ import { recordIdentity } from "./status.ts";
 import { currentMinuteSlot, minuteSlots, untilNext } from "./time.ts";
 
 declare const __DK_VERSION__: string;
-export const LOADED_VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
+const LOADED_VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
 
 /** In-runner CI watches, at most one per SHA. Aborted watches resume in the next runner. */
-export class CiTasks {
+class CiTasks {
   readonly #running = new Map<string, Promise<unknown>>();
   readonly #signal: AbortSignal;
 
@@ -47,7 +47,7 @@ export class CiTasks {
 }
 
 /** One observer pass: monitor wakes, scheduled-slot reports and an event flush. */
-export async function observe(
+async function observe(
   context: BusContext,
   after: number,
   now: number,
@@ -101,7 +101,7 @@ export interface LoopHooks {
 }
 
 /** Serialized scheduled and requested departures until `signal` aborts. */
-export async function departureLoop(
+async function departureLoop(
   context: BusContext,
   hooks: LoopHooks,
   signal: AbortSignal,

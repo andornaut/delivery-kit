@@ -25,7 +25,7 @@ const CLI = join(KIT_ROOT, "dist", "cli.js");
  * Complete the 1.0 required fields a case leaves out with neutral defaults. Fields a case sets,
  * including deliberately invalid values, pass through unchanged.
  */
-export function nodeConfig(ws: Workspace): Record<string, unknown> {
+function nodeConfig(ws: Workspace): Record<string, unknown> {
   const c = structuredClone(ws.config) as Record<string, Record<string, unknown>>;
   const fill = (section: string, defaults: Record<string, unknown>) => {
     c[section] = { ...defaults, ...(c[section] ?? {}) };

@@ -13,7 +13,7 @@ export type Availability =
   | { readonly status: null; readonly reason: string };
 
 /** `CLAUDE_BIN` overrides the executable for fixtures; the arguments are fixed. */
-export function claudeExecutable(env: NodeJS.ProcessEnv): string {
+function claudeExecutable(env: NodeJS.ProcessEnv): string {
   const override = env.CLAUDE_BIN;
   return override !== undefined && override !== "" ? override : "claude";
 }

@@ -216,7 +216,7 @@ function utcSeconds(chars: readonly string[], start: number): number | null {
  * datetime.fromisoformat(value).timestamp() when the value parses with a zero UTC offset, else
  * null. Follows the CPython 3.12 C parser: any single code point separates date and time.
  */
-export function utcTimestamp(value: string): number | null {
+function utcTimestamp(value: string): number | null {
   const chars = Array.from(value);
   if (chars.length < 7) {
     return null;

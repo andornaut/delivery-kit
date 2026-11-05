@@ -21,7 +21,7 @@ import {
   snapshotPath,
 } from "./store.ts";
 
-export const UNAVAILABLE: Readonly<Json> = Object.freeze({
+const UNAVAILABLE: Readonly<Json> = Object.freeze({
   reason_code: "claude_no_native_api",
   status: "unavailable",
 });

@@ -23,7 +23,7 @@ export interface ThreadModel {
 }
 
 /** A two-page queue holding a private payload. */
-export function twoPageQueue(params: Params): Page {
+function twoPageQueue(params: Params): Page {
   if (params.cursor) {
     return {
       data: [{ id: "queue-two", clientUserMessageId: "user-two", input: ["private user content"] }],

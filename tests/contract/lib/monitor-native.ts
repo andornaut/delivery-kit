@@ -65,11 +65,6 @@ export function retentionName(recipient: string, identity: string): string {
   return join("unblock", "retentions", digest([recipient, identity]) + ".json");
 }
 
-export interface NativeOptions {
-  monitor?: string;
-  targets?: string[];
-}
-
 /** Queue, history and target state behind the fake socket. */
 export class Native {
   readonly socket: CodexSocket;

@@ -76,7 +76,7 @@ function socketAvailable(path: string | undefined): path is string {
  * The bus unblock directory that holds a receipt's recipient decisions. Scheduled receipts live
  * in `<bus>/unblock/`, event receipts in `<bus>/events/native/`; both under var/.
  */
-export function unblockDirFor(layout: Layout, receiptPath: string): string | null {
+function unblockDirFor(layout: Layout, receiptPath: string): string | null {
   const path = resolve(receiptPath);
   const inside = relative(layout.varDir, path);
   if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {

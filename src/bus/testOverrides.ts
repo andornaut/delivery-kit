@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 
 import type { Clock } from "./context.ts";
 
-export const TEST_CLOCK_VARIABLE = "DELIVERY_KIT_TEST_CLOCK";
+const TEST_CLOCK_VARIABLE = "DELIVERY_KIT_TEST_CLOCK";
 
 interface ClockFile {
   readonly epoch: number;
@@ -115,7 +115,7 @@ export function testClock(env: NodeJS.ProcessEnv): Clock | undefined {
 // DELIVERY_KIT_TEST_LOADAVG holds a one-minute load average, a finite decimal number of at least
 // 0 such as "0.5" or "30", read in place of the host's load when set, so load-limit cases do not
 // depend on the host. Unset, the runner reads the host load.
-export const TEST_LOAD_VARIABLE = "DELIVERY_KIT_TEST_LOADAVG";
+const TEST_LOAD_VARIABLE = "DELIVERY_KIT_TEST_LOADAVG";
 
 export function testLoad(env: NodeJS.ProcessEnv): number | undefined {
   const text = env[TEST_LOAD_VARIABLE];

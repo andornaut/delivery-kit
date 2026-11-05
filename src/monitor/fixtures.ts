@@ -26,7 +26,7 @@ export interface ClaudeFixture {
 }
 
 /** A role-name route hosted by GAME; HELD has no role, so only the Archie tech target resolves. */
-export function routeValue(change: Record<string, unknown> = {}): Record<string, unknown> {
+function routeValue(change: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     host: GAME,
     monitor: "game-dev",

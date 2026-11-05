@@ -90,7 +90,7 @@ export interface ReceiptState {
   status?: DeliveryStatus;
 }
 
-export function persistReceipt(path: string, state: ReceiptState): void {
+function persistReceipt(path: string, state: ReceiptState): void {
   writeDurable(path, `${dumpsJson(state as PyJson)}\n`);
 }
 

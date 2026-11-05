@@ -12,9 +12,9 @@ import { statSync } from "node:fs";
 // A named volume mounted at /var/tmp copies that directory's mode (1777) when the volume is
 // first created, so uid 19001 can write the npm cache inside it without a root step.
 
-export const CONTAINER_USER = "19001:19001";
-export const VOLUME_TARGET = "/var/tmp";
-export const NPM_CACHE = `${VOLUME_TARGET}/npm`;
+const CONTAINER_USER = "19001:19001";
+const VOLUME_TARGET = "/var/tmp";
+const NPM_CACHE = `${VOLUME_TARGET}/npm`;
 
 export function userArgs(): string[] {
   return ["--user", CONTAINER_USER, "-e", "HOME=/tmp"];

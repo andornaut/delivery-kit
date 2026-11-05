@@ -14,7 +14,7 @@ function clockLine(timezone: string, epoch: number): string {
 }
 
 /** uptime(1)'s up-time and load averages, read from node:os rather than a child process. */
-export function uptimeLine(seconds: number, loads: readonly number[]): string {
+function uptimeLine(seconds: number, loads: readonly number[]): string {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);

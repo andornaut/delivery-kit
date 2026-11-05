@@ -63,7 +63,7 @@ export function healthPath(unblock: string, recipient: string): string {
 }
 
 /** The recipient's health record, or {} when it does not exist yet. */
-export function readHealth(unblock: string, recipient: string): Json {
+function readHealth(unblock: string, recipient: string): Json {
   return readRecord(healthPath(unblock, recipient)) ?? {};
 }
 
@@ -96,7 +96,7 @@ export function sortedUnique(rows: readonly unknown[]): unknown[][] {
   return [...unique.values()].sort(compareTuples);
 }
 
-export function snapshotQueues(snapshot: Json): Record<string, QueueEntry[]> {
+function snapshotQueues(snapshot: Json): Record<string, QueueEntry[]> {
   return rec(snapshot.queues) as Record<string, QueueEntry[]>;
 }
 
@@ -152,7 +152,7 @@ export function workerFailures(snapshot: Json): unknown[][] {
   return sortedUnique(references);
 }
 
-export function pendingWorkerFailures(
+function pendingWorkerFailures(
   unblock: string,
   recipient: string,
   snapshot: Json,
@@ -201,7 +201,7 @@ export function questionObservations(snapshot: Json): Map<string, Observation> {
 }
 
 /** An owner-attested pending question on its owner's latest turn. */
-export function pendingProven(owner: string, question: Json): boolean {
+function pendingProven(owner: string, question: Json): boolean {
   const proofs = question.proof_refs;
   return (
     question.state === "pending" &&

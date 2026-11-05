@@ -28,7 +28,7 @@ export interface EmitOptions {
 }
 
 /** Progress kinds that never notify; flush marks any already queued as suppressed. */
-export const QUIET_KINDS: ReadonlySet<string> = new Set([
+const QUIET_KINDS: ReadonlySet<string> = new Set([
   "ci_pending",
   "ci_running",
   "deploy_pending",
@@ -224,7 +224,7 @@ export type AdapterFactory = (layout: Layout, game: GameLayout) => EventAdapter;
 export type AdapterFactories = Readonly<Partial<Record<Harness, AdapterFactory>>>;
 
 /** The adapter per harness. A harness without one defers delivery. */
-export const DEFAULT_ADAPTERS: AdapterFactories = {
+const DEFAULT_ADAPTERS: AdapterFactories = {
   // The Claude adapter takes the event ID from the receipt file name and ignores the seed.
   claude: (_layout, game) => claudeAdapter(process.env, game),
   codex: (layout) => codexAdapter(layout),
@@ -252,7 +252,7 @@ function gameDevRoot(game: GameLayout): string {
  * with no queue fallback. An invalid route, or a held one for its own monitor, defers every
  * event; any other recipient, or no route at all, is delivered.
  */
-export function eventRouting(layout: Layout, recipientRole: string): "defer" | "deliver" {
+function eventRouting(layout: Layout, recipientRole: string): "defer" | "deliver" {
   let route: RoleRoute | null;
   try {
     route = readRoleRoute(layout);

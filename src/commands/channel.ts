@@ -119,7 +119,7 @@ export async function runChannel(
 const PAUSE = new Int32Array(new SharedArrayBuffer(4));
 
 /** stdout carries only protocol lines. A synchronous write surfaces a closed channel at once. */
-export function writeStdoutLine(line: string): void {
+function writeStdoutLine(line: string): void {
   const bytes = Buffer.from(line, "utf8");
   let offset = 0;
   while (offset < bytes.length) {

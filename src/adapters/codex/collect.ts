@@ -14,7 +14,7 @@ import { NativeTimeout, type RpcClient } from "./rpc.ts";
 
 type Json = Record<string, unknown>;
 
-export const MAX_COLLECTION_CALLS = 256;
+const MAX_COLLECTION_CALLS = 256;
 const RESERVE_MS = 5000;
 const QUESTION_BOUND = 32768;
 

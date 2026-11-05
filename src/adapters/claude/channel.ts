@@ -79,7 +79,7 @@ function names(directory: string, suffix: string): string[] {
 }
 
 /** A claimed entry with a sending receipt was interrupted mid-delivery; never resend it. */
-export function reconcileClaims(busDir: string): void {
+function reconcileClaims(busDir: string): void {
   const spool = spoolDir(busDir);
   for (const name of names(spool, ".claimed")) {
     try {

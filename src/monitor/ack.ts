@@ -18,7 +18,7 @@ import {
   snapshotPath,
 } from "./store.ts";
 
-export class AckError extends Error {
+class AckError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AckError";

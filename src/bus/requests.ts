@@ -11,7 +11,7 @@ import type { Exec } from "./exec.ts";
 import { type BusPaths, ensureDir } from "./state.ts";
 import { mainHead, skipReason } from "./trunk.ts";
 
-export const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 export type RequestState = "finished" | "interrupted" | "pending" | "rejected" | "started";
 
@@ -25,7 +25,7 @@ export interface RequestRecord {
   completion?: string;
 }
 
-export class RequestError extends Error {
+class RequestError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RequestError";
@@ -164,8 +164,4 @@ export function finishRequest(store: RequestStore, id: string, exit: number): Pr
       writeRecord(path, record);
     }
   });
-}
-
-export function loadRequest(paths: BusPaths, id: string): RequestRecord {
-  return readRecord(join(paths.requestsDir, `${id}.json`));
 }

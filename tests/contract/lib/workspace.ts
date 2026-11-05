@@ -17,13 +17,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const HERE = dirname(fileURLToPath(import.meta.url));
+const HERE = dirname(fileURLToPath(import.meta.url));
 export const KIT_ROOT = join(HERE, "..", "..", "..");
-export const FAKE_TOOLS = ["claude", "codex", "docker", "gh", "git", "wrangler"] as const;
+const FAKE_TOOLS = ["claude", "codex", "docker", "gh", "git", "wrangler"] as const;
 export type FakeTool = (typeof FAKE_TOOLS)[number];
 
 export const SHA = "a".repeat(40);
-export const BASE = "b".repeat(40);
+const BASE = "b".repeat(40);
 
 /** The committed game `delivery-kit.json` (plan schema 1). Values are passed through as given. */
 export interface GameConfig {
@@ -69,7 +69,7 @@ export interface GameOptions {
   hostLoad?: HostLoad;
 }
 
-export function defaultConfig(): GameConfig {
+function defaultConfig(): GameConfig {
   return {
     schema: 1,
     git: { main: "main", remote: "origin", github: "" },

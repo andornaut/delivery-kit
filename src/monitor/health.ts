@@ -27,7 +27,7 @@ export interface HealthContext {
 
 type NoticeKey = Pick<QuestionNotice, "identity" | "signature" | "level">;
 
-export function recordQuestions(
+function recordQuestions(
   record: Json,
   snapshot: Json,
   slot: number,

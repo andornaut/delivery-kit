@@ -74,7 +74,7 @@ function describe(identity: PinIdentity): string {
   })`;
 }
 
-export function samePin(a: PinIdentity, b: PinIdentity): boolean {
+function samePin(a: PinIdentity, b: PinIdentity): boolean {
   return a.version === b.version && a.cliSha256 === b.cliSha256 && a.integrity === b.integrity;
 }
 

@@ -106,7 +106,7 @@ function itemPage(page: unknown, turnId: string, items: Map<string, NativeItem>)
 }
 
 /** Every item of one turn in native order, failing on any incomplete or unknown page. */
-export async function nativeItems(
+async function nativeItems(
   client: RpcClient,
   recipient: string,
   turnId: string,

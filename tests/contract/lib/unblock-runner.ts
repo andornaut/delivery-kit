@@ -44,7 +44,7 @@ export function codexRoute(
   };
 }
 
-export function codexRegistry(ws: Workspace): void {
+function codexRegistry(ws: Workspace): void {
   ws.writeRegistry({
     schema: 1,
     revision: 1,

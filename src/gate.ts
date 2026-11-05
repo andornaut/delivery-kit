@@ -29,12 +29,12 @@ export function stepLogName(index: number, name: string): string {
 }
 
 /** The container paths: the read-only checkout, its copy and the step logs. */
-export const GATE_WORK = "/tmp/work";
-export const GATE_LOGS = "/tmp/gate-logs";
-export const GATE_SOURCE = "/src";
+const GATE_WORK = "/tmp/work";
+const GATE_LOGS = "/tmp/gate-logs";
+const GATE_SOURCE = "/src";
 export const GATE_LABEL = "delivery-kit-gate";
 /** An upper bound for install and for the gate steps; the container is removed after it. */
-export const GATE_TIMEOUT_SECONDS = 4 * 3600;
+const GATE_TIMEOUT_SECONDS = 4 * 3600;
 
 /** One `sh -c` script running every step in order, logging each to GATE_LOGS. */
 export function gateScript(steps: readonly GateStep[]): string {
@@ -97,11 +97,11 @@ export async function treeFingerprint(context: BusContext, work: string): Promis
 }
 
 /** The deterministic container name of one departure's gate, keyed by its short HEAD SHA. */
-export function gateContainerName(game: string, departure: string): string {
+function gateContainerName(game: string, departure: string): string {
   return `delivery-kit-gate-${game}-${departure}`;
 }
 
-export function createArgs(context: BusContext, name: string, input: GateInput): string[] {
+function createArgs(context: BusContext, name: string, input: GateInput): string[] {
   const { config, game } = context;
   return [
     "create",
@@ -142,7 +142,7 @@ async function docker(
  * Remove every gate container left for this game, for example by a stopped runner. Called
  * under departure.lock, so no gate of this game is running.
  */
-export async function removeLeftoverGates(context: BusContext): Promise<string[]> {
+async function removeLeftoverGates(context: BusContext): Promise<string[]> {
   const listed = await docker(context, [
     "ps",
     "--all",
@@ -210,7 +210,7 @@ function timedOut(result: ExecResult): boolean {
 }
 
 /** Tools the gate image provides besides sh, for the copy, the loopback check and step logs. */
-export const GATE_TOOLS = ["git", "tar", "ls", "tail"] as const;
+const GATE_TOOLS = ["git", "tar", "ls", "tail"] as const;
 /** COPY_SCRIPT exit statuses: a required tool is missing (named on stdout), or the tree differs. */
 const MISSING_TOOL = 3;
 const TREE_MISMATCH = 4;
@@ -263,7 +263,7 @@ async function copyIn(
 }
 
 /** The build outputs a passing, verified gate copies back into the scratch worktree. */
-export const GATE_OUTPUTS = ["dist", "node_modules"] as const;
+const GATE_OUTPUTS = ["dist", "node_modules"] as const;
 
 async function copyOut(
   context: BusContext,

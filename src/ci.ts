@@ -52,7 +52,7 @@ function onPath(command: string): boolean {
 }
 
 /** Check runs from the existing gh login, or the public API when gh is not installed. */
-export const githubChecks: CheckSource = async (context, sha) => {
+const githubChecks: CheckSource = async (context, sha) => {
   const path = `repos/${context.config.git.github}/commits/${sha}/check-runs?per_page=100`;
   if (onPath("gh")) {
     const result = await context.exec({
@@ -118,7 +118,7 @@ export interface RequiredState {
   readonly failed: readonly string[];
 }
 
-export function requiredState(
+function requiredState(
   rows: ReturnType<typeof latestRuns>,
   required: ReadonlySet<string>,
 ): RequiredState {
@@ -144,7 +144,7 @@ function listed(names: readonly string[]): string {
 }
 
 /** The timeout diagnosis: which required checks never ran and which are still running. */
-export function timeoutDetail(state: RequiredState): string {
+function timeoutDetail(state: RequiredState): string {
   return `required checks with no run: ${listed(state.missing)}; still incomplete: ${listed(state.incomplete)}`;
 }
 

@@ -117,7 +117,7 @@ export function sendRoute(registry: Registry, route: RoleRoute, game: string): S
 }
 
 /** The distinct resolved target conversations other than the monitor's. */
-export function peerConversations(route: Extract<SendRoute, { status: "active" }>): string[] {
+function peerConversations(route: Extract<SendRoute, { status: "active" }>): string[] {
   const monitor = route.monitor.conversation;
   const peers = route.targets
     .map((target) => target.conversation)

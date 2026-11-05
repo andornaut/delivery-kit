@@ -6,8 +6,8 @@
 // registration on a "modern" revision). Re-verify after Claude Code upgrades.
 import type { SpoolEntry } from "./spool.ts";
 
-export const SERVER_NAME = "delivery-kit-monitor";
-export const LEGACY_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
+const SERVER_NAME = "delivery-kit-monitor";
+const LEGACY_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 export interface ChannelNotification {

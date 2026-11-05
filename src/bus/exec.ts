@@ -26,7 +26,7 @@ export type Exec = (spec: ExecSpec) => Promise<ExecResult>;
 export const WRANGLER_ENTRY = "node_modules/wrangler/bin/wrangler.js";
 const ALLOWED = new Set(["docker", "gh", "git"]);
 
-export class ExecRefused extends Error {
+class ExecRefused extends Error {
   constructor(command: string) {
     super(`refusing to spawn ${command}: not an allowed bus child process`);
     this.name = "ExecRefused";
@@ -120,7 +120,7 @@ export async function git(exec: Exec, cwd: string, args: readonly string[]): Pro
   return result.stdout.trim();
 }
 
-export class GitError extends Error {
+class GitError extends Error {
   readonly result: ExecResult;
 
   constructor(args: readonly string[], result: ExecResult) {

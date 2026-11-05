@@ -60,7 +60,7 @@ export interface ProjectConfig {
 }
 
 /** The resource ceiling every gate observes: at most four CPUs, start below load 24. */
-export const RESOURCE_LIMITS = { cpus: 4, loadLimit: 24 } as const;
+const RESOURCE_LIMITS = { cpus: 4, loadLimit: 24 } as const;
 
 const BRANCH_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,128}$/;
 const GITHUB_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -70,7 +70,7 @@ const CHECK_NAME_PATTERN = /^[^|]{1,128}$/;
 const PROJECT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 const IMAGE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$/;
 // A role key (`<game>/<role>`) or a shared role or duty name.
-export const ROLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(\/[a-z0-9][a-z0-9-]{0,63})?$/;
+const ROLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(\/[a-z0-9][a-z0-9-]{0,63})?$/;
 // An inline assignment of secret-like material in a command, such as `TOKEN=x npm ci`.
 const INLINE_SECRET_PATTERN =
   /(^|\s)[A-Za-z_]*(SECRET|TOKEN|PASSW|API_?KEY|CREDENTIAL)[A-Za-z_]*=/i;

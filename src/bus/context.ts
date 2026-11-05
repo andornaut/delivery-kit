@@ -43,7 +43,7 @@ export interface BusContext {
   readonly startCi: (sha: string) => void;
 }
 
-export const systemClock: Clock = {
+const systemClock: Clock = {
   now: () => Math.floor(Date.now() / 1000),
   sleep: (seconds, signal) =>
     new Promise((resolve) => {
@@ -64,7 +64,7 @@ export const systemClock: Clock = {
 };
 
 /** Events through events.ts. Persistence failures are logged and never stop a departure. */
-export function busEvents(game: GameLayout, project: string, log: (line: string) => void): Events {
+function busEvents(game: GameLayout, project: string, log: (line: string) => void): Events {
   return {
     emit(kind, key, message) {
       try {
@@ -81,7 +81,7 @@ export function busEvents(game: GameLayout, project: string, log: (line: string)
   };
 }
 
-export function fileLog(path: string): (line: string) => void {
+function fileLog(path: string): (line: string) => void {
   return (line) => appendFileSync(path, `${line}\n`, { mode: 0o600 });
 }
 
