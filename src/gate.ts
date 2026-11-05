@@ -172,7 +172,8 @@ export interface GateInput {
 /**
  * A `step` failure is install or a gate step exiting non-zero inside the running container: the
  * departure records gate-failed for the SHA. An `infrastructure` failure (Docker, the image, the
- * container, its network, a copy or the fingerprint check) records nothing, so the next
+ * container, its network, an install that could not reach the registry, a copy or the
+ * fingerprint check) records nothing, so the next
  * departure gates the same SHA again.
  */
 export type GateOutcome =
@@ -207,6 +208,19 @@ function diagnostic(result: ExecResult): string {
 
 function timedOut(result: ExecResult): boolean {
   return result.status === null;
+}
+
+/** npm's codes for a registry or network fault: HTTP 5xx, DNS, refused, reset or timed-out sockets. */
+const NETWORK_ERROR =
+  /\bnpm (?:ERR!|error) code (?:E5\d\d|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ESOCKETTIMEDOUT)\b/;
+
+/** Whether the install log reports a network fault, which a later departure may not meet. */
+function networkFailure(log: string): boolean {
+  try {
+    return NETWORK_ERROR.test(readFileSync(log, "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 /** Tools the gate image provides besides sh, for the copy, the loopback check and step logs. */
@@ -320,6 +334,9 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
     );
     if (install.status === DOCKER_EXEC_ERROR) {
       return blockedGate(`docker exec of the install step failed; see ${log}`);
+    }
+    if (install.status !== 0 && !timedOut(install) && networkFailure(log)) {
+      return blockedGate(`install could not reach the registry; see ${log}`);
     }
     if (install.status !== 0) {
       return failed("install", `install ${timedOut(install) ? "TIMED OUT" : "FAIL"}; see ${log}`);

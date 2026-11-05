@@ -18,7 +18,7 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.0.1/delivery-kit-2.0.1.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.0.2/delivery-kit-2.0.2.tgz"
 }
 ```
 
@@ -293,8 +293,10 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   again; the next departure runs once Tech merges a fix. Red CI or a failed deployment is fixed the
   same way, with no automatic CI rerun.
 - **Gate infrastructure:** when Docker is unavailable, the image cannot be pulled, the container
-  cannot be created or started, the network cannot be detached, more than loopback remains, a
-  `docker cp` fails or the worktree fingerprint changes, the departure reports `blocked-gate` with
+  cannot be created or started, install fails with an npm network code (HTTP 5xx, `ETIMEDOUT`,
+  `ECONNRESET`, `ECONNREFUSED`, `EAI_AGAIN`, `ENOTFOUND`, `ESOCKETTIMEDOUT`), the network cannot be
+  detached, more than loopback remains, a `docker cp` fails or the worktree fingerprint changes,
+  the departure reports `blocked-gate` with
   the cause, writes no `gate-failed` record and gates the same SHA again at the next departure.
 - **CI:** polls the check runs of the exact pushed commit through the existing `gh` login, or the
   public GitHub API (User-Agent `delivery-kit`) when `gh` is not installed. Only the runs named in

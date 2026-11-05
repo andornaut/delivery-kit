@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -213,6 +213,16 @@ describe("runGate", () => {
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+
+  it.each([
+    ["npm error code E504", "infrastructure"],
+    ["npm ERR! code ECONNRESET", "infrastructure"],
+    ["npm error code E404", "step"],
+  ])("classifies a failed install logging %s as %s", async (line, failure) => {
+    const { context, input } = setup({ install: () => ({ status: 1, stderr: "", stdout: "" }) });
+    writeFileSync(join(input.logs, "install.log"), `${line}\nnpm error 504 Gateway Time-out\n`);
+    expect(await runGate(context, input)).toMatchObject({ failure, ok: false });
   });
 
   it("copies no dist/ or node_modules/ out of a failed gate", async () => {
