@@ -1,5 +1,5 @@
 // var/registry.json schema version 1, shared by delivery-kit and the game-sessions skills.
-// The skills own every field except operations.*.lastAdoption, which delivery-kit writes.
+// The skills own every field except operations.*.lastAdoption, a reserved field nothing writes.
 // Registry state records ownership; it never proves activation on its own.
 import { type GameDevConfig, roleKeys } from "../layout.ts";
 import {

@@ -53,7 +53,7 @@ export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<st
     String(started),
   );
   writeDurable(paths.identity, `${text}\n`, { mode: 0o644 });
-  // O_TRUNC keeps the lock inode; an older runner truncates this token on open.
+  // O_TRUNC keeps the lock inode, so the holder's lock stays valid while the token changes.
   const fd = openSync(paths.runnerLock, constants.O_WRONLY | constants.O_TRUNC);
   try {
     writeSync(fd, `${token}\n`);

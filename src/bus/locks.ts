@@ -1,28 +1,16 @@
-// Lock probes on files that must not be created: the status probe. lock.ts opens these
-// read-only, so probing never needs write access.
-import { holdLock, LockBusy, type LockHandle, LockMissing } from "../lock.ts";
+// The status probe's lock test on files that must not be created. lock.ts opens them read-only,
+// so probing never needs write access.
+import { holdLock, LockBusy, LockMissing } from "../lock.ts";
 
-/**
- * Take a non-blocking exclusive lock on an existing file. Returns undefined when the file does
- * not exist, and throws LockBusy when another open file description holds it.
- */
-function holdExistingLock(path: string): LockHandle | undefined {
-  try {
-    return holdLock(path, { nonBlocking: true, readOnly: true });
-  } catch (error) {
-    if (error instanceof LockMissing) {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-/** True when another holder has the lock; never creates the file. */
+/** True when another holder has the lock; never creates the file, and a missing file is free. */
 export function lockHeld(path: string): boolean {
   try {
-    holdExistingLock(path)?.release();
+    holdLock(path, { nonBlocking: true, readOnly: true }).release();
     return false;
   } catch (error) {
+    if (error instanceof LockMissing) {
+      return false;
+    }
     if (error instanceof LockBusy) {
       return true;
     }
