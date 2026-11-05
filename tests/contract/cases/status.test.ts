@@ -91,21 +91,24 @@ suite("status", () => {
     }
   });
 
-  contract("a lock holder whose token does not match the identity record is unattested", async () => {
-    const ws = workspace();
-    quiet(ws);
-    await (await started(ws)).stop();
-    // A runner between taking runner.lock and writing its token, or one whose identity write
-    // failed, holds the lock with no matching token. Truncating the lock reproduces that.
-    const holder = await hold(ws.path("runner.lock"), "5>");
-    try {
-      const result = await report(ws);
-      expect([result.status, result.identity_status]).toEqual(["running", "unattested"]);
-      expect((await report(ws)).status).toBe("running");
-    } finally {
-      await holder.release();
-    }
-  });
+  contract(
+    "a lock holder whose token does not match the identity record is unattested",
+    async () => {
+      const ws = workspace();
+      quiet(ws);
+      await (await started(ws)).stop();
+      // A runner between taking runner.lock and writing its token, or one whose identity write
+      // failed, holds the lock with no matching token. Truncating the lock reproduces that.
+      const holder = await hold(ws.path("runner.lock"), "5>");
+      try {
+        const result = await report(ws);
+        expect([result.status, result.identity_status]).toEqual(["running", "unattested"]);
+        expect((await report(ws)).status).toBe("running");
+      } finally {
+        await holder.release();
+      }
+    },
+  );
 
   contract("a missing lock and record are reported absent and not created", async () => {
     const ws = workspace();

@@ -213,9 +213,7 @@ suite("monitor cadence", () => {
         ws.config.reports = { project: "Fixture", recipient: "monitor", scheduledTicks: true };
         ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
         ws.updateGameDevConfig({ wakeMinutes: [1] });
-        ws.writeRoute(
-          cadenceRoute(ws, { host: host ? ws.game : otherGame(ws) }),
-        );
+        ws.writeRoute(cadenceRoute(ws, { host: host ? ws.game : otherGame(ws) }));
         const checked = await cli(ws, ["check-config"]);
         expect(checked.code, checked.stderr).toBe(0);
         expect(checked.stdout).toContain("configuration accepted");

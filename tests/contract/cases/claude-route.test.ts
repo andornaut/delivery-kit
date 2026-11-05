@@ -21,31 +21,28 @@ const SLOT = at(20);
 suite("claude route", () => {
   const workspace = workspaces();
 
-  contract(
-    "an active route reaches only its targets, and only the host dispatches",
-    async () => {
-      const ws = workspace();
-      claudeGame(ws);
-      const snapshot = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
-      expect(snapshot.code, snapshot.stdout + snapshot.stderr).toBe(0);
-      const output = JSON.parse(snapshot.stdout);
-      expect(Object.keys(output.target_queue_status)).toEqual([ARCHIE]);
-      expect(Object.keys(output.session_status)).toEqual([MONITOR, ARCHIE]);
-      const result = await tick(ws, SLOT);
-      expect(result.monitor[0]!.result.status).toBe("sending");
-      const [entry] = ws.list("unblock", "claude-spool");
-      const text = ws.readJson<{ text: string }>(`unblock/claude-spool/${entry}`).text;
-      expect(text.split(briefTarget(ws, "Archie tech", ARCHIE))).toHaveLength(2);
-      expect(text).not.toContain(CHIBI);
-      for (const change of [{ host: otherGame(ws) }, { state: "held", targets: [] }]) {
-        ws.writeRoute(claudeRoute(ws, change));
-        const quiet = await tick(ws, at(50));
-        expect(quiet.monitor).toEqual([]);
-        expect(quiet.stderr).not.toContain("monitor deferred");
-        expect(ws.exists(`unblock/${MONITOR}-${at(50)}.json`)).toBe(false);
-      }
-    },
-  );
+  contract("an active route reaches only its targets, and only the host dispatches", async () => {
+    const ws = workspace();
+    claudeGame(ws);
+    const snapshot = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
+    expect(snapshot.code, snapshot.stdout + snapshot.stderr).toBe(0);
+    const output = JSON.parse(snapshot.stdout);
+    expect(Object.keys(output.target_queue_status)).toEqual([ARCHIE]);
+    expect(Object.keys(output.session_status)).toEqual([MONITOR, ARCHIE]);
+    const result = await tick(ws, SLOT);
+    expect(result.monitor[0]!.result.status).toBe("sending");
+    const [entry] = ws.list("unblock", "claude-spool");
+    const text = ws.readJson<{ text: string }>(`unblock/claude-spool/${entry}`).text;
+    expect(text.split(briefTarget(ws, "Archie tech", ARCHIE))).toHaveLength(2);
+    expect(text).not.toContain(CHIBI);
+    for (const change of [{ host: otherGame(ws) }, { state: "held", targets: [] }]) {
+      ws.writeRoute(claudeRoute(ws, change));
+      const quiet = await tick(ws, at(50));
+      expect(quiet.monitor).toEqual([]);
+      expect(quiet.stderr).not.toContain("monitor deferred");
+      expect(ws.exists(`unblock/${MONITOR}-${at(50)}.json`)).toBe(false);
+    }
+  });
 
   contract("the registry's harness, not the route, selects the adapter", async () => {
     const ws = workspace();
