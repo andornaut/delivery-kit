@@ -152,11 +152,7 @@ export function workerFailures(snapshot: Json): unknown[][] {
   return sortedUnique(references);
 }
 
-function pendingWorkerFailures(
-  unblock: string,
-  recipient: string,
-  snapshot: Json,
-): unknown[][] {
+function pendingWorkerFailures(unblock: string, recipient: string, snapshot: Json): unknown[][] {
   const accepted = list(readHealth(unblock, recipient).accepted_worker_failures);
   return workerFailures(snapshot).filter((reference) => !containsJson(accepted, reference));
 }
