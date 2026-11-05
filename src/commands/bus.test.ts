@@ -37,7 +37,7 @@ describe("bus commands", () => {
     expect((await run(test.layout.root, "status")).code).toBe(2);
   });
 
-  it("resource-report prints the clock and load lines", async () => {
+  it("status --resources prints the clock and load lines", async () => {
     const test = makeGame();
     const result = await run(test.layout.root, "status", "--game", GAME, "--resources");
     expect(result.code).toBe(0);

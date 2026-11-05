@@ -21,7 +21,7 @@ const QUEUE = [
   { id: "queued-one", clientUserMessageId: "client-one", input: [{ type: "text", text: PRIVATE }] },
 ];
 
-/** Tech reports to itself; legacy release-driven triage resolves art and gameplay from the session map. */
+/** Tech reports to itself. */
 async function nativeGame(ws: Workspace, sockets: CodexSocket[]): Promise<CodexSocket> {
   ws.writeRegistry({
     schema: 1,

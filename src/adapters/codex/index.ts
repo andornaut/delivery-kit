@@ -93,7 +93,7 @@ function unblockDirFor(layout: Layout, receiptPath: string): string | null {
 }
 
 /**
- * The receipt status monitor-ack maps back to its operation state: accepted is deleted,
+ * The receipt status `monitor ack` maps back to its operation state: accepted is deleted,
  * unchanged is confirmed absent (or retained), rejected is a changed payload, anything else
  * ambiguous. The exact native outcome is the receipt reason.
  */

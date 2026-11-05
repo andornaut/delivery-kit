@@ -17,7 +17,7 @@ function io(): Io & { errors: string[] } {
   return { cwd: "/", env: {}, err: (text) => void errors.push(text), errors, out: () => undefined };
 }
 
-describe("channel options", () => {
+describe("claude channel options", () => {
   it("rejects a repeated state directory, a relative one and a noncanonical monitor", async () => {
     const fixture = claudeFixture();
     const dir = join(fixture.game.busDir, "unblock");

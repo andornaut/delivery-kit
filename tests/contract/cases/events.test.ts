@@ -1,5 +1,4 @@
-// Bus event outbox durability, retry, deduplication and completion truth through the runner
-// and the legacy Codex queue sink.
+// Bus event outbox durability, retry, deduplication and completion truth through the runner.
 
 import { expect } from "vitest";
 

@@ -274,8 +274,6 @@ export const nodeImplementation: Implementation = {
   status: (ws) => command(ws, ["status"]),
   resourceReport: (ws) => command(ws, ["status", "--resources"]),
   request: (ws, id) => command(ws, ["request", "--id", id]),
-  monitorSnapshot: (ws, args) => command(ws, ["monitor", "snapshot", ...args]),
-  monitorAck: (ws, args) => command(ws, ["monitor", "ack", ...args]),
   run: (ws) => ({ ...command(ws, ["run"]), logFile: join(ws.state, "runner.log") }),
   channel: (ws, args) => ({
     argv: [process.execPath, CLI, "claude", "channel", ...args],

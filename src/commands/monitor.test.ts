@@ -70,7 +70,7 @@ function ack(fixture: ClaudeFixture, id: string, disposition: string, ...extra: 
     );
 }
 
-describe("monitor-snapshot (claude)", () => {
+describe("monitor snapshot (claude)", () => {
   it("lists delivered entries and reports native state unavailable", async () => {
     const { fixture, requestId } = await delivered();
     const output = await snapshot(fixture);
@@ -142,7 +142,7 @@ describe("monitor-snapshot (claude)", () => {
   });
 });
 
-describe("monitor-ack (claude)", () => {
+describe("monitor ack (claude)", () => {
   it("removes the exact handled entry once and keeps the durable disposition", async () => {
     const { fixture, requestId } = await delivered();
     const id = (await snapshot(fixture)).snapshot_id as string;

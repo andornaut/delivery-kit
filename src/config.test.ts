@@ -29,7 +29,7 @@ describe("validateProjectConfig", () => {
     expect(validateProjectConfig(projectConfig("Archie")).gate.install).toBe("npm ci");
   });
 
-  it("accepts the 0.9 meanings: no install step, no gate steps, a load limit of 0, no timezone", () => {
+  it("accepts no install step, no gate steps, a load limit of 0 and no timezone", () => {
     expect(
       issuesFor((config) => {
         Object.assign(section(config, "gate"), { install: "", steps: [] });

@@ -42,8 +42,6 @@ export interface Implementation {
   status(ws: Workspace): Command;
   resourceReport(ws: Workspace): Command;
   request(ws: Workspace, id: string): Command;
-  monitorSnapshot(ws: Workspace, args: string[]): Command;
-  monitorAck(ws: Workspace, args: string[]): Command;
   run(ws: Workspace): Command;
   /** The Claude channel consumer (stdio MCP server). */
   channel(ws: Workspace, args: string[]): Command;

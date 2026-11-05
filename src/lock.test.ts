@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { holdLock, holdLockAsync, LockBusy, lockIsFree, LockMissing, withLock } from "./lock.ts";
 
-// A Bash holder stands in for every external flock(1) user, including the 0.9.x runner.
+// A Bash holder stands in for every external flock(1) user.
 const HOLDERS = {
   bash: ["bash", "-c", 'exec 9>>"$1"; flock 9; echo held; exec sleep 60', "holder"],
 } as const;
@@ -79,7 +79,7 @@ describe("read-only locks", () => {
       expect(PROBES.bash(path)).toBe(3);
       expect(() => holdLock(path, { nonBlocking: true, readOnly: true })).toThrow(LockBusy);
       lock.release();
-      // A 0.x holder in a read-only tree can only open the file for reading too.
+      // A holder in a read-only tree can only open the file for reading too.
       const holder = spawn(
         "bash",
         ["-c", 'exec 9<"$1"; flock 9; echo held; exec sleep 60', "x", path],
