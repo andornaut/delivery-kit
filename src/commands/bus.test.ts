@@ -32,9 +32,7 @@ describe("bus commands", () => {
     expect(result.code).toBe(0);
     expect(readFileSync(join(test.game.busDir, "requests", "r1.json"), "utf8")).toBe(result.out);
     expect((await run(test.layout.root, "request", "--game", GAME)).code).toBe(2);
-    expect((await run(test.layout.root, "request", "--game", GAME, "--id", "!")).code).toBe(
-      1,
-    );
+    expect((await run(test.layout.root, "request", "--game", GAME, "--id", "!")).code).toBe(1);
     expect((await run(test.layout.root, "status", "--game", "unknown")).code).toBe(2);
     expect((await run(test.layout.root, "status")).code).toBe(2);
   });

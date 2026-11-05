@@ -45,7 +45,6 @@ async function readiness(io: Io, root: string, harness: Harness): Promise<number
   return report.ready ? EXIT_OK : EXIT_INVALID;
 }
 
-
 function ready(harness: Harness): Handler {
   return (io, root, args) => {
     if (args.length > 0) {

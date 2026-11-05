@@ -56,7 +56,8 @@ function ack(fixture: ClaudeFixture, id: string, disposition: string, ...extra: 
   return async (snapshotId: string) =>
     run(
       fixture,
-      "monitor", "ack",
+      "monitor",
+      "ack",
       "--game",
       GAME,
       "--snapshot",
@@ -103,7 +104,8 @@ describe("monitor-snapshot (claude)", () => {
     const { fixture } = await delivered();
     const result = await run(
       fixture,
-      "monitor", "snapshot",
+      "monitor",
+      "snapshot",
       "--game",
       GAME,
       "--recipient",

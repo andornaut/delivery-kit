@@ -163,7 +163,14 @@ suite("monitor snapshot", () => {
       }
       for (const change of [{ state: "held" }, { version: 99 }]) {
         writeCodexRoute(ws, change);
-        const result = await cli(ws, ["monitor", "snapshot", "--recipient", TECH, "--parent", TECH]);
+        const result = await cli(ws, [
+          "monitor",
+          "snapshot",
+          "--recipient",
+          TECH,
+          "--parent",
+          TECH,
+        ]);
         expect(result.code, JSON.stringify(change)).not.toBe(0);
       }
       expect(native.socket.connections).toEqual([]);

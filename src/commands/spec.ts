@@ -110,7 +110,8 @@ export const SPECS = {
     forms: [["game", "resources?"]],
     group: "game",
     options: { ...GAME, resources: { type: "boolean" } },
-    summary: "print the read-only runner and delivery status, or with --resources the resource report",
+    summary:
+      "print the read-only runner and delivery status, or with --resources the resource report",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
 
