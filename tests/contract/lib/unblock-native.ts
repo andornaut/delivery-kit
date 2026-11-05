@@ -43,8 +43,6 @@ export class NativeWorld {
   readonly outcomes: unknown[] = [];
   /** thread/list inventories keyed by `${parent}:${archived}`. */
   readonly children = new Map<string, unknown[]>();
-  /** thread/items/read replies keyed by `${thread}:${turn}:${item}`. */
-  readonly commands = new Map<string, unknown>();
   /** Called before each reply, for state changes in the middle of a native read. */
   hook: ((call: RpcCall) => void) | undefined;
   socket: CodexSocket | undefined;
@@ -117,14 +115,6 @@ export class NativeWorld {
         data: this.children.get(`${params.parentThreadId}:${params.archived}`) ?? [],
         nextCursor: null,
       })),
-    );
-    socket.on(
-      "thread/items/read",
-      wrap((params) => {
-        const ids = (params.itemIds as string[] | undefined) ?? [];
-        const reply = this.commands.get(`${params.threadId}:${params.turnId}:${ids[0]}`);
-        return reply ?? { error: { code: -32602, message: "unknown item" } };
-      }),
     );
     const mutate = (method: string) =>
       wrap((params) => {

@@ -244,7 +244,6 @@ suite("codex events", () => {
         const m = await reporter({ ws, route: route(ws) as Record<string, unknown> | string });
         await m.start();
         await sleep(2500);
-        expect(m.ws.calls("codex"), name).toEqual([]);
         expect(m.socket.connections, name).toEqual([]);
         expect(
           m.ws.events().every((event) => event.sent === false),

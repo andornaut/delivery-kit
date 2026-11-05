@@ -43,16 +43,12 @@ suite("events", () => {
     await runner.until(() => ws.virtualNow() >= at(3, 0, 1), 20_000);
     await runner.stop();
     expect(ws.events()).toEqual([]);
-    expect(ws.calls("codex")).toEqual([]);
   });
 
   contract("blocked events for one attempt deduplicate across stages", async () => {
     const ws = workspace();
     bus(ws);
-    ws.updateControl((c) => {
-      c.docker = { gateFail: true };
-      c.codex = { fail: true };
-    });
+    ws.updateControl((c) => (c.docker = { gateFail: true }));
     impl.offer(ws, ["bus/feature"]);
     const runner = start(ws);
     await runner.until(() => kinds(ws).some((kind) => kind.startsWith("blocked-")));

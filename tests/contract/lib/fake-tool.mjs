@@ -56,10 +56,6 @@ function passthrough(binary, argv) {
   process.exit(result.status ?? 1);
 }
 
-function advanceClock(seconds) {
-  if (seconds) appendFileSync(join(dir, "clock-offsets"), `${seconds}\n`);
-}
-
 function git() {
   const behaviour = control.git ?? {};
   log();
@@ -72,17 +68,7 @@ function git() {
   switch (command) {
     case "rev-parse":
       if (last.endsWith("^{tree}")) {
-        out(
-          `${last === "HEAD^{tree}" ? (behaviour.wrongTree ?? "f".repeat(40)) : "f".repeat(40)}\n`,
-        );
-      } else if (last.startsWith("refs/heads/bus/")) {
-        const branch = last.replace(/^refs\/heads\//, "").replace(/\^\{commit\}$/, "");
-        const tip = behaviour.tips?.[branch] ?? behaviour.branchTip ?? sha;
-        if (tip === null) {
-          process.stderr.write(`fatal: Needed a single revision\n`);
-          process.exit(128);
-        }
-        out(`${tip}\n`);
+        out(`${"f".repeat(40)}\n`);
       } else if (
         behaviour.localMain &&
         ["main", "refs/heads/main", "refs/heads/main^{commit}"].includes(last)
@@ -107,18 +93,11 @@ function git() {
     case "log":
       out(`${sha} fixture\n`);
       return 0;
-    case "fetch":
-      return behaviour.fetchFail ? 1 : 0;
-    case "rebase":
-      return behaviour.rebaseFail ? 1 : 0;
-    case "cherry-pick":
-      return behaviour.conflict?.length && tail[0] !== "--abort" ? 1 : 0;
     case "worktree":
       // `git worktree add` creates the checkout; node_modules/ comes only from an install.
       if (tail[0] === "add") mkdirSync(rest.at(-2), { recursive: true });
       return 0;
     case "push":
-      if (behaviour.pushFail) return 1;
       writeFileSync(remoteHeadFile, sha);
       return 0;
     default:
@@ -169,10 +148,6 @@ function plantWrangler(nodeModules) {
       `const r = spawnSync(process.execPath, [${JSON.stringify(process.argv[1])}, "wrangler", ...process.argv.slice(2)], { stdio: "inherit" });\n` +
       `process.exit(r.status ?? 1);\n`,
   );
-}
-
-function holdWhile(path) {
-  while (path && existsSync(path)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 }
 
 /**
@@ -267,16 +242,10 @@ function gateProtocol(behaviour) {
     if (!state?.started) return fail(`container ${name} is not running`);
     const script = command[0] === "sh" ? (command[2] ?? "") : "";
     if (command[0] === "test") return state.built ? 0 : 1;
-    if ("EXPECTED_TREE" in env) {
-      return behaviour.copyMismatch || env.EXPECTED_TREE !== "f".repeat(40) ? 1 : 0;
-    }
-    if (script.includes("/sys/class/net")) return behaviour.networkLeak ? 1 : 0;
+    if ("EXPECTED_TREE" in env) return env.EXPECTED_TREE !== "f".repeat(40) ? 1 : 0;
+    if (script.includes("/sys/class/net")) return 0;
     if (script.startsWith("set -e")) {
-      holdWhile(behaviour.blockWhile);
       if (behaviour.gateFail) return 1;
-      if (behaviour.moveBase) writeFileSync(remoteHeadFile, "9".repeat(40));
-      if (behaviour.changeApproval) writeFileSync(behaviour.changeApproval, "changed");
-      if (behaviour.advanceClock) advanceClock(behaviour.advanceClock);
       save(name, { ...state, built: true });
       return 0;
     }
@@ -307,7 +276,6 @@ function gh() {
 function wrangler(argv) {
   const behaviour = control.wrangler ?? {};
   log({ args: argv });
-  if (behaviour.append) appendFileSync(behaviour.append[0], behaviour.append[1]);
   return behaviour.fail ? 1 : 0;
 }
 
@@ -321,20 +289,8 @@ function claude() {
   return 0;
 }
 
-function codex() {
-  const behaviour = control.codex ?? {};
-  if (behaviour.blockWhile) {
-    while (existsSync(behaviour.blockWhile))
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  }
-  if (behaviour.fail) return 1;
-  log();
-  return 0;
-}
-
 const handlers = {
   claude,
-  codex,
   docker,
   gh,
   git,

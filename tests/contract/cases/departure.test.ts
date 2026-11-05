@@ -34,8 +34,6 @@ function bus(ws: Workspace, options: { github?: string; reports?: boolean } = {}
       roles: { monitor: { conversations: { codex: MONITOR } } },
     });
     ws.config.reports = { project: "Fixture", recipient: "monitor" };
-    // The legacy Codex queue sink fails, so events stay in the local outbox for inspection.
-    ws.updateControl((c) => (c.codex = { fail: true }));
   }
 }
 

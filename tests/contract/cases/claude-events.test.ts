@@ -85,7 +85,6 @@ suite("claude bus events", () => {
         expect(spooled(ws)[0]!.recipient).toBe(MONITOR);
         await flushes(runner);
         expect(spooled(ws).map((entry) => entry.name)).toEqual([`${requestId}.json`]);
-        expect(ws.calls("codex")).toEqual([]);
         const channel = Channel.open(ws, [ws.path("unblock")]);
         channel.initialize();
         channel.initialized();
@@ -212,7 +211,6 @@ suite("claude bus events", () => {
           await runner.stop();
         }
         expect(spooled(ws), name).toEqual([]);
-        expect(ws.calls("codex"), name).toEqual([]);
         expect(
           events(ws).map((event) => event.sent),
           name,

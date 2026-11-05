@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const KIT_ROOT = join(HERE, "..", "..", "..");
-const FAKE_TOOLS = ["claude", "codex", "docker", "gh", "git", "wrangler"] as const;
+const FAKE_TOOLS = ["claude", "docker", "gh", "git", "wrangler"] as const;
 export type FakeTool = (typeof FAKE_TOOLS)[number];
 
 export const SHA = "a".repeat(40);
@@ -99,32 +99,19 @@ export interface Control {
     real?: boolean;
     /** Local main HEAD for `rev-parse main` (1.0 trunk-based departures). */
     localMain?: string;
-    wrongTree?: string;
-    branchTip?: string;
-    tips?: Record<string, string | null>;
     files?: string;
     status?: string;
-    fetchFail?: boolean;
-    rebaseFail?: boolean;
-    pushFail?: boolean;
-    conflict?: string[];
   };
   docker?: {
     cpus?: number;
     gateFail?: boolean;
     installFail?: boolean;
-    moveBase?: boolean;
-    changeApproval?: string;
-    advanceClock?: number;
     /** The install provides no node_modules/wrangler/bin/wrangler.js. */
     noWrangler?: boolean;
-    /** Block the gate while this file exists. */
-    blockWhile?: string;
   };
   gh?: { exitCode?: number; default?: unknown[]; checks?: Record<string, unknown[]> };
-  wrangler?: { fail?: boolean; append?: [string, string] };
+  wrangler?: { fail?: boolean };
   claude?: { exitCode?: number; agents?: unknown };
-  codex?: { fail?: boolean; blockWhile?: string };
 }
 
 export interface Call {
