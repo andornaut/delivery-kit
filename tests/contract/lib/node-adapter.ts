@@ -139,11 +139,19 @@ function ensureRouteRoles(ws: Workspace): void {
   if (typeof route !== "object" || route === null) return;
   const { monitor, targets } = route as { monitor?: unknown; targets?: unknown };
   const names = [monitor, ...(Array.isArray(targets) ? targets : [])];
-  const ids = names
-    .filter((name): name is string => typeof name === "string" && name.startsWith("c-"))
-    .map((name) => name.slice(2))
-    .filter((id) => UUID.test(id));
-  if (ids.length) registerConversations(ws, ws.registry().harness, ids);
+  const registry = ws.registry();
+  const missing = names.filter(
+    (name): name is string =>
+      typeof name === "string" &&
+      name.startsWith("c-") &&
+      UUID.test(name.slice(2)) &&
+      registry.roles[name] === undefined,
+  );
+  if (missing.length === 0) return;
+  // By exact name: another role may hold the same conversation since the registry was rewritten.
+  const roles = { ...registry.roles };
+  for (const name of missing) roles[name] = { conversations: { [registry.harness]: name.slice(2) } };
+  ws.writeRegistry({ ...registry, roles });
 }
 
 /** Register the conversation IDs a command names (--recipient, --parent) and the process manifest. */

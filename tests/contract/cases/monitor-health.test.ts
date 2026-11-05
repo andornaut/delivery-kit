@@ -220,6 +220,8 @@ suite("monitor scheduled health", () => {
         harness: "codex",
         roles: { tech: { conversations: { codex: TECH } } },
       });
+      // The route names the roles of the registry it runs under.
+      writeCodexRoute(ws);
       ws.config.reports = { workerParents: ["tech"] };
       clear(ws);
       native.queues = { [TECH]: [], [ART]: [] };
@@ -465,6 +467,7 @@ suite("monitor scheduled health", () => {
           harness: "codex",
           roles: { tech: { conversations: { codex: TECH } } },
         });
+        writeCodexRoute(ws);
         ws.config.reports = { workerParents: ["tech"] };
         clear(ws);
         native.queues = { [TECH]: [], [ART]: [] };
@@ -505,6 +508,7 @@ suite("monitor scheduled health", () => {
       harness: "codex",
       roles: { tech: { conversations: { codex: TECH } } },
     });
+    writeCodexRoute(ws, {}, targets);
     ws.config.reports = { workerParents: ["tech"] };
     clear(ws);
     native.queues = {};

@@ -50,7 +50,8 @@ suite("codex events", () => {
   async function reporter(
     options: {
       recipient?: string;
-      route?: Record<string, unknown> | string | null;
+      /** Built after the reporter's registry exists, so it names that registry's roles. */
+      route?: ((ws: Workspace) => unknown) | null;
       ws?: Workspace;
     } = {},
   ): Promise<Monitored> {
@@ -58,7 +59,7 @@ suite("codex events", () => {
     const m = await Monitored.routed(ws, { host: otherGame(ws) });
     open.push(m);
     if (options.route === null) rmSync(ws.routeFile);
-    else if (options.route !== undefined) ws.writeRoute(options.route);
+    else if (options.route !== undefined) ws.writeRoute(options.route(ws));
     ws.config.reports = { project: "Fixture", recipient: options.recipient ?? "monitor" };
     seed(ws);
     return m;
@@ -241,7 +242,7 @@ suite("codex events", () => {
       ];
       for (const [name, route] of cases) {
         const ws = workspace();
-        const m = await reporter({ ws, route: route(ws) as Record<string, unknown> | string });
+        const m = await reporter({ ws, route });
         await m.start();
         await sleep(2500);
         expect(m.socket.connections, name).toEqual([]);
