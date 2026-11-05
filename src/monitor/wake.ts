@@ -67,7 +67,8 @@ function line(outcome: Readonly<Record<string, unknown>>): string {
 export const DEFERRED_PREFIX = "bus: monitor deferred: ";
 
 const PARENTS_INVALID =
-  "worker parents require unique canonical UUIDs in an active MONITOR_ROUTE_FILE";
+  "worker parents must resolve through var/registry.json roles to distinct canonical UUIDs " +
+  "in the active var/route.json";
 const CONNECT_MS = 25_000;
 const ROUTE_UNAVAILABLE =
   "monitor route is unavailable or invalid; its owner must verify identities and ownership";
