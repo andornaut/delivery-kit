@@ -8,6 +8,7 @@ import { cli, type Result, startRunner } from "./adapter.ts";
 import { CodexSocket, type RpcCall } from "./codex-socket.ts";
 import { sleep } from "./time.ts";
 import type { Workspace } from "./workspace.ts";
+import { roleRoute } from "./routes.ts";
 
 export const P = "00000000-0000-0000-0000-000000000001";
 export const C = "00000000-0000-0000-0000-000000000002";
@@ -37,18 +38,10 @@ export function sockets(): (ws: Workspace) => Promise<CodexSocket> {
   };
 }
 
-/** An active version 1 route: monitor coordinator plus active targets. */
+/** An active route from the monitor coordinator to `targets`, under a Codex registry. */
 export function codexRoute(ws: Workspace, targets: string[], monitor = M): void {
-  // A Codex route runs under a Codex registry; the Node adapter registers its conversations.
   ws.writeRegistry({ ...ws.registry(), harness: "codex" });
-  ws.writeRoute({
-    version: 1,
-    harness: "codex",
-    state: "active",
-    host_project_root: ws.repo,
-    monitor_thread_id: monitor,
-    targets: targets.map((thread_id) => ({ thread_id, ownership: "active" })),
-  });
+  ws.writeRoute(roleRoute(ws, "codex", monitor, targets));
 }
 
 export function decision(ws: Workspace, recipient: string, record: unknown): void {

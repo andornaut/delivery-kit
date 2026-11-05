@@ -9,6 +9,7 @@ import { CodexSocket, type Reply } from "./codex-socket.ts";
 import type { Workspace } from "./workspace.ts";
 
 import type { Json } from "./json.ts";
+import { roleRoute } from "./routes.ts";
 
 export type { Json };
 
@@ -166,17 +167,9 @@ export function writeCodexRoute(
   change: Record<string, unknown> = {},
   targets = [ART],
 ): void {
-  // A Codex route runs under a Codex registry; the Node adapter registers its conversations.
+  // A Codex route runs under a Codex registry.
   ws.writeRegistry({ ...ws.registry(), harness: "codex" });
-  ws.writeRoute({
-    version: 1,
-    harness: "codex",
-    state: "active",
-    host_project_root: ws.repo,
-    monitor_thread_id: TECH,
-    targets: targets.map((thread_id) => ({ thread_id, ownership: "active" })),
-    ...change,
-  });
+  ws.writeRoute(roleRoute(ws, "codex", TECH, targets, change));
 }
 
 /** Recipient-bound decision marker in STATE/unblock/decisions/. */

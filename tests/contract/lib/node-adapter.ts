@@ -13,7 +13,7 @@
 // - The built package is installed into the game's node_modules with a package-lock entry, so
 //   the pin guard sees the installed identity equal to the loaded one.
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Command, Implementation } from "./adapter.ts";
@@ -25,7 +25,7 @@ const CLI = join(KIT_ROOT, "dist", "cli.js");
  * Complete the 1.0 required fields a case leaves out with neutral defaults. Fields a case sets,
  * including deliberately invalid values, pass through unchanged.
  */
-function nodeConfig(ws: Workspace): Record<string, unknown> {
+export function nodeConfig(ws: Workspace): Record<string, unknown> {
   const c = structuredClone(ws.config) as Record<string, Record<string, unknown>>;
   const fill = (section: string, defaults: Record<string, unknown>) => {
     c[section] = { ...defaults, ...(c[section] ?? {}) };
@@ -97,16 +97,19 @@ function ensureRecipient(ws: Workspace): void {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const OTHER_GAME = "fixture-other";
 
-type Harness = "claude" | "codex";
+export type Harness = "claude" | "codex";
 
 /**
  * Register conversation IDs a fixture uses, so 1.0's registry resolves them. An ID already held
  * by a role (under `harness`) keeps that role; others get a shared role named after the ID.
  * Returns the role name of each ID, in order.
  */
-function registerConversations(ws: Workspace, harness: Harness, ids: string[]): string[] {
+export function registerConversations(
+  ws: Workspace,
+  harness: Harness,
+  ids: readonly string[],
+): string[] {
   const registry = ws.registry();
   const roles = { ...registry.roles };
   let changed = false;
@@ -122,109 +125,25 @@ function registerConversations(ws: Workspace, harness: Harness, ids: string[]): 
   return names;
 }
 
-/** Make a nonhost route's host a real game in config.json. */
-function otherGame(ws: Workspace): string {
-  const config = ws.gameDevConfig() as { games: Record<string, unknown> };
-  if (!config.games[OTHER_GAME]) {
-    // A real checkout with a valid delivery-kit.json, so validating every game still passes.
-    writeJson(join(ws.root, OTHER_GAME, "delivery-kit.json"), nodeConfig(ws));
-    ws.updateGameDevConfig({
-      games: {
-        ...config.games,
-        [OTHER_GAME]: { name: "Other", path: `../${OTHER_GAME}`, roles: ["tech"] },
-      },
-    });
-  }
-  return OTHER_GAME;
-}
-
-interface Endpoint {
-  id: unknown;
-  ownership: unknown;
-}
-
 /**
- * Translate the case's ID-based route fixture into the role-name route (schema 1): IDs become
- * registered role names, the host project becomes a game key, and held targets are dropped. An
- * invalid fixture (an unknown shape, a noncanonical ID or a conflicting duplicate) is written so
- * the schema check fails.
+ * Register again the `c-<id>` roles a route fixture names, for a case that rewrote the registry
+ * after writing its route.
  */
-function applyRoute(ws: Workspace): void {
-  const legacy = ws.legacyRoute as Record<string, unknown> | string | undefined;
-  if (legacy === undefined) return;
-  const invalid = () => writeFileSync(ws.routeFile, JSON.stringify({ schema: 1, invalid: legacy }));
-  if (
-    typeof legacy === "string" ||
-    legacy === null ||
-    typeof legacy !== "object" ||
-    Array.isArray(legacy)
-  ) {
-    if (typeof legacy === "string") writeFileSync(ws.routeFile, legacy);
-    else invalid();
+function ensureRouteRoles(ws: Workspace): void {
+  let route: unknown;
+  try {
+    route = JSON.parse(readFileSync(ws.routeFile, "utf8"));
+  } catch {
     return;
   }
-  let harness: Harness;
-  let monitor: unknown;
-  let endpoints: Endpoint[];
-  if (legacy.version === 1 && legacy.harness === "codex" && Array.isArray(legacy.targets)) {
-    harness = "codex";
-    monitor = legacy.monitor_thread_id;
-    endpoints = (legacy.targets as Record<string, unknown>[]).map((t) => ({
-      id: t?.thread_id,
-      ownership: t?.ownership,
-    }));
-  } else if (
-    legacy.version === 2 &&
-    legacy.harness === "claude" &&
-    Array.isArray(legacy.targets) &&
-    typeof legacy.monitor === "object" &&
-    legacy.monitor !== null
-  ) {
-    harness = "claude";
-    monitor = (legacy.monitor as Record<string, unknown>).session_id;
-    endpoints = (legacy.targets as Record<string, unknown>[]).map((t) => ({
-      id: t?.session_id,
-      ownership: t?.ownership,
-    }));
-  } else {
-    invalid();
-    return;
-  }
-  const state = legacy.state;
-  const ownerships = new Map<unknown, unknown>();
-  for (const { id, ownership } of endpoints) {
-    if (ownerships.has(id) && ownerships.get(id) !== ownership) return invalid();
-    ownerships.set(id, ownership);
-  }
-  const ids = [...ownerships.keys()];
-  const monitorId = monitor === null && state === "held" ? undefined : monitor;
-  if (
-    (state !== "active" && state !== "held") ||
-    ids.some((id) => typeof id !== "string" || !UUID.test(id)) ||
-    [...ownerships.values()].some((o) => o !== "active" && o !== "held") ||
-    (monitorId !== undefined && (typeof monitorId !== "string" || !UUID.test(monitorId)))
-  ) {
-    return invalid();
-  }
-  const active = ids.filter((id) => ownerships.get(id) === "active") as string[];
-  let monitorRole: string;
-  if (monitorId === undefined) {
-    // A held fixture route may name no monitor; the route still names a monitor role.
-    monitorRole = "monitor";
-    const registry = ws.registry();
-    if (!registry.roles.monitor) {
-      ws.writeRegistry({
-        ...registry,
-        roles: { ...registry.roles, monitor: { conversations: {} } },
-      });
-    }
-  } else {
-    [monitorRole] = registerConversations(ws, harness, [monitorId as string]) as [string];
-  }
-  const targets = registerConversations(ws, harness, active);
-  const root = legacy.host_project_root ?? legacy.hostProjectRoot;
-  const host = root === ws.repo ? ws.game : otherGame(ws);
-  writeJson(ws.routeFile, { host, monitor: monitorRole, schema: 1, state, targets });
+  if (typeof route !== "object" || route === null) return;
+  const { monitor, targets } = route as { monitor?: unknown; targets?: unknown };
+  const names = [monitor, ...(Array.isArray(targets) ? targets : [])];
+  const ids = names
+    .filter((name): name is string => typeof name === "string" && name.startsWith("c-"))
+    .map((name) => name.slice(2))
+    .filter((id) => UUID.test(id));
+  if (ids.length) registerConversations(ws, ws.registry().harness, ids);
 }
 
 /** Register the conversation IDs a command names (--recipient, --parent) and the process manifest. */
@@ -243,7 +162,7 @@ function command(ws: Workspace, words: string[]): Command {
   writeJson(ws.configFile, nodeConfig(ws));
   installPackage(ws);
   ensureRecipient(ws);
-  applyRoute(ws);
+  ensureRouteRoles(ws);
   registerUsedConversations(ws, words);
   // A noun group (monitor, claude, codex) takes a verb; the other commands are one word.
   const width = ["monitor", "claude", "codex"].includes(words[0] ?? "") ? 2 : 1;

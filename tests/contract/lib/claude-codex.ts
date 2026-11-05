@@ -1,7 +1,8 @@
-// Codex-route fixtures for the cadence and native-interpreter cases: registry roles, a version 1
-// route and the fake control socket answering as the original native fixtures did.
+// Codex-route fixtures for the cadence and observer cases: registry roles, a schema 1 role-name
+// route and the fake control socket.
 import { CodexSocket } from "./codex-socket.ts";
 import { codexWorld } from "./claude-fixture.ts";
+import { roleRoute } from "./routes.ts";
 import type { Workspace } from "./workspace.ts";
 
 export const TECH = "00000000-0000-0000-0000-000000000001";
@@ -9,23 +10,12 @@ export const MONITOR = "00000000-0000-0000-0000-000000000002";
 export const TARGET = "00000000-0000-0000-0000-000000000003";
 export const HELD = "00000000-0000-0000-0000-000000000004";
 
-export function v1Route(
+/** The cadence route: the monitor routes to the target; HELD is a registered role it leaves out. */
+export function cadenceRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return {
-    version: 1,
-    harness: "codex",
-    host_project_root: ws.repo,
-    state: "active",
-    monitor_thread_id: MONITOR,
-    targets: [
-      { thread_id: TARGET, ownership: "active" },
-      { thread_id: TARGET, ownership: "active" },
-      { thread_id: HELD, ownership: "held" },
-    ],
-    ...change,
-  };
+  return roleRoute(ws, "codex", MONITOR, [TARGET], change);
 }
 
 /** Register roles for every ID (role name = `r-<id suffix>` plus the named roles). */
@@ -61,7 +51,7 @@ export async function codexGame(
   ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
   ws.config.reports = { project: "Fixture", recipient: "tech", scheduledTicks: true };
-  ws.writeRoute(v1Route(ws));
+  ws.writeRoute(cadenceRoute(ws));
   clearMonitor(ws);
   const socket = await codexWorld(new CodexSocket(ws), queues).listen();
   ws.env.CODEX_CONTROL_SOCKET = socket.path;

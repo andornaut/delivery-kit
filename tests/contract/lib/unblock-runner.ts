@@ -9,6 +9,7 @@ import { CodexSocket } from "./codex-socket.ts";
 import { at, sleep } from "./time.ts";
 import { ART, GAMEPLAY, NativeWorld, TECH } from "./unblock-native.ts";
 import type { Workspace } from "./workspace.ts";
+import { roleRoute } from "./routes.ts";
 
 export function virtualNow(ws: Workspace): number {
   const clock = JSON.parse(readFileSync(ws.clockFile, "utf8")) as {
@@ -25,23 +26,12 @@ export function virtualNow(ws: Workspace): number {
   return Math.floor(clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
 }
 
-/** A version 1 Codex monitor route; host defaults to this game's checkout. */
+/** The Codex monitor route from Tech to Art and Gameplay, hosted by this game. */
 export function codexRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return {
-    version: 1,
-    harness: "codex",
-    state: "active",
-    host_project_root: ws.repo,
-    monitor_thread_id: TECH,
-    targets: [
-      { thread_id: ART, ownership: "active" },
-      { thread_id: GAMEPLAY, ownership: "active" },
-    ],
-    ...change,
-  };
+  return roleRoute(ws, "codex", TECH, [ART, GAMEPLAY], change);
 }
 
 function codexRegistry(ws: Workspace): void {

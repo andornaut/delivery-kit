@@ -23,6 +23,7 @@ import {
 } from "../lib/monitor-native.ts";
 import { MonitorSchedule } from "../lib/monitor-schedule.ts";
 import type { Workspace } from "../lib/workspace.ts";
+import { routeRole } from "../lib/routes.ts";
 
 const SLOW = 120_000;
 
@@ -354,7 +355,7 @@ suite("monitor scheduled health", () => {
     "the real question collector keeps partial old history apart from complete current proof",
     async () => {
       const { ws, native, schedule } = await setup((w) =>
-        writeCodexRoute(w, { monitor_thread_id: ART }, [TECH]),
+        writeCodexRoute(w, { monitor: routeRole(w, "codex", ART) }, [TECH]),
       );
       clear(ws, ART);
       const question = {

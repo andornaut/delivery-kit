@@ -1,7 +1,6 @@
 // Bus events for the confirmed Codex monitor, flushed by the resident runner's observer
 //.
 import { rmSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, expect } from "vitest";
 
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
@@ -9,6 +8,7 @@ import { sleep } from "../lib/time.ts";
 import { rpcError, STALE, TECH } from "../lib/unblock-native.ts";
 import { codexRoute, Monitored } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
+import { otherGame } from "../lib/routes.ts";
 
 const EVENT = "a".repeat(64);
 const RECEIPT = `events/native/${EVENT}-${TECH}.json`;
@@ -55,7 +55,7 @@ suite("codex events", () => {
     } = {},
   ): Promise<Monitored> {
     const ws = options.ws ?? workspace();
-    const m = await Monitored.routed(ws, { host_project_root: join(ws.root, "dispatch-host") });
+    const m = await Monitored.routed(ws, { host: otherGame(ws) });
     open.push(m);
     if (options.route === null) rmSync(ws.routeFile);
     else if (options.route !== undefined) ws.writeRoute(options.route);
@@ -235,9 +235,9 @@ suite("codex events", () => {
     async () => {
       const cases: Array<[string, (ws: Workspace) => unknown]> = [
         ["malformed", () => "not json"],
-        ["invalid", (ws) => codexRoute(ws, { version: 2 })],
+        ["invalid", (ws) => codexRoute(ws, { schema: 2 })],
         ["held", (ws) => codexRoute(ws, { state: "held" })],
-        ["held-unknown", (ws) => codexRoute(ws, { state: "held", monitor_thread_id: null })],
+        ["held-unknown", (ws) => codexRoute(ws, { monitor: "no-such-role", state: "held" })],
       ];
       for (const [name, route] of cases) {
         const ws = workspace();

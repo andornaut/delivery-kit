@@ -240,15 +240,8 @@ export class Workspace {
     return join(this.gameDev, "var", "route.json");
   }
 
-  /** The last 0.x route a case wrote; the Node adapter translates it to a role-name route. */
-  legacyRoute: unknown;
-
-  /**
-   * Write a 0.x monitor route (version 1 Codex or version 2 Claude, or raw text). The adapter
-   * rewrites var/route.json as a schema 1 role-name route at each command.
-   */
+  /** Write var/route.json: a schema 1 role-name route, or raw text for a malformed one. */
   writeRoute(route: unknown): void {
-    this.legacyRoute = route;
     writeFileSync(this.routeFile, typeof route === "string" ? route : JSON.stringify(route));
   }
 

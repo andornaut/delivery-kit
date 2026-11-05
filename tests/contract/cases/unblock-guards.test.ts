@@ -16,6 +16,7 @@ import {
 import { ART, type Params, TECH } from "../lib/unblock-native.ts";
 import { decide, Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
+import { routeRole } from "../lib/routes.ts";
 
 const COMPACTION = "native latest-turn context compaction prevents complete question proof";
 
@@ -87,9 +88,9 @@ suite("unblock guards", () => {
     },
   );
 
-  contract("a non-UUID monitor identity is never a clear recipient", async () => {
-    for (const identity of ["../other", "tech"]) {
-      const m = await routed(workspace(), { monitor_thread_id: identity });
+  contract("a monitor that is not a registered role is never a clear recipient", async () => {
+    for (const identity of ["../other", "no-such-role"]) {
+      const m = await routed(workspace(), { monitor: identity });
       await m.start();
       const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
       expect(output).toContain(ROUTE_INVALID_MESSAGE);
@@ -387,7 +388,8 @@ suite("unblock guards", () => {
   contract(
     "worker parents outside the active route defer before any native connection",
     async () => {
-      const m = await routed(workspace(), { targets: [{ thread_id: ART, ownership: "active" }] });
+      const ws = workspace();
+      const m = await routed(ws, { targets: [routeRole(ws, "codex", ART)] });
       m.ws.config.reports = { workerParents: ["gameplay"] };
       await m.start();
       const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));

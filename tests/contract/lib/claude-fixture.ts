@@ -8,6 +8,7 @@ import { type Command, impl, type Resident, type Result, start, startRunner } fr
 import type { CodexSocket } from "./codex-socket.ts";
 import type { Workspace } from "./workspace.ts";
 import type { Json } from "./json.ts";
+import { roleRoute } from "./routes.ts";
 
 export const MONITOR = "00000000-0000-4000-8000-000000000001";
 export const ARCHIE = "00000000-0000-4000-8000-000000000002";
@@ -78,30 +79,19 @@ export function agents(
   });
 }
 
+/** The Claude route: the monitor routes to Archie's Tech; Chibi's Tech is not a target. */
 export function claudeRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return {
-    version: 2,
-    harness: "claude",
-    host_project_root: ws.repo,
-    state: "active",
-    monitor: { session_id: MONITOR, name: "monitor", ownership: "active" },
-    targets: [
-      { session_id: ARCHIE, name: "Archie tech", ownership: "active" },
-      { session_id: ARCHIE, name: "Archie tech", ownership: "active" },
-      { session_id: CHIBI, name: "Chibi tech", ownership: "held" },
-    ],
-    ...change,
-  };
+  return roleRoute(ws, "claude", MONITOR, [ARCHIE], change);
 }
 
 export function clear(ws: Workspace, recipient = MONITOR, state = "clear"): void {
   ws.write(`unblock/decisions/${recipient}.json`, JSON.stringify({ thread_id: recipient, state }));
 }
 
-/** A Claude-harness game: registry roles, a version 2 route, clearance and an idle monitor. */
+/** A Claude-harness game: registry roles, its route, clearance and an idle monitor. */
 export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {}): void {
   ws.writeRegistry({
     schema: 1,

@@ -161,7 +161,7 @@ suite("monitor snapshot", () => {
         ]);
         expect(result.code, parents.join(",")).toBe(2);
       }
-      for (const change of [{ state: "held" }, { version: 99 }]) {
+      for (const change of [{ state: "held" }, { schema: 99 }]) {
         writeCodexRoute(ws, change);
         const result = await cli(ws, [
           "monitor",

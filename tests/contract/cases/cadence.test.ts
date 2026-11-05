@@ -14,7 +14,7 @@ import {
   role,
   TARGET,
   TECH,
-  v1Route,
+  cadenceRoute,
 } from "../lib/claude-codex.ts";
 import { threads, tick, virtualNow } from "../lib/claude-fixture.ts";
 import {
@@ -25,6 +25,7 @@ import {
   workspaces,
 } from "../lib/cases.ts";
 import { CodexSocket } from "../lib/codex-socket.ts";
+import { otherGame, routeRole } from "../lib/routes.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -99,14 +100,9 @@ suite("monitor cadence", () => {
       );
       const parents = [MONITOR, TARGET, ...extra];
       codexRoles(ws, extra);
-      const route = v1Route(ws);
-      ws.writeRoute({
-        ...route,
-        targets: [
-          ...(route.targets as unknown[]),
-          ...extra.map((id) => ({ thread_id: id, ownership: "active" })),
-        ],
-      });
+      ws.writeRoute(
+        cadenceRoute(ws, { targets: [TARGET, ...extra].map((id) => routeRole(ws, "codex", id)) }),
+      );
       ws.config.reports = {
         project: "Fixture",
         recipient: "tech",
@@ -131,7 +127,7 @@ suite("monitor cadence", () => {
       recipient: "tech",
       workerParents: ["monitor", "target"],
     };
-    ws.writeRoute(v1Route(ws, { host_project_root: `${ws.repo}/dispatch-host` }));
+    ws.writeRoute(cadenceRoute(ws, { host: otherGame(ws) }));
     const result = await tick(ws, at(20));
     expect(monitorLines(result.stdout + result.stderr)).toEqual([]);
     expect(socket.calls).toEqual([]);
@@ -169,8 +165,8 @@ suite("monitor cadence", () => {
       for (const content of [
         "",
         "not json",
-        JSON.stringify(v1Route(ws, { version: 2 })),
-        JSON.stringify(v1Route(ws, { state: "held" })),
+        JSON.stringify(cadenceRoute(ws, { schema: 2 })),
+        JSON.stringify(cadenceRoute(ws, { state: "held" })),
       ]) {
         ws.writeRoute(content);
         const result = await tick(ws, at(20));
@@ -190,22 +186,17 @@ suite("monitor cadence", () => {
       await tick(ws, at(20));
       expect(socket.connections).toHaveLength(1);
       const updates: Array<Record<string, unknown>> = [
-        { host_project_root: `${ws.repo}/nonhost` },
-        { state: "held", monitor_thread_id: null },
-        { monitor_thread_id: "invalid" },
-        { monitor_thread_id: null },
-        { harness: "other" },
+        { host: otherGame(ws) },
+        { state: "held" },
+        { monitor: "no-such-role" },
+        { monitor: undefined },
+        { harness: "codex" },
         { targets: [] },
-        {
-          targets: [
-            { thread_id: MONITOR, ownership: "active" },
-            { thread_id: TARGET, ownership: "active" },
-          ],
-        },
-        { targets: [{ thread_id: "invalid", ownership: "active" }] },
+        { targets: [MONITOR, TARGET].map((id) => routeRole(ws, "codex", id)) },
+        { targets: ["no-such-role"] },
       ];
       for (const update of updates) {
-        ws.writeRoute(v1Route(ws, update));
+        ws.writeRoute(cadenceRoute(ws, update));
         await tick(ws, at(20));
         expect(socket.connections, JSON.stringify(update)).toHaveLength(1);
       }
@@ -223,7 +214,7 @@ suite("monitor cadence", () => {
         ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
         ws.updateGameDevConfig({ wakeMinutes: [1] });
         ws.writeRoute(
-          v1Route(ws, { host_project_root: host ? ws.repo : `${ws.repo}/other-project` }),
+          cadenceRoute(ws, { host: host ? ws.game : otherGame(ws) }),
         );
         const checked = await cli(ws, ["check-config"]);
         expect(checked.code, checked.stderr).toBe(0);

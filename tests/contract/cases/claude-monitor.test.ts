@@ -181,7 +181,7 @@ suite("claude monitor inventory", () => {
     expect(record.history).toContainEqual({ attempt: 1, state: "ambiguous" });
   });
 
-  contract("the public CLI selects the Claude monitor for a version 2 route", async () => {
+  contract("the public CLI selects the Claude monitor for its route", async () => {
     const ws = workspace();
     await delivered(ws);
     const result = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);

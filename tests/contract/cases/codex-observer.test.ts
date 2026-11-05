@@ -11,6 +11,7 @@ import { CodexSocket } from "../lib/codex-socket.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
+import { roleRoute } from "../lib/routes.ts";
 
 const TECH = "00000000-0000-0000-0000-000000000001";
 const ART = "00000000-0000-0000-0000-000000000002";
@@ -57,17 +58,7 @@ suite("codex observer", () => {
     async () => {
       const ws = workspace();
       const socket = await nativeGame(ws, sockets);
-      ws.writeRoute({
-        version: 1,
-        harness: "codex",
-        host_project_root: ws.repo,
-        state: "active",
-        monitor_thread_id: MONITOR,
-        targets: [
-          { thread_id: TECH, ownership: "active" },
-          { thread_id: GAMEPLAY, ownership: "active" },
-        ],
-      });
+      ws.writeRoute(roleRoute(ws, "codex", MONITOR, [TECH, GAMEPLAY]));
       const twenty = at(20);
       const fifty = at(50);
       const first = await tick(ws, twenty);
