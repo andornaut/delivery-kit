@@ -1,7 +1,7 @@
 // Runner self-attested identity and a read-only singleton, idle and drain report.
 // Only the runner writes its identity, while it holds runner.lock. The report never reads
 // /proc: the singleton test is a non-blocking flock on the same lock files.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -9,6 +9,7 @@ import {
   fsyncSync,
   openSync,
   readdirSync,
+  readFileSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -27,6 +28,15 @@ export interface IdentityInput {
   readonly startedNs?: bigint;
 }
 
+/** The sha256 of a file's bytes, or null when it cannot be read. */
+function fileSha256(path: string): string | null {
+  try {
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
 function nowNs(): bigint {
   return BigInt(Date.now()) * 1_000_000n;
 }
@@ -38,6 +48,7 @@ export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<st
   const startedAt = new Date(Number(started / 1_000_000n)).toISOString().replace(/\.\d{3}Z$/, "Z");
   const identity = {
     config: input.config,
+    config_sha256: fileSha256(input.config),
     pid: input.pid,
     source_commit: input.sourceCommit,
     started_at: startedAt,
@@ -104,6 +115,22 @@ function readIdentity(paths: BusPaths): Record<string, unknown> | "unreadable" |
   } catch {
     return "unreadable";
   }
+}
+
+/**
+ * Whether the configuration file still matches what the running runner loaded at startup:
+ * `loaded`, `changed` (the runner keeps the loaded copy until it restarts) or `unknown`.
+ */
+function configStatus(identity: Record<string, unknown>): "changed" | "loaded" | "unknown" {
+  const { config, config_sha256: loaded } = identity;
+  if (typeof config !== "string" || typeof loaded !== "string") {
+    return "unknown";
+  }
+  const onDisk = fileSha256(config);
+  if (onDisk === null) {
+    return "unknown";
+  }
+  return onDisk === loaded ? "loaded" : "changed";
 }
 
 export interface StatusReport {
@@ -200,7 +227,9 @@ export function statusReport(paths: BusPaths): StatusReport {
   if (gateFailed === null) {
     blockers.push("gate_failed_dir_unreadable");
   }
+  const config = identityStatus === "current" && identity !== null ? configStatus(identity) : null;
   return {
+    config_status: config,
     drained: blockers.length === 0 && reporters.length === 0,
     gate_failed: gateFailed ?? [],
     identity,

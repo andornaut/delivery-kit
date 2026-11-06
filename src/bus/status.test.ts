@@ -17,6 +17,7 @@ describe("status report", () => {
   it("reports an idle, drained bus with no runner", () => {
     const bus = paths();
     expect(statusReport(bus)).toEqual({
+      config_status: null,
       drained: true,
       identity: null,
       identity_status: "absent",
@@ -44,6 +45,7 @@ describe("status report", () => {
     // The holder is another open file description of the same process, so the probe sees it.
     const running = statusReport(bus);
     expect(running).toMatchObject({
+      config_status: "unknown",
       identity_status: "current",
       runner_lock_held: true,
       status: "running",
@@ -53,6 +55,19 @@ describe("status report", () => {
     );
     lock.release();
     expect(statusReport(bus).identity_status).toBe("stale");
+  });
+
+  it("reports whether the configuration on disk is the one the runner loaded", () => {
+    const bus = paths();
+    const config = join(bus.dir, "delivery-kit.json");
+    writeFileSync(config, '{"gate":{"image":"node:24"}}\n');
+    const lock = holdLock(bus.runnerLock);
+    recordIdentity(bus, { config, pid: 42, sourceCommit: null, toolRoot: "/t", version: "2.0.3" });
+    expect(statusReport(bus).config_status).toBe("loaded");
+    writeFileSync(config, '{"gate":{"image":"archie-check"}}\n');
+    expect(statusReport(bus).config_status).toBe("changed");
+    lock.release();
+    expect(statusReport(bus).config_status).toBeNull();
   });
 
   it("lists idle and reporter blockers", () => {

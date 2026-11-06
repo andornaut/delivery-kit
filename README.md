@@ -18,7 +18,7 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.0.2/delivery-kit-2.0.2.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.0.3/delivery-kit-2.0.3.tgz"
 }
 ```
 
@@ -48,7 +48,10 @@ explicit; it is never inferred from the working directory.
 - `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
 - `status --game`: an unreadable `ci/`, `events/`, `requests/` or `gate-failed/` directory is a
   blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
-  `unreadable` with the `identity_unreadable` blocker.
+  `unreadable` with the `identity_unreadable` blocker. The runner loads `delivery-kit.json` once
+  at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
+  (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
+  unavailable, and `null` without a current runner.
 - `claude channel`: by default it drains every game's spool (or each `--game`) for the registry's
   `monitor` conversation and requires `harness` to be `claude`. `--monitor UUID` and repeated
   absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
