@@ -291,7 +291,8 @@ locks are free and its runner token matches the identity and lock token.
 ### Adopt persistent control
 
 Tech installs the upgraded package and replaces its runner only while idle. Before starting
-the new runner, game-dev explicitly initializes the approved desired states:
+the new runner, game-dev uses the upgraded CLI to explicitly initialize the approved desired
+states. An older installed CLI does not implement `control`:
 
 ```bash
 delivery-kit control --game archies-dog-walks --state paused \
@@ -339,7 +340,7 @@ Short commands load fresh code.
 ### Departures
 
 Delivery is trunk-based. Tech merges each reviewed feature branch into the game's local `main`, as
-a real merge or a fast-forward, and never pushes. There is no queue, admission, batch merge,
+a real merge or a fast-forward, and never pushes. There is no queue, batch merge,
 cherry-pick, rewrite or revert. Each scheduled or requested departure, under `departure.lock`:
 
 1. Restarts the CI watch of the pending deployment or the last push when it timed out or lost
