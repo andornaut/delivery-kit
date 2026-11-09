@@ -4,12 +4,16 @@ import { join } from "node:path";
 
 import { resumeStoppedCi } from "../ci.ts";
 import {
+  beginDeliveryWork,
   deployNeeded,
   deployPendingExists,
+  endDeliveryWork,
   readPending,
   removeWorktree,
   retryDeploy,
   stageDeploy,
+  updateDeliveryWork,
+  withDeliveryRunner,
 } from "../deploy.ts";
 import { runGate, treeFingerprint } from "../gate.ts";
 import { holdLockAsync } from "../lock.ts";
@@ -57,6 +61,8 @@ export function slotDetail(context: BusContext): string {
 }
 
 interface Attempt {
+  readonly activity: string;
+  sha?: string;
   readonly key: string;
   readonly when: string;
   readonly slot: number;
@@ -94,19 +100,43 @@ function blocked(
 }
 
 /** 0 when the departure pushed or had nothing new, otherwise 1. */
-export async function depart(context: BusContext, requestId?: string): Promise<number> {
+export async function depart(
+  context: BusContext,
+  requestId?: string,
+  admission?: string,
+): Promise<number> {
+  return withDeliveryRunner(context, () => departAdmitted(context, requestId, admission));
+}
+
+async function departAdmitted(
+  context: BusContext,
+  requestId?: string,
+  admission?: string,
+): Promise<number> {
   const lock = await holdLockAsync(context.paths.departureLock);
+  let activity = admission;
   try {
+    activity ??= beginDeliveryWork(context, "checking", null);
+    if (activity === undefined) {
+      context.log("bus: departure held: delivery is paused or control is unavailable");
+      return 1;
+    }
     const now = context.clock.now();
     const { departures, timezone } = context.config.schedule;
     const attempt: Attempt = {
+      activity,
       key: requestId === undefined ? String(now) : `request-${requestId}`,
       slot: latestScheduledSlot(timezone, departures, now),
       when: stamp(timezone, now),
       ...(requestId === undefined ? {} : { requestId }),
     };
     try {
-      return await departLocked(context, attempt);
+      const result = await departLocked(context, attempt);
+      if (result !== 0) {
+        // The exact SHA, if resolved, remains attached to this activity.
+        updateDeliveryWork(context, activity, "failed", attempt.sha ?? null);
+      }
+      return result;
     } catch (error) {
       if (error instanceof Interrupted) {
         // Stopped by the runner's own shutdown: nothing failed, so nothing is recorded or
@@ -114,9 +144,13 @@ export async function depart(context: BusContext, requestId?: string): Promise<n
         context.log(`${attempt.when} bus: departure stopped by shutdown (${error.message})`);
         return 1;
       }
+      updateDeliveryWork(context, activity, "failed", attempt.sha ?? null);
       throw error;
     }
   } finally {
+    if (activity !== undefined) {
+      endDeliveryWork(context, activity);
+    }
     lock.release();
   }
 }
@@ -153,6 +187,10 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
     );
   }
   let remote: string | undefined;
+  // This serialized departure is the only writer of its attempt's resolved SHA.
+  // eslint-disable-next-line require-atomic-updates
+  attempt.sha = head;
+  updateDeliveryWork(context, attempt.activity, "checking", head);
   try {
     remote = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
   } catch (error) {
@@ -337,6 +375,7 @@ async function gateAndPush(
   } catch (error) {
     rethrowInterrupted(error);
     // Never leave a pushed SHA undeployed without a report.
+    updateDeliveryWork(context, attempt.activity, "failed", head);
     const cause = error instanceof Error ? error.message : String(error);
     context.log(`bus: deployment staging failed: ${cause}`);
     context.events.emit(

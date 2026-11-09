@@ -1,11 +1,20 @@
 // The resident runner for one game: singleton locks, identity, the
 // serialized scheduled and requested departure loop, the 60 s observer, the 1800 s resource
 // sampler and the in-runner CI watches. No timer outlives the process.
-import { realpathSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { unfinishedCi, watchCi } from "../ci.ts";
-import { deployAfterCi } from "../deploy.ts";
+import {
+  beginDeliveryWork,
+  bindDeliveryRunner,
+  deliveryRunnerReady,
+  deployAfterCi,
+  endDeliveryWork,
+  settleDeliveryRunner,
+  unbindDeliveryRunner,
+  updateDeliveryWork,
+} from "../deploy.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { DEFERRED_PREFIX, deliverScheduledWake } from "../monitor/wake.ts";
 import type { BusContext } from "./context.ts";
@@ -23,6 +32,7 @@ const LOADED_VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.
 /** In-runner CI watches, at most one per SHA. Aborted watches resume in the next runner. */
 class CiTasks {
   readonly #running = new Map<string, Promise<unknown>>();
+  readonly #activities = new Map<string, string | undefined>();
   readonly #signal: AbortSignal;
 
   constructor(signal: AbortSignal) {
@@ -33,12 +43,43 @@ class CiTasks {
     if (this.#running.has(sha) || this.#signal.aborted) {
       return;
     }
+    // startCi is called only for a recorded push or a persisted unfinished CI watch.
+    this.#activities.set(sha, beginDeliveryWork(context, "checking", sha, true));
     // The deployment of a pushed SHA runs once its CI passes.
     const task = watchCi(context, sha, { signal: this.#signal })
-      .then((result) => (result === "success" ? deployAfterCi(context, sha) : undefined))
-      .catch((error: unknown) => context.log(`bus: CI watch ${sha} failed: ${String(error)}`))
-      .finally(() => this.#running.delete(sha));
+      .then(async (result) => {
+        const activity = this.#activities.get(sha);
+        if (result === "success") {
+          await deployAfterCi(context, sha);
+        } else if (result !== "busy" && activity !== undefined) {
+          updateDeliveryWork(context, activity, "failed", sha);
+        }
+      })
+      .catch((error: unknown) => {
+        const activity = this.#activities.get(sha);
+        if (activity !== undefined && !this.#signal.aborted) {
+          updateDeliveryWork(context, activity, "failed", sha);
+        }
+        context.log(`bus: CI watch ${sha} failed: ${String(error)}`);
+      })
+      .finally(() => {
+        const activity = this.#activities.get(sha);
+        if (activity !== undefined) {
+          endDeliveryWork(context, activity);
+        }
+        this.#running.delete(sha);
+        this.#activities.delete(sha);
+      });
     this.#running.set(sha, task);
+  }
+
+  /** Attach observations after an operator explicitly initializes missing control. */
+  refresh(context: BusContext): void {
+    for (const [sha, activity] of this.#activities) {
+      if (activity === undefined) {
+        this.#activities.set(sha, beginDeliveryWork(context, "checking", sha, true));
+      }
+    }
   }
 
   async drain(): Promise<void> {
@@ -80,9 +121,11 @@ async function observe(
   context.events.flush();
 }
 
-async function observer(context: BusContext, signal: AbortSignal): Promise<void> {
+async function observer(context: BusContext, signal: AbortSignal, tasks: CiTasks): Promise<void> {
   let previous = context.clock.now();
   while (!signal.aborted) {
+    deliveryRunnerReady(context);
+    tasks.refresh(context);
     const now = context.clock.now();
     // The observer is sequential by design.
     // eslint-disable-next-line no-await-in-loop
@@ -98,6 +141,25 @@ async function observer(context: BusContext, signal: AbortSignal): Promise<void>
 export interface LoopHooks {
   /** Called before every departure; the pin guard. */
   readonly beforeDeparture?: () => void;
+}
+
+function pendingRequest(context: BusContext): boolean {
+  try {
+    return readdirSync(context.paths.requestsDir).some((name) => {
+      if (!name.endsWith(".json")) {
+        return false;
+      }
+      const record = JSON.parse(readFileSync(join(context.paths.requestsDir, name), "utf8")) as {
+        state?: string;
+      };
+      return record.state === "pending";
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /** Serialized scheduled and requested departures until `signal` aborts. */
@@ -121,16 +183,33 @@ async function departureLoop(
     while (!signal.aborted) {
       let now = context.clock.now();
       if (now < next) {
-        // eslint-disable-next-line no-await-in-loop
-        const request = await claimRequest(store);
+        const admission = pendingRequest(context)
+          ? beginDeliveryWork(context, "checking", null)
+          : undefined;
+        let request: string | undefined;
+        try {
+          // Reserve before claiming: a pause cannot consume a pending receipt.
+          // eslint-disable-next-line no-await-in-loop
+          request = admission === undefined ? undefined : await claimRequest(store);
+        } finally {
+          if (request === undefined && admission !== undefined) {
+            endDeliveryWork(context, admission);
+          }
+        }
         if (request !== undefined) {
-          writeLines(paths.activeDeparture, String(now));
-          hooks.beforeDeparture?.();
-          // eslint-disable-next-line no-await-in-loop
-          const result = await depart(context, request);
-          // eslint-disable-next-line no-await-in-loop
-          await finishRequest(store, request, result);
-          truncate(paths.activeDeparture);
+          try {
+            writeLines(paths.activeDeparture, String(now));
+            hooks.beforeDeparture?.();
+            // eslint-disable-next-line no-await-in-loop
+            const result = await depart(context, request, admission);
+            // eslint-disable-next-line no-await-in-loop
+            await finishRequest(store, request, result);
+          } finally {
+            if (admission !== undefined) {
+              endDeliveryWork(context, admission);
+            }
+            truncate(paths.activeDeparture);
+          }
           now = context.clock.now();
           if (now >= next) {
             next = now + untilNext(timezone, departures, now);
@@ -201,43 +280,56 @@ export async function runRunner(
   options: RunnerOptions,
   makeContext: (startCi: (sha: string) => void) => BusContext,
 ): Promise<void> {
-  const tasks = new CiTasks(options.signal);
+  const stop = new AbortController();
+  const signal = AbortSignal.any([options.signal, stop.signal]);
+  const tasks = new CiTasks(signal);
   const context: BusContext = makeContext((sha) => tasks.start(context, sha));
   ensureDir(context.paths.dir);
   const locks = holdSingleton(context);
+  let failed = false;
   try {
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));
+    let runnerToken: string | undefined;
     try {
-      recordIdentity(context.paths, {
+      const identity = recordIdentity(context.paths, {
         config: context.game.configFile,
         pid: process.pid,
         sourceCommit: sourceCommit(toolRoot),
         toolRoot,
         version: LOADED_VERSION,
       });
+      runnerToken = typeof identity.token === "string" ? identity.token : undefined;
     } catch (error) {
       context.log(
         `bus: runner identity record unavailable; status reports it unattested (${String(error)})`,
       );
     }
+    bindDeliveryRunner(context, runnerToken);
     const loaded = loadedIdentity(LOADED_VERSION, cliPath, context.game.repo);
     recordPin(context, loaded, cliPath);
     const guard = pinGuard(context, loaded);
     for (const sha of unfinishedCi(context)) {
       tasks.start(context, sha);
     }
-    const background = [
-      sampleResources(context, options.signal),
-      observer(context, options.signal),
-    ];
+    const background = [sampleResources(context, signal), observer(context, signal, tasks)];
+    let backgroundFailure: PromiseRejectedResult | undefined;
     try {
-      await departureLoop(context, { beforeDeparture: () => guard.check() }, options.signal);
+      await departureLoop(context, { beforeDeparture: () => guard.check() }, signal);
     } finally {
-      await Promise.all(background);
-      await tasks.drain();
+      stop.abort();
+      const drained = await Promise.allSettled([...background, tasks.drain()]);
+      backgroundFailure = drained.find((result) => result.status === "rejected");
     }
+    if (backgroundFailure !== undefined) {
+      throw backgroundFailure.reason;
+    }
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
+    settleDeliveryRunner(context, failed ? "failed" : "stopped");
+    unbindDeliveryRunner(context);
     for (const lock of locks.reverse()) {
       lock.release();
     }

@@ -8,6 +8,7 @@ import { type ProjectConfig, validateProjectConfig } from "../config.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { makeFixture, projectConfig } from "../testFixtures.ts";
 import { type BusContext, busContext, type Clock, type Events } from "./context.ts";
+import { setDesiredDelivery } from "./control.ts";
 import { type Exec, type ExecResult, type ExecSpec, spawnExec } from "./exec.ts";
 
 export const GAME = "archies-dog-walks";
@@ -210,6 +211,14 @@ export function makeGame(
   gitSync(game.repo, "push", "-q", "origin", "main");
   gitSync(game.repo, "fetch", "-q", "origin");
   mkdirSync(game.busDir, { recursive: true });
+  setDesiredDelivery(
+    { dir: game.busDir },
+    {
+      reason: "explicit test fixture adoption",
+      requester: "game-dev",
+      state: "enabled",
+    },
+  );
   return { base, config: validateProjectConfig(config), game, layout, origin, repo: game.repo };
 }
 

@@ -1,15 +1,154 @@
 // Deployment of already-gated assets after the exact pushed SHA passes CI. The gated worktree
 // is kept with its pending pointer until the deployment succeeds; a failed deployment is
 // retried at a later departure, and a newer push supersedes it.
+import { randomUUID } from "node:crypto";
 import { existsSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { SHA_PATTERN } from "./adapters/shared/ids.ts";
 import type { BusContext } from "./bus/context.ts";
+import {
+  beginDeliveryActivity,
+  claimDeliveryRunner,
+  endDeliveryActivity,
+  readDeliveryControl,
+  resumeDeliveryActivity,
+  setObservedDelivery,
+  updateDeliveryActivity,
+} from "./bus/control.ts";
 import { gitOk, WRANGLER_ENTRY } from "./bus/exec.ts";
 import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "./bus/state.ts";
 import { remoteMain } from "./bus/trunk.ts";
 import { fsyncDirectory } from "./durable.ts";
+import { holdLock } from "./lock.ts";
+
+interface DeliverySession {
+  readonly token: string;
+  claimed: boolean;
+}
+
+const sessions = new WeakMap<BusContext, DeliverySession>();
+
+/** Bind only after acquiring the runner singleton locks. */
+export function bindDeliveryRunner(context: BusContext, token: string = randomUUID()): void {
+  sessions.set(context, { claimed: false, token });
+  deliveryRunnerReady(context);
+}
+
+export function unbindDeliveryRunner(context: BusContext): void {
+  sessions.delete(context);
+}
+
+export function hasDeliveryRunner(context: BusContext): boolean {
+  return sessions.has(context);
+}
+
+/** Internal direct calls use the same singleton exclusion as the resident runner. */
+export async function withDeliveryRunner<T>(
+  context: BusContext,
+  run: () => Promise<T>,
+): Promise<T> {
+  if (hasDeliveryRunner(context)) {
+    return run();
+  }
+  const runner = holdLock(context.paths.runnerLock, { nonBlocking: true });
+  let loop;
+  try {
+    loop = holdLock(context.paths.loopLock, { nonBlocking: true });
+    bindDeliveryRunner(context);
+    return await run();
+  } finally {
+    unbindDeliveryRunner(context);
+    loop?.release();
+    runner.release();
+  }
+}
+
+function controlStore(context: BusContext) {
+  return { dir: context.paths.dir, now: () => new Date(context.clock.now() * 1000).toISOString() };
+}
+
+/** Missing control blocks admission while the existing runner continues observing. */
+export function deliveryRunnerReady(context: BusContext): boolean {
+  const session = sessions.get(context);
+  if (session === undefined) {
+    return false;
+  }
+  if (!session.claimed) {
+    try {
+      claimDeliveryRunner(controlStore(context), session.token);
+      session.claimed = true;
+    } catch (error) {
+      context.log(`bus: delivery control unavailable; admission blocked (${String(error)})`);
+    }
+  }
+  return session.claimed;
+}
+
+export function beginDeliveryWork(
+  context: BusContext,
+  state: "checking" | "deploying",
+  sha: string | null,
+  resume = false,
+): string | undefined {
+  if (!deliveryRunnerReady(context)) {
+    return undefined;
+  }
+  const session = sessions.get(context)!;
+  const id = randomUUID();
+  try {
+    const begin = resume ? resumeDeliveryActivity : beginDeliveryActivity;
+    return begin(controlStore(context), session.token, { id, sha, state }) ? id : undefined;
+  } catch (error) {
+    context.log(`bus: delivery control unavailable; admission blocked (${String(error)})`);
+    return undefined;
+  }
+}
+
+export function updateDeliveryWork(
+  context: BusContext,
+  id: string,
+  state: "checking" | "deploying" | "failed",
+  sha: string | null,
+): void {
+  const session = sessions.get(context);
+  if (session !== undefined) {
+    try {
+      updateDeliveryActivity(controlStore(context), session.token, { id, sha, state });
+    } catch (error) {
+      context.log(`bus: delivery observation unavailable (${String(error)})`);
+    }
+  }
+}
+
+export function endDeliveryWork(context: BusContext, id: string): void {
+  const session = sessions.get(context);
+  if (session !== undefined) {
+    try {
+      endDeliveryActivity(controlStore(context), session.token, id);
+    } catch (error) {
+      context.log(`bus: delivery observation unavailable (${String(error)})`);
+    }
+  }
+}
+
+export function settleDeliveryRunner(
+  context: BusContext,
+  state: "idle" | "stopped" | "failed",
+): void {
+  const session = sessions.get(context);
+  if (session?.claimed === true) {
+    try {
+      const sha =
+        state === "failed"
+          ? (readDeliveryControl(controlStore(context)).observed?.sha ?? null)
+          : null;
+      setObservedDelivery(controlStore(context), session.token, { sha, state });
+    } catch (error) {
+      context.log(`bus: delivery observation unavailable (${String(error)})`);
+    }
+  }
+}
 
 export interface PendingDeploy {
   readonly sha: string;
@@ -168,11 +307,27 @@ async function finishPending(context: BusContext, pending: PendingDeploy): Promi
 
 /** Deploy `pending`, reporting a failure; true once deployed. */
 async function attempt(context: BusContext, pending: PendingDeploy): Promise<boolean> {
-  if (await finishPending(context, pending)) {
-    return true;
+  // A matching durable pending pointer proves this batch was already pushed.
+  const activity = beginDeliveryWork(context, "deploying", pending.sha, true);
+  try {
+    if (await finishPending(context, pending)) {
+      return true;
+    }
+    if (activity !== undefined) {
+      updateDeliveryWork(context, activity, "failed", pending.sha);
+    }
+    failureEvent(context, pending.sha);
+    return false;
+  } catch (error) {
+    if (activity !== undefined) {
+      updateDeliveryWork(context, activity, "failed", pending.sha);
+    }
+    throw error;
+  } finally {
+    if (activity !== undefined) {
+      endDeliveryWork(context, activity);
+    }
   }
-  failureEvent(context, pending.sha);
-  return false;
 }
 
 /** After CI passes for `sha`: deploy it when it is the pending deployment. */
@@ -181,7 +336,7 @@ export async function deployAfterCi(context: BusContext, sha: string): Promise<b
   if (pending?.sha !== sha) {
     return false;
   }
-  return attempt(context, pending);
+  return withDeliveryRunner(context, () => attempt(context, pending));
 }
 
 /**

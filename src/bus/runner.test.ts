@@ -60,12 +60,14 @@ describe("runRunner", () => {
   it("refuses a second runner and leaves the holder's token intact", async () => {
     const test = makeGame();
     const context = testContext(test);
+    const control = readFileSync(join(context.paths.dir, "delivery-control.json"), "utf8");
     const release = await holdWithBash(context.paths.runnerLock);
     try {
       await expect(
         runRunner({ cliPath: cliFile(test), signal: new AbortController().signal }, () => context),
       ).rejects.toThrow(new RunnerRefused("a runner is already active"));
       expect(readFileSync(context.paths.runnerLock, "utf8")).toBe("holder-token\n");
+      expect(readFileSync(join(context.paths.dir, "delivery-control.json"), "utf8")).toBe(control);
     } finally {
       release();
     }
