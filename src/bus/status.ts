@@ -217,13 +217,15 @@ function controlReport(
     observed.state === "stopped" &&
     matches &&
     token === readTrimmed(paths.runnerLock);
-  if (!(matches && identityStatus === "current") && !stopped) {
+  const live = running && loopHeld && identityStatus === "current" && matches;
+  if (!live && !stopped) {
     return {
       ...common,
       draining: false,
       mismatch: null,
       mismatch_reason: "observation_unattested",
-      observed_status: identityStatus === "current" && !matches ? "stale" : "unattested",
+      observed_status:
+        running && loopHeld && identityStatus === "current" && !matches ? "stale" : "unattested",
     };
   }
   const active =

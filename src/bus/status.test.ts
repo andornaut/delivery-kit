@@ -27,7 +27,14 @@ function controlledRunner() {
     reason: "fixture adoption",
     requester: "game-dev",
   });
-  const lock = holdLock(bus.runnerLock);
+  const runner = holdLock(bus.runnerLock);
+  const loop = holdLock(bus.loopLock);
+  const lock = {
+    release() {
+      loop.release();
+      runner.release();
+    },
+  };
   const identity = recordIdentity(bus, {
     config: "/c",
     pid: 42,
@@ -37,10 +44,43 @@ function controlledRunner() {
   });
   const token = identity.token as string;
   claimDeliveryRunner(store, token);
-  return { bus, lock, store, token };
+  return { bus, lock, loop, store, token };
 }
 
 describe("status report", () => {
+  it.each(["idle", "checking", "deploying", "failed"] as const)(
+    "does not attest live %s when only the runner lock is held",
+    (state) => {
+      const test = controlledRunner();
+      try {
+        if (state === "checking" || state === "deploying") {
+          beginDeliveryActivity(test.store, test.token, {
+            id: "batch",
+            state,
+            sha: "a".repeat(40),
+          });
+        } else {
+          setObservedDelivery(test.store, test.token, { state, sha: null });
+        }
+        expect(statusReport(test.bus)).toMatchObject({ control: { observed_status: "current" } });
+        test.loop.release();
+        expect(statusReport(test.bus)).toMatchObject({
+          identity_status: "current",
+          runner_lock_held: true,
+          loop_lock_held: false,
+          control: {
+            observed: { state, runnerToken: test.token },
+            observed_status: "unattested",
+            draining: false,
+            mismatch: null,
+            mismatch_reason: "observation_unattested",
+          },
+        });
+      } finally {
+        test.lock.release();
+      }
+    },
+  );
   it("keeps an old running protocol's missing control explicitly unknown and unattested", () => {
     const bus = paths();
     const lock = holdLock(bus.runnerLock);
@@ -170,6 +210,7 @@ describe("status report", () => {
         },
       });
       const replacement = holdLock(test.bus.runnerLock);
+      const replacementLoop = holdLock(test.bus.loopLock);
       try {
         recordIdentity(test.bus, {
           config: "/c",
@@ -187,6 +228,7 @@ describe("status report", () => {
           },
         });
       } finally {
+        replacementLoop.release();
         replacement.release();
       }
     },
