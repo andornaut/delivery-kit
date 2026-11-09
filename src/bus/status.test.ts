@@ -4,7 +4,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { gameLayout, loadLayout } from "../layout.ts";
 import { holdLock } from "../lock.ts";
+import { makeFixture } from "../testFixtures.ts";
 import {
   beginDeliveryActivity,
   claimDeliveryRunner,
@@ -13,7 +15,7 @@ import {
 } from "./control.ts";
 import { busPaths } from "./state.ts";
 import { recordIdentity, statusReport } from "./status.ts";
-import { makeGame } from "./testGame.ts";
+import { GAME, makeGame } from "./testGame.ts";
 
 function paths() {
   return busPaths(makeGame().game.busDir);
@@ -82,7 +84,9 @@ describe("status report", () => {
     },
   );
   it("keeps an old running protocol's missing control explicitly unknown and unattested", () => {
-    const bus = paths();
+    const { root } = makeFixture();
+    const bus = busPaths(gameLayout(loadLayout(root), GAME).busDir);
+    mkdirSync(bus.dir, { recursive: true });
     const lock = holdLock(bus.runnerLock);
     try {
       recordIdentity(bus, {
@@ -96,12 +100,14 @@ describe("status report", () => {
         identity_status: "current",
         idle: true,
         control: {
+          desired: null,
           desired_state: "unknown",
           desired_status: "missing",
           migration_required: true,
           observed: null,
           observed_status: "unattested",
           mismatch: null,
+          mismatch_reason: "control_missing",
         },
       });
     } finally {
@@ -251,18 +257,24 @@ describe("status report", () => {
     });
   });
 
-  it("reports an idle, drained bus with no runner", () => {
+  it("reports an adopted, idle, drained bus with no runner", () => {
     const bus = paths();
     expect(statusReport(bus)).toEqual({
       config_status: null,
       control: {
-        desired: null,
-        desired_state: "unknown",
-        desired_status: "missing",
+        desired: {
+          reason: "explicit test fixture adoption",
+          requester: "game-dev",
+          revision: 1,
+          state: "enabled",
+          updatedAt: expect.any(String),
+        },
+        desired_state: "enabled",
+        desired_status: "valid",
         draining: false,
-        migration_required: true,
+        migration_required: false,
         mismatch: null,
-        mismatch_reason: "control_missing",
+        mismatch_reason: "observation_missing",
         observed: null,
         observed_status: "missing",
       },

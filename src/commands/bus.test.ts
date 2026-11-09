@@ -24,7 +24,7 @@ describe("bus commands", () => {
     expect(JSON.parse(result.out)).toMatchObject({ idle: true, status: "not running" });
     expect(result.out.trim().split("\n")).toHaveLength(1);
     expect(JSON.parse(result.out)).toMatchObject({
-      control: { desired_state: "unknown", desired_status: "missing", migration_required: true },
+      control: { desired_state: "enabled", desired_status: "valid", migration_required: false },
       drained: true,
     });
   });
