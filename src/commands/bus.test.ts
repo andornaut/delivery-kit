@@ -22,7 +22,11 @@ describe("bus commands", () => {
     const result = await run(test.layout.root, "status", "--game", GAME);
     expect(result.code).toBe(0);
     expect(JSON.parse(result.out)).toMatchObject({ idle: true, status: "not running" });
-    expect(result.out).toMatch(/^\{"config_status": null, "drained": true, /);
+    expect(result.out.trim().split("\n")).toHaveLength(1);
+    expect(JSON.parse(result.out)).toMatchObject({
+      control: { desired_state: "unknown", desired_status: "missing", migration_required: true },
+      drained: true,
+    });
   });
 
   it("request captures the main HEAD and requires a game and an ID", async () => {

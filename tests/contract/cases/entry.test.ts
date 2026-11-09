@@ -56,6 +56,78 @@ function roles(ws: Workspace, ids: Record<string, string>): void {
 suite("entry", () => {
   const workspace = workspaces();
 
+  contract("control explicitly adopts a missing record without starting a runner", async () => {
+    const ws = workspace({ deliveryState: null });
+    minimal(ws);
+    ws.writeRegistry({
+      schema: 1,
+      revision: 1,
+      harness: "claude",
+      roles: { "game-dev": { conversations: {}, duties: ["coordinator"] } },
+    });
+    const result = await cli(ws, [
+      "control",
+      "--state",
+      "paused",
+      "--reason",
+      "operator pause",
+      "--requester",
+      "coordinator",
+    ]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      state: "paused",
+      requester: "game-dev",
+      reason: "operator pause",
+      revision: 1,
+    });
+    expect(ws.readJson("delivery-control.json")).toMatchObject({
+      schema: 1,
+      desired: { state: "paused" },
+      observed: null,
+      activities: {},
+    });
+    expect(ws.exists("runner.lock")).toBe(false);
+    expect(ws.exists("runner.identity.json")).toBe(false);
+    expect(ws.calls()).toEqual([]);
+  });
+
+  contract(
+    "control requires explicit options and registered role names and preserves corrupt state",
+    async () => {
+      const ws = workspace({ deliveryState: null });
+      minimal(ws);
+      roles(ws, { "game-dev": FIRST });
+      const valid = [
+        "control",
+        "--state",
+        "enabled",
+        "--reason",
+        "operator enable",
+        "--requester",
+        "game-dev",
+      ];
+      for (const flag of ["--state", "--reason", "--requester"]) {
+        const words = [...valid];
+        words.splice(words.indexOf(flag), 2);
+        expect((await cli(ws, words)).code).toBe(2);
+      }
+      for (const requester of ["unknown-role", FIRST]) {
+        const words = [...valid];
+        words[words.length - 1] = requester;
+        expect((await cli(ws, words)).code).toBe(1);
+      }
+      expect(ws.exists("delivery-control.json")).toBe(false);
+      const corrupt = '{"desired":{"state":"paused"}}\n';
+      ws.write("delivery-control.json", corrupt);
+      const refused = await cli(ws, valid);
+      expect(refused.code).toBe(1);
+      expect(refused.stdout).toBe("");
+      expect(ws.read("delivery-control.json")).toBe(corrupt);
+      expect(ws.calls()).toEqual([]);
+    },
+  );
+
   contract("help requires no configuration, state or runtime writes", async () => {
     const ws = workspace();
     // Build command lines first: adapters may prepare scratch support files.

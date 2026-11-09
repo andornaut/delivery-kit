@@ -5,6 +5,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { holdLock } from "../lock.ts";
+import {
+  beginDeliveryActivity,
+  claimDeliveryRunner,
+  setDesiredDelivery,
+  setObservedDelivery,
+} from "./control.ts";
 import { busPaths } from "./state.ts";
 import { recordIdentity, statusReport } from "./status.ts";
 import { makeGame } from "./testGame.ts";
@@ -13,11 +19,211 @@ function paths() {
   return busPaths(makeGame().game.busDir);
 }
 
+function controlledRunner() {
+  const bus = paths();
+  const store = { dir: bus.dir };
+  setDesiredDelivery(store, {
+    state: "enabled",
+    reason: "fixture adoption",
+    requester: "game-dev",
+  });
+  const lock = holdLock(bus.runnerLock);
+  const identity = recordIdentity(bus, {
+    config: "/c",
+    pid: 42,
+    sourceCommit: null,
+    toolRoot: "/t",
+    version: "2.1.0",
+  });
+  const token = identity.token as string;
+  claimDeliveryRunner(store, token);
+  return { bus, lock, store, token };
+}
+
 describe("status report", () => {
+  it("keeps an old running protocol's missing control explicitly unknown and unattested", () => {
+    const bus = paths();
+    const lock = holdLock(bus.runnerLock);
+    try {
+      recordIdentity(bus, {
+        config: "/c",
+        pid: 42,
+        sourceCommit: null,
+        toolRoot: "/t",
+        version: "2.0.3",
+      });
+      expect(statusReport(bus)).toMatchObject({
+        identity_status: "current",
+        idle: true,
+        control: {
+          desired_state: "unknown",
+          desired_status: "missing",
+          migration_required: true,
+          observed: null,
+          observed_status: "unattested",
+          mismatch: null,
+        },
+      });
+    } finally {
+      lock.release();
+    }
+  });
+
+  it.each(["checking", "deploying"] as const)(
+    "reports paused %s work as expected draining",
+    (state) => {
+      const test = controlledRunner();
+      try {
+        expect(
+          beginDeliveryActivity(test.store, test.token, {
+            id: "batch",
+            state,
+            sha: "a".repeat(40),
+          }),
+        ).toBe(true);
+        setDesiredDelivery(test.store, {
+          state: "paused",
+          reason: "operator pause",
+          requester: "game-dev",
+        });
+        expect(statusReport(test.bus)).toMatchObject({
+          control: {
+            desired_state: "paused",
+            observed: { state, sha: "a".repeat(40), runnerToken: test.token },
+            observed_status: "current",
+            draining: true,
+            mismatch: false,
+            mismatch_reason: null,
+          },
+        });
+      } finally {
+        test.lock.release();
+      }
+    },
+  );
+
+  it.each(["idle", "stopped", "failed"] as const)("does not make paused %s a mismatch", (state) => {
+    const test = controlledRunner();
+    try {
+      setObservedDelivery(test.store, test.token, { state, sha: null });
+      setDesiredDelivery(test.store, {
+        state: "paused",
+        reason: "operator pause",
+        requester: "game-dev",
+      });
+      expect(statusReport(test.bus)).toMatchObject({
+        control: {
+          observed_status: "current",
+          draining: false,
+          mismatch: false,
+          mismatch_reason: null,
+        },
+      });
+    } finally {
+      test.lock.release();
+    }
+  });
+
+  it("attests stopped after shutdown and reports enabled but stopped as a mismatch", () => {
+    const test = controlledRunner();
+    setObservedDelivery(test.store, test.token, { state: "stopped", sha: null });
+    test.lock.release();
+    expect(statusReport(test.bus)).toMatchObject({
+      identity_status: "stale",
+      idle: true,
+      control: {
+        observed: { state: "stopped", sha: null },
+        observed_status: "current",
+        mismatch: true,
+        mismatch_reason: "desired_enabled_observed_stopped",
+      },
+    });
+    const loop = holdLock(test.bus.loopLock);
+    try {
+      expect(statusReport(test.bus)).toMatchObject({
+        control: { observed_status: "unattested", mismatch: null },
+      });
+    } finally {
+      loop.release();
+    }
+    writeFileSync(test.bus.runnerLock, "different-token\n");
+    expect(statusReport(test.bus)).toMatchObject({
+      control: { observed_status: "unattested", mismatch: null },
+    });
+  });
+
+  it.each(["idle", "checking", "deploying"] as const)(
+    "does not attest %s after the singleton stops or a replaced identity",
+    (state) => {
+      const test = controlledRunner();
+      if (state === "idle") {
+        setObservedDelivery(test.store, test.token, { state, sha: null });
+      } else {
+        beginDeliveryActivity(test.store, test.token, { id: "batch", state, sha: "a".repeat(40) });
+      }
+      test.lock.release();
+      expect(statusReport(test.bus)).toMatchObject({
+        control: {
+          observed_status: "unattested",
+          mismatch: null,
+          mismatch_reason: "observation_unattested",
+        },
+      });
+      const replacement = holdLock(test.bus.runnerLock);
+      try {
+        recordIdentity(test.bus, {
+          config: "/c",
+          pid: 43,
+          sourceCommit: null,
+          toolRoot: "/t",
+          version: "2.1.0",
+        });
+        expect(statusReport(test.bus)).toMatchObject({
+          identity_status: "current",
+          control: {
+            observed_status: "stale",
+            mismatch: null,
+            mismatch_reason: "observation_unattested",
+          },
+        });
+      } finally {
+        replacement.release();
+      }
+    },
+  );
+
+  it("reports corrupt control as unknown migration without changing idle or drain semantics", () => {
+    const bus = paths();
+    writeFileSync(join(bus.dir, "delivery-control.json"), '{"desired":{"state":"paused"}}');
+    expect(statusReport(bus)).toMatchObject({
+      idle: true,
+      drained: true,
+      control: {
+        desired_state: "unknown",
+        desired_status: "invalid",
+        migration_required: true,
+        observed_status: "invalid",
+        mismatch: null,
+        mismatch_reason: "control_invalid",
+      },
+    });
+  });
+
   it("reports an idle, drained bus with no runner", () => {
     const bus = paths();
     expect(statusReport(bus)).toEqual({
       config_status: null,
+      control: {
+        desired: null,
+        desired_state: "unknown",
+        desired_status: "missing",
+        draining: false,
+        migration_required: true,
+        mismatch: null,
+        mismatch_reason: "control_missing",
+        observed: null,
+        observed_status: "missing",
+      },
       drained: true,
       identity: null,
       identity_status: "absent",

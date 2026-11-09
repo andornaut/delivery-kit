@@ -67,6 +67,8 @@ export interface GameOptions {
   realGit?: boolean;
   /** Harness-only; see Workspace.hostLoad. */
   hostLoad?: HostLoad;
+  /** Explicit fixture adoption; null leaves the production control record absent. */
+  deliveryState?: "enabled" | "paused" | null;
 }
 
 function defaultConfig(): GameConfig {
@@ -165,6 +167,8 @@ export class Workspace {
     const gh = { default: [{ conclusion: "success", id: 1, name: "Test", status: "completed" }] };
     this.setControl(this.realGit ? { gh, git: { real: true } } : { gh });
     this.writeGameDev();
+    if (options.deliveryState !== null)
+      this.adoptDeliveryControl(options.deliveryState ?? "enabled");
     if (this.realGit) this.initRealGit();
   }
 
@@ -247,6 +251,27 @@ export class Workspace {
 
   get configFile(): string {
     return join(this.repo, "delivery-kit.json");
+  }
+
+  /** Seed this fixture's approved control state without changing production defaults. */
+  adoptDeliveryControl(state: "enabled" | "paused"): void {
+    const updatedAt = "2026-11-09T20:00:00.000Z";
+    this.write(
+      "delivery-control.json",
+      JSON.stringify({
+        schema: 1,
+        revision: 1,
+        desired: {
+          state,
+          reason: "fixture adoption",
+          requester: "game-dev",
+          updatedAt,
+          revision: 1,
+        },
+        observed: null,
+        activities: {},
+      }),
+    );
   }
 
   setControl(control: Control): void {

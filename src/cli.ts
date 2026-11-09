@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 
 import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
+import { control } from "./commands/control.ts";
 import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
 import { claudeReady, codexReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
@@ -26,6 +27,7 @@ export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.
 export const COMMANDS = [
   "run",
   "status",
+  "control",
   "check-config",
   "request",
   "monitor snapshot",
@@ -166,6 +168,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude channel": channel,
   "claude ready": claudeReady,
   "codex ready": codexReady,
+  control,
   "monitor ack": monitorAck,
   "monitor snapshot": monitorSnapshot,
   request,

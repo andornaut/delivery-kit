@@ -26,7 +26,9 @@ const VALUES: Readonly<Record<string, string>> = {
   "queue-id": "ID",
   reason: "TEXT",
   recipient: "ROLE|UUID",
+  requester: "ROLE",
   snapshot: "UUID",
+  state: "enabled|paused",
   "state-dir": "STATE/unblock",
 };
 
@@ -76,6 +78,17 @@ export const SPECS = {
   },
   "claude ready": READY,
   "codex ready": READY,
+  control: {
+    forms: [["game", "state", "reason", "requester"]],
+    group: "game",
+    options: {
+      ...GAME,
+      reason: { type: "string" },
+      requester: { type: "string" },
+      state: { type: "string" },
+    },
+    summary: "persist the requested delivery state without starting a runner",
+  },
   "monitor ack": {
     forms: [["game", "snapshot", "queue-id", "disposition", "reason?", "recipient?", "parent?"]],
     group: "monitor",

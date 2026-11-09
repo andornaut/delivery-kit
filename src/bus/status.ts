@@ -15,6 +15,7 @@ import {
 import { join } from "node:path";
 
 import { writeDurable } from "../durable.ts";
+import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { lockHeld } from "./locks.ts";
 import { type BusPaths, ciStatusFile, readText, readTrimmed, sortKeys } from "./state.ts";
 
@@ -137,6 +138,108 @@ export interface StatusReport {
   readonly [key: string]: unknown;
 }
 
+type ControlRecord = ReturnType<typeof readDeliveryControl>;
+type MismatchReason =
+  | "control_missing"
+  | "control_invalid"
+  | "observation_missing"
+  | "observation_invalid"
+  | "observation_unattested"
+  | "desired_enabled_observed_stopped";
+
+interface ControlReport {
+  readonly desired: ControlRecord["desired"] | null;
+  readonly desired_state: "enabled" | "paused" | "unknown";
+  readonly desired_status: "valid" | "missing" | "invalid";
+  readonly draining: boolean;
+  readonly migration_required: boolean;
+  readonly mismatch: boolean | null;
+  readonly mismatch_reason: MismatchReason | null;
+  readonly observed: ControlRecord["observed"];
+  readonly observed_status: "current" | "stale" | "unattested" | "missing" | "invalid";
+}
+
+/** Compare persisted intent with an observation attested by the singleton's identity token. */
+function controlReport(
+  attestation: {
+    readonly identity: Record<string, unknown> | null;
+    readonly identityStatus: string;
+    readonly loopHeld: boolean;
+    readonly running: boolean;
+  },
+  paths: BusPaths,
+): ControlReport {
+  const { identity, identityStatus, loopHeld, running } = attestation;
+  let control: ControlRecord;
+  try {
+    control = readDeliveryControl({ dir: paths.dir });
+  } catch (error) {
+    if (!(error instanceof ControlMissing) && !(error instanceof ControlInvalid)) {
+      throw error;
+    }
+    const missing = error instanceof ControlMissing;
+    return {
+      desired: null,
+      desired_state: "unknown",
+      desired_status: missing ? "missing" : "invalid",
+      draining: false,
+      migration_required: true,
+      mismatch: null,
+      mismatch_reason: missing ? "control_missing" : "control_invalid",
+      observed: null,
+      observed_status: missing ? (running ? "unattested" : "missing") : "invalid",
+    };
+  }
+  const { desired, observed } = control;
+  const common = {
+    desired,
+    desired_state: desired.state,
+    desired_status: "valid",
+    migration_required: false,
+    observed,
+  } as const;
+  if (observed === null) {
+    return {
+      ...common,
+      draining: false,
+      mismatch: null,
+      mismatch_reason: running ? "observation_unattested" : "observation_missing",
+      observed_status: running ? "unattested" : "missing",
+    };
+  }
+  const token = identity?.token;
+  const matches = typeof token === "string" && token !== "" && observed.runnerToken === token;
+  // A stopped observation remains provable after shutdown, while idle and active observations
+  // require a current singleton. The lock's retained token binds the shutdown to that identity.
+  const stopped =
+    !running &&
+    !loopHeld &&
+    observed.state === "stopped" &&
+    matches &&
+    token === readTrimmed(paths.runnerLock);
+  if (!(matches && identityStatus === "current") && !stopped) {
+    return {
+      ...common,
+      draining: false,
+      mismatch: null,
+      mismatch_reason: "observation_unattested",
+      observed_status: identityStatus === "current" && !matches ? "stale" : "unattested",
+    };
+  }
+  const active =
+    Object.keys(control.activities).length > 0 ||
+    observed.state === "checking" ||
+    observed.state === "deploying";
+  const mismatch = desired.state === "enabled" && observed.state === "stopped";
+  return {
+    ...common,
+    draining: desired.state === "paused" && active,
+    mismatch,
+    mismatch_reason: mismatch ? "desired_enabled_observed_stopped" : null,
+    observed_status: "current",
+  };
+}
+
 /** The status report. The last push needs a CI record, because every 1.x game watches CI. */
 export function statusReport(paths: BusPaths): StatusReport {
   const running = lockHeld(paths.runnerLock);
@@ -228,15 +331,17 @@ export function statusReport(paths: BusPaths): StatusReport {
     blockers.push("gate_failed_dir_unreadable");
   }
   const config = identityStatus === "current" && identity !== null ? configStatus(identity) : null;
+  const loopHeld = lockHeld(paths.loopLock);
   return {
     config_status: config,
+    control: controlReport({ identity, identityStatus, loopHeld, running }, paths),
     drained: blockers.length === 0 && reporters.length === 0,
     gate_failed: gateFailed ?? [],
     identity,
     identity_status: identityStatus,
     idle: blockers.length === 0,
     idle_blockers: blockers,
-    loop_lock_held: lockHeld(paths.loopLock),
+    loop_lock_held: loopHeld,
     reporter_blockers: reporters,
     runner_lock_held: running,
     status: running ? "running" : "not running",
