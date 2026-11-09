@@ -118,7 +118,7 @@ suite("unblock briefs", () => {
   }
 
   contract(
-    "a confirmed question is briefed at its first slot, escalated once at a distinct slot, then quiet",
+    "a confirmed question is briefed once, escalated once, then omitted from periodic wakes",
     async () => {
       const m = await routed();
       question(m, ART);
@@ -132,8 +132,10 @@ suite("unblock briefs", () => {
       expect(text).toContain("UI visibility is unknown");
       expect((await m.slot(wake(1))).result?.status).toBe("accepted");
       expect(m.world.lastText()).toContain('"level": "escalation"');
-      expect((await m.slot(wake(2))).result?.status).toBe("unchanged");
-      expect(m.world.mutations()).toHaveLength(2);
+      expect((await m.slot(wake(2))).result?.status).toBe("accepted");
+      expect(briefQuestions(m.world.lastText())).toEqual([]);
+      expect(m.world.lastText()).not.toContain(TITLE);
+      expect(m.world.mutations()).toHaveLength(3);
       expect(m.world.mutations().every((call) => call.params.threadId === TECH)).toBe(true);
     },
   );
@@ -179,7 +181,8 @@ suite("unblock briefs", () => {
       await m.start();
       expect((await m.slot(wake(0))).result?.status).toBe("accepted");
       answered(m, ART);
-      expect((await m.slot(wake(1))).result?.status).toBe("unchanged");
+      expect((await m.slot(wake(1))).result?.status).toBe("accepted");
+      expect(briefQuestions(m.world.lastText())).toEqual([]);
       question(m, ART, { item: "replacement-exact-item" });
       expect((await m.slot(wake(2))).result?.status).toBe("accepted");
       const [row, ...rest] = briefQuestions(m.world.lastText());
@@ -198,10 +201,13 @@ suite("unblock briefs", () => {
     await m.start();
     expect((await m.slot(wake(0))).result?.status).toBe("accepted");
     answered(m, ART);
-    expect((await m.slot(wake(1))).result?.status).toBe("unchanged");
+    expect((await m.slot(wake(1))).result?.status).toBe("accepted");
+    expect(briefQuestions(m.world.lastText())).toEqual([]);
     question(m, ART);
-    expect((await m.slot(wake(2))).result?.status).toBe("unchanged");
-    expect(m.world.mutations()).toHaveLength(1);
+    expect((await m.slot(wake(2))).result?.status).toBe("accepted");
+    expect(briefQuestions(m.world.lastText())).toEqual([]);
+    expect(m.world.lastText()).not.toContain(TITLE);
+    expect(m.world.mutations()).toHaveLength(3);
   });
 
   contract("the monitor's own confirmed question wait never fails health by itself", async () => {
@@ -275,22 +281,28 @@ suite("unblock briefs", () => {
         expect(text).toContain(reference);
       expect(text).toContain("recipient guards");
       expect(text).toContain("Parent decides");
-      expect((await m.slot(wake(1))).result?.status).toBe("unchanged");
-      expect(m.world.mutations()).toHaveLength(1);
+      expect((await m.slot(wake(1))).result?.status).toBe("accepted");
+      expect(m.world.lastText()).not.toContain("Verified latest failed child turns");
+      expect(m.world.mutations()).toHaveLength(2);
       child(FAILED_TWO);
       decide(m.ws, TECH, { thread_id: TECH, state: "pending" });
       expect((await m.slot(wake(2))).result?.status).toBe("deferred");
-      expect(m.world.mutations()).toHaveLength(1);
+      expect(m.world.mutations()).toHaveLength(2);
       decide(m.ws, TECH, { thread_id: TECH, state: "clear" });
       expect((await m.slot(wake(3))).result?.status).toBe("accepted");
-      expect(m.world.mutations()).toHaveLength(2);
+      expect(m.world.mutations()).toHaveLength(3);
+      expect(m.world.lastText()).toContain(FAILED_TWO);
+      expect(m.world.lastText()).not.toContain(FAILED_ONE);
       expect(m.world.mutations().every((call) => call.params.threadId === TECH)).toBe(true);
       const record = m.health();
       expect(record.accepted_worker_failures).toHaveLength(2);
       expect(record).not.toHaveProperty("handled");
-      // The earlier failure was already reminded, so it does not force another reminder.
+      // The earlier failure stays deduplicated within the next scheduled reminder.
       child(FAILED_ONE);
-      expect((await m.slot(wake(4))).result?.status).toBe("unchanged");
+      expect((await m.slot(wake(4))).result?.status).toBe("accepted");
+      expect(m.world.lastText()).not.toContain("Verified latest failed child turns");
+      expect(m.world.mutations()).toHaveLength(4);
+      expect(m.health().accepted_worker_failures).toHaveLength(2);
       // Child health is collected at every slot through the scoped parent inventory only.
       const inventories = m.socket.callsOf("thread/list");
       expect(inventories.every((call) => call.params.parentThreadId === ART)).toBe(true);

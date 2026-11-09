@@ -65,7 +65,7 @@ suite("monitor scheduled health", () => {
       expect(first.output).toMatchObject({ status: "accepted", monitor_status: "ok" });
       const second = await schedule.slot();
       expect(second.output).toMatchObject({
-        status: "unchanged",
+        status: "accepted",
         monitor_status: "failed",
         backlog_slots: 2,
       });
@@ -322,10 +322,14 @@ suite("monitor scheduled health", () => {
       await schedule.start();
       for (let i = 0; i < 2; i++) {
         const result = (await schedule.slot()).output!;
-        expect(result.status).toBe("unchanged");
+        expect(result.status).toBe("accepted");
         expect(result.monitor_status).toBe("ok");
       }
       expect(monitorEvents(ws)).toEqual([]);
+      expect(native.deletions()).toEqual([]);
+      expect(native.queues[TECH]).toEqual([entry("one")]);
+      expect(native.reminders()).toHaveLength(2);
+      expect(ws.readJson(retentionName(TECH, "one")).active).toBe(true);
       native.queues[TECH]![0]!.input = [];
       await schedule.slot();
       expect((await schedule.slot()).output!.monitor_status).toBe("failed");

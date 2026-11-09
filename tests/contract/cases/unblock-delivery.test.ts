@@ -5,7 +5,7 @@ import { afterEach, expect } from "vitest";
 
 import { CodexSocket, type RpcCall } from "../lib/codex-socket.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
-import { rpcError, STALE, TECH, ART, GAMEPLAY } from "../lib/unblock-native.ts";
+import { ART, emptyQueue, GAMEPLAY, rpcError, STALE, TECH } from "../lib/unblock-native.ts";
 import { Monitored, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -62,6 +62,43 @@ suite("unblock delivery", () => {
       expect(pages.map((call) => call.params.cursor ?? null)).toEqual([null, "next"]);
     }
   });
+
+  contract(
+    "identical empty queues accept each distinct slot with stable IDs across a same-slot restart",
+    async () => {
+      const m = await routed();
+      for (const role of [TECH, ART, GAMEPLAY]) m.world.thread(role).queue = emptyQueue;
+      const queues = Object.fromEntries([TECH, ART, GAMEPLAY].map((role) => [role, []]));
+      const requestIds: string[] = [];
+      await m.start();
+      for (const index of [0, 1, 2]) {
+        const slot = wake(index);
+        expect((await m.slot(slot)).result?.status).toBe("accepted");
+        const receipt = m.receipt(slot);
+        expect(receipt).toMatchObject({ status: "accepted", slot, queues });
+        expect(receipt.requestId).toEqual(expect.any(String));
+        const requestId = receipt.requestId as string;
+        expect(requestId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        );
+        requestIds.push(requestId);
+        expect(m.world.mutations()).toHaveLength(index + 1);
+        expect(m.world.mutations()[index]!.params.clientUserMessageId).toBe(requestId);
+        if (index === 1) {
+          await m.stop();
+          await m.start();
+          expect((await m.slot(slot)).result).toMatchObject({
+            status: "deduplicated",
+            previousStatus: "accepted",
+          });
+          expect(m.receipt(slot)).toEqual(receipt);
+          expect(m.world.mutations()).toHaveLength(2);
+        }
+      }
+      expect(new Set(requestIds).size).toBe(3);
+      expect(m.socket.methods()).not.toContain("thread/queue/delete");
+    },
+  );
 
   contract(
     "a completed idle monitor gets turn/start without model or permission overrides",
@@ -177,7 +214,7 @@ suite("unblock delivery", () => {
   contract(
     "a prior accepted or interrupted send is deduplicated without resending and still snapshots",
     async () => {
-      for (const status of ["accepted", "sending"]) {
+      for (const status of ["accepted", "sending", "ambiguous"]) {
         const m = await routed();
         m.ws.write(`unblock/${TECH}-${wake(0)}.json`, JSON.stringify({ status }));
         await m.start();
