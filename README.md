@@ -322,6 +322,16 @@ scheduled-slot reports and event flushes), the 1800 s resource sampler and the C
 in-process. No timer outlives it, and no systemd unit, cron entry or other timer is involved. A
 missed scheduled slot is never replayed.
 
+Each distinct scheduled monitor slot attempts a guarded review, including when queues are empty,
+unchanged since an accepted review, or explicitly retained. Accepted inventory signatures are
+health diagnostics, not permission to suppress later scheduled reviews. Repeated observations
+of the same slot use its persisted receipt without another send; an interrupted send becomes
+ambiguous and is never resent. An explicit stale-turn rejection permits one refreshed attempt.
+Queue inventory errors block the review, and recipient clearance and native question guards
+still apply. Worker failure and question notice deduplication remain independent of the review.
+Acceptance does not acknowledge queue work: acknowledgements still validate unchanged originals,
+and retention remains bound to the exact payload.
+
 To replace a runner: record its identity, stop it while idle, start one runner, verify exactly one
 holder of each lock with `status` and `runner.json`, then observe the next normal slot. A
 replacement resumes every CI watch whose `ci/<sha>.status` is still running, with its original

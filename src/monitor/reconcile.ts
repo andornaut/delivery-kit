@@ -2,7 +2,6 @@
 // questions and failed worker turns still need a reminder, the bounded brief
 // that carries them, and the guarded send. State lives in `<unblock>/health/<recipient>.json`
 // and the slot receipt; their keys are persisted game state.
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import type { RpcClient } from "../adapters/codex/rpc.ts";
@@ -288,28 +287,6 @@ export function questionBrief(notices: readonly QuestionNotice[]): [Json[], Json
   return [rows, keys];
 }
 
-/** Whether the snapshot's unacknowledged inventory was already reminded or explicitly retained. */
-export function acceptedInventory(unblock: string, recipient: string, snapshot: Json): boolean {
-  if (
-    pendingWorkerFailures(unblock, recipient, snapshot).length > 0 ||
-    questionNotices(unblock, recipient, snapshot).length > 0
-  ) {
-    return false;
-  }
-  const [queues, kept] = unacknowledged(unblock, snapshot);
-  const errors = hasErrors(snapshot);
-  if (kept > 0 && !Object.values(queues).some((entries) => entries.length > 0) && !errors) {
-    return true;
-  }
-  const path = healthPath(unblock, recipient);
-  if (errors || !existsSync(path)) {
-    return false;
-  }
-  return (
-    readHealth(unblock, recipient).accepted_signature === inventorySignature(unblock, snapshot)
-  );
-}
-
 export interface Brief {
   readonly workerFailures: readonly unknown[];
   readonly questions: readonly Json[];
@@ -393,7 +370,8 @@ export interface ReconcileTarget {
 
 /**
  * Reconcile: persist and return the slot receipt for one captured snapshot, sending at
- * most one reminder (plus one stale-turn refresh) when the inventory is new and the guards allow.
+ * most one reminder (plus one stale-turn refresh) when the guards allow. The caller checks
+ * the same-slot receipt; inventory acceptance never suppresses a distinct scheduled slot.
  */
 export async function reconcileSlot(
   client: RpcClient,
@@ -435,13 +413,6 @@ export async function reconcileSlot(
   if (!decisionClear(unblock, coordinator)) {
     state.waiting_on_user = ownWait;
     return finish({ reason: CLEARANCE_MISSING, status: "deferred" });
-  }
-  if (acceptedInventory(unblock, coordinator, snapshot)) {
-    return finish({
-      reason:
-        "inventory already reminded or explicitly retained; reconcile any remaining unacknowledged work",
-      status: "unchanged",
-    });
   }
   const [questions, noticeKeys] = questionBrief(
     questionNotices(unblock, coordinator, snapshot, slot),

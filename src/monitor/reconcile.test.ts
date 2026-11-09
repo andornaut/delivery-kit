@@ -2,17 +2,19 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { RpcClient } from "../adapters/codex/rpc.ts";
+import { recordHealth } from "./health.ts";
 import {
-  acceptedInventory,
   inventorySignature,
   questionBrief,
   type QuestionNotice,
   questionNotices,
+  reconcileSlot,
   workerFailures,
 } from "./reconcile.ts";
-import { persist } from "./store.ts";
+import { payloadSignature, persist, queueEntry, retentionPath } from "./store.ts";
 
 const OWNER = "00000000-0000-4000-8000-000000000002";
 const MONITOR = "00000000-0000-4000-8000-000000000001";
@@ -93,13 +95,91 @@ describe("reconcile", () => {
     expect(questionNotices(unblock, MONITOR, snapshot)[0]?.level).toBe("escalation");
   });
 
-  it("treats an unchanged accepted inventory as already reminded", () => {
-    const unblock = mkdtempSync(join(tmpdir(), "reconcile-"));
-    const snapshot = { errors: {}, queues: { [MONITOR]: [] } };
-    expect(acceptedInventory(unblock, MONITOR, snapshot)).toBe(false);
-    persist(join(unblock, "health", `${MONITOR}.json`), {
-      accepted_signature: inventorySignature(unblock, snapshot),
-    });
-    expect(acceptedInventory(unblock, MONITOR, snapshot)).toBe(true);
-  });
+  it.each(["empty", "unchanged", "retained"])(
+    "sends a guarded review in each distinct slot with %s inventory",
+    async (inventory) => {
+      const unblock = mkdtempSync(join(tmpdir(), "reconcile-"));
+      const entry = queueEntry("q1", "Review work");
+      const snapshot = {
+        errors: {},
+        queues: { [OWNER]: inventory === "empty" ? [] : [entry] },
+        snapshot_id: "snapshot",
+      };
+      persist(join(unblock, "decisions", `${MONITOR}.json`), {
+        state: "clear",
+        thread_id: MONITOR,
+      });
+      if (inventory === "retained") {
+        persist(retentionPath(unblock, OWNER, entry.id), {
+          active: true,
+          payload_signature: payloadSignature(entry),
+          queue_id: entry.id,
+          recipient: OWNER,
+        });
+      }
+      const call = vi.fn<RpcClient["call"]>(async (method) => {
+        switch (method) {
+          case "thread/read":
+            return { thread: { canAcceptDirectInput: true, status: { type: "idle" } } };
+          case "thread/turns/list":
+            return { data: [{ id: "turn-one", status: "completed" }] };
+          case "thread/items/list":
+            return { data: [] };
+          case "turn/start":
+            return { turnId: "turn-two" };
+          default:
+            throw new Error(`Unexpected method: ${method}`);
+        }
+      });
+      const client: RpcClient = { call, close: () => {} };
+      const first = await reconcileSlot(client, { coordinator: MONITOR, slot: 1, unblock }, snapshot);
+      expect(first.status).toBe("accepted");
+      recordHealth({ emit: vi.fn(), unblock }, MONITOR, 1, snapshot, first);
+      const second = await reconcileSlot(client, { coordinator: MONITOR, slot: 2, unblock }, snapshot);
+      expect(second.status).toBe("accepted");
+      expect(second.requestId).not.toBe(first.requestId);
+      expect(call.mock.calls.map(([method]) => method)).toEqual([
+        "thread/read",
+        "thread/turns/list",
+        "thread/items/list",
+        "turn/start",
+        "thread/read",
+        "thread/turns/list",
+        "thread/items/list",
+        "turn/start",
+      ]);
+      const sends = call.mock.calls.filter(([method]) => method === "turn/start");
+      expect(sends[0]?.[1]).toMatchObject({
+        input: [{ text: expect.stringContaining("Scheduled monitoring review, slot 1.") }],
+      });
+      expect(sends[1]?.[1]).toMatchObject({
+        input: [{ text: expect.stringContaining("Scheduled monitoring review, slot 2.") }],
+      });
+    },
+  );
+
+  it.each(["inventory error", "missing clearance"])(
+    "blocks a distinct slot with accepted inventory and %s",
+    async (blocker) => {
+      const unblock = mkdtempSync(join(tmpdir(), "reconcile-"));
+      const snapshot = { errors: {}, queues: { [MONITOR]: [] } };
+      persist(join(unblock, "health", `${MONITOR}.json`), {
+        accepted_signature: inventorySignature(unblock, snapshot),
+      });
+      if (blocker === "inventory error") {
+        persist(join(unblock, "decisions", `${MONITOR}.json`), {
+          state: "clear",
+          thread_id: MONITOR,
+        });
+      }
+      const call = vi.fn<RpcClient["call"]>();
+      const result = await reconcileSlot(
+        { call, close: () => {} },
+        { coordinator: MONITOR, slot: 2, unblock },
+        { ...snapshot, errors: blocker === "inventory error" ? { [OWNER]: "unavailable" } : {} },
+      );
+      expect(result.status).toBe("deferred");
+      expect(call).not.toHaveBeenCalled();
+    },
+  );
 });

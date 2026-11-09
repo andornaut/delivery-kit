@@ -1,7 +1,7 @@
 // Scheduled monitor health in `<unblock>/health/<recipient>.json`: per-item backlog ages across
 // distinct slots, deferral counts, question observation history, and one
-// `monitor-stuck` event per failed episode. Delivery acceptance deduplicates reminders; it never
-// acknowledges queue work or records recovery.
+// `monitor-stuck` event per failed episode. Delivery acceptance deduplicates worker and question
+// notices, never distinct scheduled reviews. It never acknowledges queue work or records recovery.
 import {
   hasErrors,
   hash,
