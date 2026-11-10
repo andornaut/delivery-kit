@@ -12,9 +12,10 @@ import {
   type QuestionNotice,
   questionNotices,
   reconcileSlot,
+  unacknowledged,
   workerFailures,
 } from "./reconcile.ts";
-import { payloadSignature, persist, queueEntry, retentionPath } from "./store.ts";
+import { payloadSignature, persist, queueEntry, retentionPath, snapshotPath } from "./store.ts";
 
 const OWNER = "00000000-0000-4000-8000-000000000002";
 const MONITOR = "00000000-0000-4000-8000-000000000001";
@@ -43,6 +44,32 @@ function question(index: number, options: unknown): Record<string, unknown> {
 }
 
 describe("reconcile", () => {
+  it.each(["wrong provider", "unknown", "legacy matching"])(
+    "keeps retention transport binding during mixed reconciliation: %s",
+    (binding) => {
+      const unblock = mkdtempSync(join(tmpdir(), "reconcile-retention-"));
+      const entry = queueEntry("same-id", "same payload");
+      persist(retentionPath(unblock, MONITOR, entry.id), {
+        active: true,
+        ...(binding === "wrong provider" ? { harness: "claude" } : {}),
+        payload_signature: payloadSignature(entry),
+        queue_id: entry.id,
+        recipient: MONITOR,
+        snapshot_id: "original",
+      });
+      if (binding === "legacy matching") {
+        persist(snapshotPath(unblock, "original"), { harness: "codex", snapshot_id: "original" });
+      }
+      const [queues, count] = unacknowledged(unblock, {
+        harness: "codex",
+        harnesses: { [MONITOR]: "codex" },
+        queues: { [MONITOR]: [entry] },
+      });
+      expect(count).toBe(binding === "legacy matching" ? 1 : 0);
+      expect(queues[MONITOR]).toEqual(binding === "legacy matching" ? [] : [entry]);
+    },
+  );
+
   it("sorts and deduplicates verified failed child turns", () => {
     const child = (id: string) => ({
       child_id: id,

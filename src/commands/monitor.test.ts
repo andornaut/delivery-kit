@@ -19,6 +19,7 @@ import {
   TECH,
 } from "../monitor/fixtures.ts";
 import { persist } from "../monitor/store.ts";
+import { CODEX_TECH } from "../testFixtures.ts";
 
 async function run(
   fixture: ClaudeFixture,
@@ -69,6 +70,123 @@ function ack(fixture: ClaudeFixture, id: string, disposition: string, ...extra: 
       ...extra,
     );
 }
+
+function select(
+  fixture: ClaudeFixture,
+  change: (registry: { harness: string; roles: Record<string, Record<string, unknown>> }) => void,
+): void {
+  const registry = JSON.parse(readFileSync(fixture.layout.registryFile, "utf8"));
+  change(registry);
+  writeFileSync(fixture.layout.registryFile, JSON.stringify(registry));
+}
+
+describe("monitor effective harness selection", () => {
+  it("distinguishes mixed local inventory success from unavailable requested native queues", async () => {
+    const fixture = claudeFixture();
+    select(fixture, (registry) => {
+      registry.roles["archies-dog-walks/tech"]!.harness = "codex";
+    });
+    const output = await snapshot(fixture);
+    expect(output).toMatchObject({
+      channel_queues: { [MONITOR]: [] },
+      complete: true,
+      harness: "claude",
+      native_complete: false,
+      native_queues: { [MONITOR]: { status: "unavailable" } },
+      queue_sources: { [MONITOR]: "local_channel_delivered" },
+    });
+  });
+
+  it("rejects an outside parent before a mixed Claude monitor can query Codex", async () => {
+    const fixture = claudeFixture();
+    select(fixture, (registry) => {
+      registry.roles["archies-dog-walks/tech"]!.harness = "codex";
+      registry.roles["game-kit"] = {
+        conversations: { codex: "00000000-0000-4000-8000-000000000099" },
+        harness: "codex",
+        ownership: "active",
+        worktree: ".",
+      };
+    });
+    const result = await run(
+      fixture,
+      "monitor",
+      "snapshot",
+      "--game",
+      GAME,
+      "--parent",
+      "game-kit",
+    );
+    expect(result.code).toBe(EXIT_INVALID);
+    expect(result.err).toContain("parent outside active route");
+  });
+
+  it("uses the monitor's Claude selection when the global fallback is Codex", async () => {
+    const { fixture } = await delivered();
+    select(fixture, (registry) => {
+      registry.harness = "codex";
+      registry.roles["game-dev"]!.harness = "claude";
+      registry.roles["archies-dog-walks/tech"]!.harness = "claude";
+    });
+    const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
+    expect(result.code, result.err).toBe(EXIT_OK);
+    expect(JSON.parse(result.out).harness).toBe("claude");
+  });
+
+  it("refuses an inactive conversation UUID and unsupported Claude nonmonitor recipient", async () => {
+    const fixture = claudeFixture();
+    select(fixture, (registry) => {
+      registry.roles["archies-dog-walks/tech"]!.harness = "claude";
+    });
+    const inactive = await run(
+      fixture,
+      "monitor",
+      "snapshot",
+      "--game",
+      GAME,
+      "--recipient",
+      CODEX_TECH,
+    );
+    expect(inactive.code).toBe(EXIT_USAGE);
+    expect(inactive.err).toContain("exactly one active registered role");
+    const unsupported = await run(
+      fixture,
+      "monitor",
+      "snapshot",
+      "--game",
+      GAME,
+      "--recipient",
+      TECH,
+    );
+    expect(unsupported.code).toBe(EXIT_INVALID);
+    expect(unsupported.err).toContain("recipient must be the active route monitor");
+  });
+
+  it("refuses an ambiguous active UUID before choosing either adapter", async () => {
+    const fixture = claudeFixture();
+    select(fixture, (registry) => {
+      registry.roles["game-dev"]!.conversations = { claude: TECH };
+    });
+    const result = await run(fixture, "monitor", "snapshot", "--game", GAME, "--recipient", TECH);
+    expect(result.code).toBe(EXIT_USAGE);
+    expect(result.err).toContain("exactly one active registered role");
+  });
+
+  it("rejects an old snapshot after a same-ID harness retarget without touching the channel entry", async () => {
+    const { fixture, requestId } = await delivered();
+    const captured = await snapshot(fixture);
+    select(fixture, (registry) => {
+      registry.roles["game-dev"]!.harness = "codex";
+      registry.roles["game-dev"]!.conversations = { claude: MONITOR, codex: MONITOR };
+    });
+    const result = await ack(fixture, requestId, "handled")(captured.snapshot_id as string);
+    expect(result.code).toBe(EXIT_INVALID);
+    expect(result.err).toContain("snapshot recipient mismatch");
+    expect(
+      readFileSync(join(deliveredDir(fixture.game.busDir), `${requestId}.json`), "utf8"),
+    ).toContain(requestId);
+  });
+});
 
 describe("monitor snapshot (claude)", () => {
   it("lists delivered entries and reports native state unavailable", async () => {

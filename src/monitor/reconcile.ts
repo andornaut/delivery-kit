@@ -22,7 +22,15 @@ import {
   unicodeDumps,
 } from "../adapters/shared/pyjson.ts";
 import { UNBLOCK_INSTRUCTIONS } from "../adapters/shared/review.ts";
-import { type Json, type QueueEntry, readRecord, retained, snapshotPath } from "./store.ts";
+import {
+  type Json,
+  type QueueEntry,
+  readRecord,
+  retained,
+  retentionStatus,
+  snapshotHarness,
+  snapshotPath,
+} from "./store.ts";
 
 const BRIEF_BOUND = 32768;
 const DIAGNOSTIC_BOUND = 4096;
@@ -110,7 +118,14 @@ export function unacknowledged(
   for (const [recipient, entries] of Object.entries(snapshotQueues(snapshot))) {
     const open: QueueEntry[] = [];
     for (const entry of entries) {
-      if (retained(unblock, recipient, entry)) {
+      const harness = snapshotHarness(snapshot, recipient);
+      const keep =
+        harness === null
+          ? snapshot.harnesses === undefined &&
+            snapshot.harness === undefined &&
+            retained(unblock, recipient, entry)
+          : retentionStatus(unblock, harness, recipient, entry) === "retained";
+      if (keep) {
         kept += 1;
       } else {
         open.push(entry);

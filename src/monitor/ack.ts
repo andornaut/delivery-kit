@@ -15,6 +15,8 @@ import {
   queueEntry,
   readRecord,
   retentionPath,
+  retentionStatus,
+  snapshotHarness,
   snapshotPath,
 } from "./store.ts";
 
@@ -51,6 +53,7 @@ interface AckRequest {
   readonly queueIds: readonly string[];
   readonly disposition: Disposition;
   readonly reason?: string | undefined;
+  readonly harnessBound?: boolean;
 }
 
 function history(operation: Json): Json[] {
@@ -119,6 +122,14 @@ async function acknowledgeOne(
     recipient,
     snapshot_id: snapshotId,
   };
+  if (
+    operation.harness !== adapter.harness ||
+    operation.recipient !== recipient ||
+    operation.snapshot_id !== snapshotId ||
+    operation.queue_id !== identity
+  ) {
+    throw new AckError("acknowledgement transport binding differs from durable operation");
+  }
   if (operation.disposition !== disposition) {
     throw new AckError("acknowledgement disposition differs from durable operation");
   }
@@ -133,6 +144,25 @@ async function acknowledgeOne(
     persist(path, operation);
   }
   const retentionFile = retentionPath(unblock, recipient, identity);
+  let retention: Json | undefined;
+  try {
+    retention = readRecord(retentionFile);
+  } catch {
+    return { queue_id: identity, state: "retention_binding_unknown" };
+  }
+  const status = retentionStatus(unblock, adapter.harness, recipient, original);
+  if (status === "conflicting_harness") {
+    return { queue_id: identity, state: "retention_harness_conflict" };
+  }
+  if (
+    status === "unknown" &&
+    (request.harnessBound === true ||
+      retention === undefined ||
+      retention?.harness !== undefined ||
+      retention?.snapshot_id !== undefined)
+  ) {
+    return { queue_id: identity, state: "retention_binding_unknown" };
+  }
   if (disposition !== "retained") {
     deactivate(retentionFile, "invalidated", snapshotId);
   }
@@ -161,6 +191,7 @@ async function acknowledgeOne(
     rows.push({ snapshot_id: snapshotId, state: "retained" });
     Object.assign(retention, {
       active: true,
+      harness: adapter.harness,
       history: rows,
       payload_signature: payloadSignature(original),
       queue_id: identity,
@@ -223,12 +254,17 @@ export function acknowledge(
   }
   return locked(unblock, async () => {
     const snapshot = readRecord(snapshotPath(unblock, snapshotId));
-    const queues = snapshot?.queues as Json | undefined;
+    const queues = (
+      snapshot?.harnesses !== undefined && adapter.harness === "claude"
+        ? snapshot?.channel_queues
+        : snapshot?.queues
+    ) as Json | undefined;
+    const harness = snapshotHarness(snapshot, recipient);
     if (
       snapshot?.snapshot_id !== snapshotId ||
-      snapshot.harness !== adapter.harness ||
+      harness !== adapter.harness ||
       queues === undefined ||
-      !Object.hasOwn(queues, recipient)
+      !Array.isArray(queues[recipient])
     ) {
       throw new AckError("snapshot recipient mismatch");
     }
@@ -244,7 +280,12 @@ export function acknowledge(
       const original = originals.get(identity) as QueueEntry;
       // Items are acknowledged in order so each durable operation precedes the next.
       // eslint-disable-next-line no-await-in-loop
-      const result = await acknowledgeOne(adapter, unblock, request, original);
+      const result = await acknowledgeOne(
+        adapter,
+        unblock,
+        { ...request, harnessBound: snapshot.harnesses !== undefined },
+        original,
+      );
       results.push(result);
     }
     return results;

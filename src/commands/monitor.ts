@@ -12,11 +12,16 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { acknowledge, ackSucceeded, DISPOSITIONS } from "../monitor/ack.ts";
 import { adapterFor } from "../monitor/harnesses.ts";
-import { captureClaude, captureCodex, TransportUnavailable } from "../monitor/snapshot.ts";
+import {
+  captureClaude,
+  captureCodex,
+  captureMixed,
+  TransportUnavailable,
+} from "../monitor/snapshot.ts";
 import { locked, snapshotPath } from "../monitor/store.ts";
 import { MONITOR_ROLE } from "../monitor/wake.ts";
-import { resolveConversation } from "../registry/resolve.ts";
-import type { Registry } from "../registry/schema.ts";
+import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
+import type { Harness, Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { SPECS } from "./spec.ts";
 
@@ -30,9 +35,11 @@ interface Scope {
   readonly game: GameLayout;
   readonly registry: Registry;
   readonly recipient: string;
+  readonly harness: Harness;
+  readonly harnesses: Readonly<Record<string, Harness>>;
   readonly parents: string[];
   /**
-   * Coordinator and peers of an active Codex route; null when a declared route is not active;
+   * Coordinator and peers of an active route; null when a declared route is not active;
    * undefined when no route is declared, which leaves collection unscoped.
    */
   readonly members: readonly string[] | null | undefined;
@@ -58,23 +65,26 @@ function codexMembers(layout: Layout, registry: Registry): string[] | null | und
  * A canonical conversation UUID registered for the active harness is used as given; anything
  * else is a role name for the registry.
  */
-function conversation(registry: Registry, role: string): string {
-  if (
-    isCanonicalUuid(role) &&
-    Object.values(registry.roles).some((record) => record.conversations[registry.harness] === role)
-  ) {
-    return role;
-  }
-  let id: string | null;
+function conversation(registry: Registry, role: string): { id: string; harness: Harness } {
   try {
-    id = resolveConversation(registry, role);
+    if (isCanonicalUuid(role)) {
+      const holders = Object.keys(registry.roles).filter(
+        (key) => resolveConversation(registry, key) === role,
+      );
+      if (holders.length !== 1) {
+        throw new UsageError("recipient UUID must identify exactly one active registered role");
+      }
+      return { harness: resolveHarness(registry, holders[0] as string), id: role };
+    }
+    const harness = resolveHarness(registry, role);
+    const id = resolveConversation(registry, role);
+    if (id === null) {
+      throw new UsageError(`${role} has no ${harness} conversation`);
+    }
+    return { harness, id };
   } catch (error) {
     throw new UsageError(error instanceof Error ? error.message : String(error));
   }
-  if (id === null) {
-    throw new UsageError(`${role} has no ${registry.harness} conversation`);
-  }
-  return id;
 }
 
 function scope(
@@ -88,25 +98,40 @@ function scope(
   }
   const layout = loadLayout(root);
   const registry = readRegistry(layout);
-  const resolvedParents = parents.map((parent) => conversation(registry, parent));
+  const resolvedRecipient = conversation(registry, recipient ?? MONITOR_ROLE);
+  const resolvedParents = parents.map((parent) => conversation(registry, parent).id);
   if (new Set(resolvedParents).size !== resolvedParents.length) {
     throw new UsageError("duplicate parent");
   }
-  const members = registry.harness === "codex" ? codexMembers(layout, registry) : undefined;
+  const members = codexMembers(layout, registry);
   // Worker parents must belong to the active route before any native call.
   if (
-    registry.harness === "codex" &&
+    resolvedRecipient.harness === "codex" &&
     resolvedParents.length > 0 &&
     (members == null || resolvedParents.some((parent) => !members.includes(parent)))
   ) {
     throw new UsageError("worker parents require membership in the active monitor route");
   }
+  const harnesses: Record<string, Harness> = {};
+  for (const role of Object.keys(registry.roles)) {
+    const id = resolveConversation(registry, role);
+    if (id === null) {
+      continue;
+    }
+    const harness = resolveHarness(registry, role);
+    if (Object.hasOwn(harnesses, id) && harnesses[id] !== harness) {
+      throw new UsageError("active conversation UUID has ambiguous harness bindings");
+    }
+    harnesses[id] = harness;
+  }
   return {
     game: gameLayout(layout, game),
+    harness: resolvedRecipient.harness,
+    harnesses,
     layout,
     members,
     parents: resolvedParents,
-    recipient: conversation(registry, recipient ?? MONITOR_ROLE),
+    recipient: resolvedRecipient.id,
     registry,
   };
 }
@@ -141,7 +166,60 @@ function statusMap(value: unknown, field: string): Record<string, unknown> {
 async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise<number> {
   const unblock = unblockDir(context.game.busDir);
   const { parents, recipient } = context;
-  if (context.registry.harness === "claude") {
+  if (context.harness === "claude") {
+    const route = claudeRoute(context.layout, context.registry, recipient);
+    const members = new Set([recipient, ...route.peers]);
+    if (parents.some((parent) => !members.has(parent))) {
+      throw new Error("parent outside active route");
+    }
+  }
+  const endpoints = [...new Set([recipient, ...parents, ...(context.members ?? [])])];
+  const selected = new Set(endpoints.map((id) => context.harnesses[id]));
+  if (selected.size > 1) {
+    const adapters = Object.fromEntries(
+      [...selected].map((harness) => [
+        harness,
+        adapterFor(io.env, context.layout, context.game, harness as Harness),
+      ]),
+    );
+    const record = await locked(unblock, () =>
+      captureMixed(
+        { busDir: context.game.busDir, unblock },
+        adapters,
+        context.harnesses,
+        [recipient],
+        parents,
+        {
+          historyCursor: historyCursor ?? null,
+          ...(context.members === undefined ? {} : { routeMembers: context.members }),
+        },
+      ),
+    );
+    const id = record.snapshot_id as string;
+    const complete = Object.keys(record.errors as Record<string, unknown>).length === 0;
+    const queues = (context.harness === "claude" ? record.channel_queues : record.queues) as
+      Record<string, { id: string }[]> | undefined;
+    io.out(
+      `${pyJsonDumps({
+        channel_queues: record.channel_queues,
+        collection_budget: record.collection_budget,
+        complete,
+        harness: context.harness,
+        harnesses: record.harnesses,
+        history: record.history,
+        native_complete: record.native_complete,
+        native_queues: record.native_queues,
+        path: snapshotPath(unblock, id),
+        question_state_status: statusMap(record.question_state, "status"),
+        queue_ids: (queues?.[recipient] ?? []).map((entry) => entry.id),
+        queue_sources: record.queue_sources,
+        snapshot_id: id,
+        worker_health: record.worker_health,
+      })}\n`,
+    );
+    return complete ? EXIT_OK : EXIT_INVALID;
+  }
+  if (context.harness === "claude") {
     const route = claudeRoute(context.layout, context.registry, recipient);
     const members = new Set([recipient, ...route.peers]);
     if (parents.some((parent) => !members.has(parent))) {
@@ -173,7 +251,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
     );
     return complete ? EXIT_OK : EXIT_INVALID;
   }
-  const adapter = adapterFor(io.env, context.layout, context.game, context.registry.harness);
+  const adapter = adapterFor(io.env, context.layout, context.game, context.harness);
   const record = await locked(unblock, () =>
     captureCodex({ busDir: context.game.busDir, unblock }, adapter, [recipient], parents, {
       historyCursor: historyCursor ?? null,
@@ -265,10 +343,10 @@ export const monitorAck: Handler = (io, root, args) => {
   }
   return guarded(io, async () => {
     const context = scope(root, values.game, values.recipient, values.parent ?? []);
-    if (context.registry.harness === "claude") {
+    if (context.harness === "claude") {
       claudeRoute(context.layout, context.registry, context.recipient);
     }
-    const adapter = adapterFor(io.env, context.layout, context.game, context.registry.harness);
+    const adapter = adapterFor(io.env, context.layout, context.game, context.harness);
     const results = await acknowledge(adapter, unblockDir(context.game.busDir), {
       disposition,
       queueIds,
