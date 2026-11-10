@@ -1,4 +1,8 @@
-#!/usr/bin/env node
-import { runChecks } from "/work/scripts/container-check.ts";
+#!/usr/bin/env bash
+set -euo pipefail
 
-process.exitCode = runChecks(process.argv.slice(2));
+if [[ ${1:-check} == lint || ( ${1:-check} == check && " ${CHECK_TASKS:-} " == *" lint "* ) ]]; then
+    shellcheck -x -P SCRIPTDIR scripts/*.sh tests/contract/run.sh tests/container/{run,check,staged,staged-git}
+    markdownlint-cli2
+fi
+exec node /work/scripts/container-check.ts "$@"

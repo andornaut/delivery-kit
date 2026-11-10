@@ -101,6 +101,27 @@ describe("test selection", () => {
   });
 });
 
+describe("formatter argv", () => {
+  it("preserves argv literally and gives it precedence over shell COMMAND", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "formatter-argv-"));
+    const output = join(scratch, "argv.json");
+    const marker = join(scratch, "must-not-execute");
+    const args = ["space in filename", `literal $(touch ${marker})`];
+    const module = join(root, "scripts/container-check.ts");
+    const writer =
+      "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))";
+    const invocation = [process.execPath, "-e", writer, output, ...args];
+    const result = spawnSync(process.execPath, [module, "exec", ...invocation], {
+      cwd: scratch,
+      encoding: "utf8",
+      env: { ...process.env, CHECK_WRITABLE: "1", COMMAND: `touch ${marker}` },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(output, "utf8"))).toEqual(args);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe("snapshot provenance", () => {
   it("preserves dirty snapshot identity without converting the revision into a clean source claim", () => {
     expect(

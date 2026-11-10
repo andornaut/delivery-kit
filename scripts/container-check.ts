@@ -12,7 +12,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface CheckContext {
   readonly CHECK_REVISION: string;
@@ -111,17 +112,17 @@ function lint(root: string): void {
   node(join(root, "tests/contract"), "node_modules/typescript/bin/tsc");
   node(root, "node_modules/prettier/bin/prettier.cjs", ["--check", "."]);
   node(root, "node_modules/eslint/bin/eslint.js", ["--max-warnings", "0", "."]);
-  node(root, "node_modules/markdownlint-cli2/markdownlint-cli2-bin.mjs");
   for (const wrapper of [
     "scripts/check.sh",
     "scripts/pack.sh",
     "tests/contract/run.sh",
     "tests/container/run",
+    "tests/container/check",
+    "tests/container/staged",
+    "tests/container/staged-git",
   ]) {
     run(root, "bash", ["-n", wrapper]);
-    run(root, "shellcheck", ["-x", "-P", "SCRIPTDIR", wrapper]);
   }
-  node(root, "--check", ["tests/container/check"]);
 }
 
 function test(root: string, args: readonly string[]): void {
@@ -220,13 +221,16 @@ export function runChecks(args: readonly string[]): number {
     const [action, ...rest] = args;
     if (action === "exec") {
       const command = process.env.COMMAND;
-      if (command === undefined || command === "") {
-        throw new Error("COMMAND must be nonempty");
-      }
       if (process.env.CHECK_WRITABLE !== "1") {
         linkDependencies(process.cwd());
       }
-      run(process.cwd(), "/bin/sh", ["-ec", command, "command", ...rest]);
+      if (rest.length !== 0) {
+        run(process.cwd(), rest[0]!, rest.slice(1));
+      } else if (command !== undefined && command !== "") {
+        run(process.cwd(), "/bin/sh", ["-ec", command, "command"]);
+      } else {
+        throw new Error("Specify formatter argv or a nonempty COMMAND");
+      }
       return 0;
     }
     if (process.getuid?.() !== 19001) {
@@ -253,4 +257,8 @@ export function runChecks(args: readonly string[]): number {
     console.error(`container-check: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = runChecks(process.argv.slice(2));
 }

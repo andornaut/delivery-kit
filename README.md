@@ -513,11 +513,23 @@ make test TEST_ARGS=src/ci.test.ts
 make test TEST_ARGS=tests/contract/cases/smoke.test.ts
 ```
 
-`make check` exports no build files. An explicit `make build` exports only
-`.claude/release-output`; set `BUILD_OUTPUTS=` to inspect the package without exporting it.
+`BUILD_OUTPUTS` and `TEST_OUTPUTS` default to empty. `make check` never exports files.
+Explicit `make build BUILD_OUTPUTS=.claude/release-output` exports the package inspection output;
+explicit `make test TEST_OUTPUTS=IGNORED_PATH` exports generated test output. Export destinations
+must be ignored generated content and cannot include tracked files, symlinks or excluded entries.
+Validated exports replace the requested destination instead of merging stale files.
 `CHECK_CONTEXT.json` records `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and
 `CHECK_SOURCE_DIRTY`. Snapshot inspection packages make no immutable-commit claim and are not
 release assets. A changed source snapshot invalidates the check result.
+
+`CHECK_ADMISSION` is optional and unset by default. A configured relative regular executable
+receives `build-image`, `lint`, `test`, `build` or `exec` immediately before that phase starts.
+It has five seconds to accept; failure or timeout stops the phase and reports on stderr.
+
+`make staged` keeps host lint-staged Git/stash orchestration and invokes the canonical staged
+adapter for containerized Prettier and ESLint fixes with exact formatter argv. Private Git state
+stays outside the writable checkout. An unresolved container-writer marker prevents Git rollback,
+index and stash operations, preserving recovery evidence until the writer is resolved.
 
 The standard `exec` action is writable and separate from checks. `COMMAND` and `TEST_ARGS`
 remain literal when Make exports them. Ordinary lint, test and build actions use uid 19001 and
