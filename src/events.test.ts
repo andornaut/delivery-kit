@@ -168,9 +168,14 @@ describe("flushEventsWith", () => {
     }
   });
 
-  it.each(["sending", "ambiguous", "rejected"])(
+  it.each([
+    ["sending", "sending"],
+    ["ambiguous", "ambiguous"],
+    ["rejected", "rejected"],
+    ["unknown", "sending"],
+  ])(
     "preserves a prior %s receipt when the role moves to another provider",
-    async (status) => {
+    async (status, attemptStatus) => {
       const game = setup();
       const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
       emitEvent(game, OPTIONS, "push", "one", "first");
@@ -179,7 +184,7 @@ describe("flushEventsWith", () => {
       mkdirSync(directory);
       const path = join(directory, `${id}-${CLAUDE_GAME_DEV}.json`);
       const receipt = JSON.stringify({
-        attempts: [{ method: "claude-channel", status }],
+        attempts: [{ method: "claude-channel", status: attemptStatus }],
         clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
         event_id: id,
         recipient: CLAUDE_GAME_DEV,
@@ -205,6 +210,44 @@ describe("flushEventsWith", () => {
       }
     },
   );
+
+  it.each([
+    { method: "unknown-method", status: "sending" },
+    { method: "claude-channel", status: "unknown-status" },
+  ])("preserves a same-ID receipt with an unprovable attempt $method/$status", async (attempt) => {
+    const game = setup();
+    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+    emitEvent(game, OPTIONS, "push", "one", "first");
+    const id = eventId("push", "one");
+    const directory = join(eventsDir(game), "native");
+    mkdirSync(directory);
+    const path = join(directory, `${id}-${CLAUDE_GAME_DEV}.json`);
+    const receipt = JSON.stringify({
+      attempts: [attempt],
+      clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
+      event_id: id,
+      recipient: CLAUDE_GAME_DEV,
+      status: "deferred",
+    });
+    writeFileSync(path, receipt);
+    updateRegistry(layout, 1, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-dev"]!.conversations.codex = CLAUDE_GAME_DEV;
+    });
+    const adapter = mockAdapter([]);
+    const diagnostic = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await flushEventsWith({ codex: () => adapter }, game);
+      expect(adapter.deliver).not.toHaveBeenCalled();
+      expect(events(game)[0]?.sent).toBe(false);
+      expect(readFileSync(path, "utf8")).toBe(receipt);
+      expect(diagnostic).toHaveBeenCalledWith(
+        expect.stringContaining("reconcile prior native receipt"),
+      );
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
 
   it("reconciles an accepted receipt from the previous provider without another send", async () => {
     const game = setup();

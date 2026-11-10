@@ -291,6 +291,19 @@ function destination(adapters: AdapterFactories, game: GameLayout): Destination 
   }
 }
 
+const STORED_EVENT_STATUSES: ReadonlySet<string> = new Set([
+  "accepted",
+  "ambiguous",
+  "deferred",
+  "rejected",
+  "sending",
+]);
+const STORED_EVENT_METHODS: ReadonlySet<string> = new Set([
+  "claude-channel",
+  "turn/start",
+  "turn/steer",
+]);
+
 /** Retargeting never retries a native send whose outcome is still unknown. */
 function previousDelivery(
   directory: string,
@@ -312,7 +325,17 @@ function previousDelivery(
         value.event_id !== event.id ||
         value.clientUserMessageId !== eventRequestId(event.id, value.recipient) ||
         !Array.isArray(value.attempts) ||
-        typeof value.status !== "string"
+        typeof value.status !== "string" ||
+        !STORED_EVENT_STATUSES.has(value.status) ||
+        value.attempts.some(
+          (attempt) =>
+            !isRecord(attempt) ||
+            typeof attempt.method !== "string" ||
+            !STORED_EVENT_METHODS.has(attempt.method) ||
+            typeof attempt.status !== "string" ||
+            attempt.status === "deferred" ||
+            !STORED_EVENT_STATUSES.has(attempt.status),
+        )
       ) {
         return "blocked";
       }
