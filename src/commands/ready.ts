@@ -1,14 +1,20 @@
-// claude ready and codex ready: the handoff readiness probe for one harness; exit 0 when ready,
-// 1 when not.
+// Readiness probes send nothing and change no registry or activation state.
+import { parseArgs } from "node:util";
+
 import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type Layout, loadLayout } from "../layout.ts";
-import { harnessReadiness } from "../monitor/readiness.ts";
+import { effectiveReadiness, harnessReadiness, type ReadinessScope } from "../monitor/readiness.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { commandUsage } from "./spec.ts";
+import { commandUsage, SPECS } from "./spec.ts";
 
-async function readiness(io: Io, root: string, harness: Harness): Promise<number> {
+async function readiness(
+  io: Io,
+  root: string,
+  harness: Harness | "mixed",
+  scope?: ReadinessScope,
+): Promise<number> {
   let layout: Layout;
   let registry: Registry;
   try {
@@ -19,7 +25,20 @@ async function readiness(io: Io, root: string, harness: Harness): Promise<number
     io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_INVALID;
   }
-  const report = await harnessReadiness(io.env, layout, registry, harness);
+  let report;
+  try {
+    report =
+      harness === "mixed"
+        ? await effectiveReadiness(io.env, layout, registry, scope)
+        : await harnessReadiness(io.env, layout, registry, harness, scope);
+  } catch (error) {
+    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_INVALID;
+  }
+  if (report.harness === "mixed") {
+    io.out(`${pyJsonDumps(report)}\n`);
+    return report.ready ? EXIT_OK : EXIT_INVALID;
+  }
   const ordered = Object.fromEntries([
     ["harness", report.harness],
     [
@@ -36,6 +55,12 @@ async function readiness(io: Io, root: string, harness: Harness): Promise<number
           ["role", row.role],
           ["conversation", row.conversation],
           ["status", row.status],
+          ...(scope === undefined
+            ? []
+            : [
+                ["current_harness", row.current_harness],
+                ["probed_harness", row.probed_harness],
+              ]),
         ]),
       ),
     ],
@@ -45,15 +70,31 @@ async function readiness(io: Io, root: string, harness: Harness): Promise<number
   return report.ready ? EXIT_OK : EXIT_INVALID;
 }
 
-function ready(harness: Harness): Handler {
+function ready(harness: Harness | "mixed"): Handler {
   return (io, root, args) => {
-    if (args.length > 0) {
-      io.err(`${commandUsage(harness === "claude" ? "claude ready" : "codex ready")}\n`);
-      return Promise.resolve(EXIT_USAGE);
+    const command =
+      harness === "mixed" ? "harness ready" : harness === "claude" ? "claude ready" : "codex ready";
+    let values;
+    try {
+      ({ values } = parseArgs({ args, options: SPECS[command].options, strict: true }));
+    } catch (error) {
+      io.err(
+        `delivery-kit: ${error instanceof Error ? error.message : String(error)}\n${commandUsage(command)}\n`,
+      );
+      return EXIT_USAGE;
     }
-    return readiness(io, root, harness);
+    const { game, role } = values;
+    const scope =
+      game === undefined && role === undefined
+        ? undefined
+        : {
+            ...(game === undefined ? {} : { games: game }),
+            ...(role === undefined ? {} : { roles: role }),
+          };
+    return readiness(io, root, harness, scope);
   };
 }
 
 export const claudeReady = ready("claude");
 export const codexReady = ready("codex");
+export const harnessReady = ready("mixed");

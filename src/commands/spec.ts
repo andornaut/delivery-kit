@@ -17,7 +17,9 @@ export interface CommandSpec {
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
   disposition: "handled|superseded|retained",
+  "expected-revision": "N",
   game: "ID",
+  harness: "claude|codex|default",
   "history-cursor": "CURSOR",
   id: "SAFE_ID",
   monitor: "UUID",
@@ -27,6 +29,7 @@ const VALUES: Readonly<Record<string, string>> = {
   reason: "TEXT",
   recipient: "ROLE|UUID",
   requester: "ROLE",
+  role: "ROLE",
   snapshot: "UUID",
   state: "enabled|paused",
   "state-dir": "STATE/unblock",
@@ -44,18 +47,22 @@ export interface GroupedSpec extends CommandSpec {
 }
 
 const GAME = { game: { type: "string" } } as const;
+const SCOPE = {
+  game: { multiple: true, type: "string" },
+  role: { multiple: true, type: "string" },
+} as const;
 const MONITOR = {
   ...GAME,
   parent: { multiple: true, type: "string" },
   recipient: { type: "string" },
 } as const;
-const READY: GroupedSpec = {
-  forms: [[]],
+const READY = {
+  forms: [["game?", "role?"]],
   group: "harness",
-  options: {},
+  options: SCOPE,
   summary:
     "probe whether this harness can deliver now; prints one JSON line, exits 0 when ready, 1 when not",
-};
+} as const satisfies GroupedSpec;
 
 /** Commands by their words: a top-level game verb, or a noun group and its verb. */
 export const SPECS = {
@@ -88,6 +95,25 @@ export const SPECS = {
       state: { type: "string" },
     },
     summary: "persist the requested delivery state without starting a runner",
+  },
+  "harness ready": {
+    forms: [["game?", "role?"]],
+    group: "harness",
+    options: SCOPE,
+    summary: "probe each selected role's effective harness without sending or activating",
+  },
+  "harness select": {
+    forms: [
+      ["harness", "expected-revision", "game", "role?"],
+      ["harness", "expected-revision", "role"],
+    ],
+    group: "harness",
+    options: {
+      ...SCOPE,
+      "expected-revision": { type: "string" },
+      harness: { type: "string" },
+    },
+    summary: "atomically select harness overrides for an explicit scope without activating roles",
   },
   "monitor ack": {
     forms: [["game", "snapshot", "queue-id", "disposition", "reason?", "recipient?", "parent?"]],

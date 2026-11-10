@@ -26,9 +26,13 @@ A pin changes only by a devDependency bump, `npm ci`, then an idle runner replac
 runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
 `claude channel`, the readiness probes and the monitor commands.
 
+The mixed-harness changes are planned for a private, checked 2.2.0 candidate package. Publication
+and consumer adoption require separate approval. The published install pin above remains 2.1.1;
+no public 2.2.0 release asset is assumed.
+
 ## Commands
 
-Top-level verbs are game operations; `monitor`, `claude` and `codex` are noun groups that take a
+Top-level verbs are game operations; `monitor`, `harness`, `claude` and `codex` are noun groups that take a
 verb. Every command resolves game-dev from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
 directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
 explicit; it is never inferred from the working directory.
@@ -43,6 +47,9 @@ explicit; it is never inferred from the working directory.
 | `monitor snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Monitor (game-dev): capture the monitor review snapshot.                                                                                                   |
 | `monitor ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Monitor (game-dev): acknowledge queue items from that snapshot. `retained` requires a reason.                                                              |
 | `claude ready`, `codex ready`                                                                                                                              | Harness: the handoff readiness probe (see [Readiness probe](#readiness-probe)).                                                                            |
+| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                              | Harness: probe the requested target adapter and conversations for an explicit subset.                                                                      |
+| `harness ready [--game ID]... [--role ROLE]...`                                                                                                            | Harness: read-only readiness using each selected role's effective harness.                                                                                 |
+| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                    | Harness: atomic selection for at least one explicit game or role, without activation.                                                                      |
 | `claude channel [--game ID]... [--monitor UUID] [--state-dir DIR]... [--poll-seconds N]`                                                                   | Harness: the stdio MCP server the Claude monitor session starts.                                                                                           |
 | `help`, `--help`, `--version`                                                                                                                              | Usage and version.                                                                                                                                         |
 
@@ -58,7 +65,7 @@ explicit; it is never inferred from the working directory.
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
 - `claude channel`: by default it drains every game's spool (or each `--game`) for the registry's
-  `monitor` conversation and requires `harness` to be `claude`. `--monitor UUID` and repeated
+  `monitor` conversation and requires that role's effective harness to be `claude`. `--monitor UUID` and repeated
   absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
   `--state-dir` excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory
   and drains only spools that already exist, so it can start before any game state. Without
@@ -127,14 +134,14 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
 ownership and the conversation ID of each role per harness. It never proves activation on its
 own: `transfers` carries the hold, acceptance and activation markers.
 
-| Field                             | Content                                                                                                                                                                                         |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                    |
-| `harness`                         | `claude` or `codex`: the active harness for every role.                                                                                                                                         |
-| `host`                            | `nativeProjectId` and `root` (relative to game-dev).                                                                                                                                            |
-| `roles.<key>`                     | `ownership`, `worktree` (relative to game-dev), `conversations` (`claude` and `codex`, each an ID or null), and optional `branch`, `phase`, `activation` (`marker`, `checkpoint`) and `duties`. |
-| `operations.<game>`               | `busOwner` (a role key or duty), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                          |
-| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                    |
+| Field                             | Content                                                                                                                                                                                                    |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                               |
+| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                                    |
+| `host`                            | `nativeProjectId` and `root` (relative to game-dev).                                                                                                                                                       |
+| `roles.<key>`                     | `ownership`, `worktree` (relative to game-dev), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`) and `duties`. |
+| `operations.<game>`               | `busOwner` (a role key or duty), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                                     |
+| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                               |
 
 - Every role key must be a role key in `config.json`, and every `operations` key a game.
 - A duty (for example `monitor`) is a name held by exactly one role. A role name resolves to
@@ -143,18 +150,55 @@ own: `transfers` carries the hold, acceptance and activation markers.
 - Every writer holds `var/registry.lock`, rejects a changed `revision`, validates the result,
   writes durably and increments `revision`.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
-  delivery-kit. The CLI only reads it.
+  delivery-kit. The harness-selection CLI changes only selected roles' `harness` overrides and
+  registry revision metadata; it preserves all other fields, including `operations`.
+
+### Scoped harness selection
+
+`roles.<role>.harness`, when present, is `claude` or `codex`. An absent override falls back to the
+top-level `harness`, preserving the global-only schema 1 behaviour. Selection records an adapter
+choice, not activation, target startup, ownership acceptance, delivery control or permission to
+clear a hold or question. Changing selection requires the caller's explicit authority for that
+exact scope.
+
+Older schema 1 readers reject the new role field. Upgrade every reader of the shared registry
+through a reviewed consumer pin before writing any override. A private candidate package is for
+review; neither its preparation nor a successful readiness probe authorizes adoption or mutation.
+
+After explicit approval and the reader upgrades, probe the selected target and apply one atomic,
+revision-checked selection, using the freshly read registry revision for `N`:
+
+```sh
+delivery-kit claude ready \
+  --game archies-dog-walks \
+  --game chibis-way-home
+delivery-kit harness select \
+  --harness claude \
+  --expected-revision N \
+  --game archies-dog-walks \
+  --game chibis-way-home
+```
+
+Each `--game` selects every configured role for that game. Repeat `--role` to select additional
+registered role names or duties; the union is changed once. Missing, invalid or ambiguous roles,
+an unknown game, an unavailable selected conversation ID, or a changed revision refuse the entire mutation. At least one scope is
+required, so this command never implicitly switches the global default. `--harness default`
+removes only the selected overrides. Unselected games, shared roles, conversation IDs, worktrees,
+activation markers, operations, delivery state and schedules remain unchanged. No provider is
+started and no runner is restarted by selection.
 
 ### Send-time resolution
 
 Route, configuration, briefs and events name roles, never conversation IDs. Each wake, event
 delivery, monitor snapshot, acknowledgement and readiness probe reads `var/registry.json` when it
-sends: `harness` selects the adapter and `roles.<role>.conversations.<harness>` gives the ID.
+sends: the role's optional `harness` override, otherwise the registry default, selects the adapter;
+`roles.<role>.conversations.<effective harness>` gives the ID.
 Nothing is cached across sends. A missing or null ID is reported `unavailable` for that role,
 never as clearance.
 
-A harness handoff is therefore one `updateRegistry` mutation of `harness`, with no configuration
-edit, runner restart or state change. The other harness's IDs stay in place.
+A scoped harness handoff selects only its approved roles, with no configuration edit, runner
+restart or delivery-state change. The other harness's IDs stay in place. Activation still needs
+its separate hold, acceptance and activation checks.
 
 Recipient decision records (`unblock/decisions/<conversation>.json`) stay keyed by conversation
 ID, because a pending question belongs to one conversation. Their owner writes them; delivery-kit
@@ -180,8 +224,21 @@ Output is one JSON line:
 }
 ```
 
-It exits 0 when ready and 1 when not, including when the registry is missing or the layout
-cannot be read. Run it before flipping `harness`.
+Unscoped `claude ready` and `codex ready` retain this output and probe every route role against
+the requested target harness. With `--game` or `--role`, they probe only the selected roles and
+add `current_harness` and `probed_harness` to each role row. Unselected games and kits need no
+conversation ID for that target. Scopes never create or modify a registry entry.
+
+`harness ready` probes the current effective harness for each selected role. Without a scope it
+uses the monitor and route targets, or the monitor duty without a route. Its output contains
+`harness: "mixed"`, an `adapters` object keyed by each required harness, the role rows with
+`current_harness` and `probed_harness`, and `ready`. Each distinct adapter is probed once. Missing
+IDs or unavailable adapter capabilities make the result not ready; an invalid selection fails
+closed. These are adapter-and-conversation probes, not proof that questions, queues or ownership
+checks are clear.
+
+Readiness exits 0 when ready and 1 when not, including when the registry is missing or the layout
+cannot be read. Malformed command options exit 2. It sends nothing and activates nothing.
 
 ## Monitor route
 
@@ -213,6 +270,12 @@ cannot be read. Run it before flipping `harness`.
   is configured in the monitor session's MCP settings; see `examples/claude-channel.mcp.json`.
 - **Codex:** turns are steered through the control socket at `CODEX_CONTROL_SOCKET`, which must be
   set to an absolute path, with the same receipt rules. Without it Codex delivery is deferred.
+
+Claude session listings do not provide native history, queue contents or authoritative question
+state. Unavailable capabilities remain explicitly unknown. A Claude conversation ID is never
+queried through Codex, and unavailable native data is never presented as an empty queue or as
+permission to acknowledge work. Mixed selection preserves exact payload guards, ambiguous-delivery
+handling and the existing same-slot monitor acknowledgements.
 
 `CLAUDE_BIN` overrides the `claude` executable. Events dedupe on `sha256(kind:key)`, and every
 `blocked-*` kind shares one identity, so a changed block reason is not reported again. Each
@@ -458,6 +521,9 @@ subject last.
   holds the lock.
 - `resolveRole(registry, role)` and `resolveConversation(registry, role)`, which throw
   `UnknownRole` or `AmbiguousRole`.
+- `resolveHarness(registry, role)` returns a registered role's override or the registry default.
+  `selectHarness(layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
+  entire explicit selection and changes only those overrides under `registry.lock`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.
 
 ## 2.0.0 changes

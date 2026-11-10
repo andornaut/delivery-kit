@@ -6,8 +6,9 @@ import { parseArgs } from "node:util";
 import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
 import { control } from "./commands/control.ts";
+import { harnessSelect } from "./commands/harness.ts";
 import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
-import { claudeReady, codexReady } from "./commands/ready.ts";
+import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
@@ -34,6 +35,8 @@ export const COMMANDS = [
   "monitor ack",
   "claude ready",
   "codex ready",
+  "harness ready",
+  "harness select",
   "claude channel",
 ] as const satisfies readonly Command[];
 export type { Command };
@@ -169,6 +172,8 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude ready": claudeReady,
   "codex ready": codexReady,
   control,
+  "harness ready": harnessReady,
+  "harness select": harnessSelect,
   "monitor ack": monitorAck,
   "monitor snapshot": monitorSnapshot,
   request,

@@ -8,7 +8,7 @@ import { type FakeControl, startFakeControl } from "../adapters/codex/testContro
 import { type Layout, loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
-import { harnessReadiness } from "./readiness.ts";
+import { effectiveReadiness, harnessReadiness } from "./readiness.ts";
 
 const CODEX_GAME_DEV = "00000000-0000-4000-8000-000000000004";
 const controls: FakeControl[] = [];
@@ -34,6 +34,50 @@ function setup(): Layout {
 }
 
 describe("harnessReadiness", () => {
+  it("a scoped target probe ignores unselected route members and reports current and probed harnesses", async () => {
+    const layout = setup();
+    const control = await startFakeControl(mkdtempSync(join(tmpdir(), "ready-")), () => ({
+      result: {},
+    }));
+    controls.push(control);
+    const report = await harnessReadiness(
+      { CODEX_CONTROL_SOCKET: control.path },
+      layout,
+      readRegistry(layout),
+      "codex",
+      { roles: ["archies-dog-walks/tech"] },
+    );
+    expect(report).toMatchObject({
+      ready: true,
+      roles: [
+        {
+          role: "archies-dog-walks/tech",
+          conversation: CODEX_TECH,
+          current_harness: "claude",
+          probed_harness: "codex",
+          status: "resolved",
+        },
+      ],
+    });
+    expect(control.methods()).toEqual([]);
+  });
+
+  it("rejects invalid explicit selections and does not accept an invalid route as effective readiness", async () => {
+    const layout = setup();
+    const registry = readRegistry(layout);
+    await expect(
+      harnessReadiness({}, layout, registry, "codex", { games: ["unknown"] }),
+    ).rejects.toThrow();
+    await expect(effectiveReadiness({}, layout, registry, {})).rejects.toThrow();
+    writeFileSync(layout.routeFile, "{invalid");
+    expect(await effectiveReadiness({}, layout, registry)).toEqual({
+      adapters: {},
+      harness: "mixed",
+      roles: [],
+      ready: false,
+    });
+  });
+
   it("is ready only when the adapter connects and every route role resolves", async () => {
     const layout = setup();
     const control = await startFakeControl(mkdtempSync(join(tmpdir(), "ready-")), () => ({
