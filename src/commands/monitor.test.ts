@@ -88,13 +88,35 @@ describe("monitor effective harness selection", () => {
     });
     const output = await snapshot(fixture);
     expect(output).toMatchObject({
-      channel_queues: { [MONITOR]: [] },
+      channel_queues: { [MONITOR]: { count: 0, queue_ids: [], status: "available" } },
       complete: true,
       harness: "claude",
       native_complete: false,
       native_queues: { [MONITOR]: { status: "unavailable" } },
       queue_sources: { [MONITOR]: "local_channel_delivered" },
     });
+  });
+
+  it("keeps mixed channel payloads in the persisted snapshot and out of stdout", async () => {
+    const { fixture, requestId } = await delivered();
+    const path = join(deliveredDir(fixture.game.busDir), `${requestId}.json`);
+    const privateText = `private-channel-body-${"x".repeat(50000)}`;
+    const deliveredEntry = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...deliveredEntry, text: privateText }));
+    select(fixture, (registry) => {
+      registry.roles["archies-dog-walks/tech"]!.harness = "codex";
+    });
+    const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
+    expect(result.code, result.err).toBe(EXIT_OK);
+    expect(result.out).not.toContain("private-channel-body");
+    expect(result.out).not.toContain('"input"');
+    expect(result.out.length).toBeLessThan(5000);
+    const output = JSON.parse(result.out);
+    expect(output.channel_queues).toEqual({
+      [MONITOR]: { count: 1, queue_ids: [requestId], status: "available" },
+    });
+    const persisted = JSON.parse(readFileSync(output.path, "utf8"));
+    expect(persisted.channel_queues[MONITOR][0].input[0].text).toBe(privateText);
   });
 
   it("rejects an outside parent before a mixed Claude monitor can query Codex", async () => {

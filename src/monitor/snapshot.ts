@@ -263,6 +263,24 @@ export async function captureMixed(
       { status: Object.hasOwn(queues, id) ? "available" : "unavailable" },
     ]),
   );
+  for (const id of selected("codex", endpoints)) {
+    const unavailable = { reason_code: "native_collection_not_requested", status: "unavailable" };
+    if (!Object.hasOwn(history, id)) {
+      history[id] = { ...unavailable };
+    }
+    if (!Object.hasOwn(questions, id)) {
+      questions[id] = {
+        ...unavailable,
+        cancelled_status: "unavailable",
+        complete: false,
+        pending_status: "unavailable",
+        ui_visibility: "unknown",
+      };
+    }
+    if (!Object.hasOwn(nativeQueues, id)) {
+      nativeQueues[id] = { ...unavailable };
+    }
+  }
   const channelQueues: Json = {};
   const sources: Json = Object.fromEntries(codexRecipients.map((id) => [id, "native_queue"]));
   for (const id of claudeMembers) {
@@ -278,6 +296,7 @@ export async function captureMixed(
   for (const recipient of claudeRecipients) {
     sources[recipient] = "local_channel_delivered";
     if (adapters.claude === undefined) {
+      errors[recipient] = "local delivered channel inventory unavailable";
       sources[recipient] = "local_channel_unavailable";
       continue;
     }
@@ -286,6 +305,7 @@ export async function captureMixed(
     const inventory = await adapters.claude.inventory(recipient);
     if (inventory.status !== "available") {
       errors[recipient] = "local delivered channel inventory unavailable";
+      sources[recipient] = "local_channel_unavailable";
       continue;
     }
     channelQueues[recipient] = inventory.entries.map((value) => {

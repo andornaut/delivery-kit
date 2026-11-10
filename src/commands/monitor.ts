@@ -18,7 +18,7 @@ import {
   captureMixed,
   TransportUnavailable,
 } from "../monitor/snapshot.ts";
-import { locked, snapshotPath } from "../monitor/store.ts";
+import { type Json, locked, snapshotPath } from "../monitor/store.ts";
 import { MONITOR_ROLE } from "../monitor/wake.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
@@ -163,6 +163,29 @@ function statusMap(value: unknown, field: string): Record<string, unknown> {
   );
 }
 
+/** Local channel stdout exposes inventory references only; original payloads stay in the snapshot. */
+function channelSummary(record: Json): Json {
+  const queues = record.channel_queues as Record<string, { id: string }[]>;
+  return Object.fromEntries(
+    Object.entries(record.queue_sources as Record<string, string>)
+      .filter(
+        ([, source]) =>
+          source === "local_channel_delivered" || source === "local_channel_unavailable",
+      )
+      .map(([recipient]) => {
+        const entries = queues[recipient];
+        return [
+          recipient,
+          {
+            count: entries?.length ?? null,
+            queue_ids: entries?.map((entry) => entry.id) ?? null,
+            status: entries === undefined ? "unavailable" : "available",
+          },
+        ];
+      }),
+  );
+}
+
 async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise<number> {
   const unblock = unblockDir(context.game.busDir);
   const { parents, recipient } = context;
@@ -201,7 +224,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
       Record<string, { id: string }[]> | undefined;
     io.out(
       `${pyJsonDumps({
-        channel_queues: record.channel_queues,
+        channel_queues: channelSummary(record),
         collection_budget: record.collection_budget,
         complete,
         harness: context.harness,

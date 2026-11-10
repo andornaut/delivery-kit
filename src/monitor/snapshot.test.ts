@@ -42,6 +42,33 @@ function adapter(harness: Harness) {
 }
 
 describe("mixed monitor capture", () => {
+  it("reports uncollected Codex route peer diagnostics without issuing cross-harness RPCs", async () => {
+    const codex = adapter("codex");
+    const claude = adapter("claude");
+    const record = await captureMixed(
+      context(),
+      { claude, codex },
+      { [CLAUDE]: "claude", [MONITOR]: "codex" },
+      [CLAUDE],
+      [],
+      { routeMembers: [CLAUDE, MONITOR] },
+    );
+    expect(record.history).toMatchObject({
+      [MONITOR]: { status: "unavailable", reason_code: "native_collection_not_requested" },
+    });
+    expect(record.question_state).toMatchObject({
+      [MONITOR]: { status: "unavailable", pending_status: "unavailable", ui_visibility: "unknown" },
+    });
+    expect(record.native_queues).toMatchObject({
+      [MONITOR]: { status: "unavailable", reason_code: "native_collection_not_requested" },
+    });
+    expect(record.queues).not.toHaveProperty(MONITOR);
+    expect(record.errors).toEqual({});
+    expect(codex.inventory).not.toHaveBeenCalled();
+    expect(codex.collectors.collect).not.toHaveBeenCalled();
+    expect(claude.inventory.mock.calls).toEqual([[CLAUDE]]);
+  });
+
   it("keeps requested native coverage separate from an unrelated unsupported peer", async () => {
     const record = await captureMixed(
       context(),
@@ -159,7 +186,8 @@ describe("mixed monitor capture", () => {
     expect(record.queues).toEqual({});
     expect(record.channel_queues).toEqual({});
     expect(record.queue_sources).toEqual({ [CLAUDE]: "local_channel_unavailable" });
-    expect(record.errors).toEqual({});
+    expect(record.errors).toEqual({ [CLAUDE]: "local delivered channel inventory unavailable" });
+    expect(record.native_complete).toBe(false);
   });
 
   it("rejects missing endpoint bindings and mismatched adapters before inventory calls", async () => {
@@ -178,7 +206,7 @@ describe("mixed monitor capture", () => {
     codex.inventory.mockResolvedValue({ entries: [], reason: "incomplete", status: "unavailable" });
     const record = await captureMixed(
       context(),
-      { codex },
+      { claude: adapter("claude"), codex },
       { [CLAUDE]: "claude", [MONITOR]: "codex" },
       [MONITOR, CLAUDE],
       [],
