@@ -132,10 +132,18 @@ describe("reconcile", () => {
         }
       });
       const client: RpcClient = { call, close: () => {} };
-      const first = await reconcileSlot(client, { coordinator: MONITOR, slot: 1, unblock }, snapshot);
+      const first = await reconcileSlot(
+        client,
+        { coordinator: MONITOR, slot: 1, unblock },
+        snapshot,
+      );
       expect(first.status).toBe("accepted");
       recordHealth({ emit: vi.fn(), unblock }, MONITOR, 1, snapshot, first);
-      const second = await reconcileSlot(client, { coordinator: MONITOR, slot: 2, unblock }, snapshot);
+      const second = await reconcileSlot(
+        client,
+        { coordinator: MONITOR, slot: 2, unblock },
+        snapshot,
+      );
       expect(second.status).toBe("accepted");
       expect(second.requestId).not.toBe(first.requestId);
       expect(call.mock.calls.map(([method]) => method)).toEqual([
