@@ -8,8 +8,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Recent successful checks took 15m16s and 15m15s; allow headroom while
-    # capping at 30 minutes, when a check has hung rather than finished normally.
+    # Offline contracts include timed observer waits alongside installs, builds
+    # and packaging; at 30 minutes a check has hung rather than finished normally.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
