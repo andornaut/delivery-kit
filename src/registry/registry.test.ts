@@ -24,6 +24,7 @@ import {
   RegistryMissing,
   RegistrySchema,
   resolveConversation,
+  resolveHarness,
   resolveRole,
   RevisionConflict,
   UnknownRole,
@@ -282,5 +283,37 @@ describe("resolveConversation", () => {
     expect(() => resolveRole(registry, "nobody")).toThrow(UnknownRole);
     expect(() => resolveRole(registry, "coordinator")).toThrow(AmbiguousRole);
     expect(resolveRole(registry, "monitor")).toBe("game-dev");
+  });
+});
+
+describe("role harness overrides", () => {
+  it("uses the role or duty holder's override while preserving the global default", () => {
+    const layout = setup();
+    const registry = updateRegistry(layout, 1, (draft) => {
+      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
+      draft.roles["archies-dog-walks/tech"]!.duties = ["implementation"];
+    });
+    expect(resolveHarness(registry, "implementation")).toBe("codex");
+    expect(resolveHarness(registry, "monitor")).toBe("claude");
+    expect(resolveConversation(registry, "implementation")).toBe(CODEX_TECH);
+    expect(registry.harness).toBe("claude");
+  });
+
+  it("returns null instead of an inactive provider's ID when the selected ID is missing", () => {
+    const layout = setup();
+    const registry = updateRegistry(layout, 1, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+    });
+    expect(resolveConversation(registry, "monitor")).toBeNull();
+    expect(registry.roles["game-dev"]!.conversations.claude).toBe(CLAUDE_GAME_DEV);
+  });
+
+  it("validates overrides and still rejects unknown role fields", () => {
+    const layout = setup();
+    for (const fields of [{ harness: "other" }, { harness: null }, { provider: "codex" }]) {
+      const value = structuredClone(readRegistry(layout));
+      Object.assign(value.roles["game-dev"]!, fields);
+      expect(() => RegistrySchema.validate(layout.config, value)).toThrow(ValidationError);
+    }
   });
 });

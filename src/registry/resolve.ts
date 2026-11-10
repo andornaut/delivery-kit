@@ -1,5 +1,5 @@
 // Role names resolve to a role key, then to the active harness's conversation ID.
-import type { Registry } from "./schema.ts";
+import type { Harness, Registry } from "./schema.ts";
 
 export class UnknownRole extends Error {
   readonly role: string;
@@ -40,8 +40,13 @@ export function resolveRole(registry: Registry, role: string): string {
   return holders[0] as string;
 }
 
-/** The conversation ID of `role` for the registry's active harness, or null when it has none. */
+/** The role or duty holder's selected transport, falling back to the global default. */
+export function resolveHarness(registry: Registry, role: string): Harness {
+  return registry.roles[resolveRole(registry, role)]?.harness ?? registry.harness;
+}
+
+/** The selected conversation only, or null when that transport has no ID. */
 export function resolveConversation(registry: Registry, role: string): string | null {
   const record = registry.roles[resolveRole(registry, role)];
-  return record?.conversations[registry.harness] ?? null;
+  return record?.conversations[resolveHarness(registry, role)] ?? null;
 }

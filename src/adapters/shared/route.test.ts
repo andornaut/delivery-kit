@@ -46,11 +46,11 @@ describe("role-name route", () => {
     const claude = sendRoute(readRegistry(layout), route, "archies-dog-walks");
     expect(claude).toEqual({
       harness: "claude",
-      monitor: { conversation: CLAUDE_GAME_DEV, role: "game-dev" },
+      monitor: { conversation: CLAUDE_GAME_DEV, harness: "claude", role: "game-dev" },
       status: "active",
       targets: [
-        { conversation: CLAUDE_TECH, role: "archies-dog-walks/tech" },
-        { conversation: null, role: "archies-dog-walks/art" },
+        { conversation: CLAUDE_TECH, harness: "claude", role: "archies-dog-walks/tech" },
+        { conversation: null, harness: "claude", role: "archies-dog-walks/art" },
       ],
     });
     const registry = readRegistry(layout);
@@ -59,10 +59,12 @@ describe("role-name route", () => {
     });
     expect(routeScope(readRegistry(layout), route)).toEqual({
       coordinator: CODEX_GAME_DEV,
+      harness: "codex",
+      harnesses: { [CODEX_GAME_DEV]: "codex", [CODEX_TECH]: "codex" },
       monitorName: "game-dev",
       peers: [CODEX_TECH],
       status: "active",
-      targets: [{ name: "archies-dog-walks/tech", sessionId: CODEX_TECH }],
+      targets: [{ harness: "codex", name: "archies-dog-walks/tech", sessionId: CODEX_TECH }],
     });
   });
 
@@ -97,5 +99,80 @@ describe("role-name route", () => {
   it("is null when no route is declared", () => {
     const layout = loadLayout(makeFixture().root);
     expect(readRoleRoute(layout)).toBeNull();
+  });
+});
+
+describe("mixed route transports", () => {
+  it("keeps the monitor transport independent and resolves changed target overrides at each call", () => {
+    const layout = setup(ROUTE);
+    const route = readRoleRoute(layout)!;
+    const mixed = updateRegistry(layout, 2, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+    });
+    const send = sendRoute(mixed, route, "archies-dog-walks");
+    expect(send).toMatchObject({
+      harness: "codex",
+      monitor: { conversation: CODEX_GAME_DEV, harness: "codex" },
+      targets: [
+        { conversation: CLAUDE_TECH, harness: "claude" },
+        { conversation: null, harness: "claude" },
+      ],
+    });
+    expect(routeScope(mixed, route)).toMatchObject({
+      harness: "codex",
+      coordinator: CODEX_GAME_DEV,
+      harnesses: { [CODEX_GAME_DEV]: "codex", [CLAUDE_TECH]: "claude" },
+      targets: [{ harness: "claude", sessionId: CLAUDE_TECH }],
+    });
+    const changed = updateRegistry(layout, mixed.revision, (draft) => {
+      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
+    });
+    expect(routeScope(changed, route)!.peers).toEqual([CODEX_TECH]);
+    expect(routeScope(changed, route)!.harnesses).toEqual({
+      [CODEX_GAME_DEV]: "codex",
+      [CODEX_TECH]: "codex",
+    });
+  });
+
+  it("keeps an unavailable selected target null instead of using its inactive ID", () => {
+    const layout = setup(ROUTE);
+    const registry = updateRegistry(layout, 2, (draft) => {
+      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
+      draft.roles["archies-dog-walks/tech"]!.conversations.codex = null;
+    });
+    const scope = routeScope(registry, readRoleRoute(layout)!);
+    expect(scope!.targets).toEqual([]);
+    expect(scope!.harnesses).toEqual({ [CLAUDE_GAME_DEV]: "claude" });
+  });
+
+  it("rejects a cross-harness UUID collision between target and monitor", () => {
+    const layout = setup(ROUTE);
+    const registry = updateRegistry(layout, 2, (draft) => {
+      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
+      draft.roles["archies-dog-walks/tech"]!.conversations.codex = CLAUDE_GAME_DEV;
+    });
+    expect(routeScope(registry, readRoleRoute(layout)!)).toBeNull();
+  });
+
+  it("rejects a cross-harness UUID collision between distinct targets", () => {
+    const layout = setup(ROUTE);
+    const registry = updateRegistry(layout, 2, (draft) => {
+      draft.roles["archies-dog-walks/art"] = {
+        conversations: { codex: CLAUDE_TECH },
+        harness: "codex",
+        ownership: "active",
+        worktree: ".",
+      };
+    });
+    expect(routeScope(registry, readRoleRoute(layout)!)).toBeNull();
+  });
+
+  it("returns no active scope when only an inactive monitor ID exists", () => {
+    const layout = setup(ROUTE);
+    const registry = updateRegistry(layout, 2, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-dev"]!.conversations.codex = null;
+    });
+    expect(routeScope(registry, readRoleRoute(layout)!)).toBeNull();
   });
 });

@@ -1,10 +1,15 @@
 // The role-name monitor route, var/route.json schema 1. It names roles only; every send resolves
-// them through var/registry.json for its active harness at that moment, so a harness handoff is
-// one registry change with no route edit or restart.
+// them through var/registry.json for each role's selected harness at that moment.
 import { existsSync } from "node:fs";
 
 import { readJson } from "../../durable.ts";
 import { type GameDevConfig, type Layout, roleKeys } from "../../layout.ts";
+import {
+  AmbiguousRole,
+  resolveConversation,
+  resolveHarness,
+  UnknownRole,
+} from "../../registry/resolve.ts";
 import type { Harness, Registry } from "../../registry/schema.ts";
 import { isRecord } from "./pyjson.ts";
 
@@ -78,7 +83,8 @@ export function readRoleRoute(layout: Layout): RoleRoute | null {
 
 export interface RouteEndpoint {
   readonly role: string;
-  /** The role's conversation for the active harness, or null when it has none. */
+  readonly harness: Harness;
+  /** The role's conversation for its selected harness, or null when it has none. */
   readonly conversation: string | null;
 }
 
@@ -86,6 +92,7 @@ export type SendRoute =
   | { readonly status: "held" | "nonhost" }
   | {
       readonly status: "active";
+      /** Transport of the monitor, independently of each target's transport. */
       readonly harness: Harness;
       readonly monitor: RouteEndpoint;
       readonly targets: readonly RouteEndpoint[];
@@ -93,7 +100,14 @@ export type SendRoute =
 
 /** roles.<role>.conversations.<harness>, read from the registry snapshot given. */
 export function roleConversation(registry: Registry, role: string): string | null {
-  return registry.roles[role]?.conversations[registry.harness] ?? null;
+  try {
+    return resolveConversation(registry, role);
+  } catch (error) {
+    if (error instanceof UnknownRole || error instanceof AmbiguousRole) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /** The route for `game`'s runner, resolved through `registry` at send time. */
@@ -106,11 +120,15 @@ export function sendRoute(registry: Registry, route: RoleRoute, game: string): S
   }
   const endpoint = (role: string): RouteEndpoint => ({
     conversation: roleConversation(registry, role),
+    harness: Object.hasOwn(registry.roles, role)
+      ? resolveHarness(registry, role)
+      : registry.harness,
     role,
   });
+  const monitor = endpoint(route.monitor);
   return {
-    harness: registry.harness,
-    monitor: endpoint(route.monitor),
+    harness: monitor.harness,
+    monitor,
     status: "active",
     targets: route.targets.map(endpoint),
   };
@@ -127,10 +145,17 @@ function peerConversations(route: Extract<SendRoute, { status: "active" }>): str
 
 export interface ActiveScope {
   readonly status: "active";
+  readonly harness?: Harness;
+  /** Includes the monitor and every resolved recipient; absent in older fixtures. */
+  readonly harnesses?: Readonly<Record<string, Harness>>;
   readonly coordinator: string;
   readonly monitorName: string;
   readonly peers: readonly string[];
-  readonly targets: readonly { readonly sessionId: string; readonly name: string }[];
+  readonly targets: readonly {
+    readonly sessionId: string;
+    readonly name: string;
+    readonly harness?: Harness;
+  }[];
 }
 
 /**
@@ -142,14 +167,30 @@ export function activeScope(route: Extract<SendRoute, { status: "active" }>): Ac
   if (coordinator === null) {
     return null;
   }
+  const harnesses = new Map<string, Harness>();
+  for (const endpoint of [route.monitor, ...route.targets]) {
+    if (endpoint.conversation !== null) {
+      const existing = harnesses.get(endpoint.conversation);
+      if (existing !== undefined && existing !== endpoint.harness) {
+        return null;
+      }
+      harnesses.set(endpoint.conversation, endpoint.harness);
+    }
+  }
   return {
     coordinator,
+    harness: route.harness,
+    harnesses: Object.fromEntries(harnesses),
     monitorName: route.monitor.role,
     peers: peerConversations(route),
     status: "active",
     targets: route.targets
       .filter((target) => target.conversation !== null && target.conversation !== coordinator)
-      .map((target) => ({ name: target.role, sessionId: target.conversation as string })),
+      .map((target) => ({
+        harness: target.harness,
+        name: target.role,
+        sessionId: target.conversation as string,
+      })),
   };
 }
 

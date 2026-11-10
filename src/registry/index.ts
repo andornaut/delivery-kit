@@ -13,7 +13,13 @@ export {
 } from "../layout.ts";
 export { LockBusy, LockError } from "../lock.ts";
 export { ValidationError } from "../validate.ts";
-export { AmbiguousRole, resolveConversation, resolveRole, UnknownRole } from "./resolve.ts";
+export {
+  AmbiguousRole,
+  resolveConversation,
+  resolveHarness,
+  resolveRole,
+  UnknownRole,
+} from "./resolve.ts";
 export {
   type Activation,
   type Adoption,
@@ -30,6 +36,12 @@ export {
   type TransferPhase,
   validateRegistry,
 } from "./schema.ts";
+export {
+  type HarnessSelection,
+  resolveSelectedRoles,
+  type RoleSelection,
+  selectHarness,
+} from "./selection.ts";
 export {
   createRegistry,
   readRegistry,

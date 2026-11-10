@@ -29,6 +29,8 @@ export interface Activation {
 }
 
 export interface RoleRecord {
+  /** Transport override only; activation is recorded separately. */
+  readonly harness?: Harness;
   readonly ownership: string;
   /** Worktree relative to game-dev. */
   readonly worktree: string;
@@ -114,7 +116,7 @@ function checkConversations(issues: Issues, at: string, value: unknown): void {
 
 function checkRole(issues: Issues, at: string, value: unknown): void {
   const shape = {
-    optional: ["branch", "phase", "activation", "duties"],
+    optional: ["branch", "phase", "activation", "duties", "harness"],
     required: ["ownership", "worktree", "conversations"],
   };
   if (!checkObject(issues, at, shape, value)) {
@@ -126,6 +128,9 @@ function checkRole(issues: Issues, at: string, value: unknown): void {
     checkName(issues, `${at}/branch`, /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,128}$/, value.branch);
   }
   checkConversations(issues, `${at}/conversations`, value.conversations);
+  if (value.harness !== undefined) {
+    checkEnum(issues, `${at}/harness`, HARNESSES, value.harness);
+  }
   if (value.phase !== undefined) {
     checkString(issues, `${at}/phase`, TOKEN_PATTERN, value.phase);
   }
