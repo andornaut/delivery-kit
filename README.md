@@ -18,19 +18,13 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.1.2/delivery-kit-2.1.2.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.2.0/delivery-kit-2.2.0.tgz"
 }
 ```
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
 runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
 `claude channel`, the readiness probes and the monitor commands.
-
-<!-- CLEANUP (added 2026-11-10): Remove after reviewed 2.2.0 publication and install pin update. -->
-
-The mixed-harness changes are planned for a private, checked 2.2.0 candidate package. Publication
-and consumer adoption require separate approval. The published install pin above remains 2.1.1;
-no public 2.2.0 release asset is assumed.
 
 ## Commands
 
@@ -164,8 +158,8 @@ clear a hold or question. Changing selection requires the caller's explicit auth
 exact scope.
 
 Older schema 1 readers reject the new role field. Upgrade every reader of the shared registry
-through a reviewed consumer pin before writing any override. A private candidate package is for
-review; neither its preparation nor a successful readiness probe authorizes adoption or mutation.
+through a reviewed consumer pin before writing any override. A successful readiness probe does
+not authorize adoption or mutation.
 
 After explicit approval and the reader upgrades, probe the selected target and apply one atomic,
 revision-checked selection, using the freshly read registry revision for `N`:
@@ -284,6 +278,9 @@ Mixed monitor snapshots expose `harnesses` (the provider per conversation), `nat
 (inventory origin). `complete` means the requested available inventories were collected without
 actual collection errors, preserving the legacy exit-0 success semantics. It proves neither
 native visibility nor clearance.
+
+CLI `channel_queues` rows expose only `count`, `queue_ids` and `status`. Full original payloads
+remain in the persisted snapshot for acknowledgement validation and are not printed on stdout.
 
 `native_complete` is true only when every requested recipient is Codex and its native queue was
 captured. Any requested Claude recipient makes it false, even when its available delivered-channel
