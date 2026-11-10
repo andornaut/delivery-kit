@@ -205,7 +205,9 @@ describe("deliverScheduledWake (codex)", () => {
       expect(snapshot.history[claudeTech]).toMatchObject({ status: "unavailable" });
       expect(snapshot.worker_health[claudeTech]).toMatchObject({ status: "unavailable" });
       expect(snapshot.queues).not.toHaveProperty(claudeTech);
-      expect(JSON.stringify(control.calls)).not.toContain(claudeTech);
+      expect(
+        control.calls.flatMap((call) => [call.params.threadId, call.params.parentThreadId]),
+      ).not.toContain(claudeTech);
       const repeated = JSON.parse(await deliverScheduledWake(fixture.layout, game, SLOT)) as Record<
         string,
         unknown
@@ -223,7 +225,9 @@ describe("deliverScheduledWake (codex)", () => {
       ) as Record<string, unknown>;
       expect(guarded.status).toBe("deferred");
       expect(steers).toHaveLength(2);
-      expect(JSON.stringify(control.calls)).not.toContain(claudeTech);
+      expect(
+        control.calls.flatMap((call) => [call.params.threadId, call.params.parentThreadId]),
+      ).not.toContain(claudeTech);
     } finally {
       await control.close();
     }
