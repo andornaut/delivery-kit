@@ -3,7 +3,7 @@
 // emitEvent records an event once under events/state.lock and tracks per-SHA CI and deployment
 // state, adding a `complete` event when a pushed commit has CI success and a finished deployment.
 // flushEvents delivers unsent events in creation order under the non-blocking dispatch.lock,
-// through the active harness's adapter, and marks an event sent only after its delivery is
+// through the recipient's selected adapter, and marks an event sent only after its delivery is
 // accepted. The first event not accepted stops the flush; a later flush resumes there.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
@@ -11,15 +11,15 @@ import { join, resolve } from "node:path";
 
 import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
-import { eventRequestId, SHA_PATTERN } from "./adapters/shared/ids.ts";
-import { dumpsJson, type PyJson } from "./adapters/shared/pyjson.ts";
+import { eventRequestId, isCanonicalUuid, SHA_PATTERN } from "./adapters/shared/ids.ts";
+import { dumpsJson, isRecord, type PyJson } from "./adapters/shared/pyjson.ts";
 import { readRoleRoute, type RoleRoute } from "./adapters/shared/route.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
 import { loadProjectConfig } from "./config.ts";
 import { readJson, writeDurable } from "./durable.ts";
 import { type GameLayout, type Layout, loadLayout } from "./layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "./lock.ts";
-import { resolveConversation, resolveRole } from "./registry/resolve.ts";
+import { resolveConversation, resolveHarness, resolveRole } from "./registry/resolve.ts";
 import type { Harness } from "./registry/schema.ts";
 import { readRegistry } from "./registry/store.ts";
 
@@ -266,6 +266,7 @@ function eventRouting(layout: Layout, recipientRole: string): "defer" | "deliver
 
 interface Destination {
   readonly adapter: EventAdapter;
+  readonly harness: Harness;
   readonly recipient: string;
 }
 
@@ -275,18 +276,65 @@ function destination(adapters: AdapterFactories, game: GameLayout): Destination 
     const registry = readRegistry(layout);
     const role = loadProjectConfig(game.configFile).reports.recipient;
     const recipient = resolveConversation(registry, role);
-    const factory = adapters[registry.harness];
+    const harness = resolveHarness(registry, role);
+    const factory = adapters[harness];
     if (recipient === null || factory === undefined) {
       return null;
     }
     if (eventRouting(layout, resolveRole(registry, role)) === "defer") {
       return null;
     }
-    return { adapter: factory(layout, game), recipient };
+    return { adapter: factory(layout, game), harness, recipient };
   } catch {
     // An unresolvable recipient leaves every event unsent for a later flush.
     return null;
   }
+}
+
+/** Retargeting never retries a native send whose outcome is still unknown. */
+function previousDelivery(
+  directory: string,
+  target: Destination,
+  event: BusEvent,
+): "accepted" | "blocked" | "none" {
+  let accepted = false;
+  let blocked = false;
+  try {
+    const names = readdirSync(directory).filter(
+      (name) => name.startsWith(`${event.id}-`) && name.endsWith(".json"),
+    );
+    for (const name of names) {
+      const value = readJson(join(directory, name));
+      if (
+        !isRecord(value) ||
+        !isCanonicalUuid(value.recipient) ||
+        name !== `${event.id}-${value.recipient}.json` ||
+        value.event_id !== event.id ||
+        value.clientUserMessageId !== eventRequestId(event.id, value.recipient) ||
+        !Array.isArray(value.attempts) ||
+        typeof value.status !== "string"
+      ) {
+        return "blocked";
+      }
+      if (value.status === "accepted") {
+        accepted = true;
+      }
+      if (["sending", "ambiguous", "rejected"].includes(value.status)) {
+        const methods = value.attempts.map((attempt) =>
+          isRecord(attempt) ? attempt.method : null,
+        );
+        const otherProvider = methods.some((method) =>
+          target.harness === "codex"
+            ? method !== "turn/start" && method !== "turn/steer"
+            : method !== "claude-channel",
+        );
+        blocked ||= value.recipient !== target.recipient || otherProvider;
+      }
+    }
+  } catch {
+    return "blocked";
+  }
+  return accepted ? "accepted" : blocked ? "blocked" : "none";
 }
 
 /** Deliver unsent events through `adapters`; the testable form of flushEvents. */
@@ -300,9 +348,11 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
     return;
   }
   try {
-    const target = destination(adapters, game);
-    const events = target === null ? null : pendingEvents(directory);
-    if (target === null || events === null) {
+    if (destination(adapters, game) === null) {
+      return;
+    }
+    const events = pendingEvents(directory);
+    if (events === null) {
       return;
     }
     const receipts = join(directory, "native");
@@ -314,6 +364,22 @@ export async function flushEventsWith(adapters: AdapterFactories, game: GameLayo
       const path = join(directory, `${event.id}.json`);
       if (QUIET_KINDS.has(event.kind)) {
         event.suppressed = true;
+        writeState(path, event);
+        continue;
+      }
+      const target = destination(adapters, game);
+      if (target === null) {
+        return;
+      }
+      const previous = previousDelivery(receipts, target, event);
+      if (previous === "blocked") {
+        process.stderr.write(
+          `delivery-kit: event ${event.id} held: reconcile prior native receipt before retargeting\n`,
+        );
+        return;
+      }
+      if (previous === "accepted") {
+        event.sent = true;
         writeState(path, event);
         continue;
       }

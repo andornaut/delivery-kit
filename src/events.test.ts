@@ -3,6 +3,8 @@ import { join, resolve } from "node:path";
 
 import { describe, expect, it, type Mock, vi } from "vitest";
 
+import { codexAdapter } from "./adapters/codex/index.ts";
+import { startFakeControl } from "./adapters/codex/testControlSocket.ts";
 import { eventRequestId } from "./adapters/shared/ids.ts";
 import type { DeliveryReceipt } from "./adapters/types.ts";
 import {
@@ -17,7 +19,8 @@ import {
 } from "./events.ts";
 import { type GameLayout, gameLayout, loadLayout } from "./layout.ts";
 import { holdLock } from "./lock.ts";
-import { createRegistry, type Registry, updateRegistry } from "./registry/index.ts";
+import { claudeFixture, MONITOR } from "./monitor/fixtures.ts";
+import { createRegistry, readRegistry, type Registry, updateRegistry } from "./registry/index.ts";
 import { CLAUDE_GAME_DEV, makeFixture, registryInput } from "./testFixtures.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -120,6 +123,181 @@ describe("deliveryMessage", () => {
 });
 
 describe("flushEventsWith", () => {
+  it("honours a new recipient decision guard between native event sends", async () => {
+    const fixture = claudeFixture();
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-dev"]!.conversations.codex = MONITOR;
+    });
+    const control = await startFakeControl(fixture.base, (method, params) => {
+      if (method === "thread/read") {
+        return {
+          result: {
+            thread: {
+              canAcceptDirectInput: true,
+              status: { activeFlags: [], type: "active" },
+            },
+          },
+        };
+      }
+      if (method === "thread/turns/list") {
+        return { result: { data: [{ id: "active-turn", status: "inProgress" }] } };
+      }
+      if (method === "turn/steer") {
+        fixture.clear("pending");
+        return { result: { turnId: params.expectedTurnId } };
+      }
+      return { result: { data: [] } };
+    });
+    try {
+      emitEvent(fixture.game, OPTIONS, "push", "one", "first");
+      emitEvent(fixture.game, OPTIONS, "push", "two", "second");
+      await flushEventsWith(
+        {
+          codex: (layout) => codexAdapter(layout, { controlSocket: control.path }),
+        },
+        fixture.game,
+      );
+      expect(
+        Object.fromEntries(events(fixture.game).map((event) => [event.key, event.sent])),
+      ).toEqual({ one: true, two: false });
+      expect(control.calls.filter((call) => call.method === "initialize")).toHaveLength(1);
+      expect(control.calls.filter((call) => call.method === "turn/steer")).toHaveLength(1);
+    } finally {
+      await control.close();
+    }
+  });
+
+  it.each(["sending", "ambiguous", "rejected"])(
+    "preserves a prior %s receipt when the role moves to another provider",
+    async (status) => {
+      const game = setup();
+      const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+      emitEvent(game, OPTIONS, "push", "one", "first");
+      const id = eventId("push", "one");
+      const directory = join(eventsDir(game), "native");
+      mkdirSync(directory);
+      const path = join(directory, `${id}-${CLAUDE_GAME_DEV}.json`);
+      const receipt = JSON.stringify({
+        attempts: [{ method: "claude-channel", status }],
+        clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
+        event_id: id,
+        recipient: CLAUDE_GAME_DEV,
+        status,
+      });
+      writeFileSync(path, receipt);
+      updateRegistry(layout, 1, (draft) => {
+        draft.roles["game-dev"]!.harness = "codex";
+        draft.roles["game-dev"]!.conversations.codex = "00000000-0000-4000-8000-000000000004";
+      });
+      const adapter = mockAdapter([]);
+      const diagnostic = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        await flushEventsWith({ codex: () => adapter }, game);
+        expect(adapter.deliver).not.toHaveBeenCalled();
+        expect(events(game)[0]?.sent).toBe(false);
+        expect(readFileSync(path, "utf8")).toBe(receipt);
+        expect(diagnostic).toHaveBeenCalledWith(
+          expect.stringContaining("reconcile prior native receipt"),
+        );
+      } finally {
+        diagnostic.mockRestore();
+      }
+    },
+  );
+
+  it("reconciles an accepted receipt from the previous provider without another send", async () => {
+    const game = setup();
+    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+    emitEvent(game, OPTIONS, "push", "one", "first");
+    const id = eventId("push", "one");
+    const directory = join(eventsDir(game), "native");
+    mkdirSync(directory);
+    writeFileSync(
+      join(directory, `${id}-${CLAUDE_GAME_DEV}.json`),
+      JSON.stringify({
+        attempts: [{ method: "claude-channel", status: "accepted" }],
+        clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
+        event_id: id,
+        recipient: CLAUDE_GAME_DEV,
+        status: "accepted",
+      }),
+    );
+    updateRegistry(layout, 1, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-dev"]!.conversations.codex = "00000000-0000-4000-8000-000000000004";
+    });
+    const adapter = mockAdapter([]);
+    await flushEventsWith({ codex: () => adapter }, game);
+    expect(adapter.deliver).not.toHaveBeenCalled();
+    expect(events(game)[0]?.sent).toBe(true);
+  });
+
+  it("uses the recipient's selected harness even when the global default differs", async () => {
+    const game = setup();
+    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+    updateRegistry(layout, 1, (draft) => {
+      draft.harness = "codex";
+      draft.roles["game-dev"]!.harness = "claude";
+    });
+    const claude = mockAdapter([]);
+    const codex = mockAdapter([]);
+    emitEvent(game, OPTIONS, "push", "one", "first");
+    await flushEventsWith({ claude: () => claude, codex: () => codex }, game);
+    expect(claude.deliver).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      CLAUDE_GAME_DEV,
+      expect.any(String),
+      { event_id: eventId("push", "one") },
+    );
+    expect(codex.deliver).not.toHaveBeenCalled();
+    expect(readRegistry(layout).harness).toBe("codex");
+  });
+
+  it("resolves role selection again between deliveries in one flush", async () => {
+    const game = setup();
+    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+    const codexMonitor = "00000000-0000-4000-8000-000000000004";
+    updateRegistry(layout, 1, (draft) => {
+      draft.harness = "codex";
+      draft.roles["game-dev"]!.harness = "claude";
+      draft.roles["game-dev"]!.conversations.codex = codexMonitor;
+    });
+    const claude = mockAdapter([]);
+    const codex = mockAdapter([]);
+    claude.deliver.mockImplementationOnce((_path: string, requestId: string) => {
+      updateRegistry(layout, 2, (draft) => {
+        draft.roles["game-dev"]!.harness = "codex";
+      });
+      return Promise.resolve({ requestId, status: "accepted" });
+    });
+    emitEvent(game, OPTIONS, "push", "one", "first");
+    emitEvent(game, OPTIONS, "push", "two", "second");
+    await flushEventsWith({ claude: () => claude, codex: () => codex }, game);
+    expect(claude.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
+      [CLAUDE_GAME_DEV, expect.stringContaining("first")],
+    ]);
+    expect(codex.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
+      [codexMonitor, expect.stringContaining("second")],
+    ]);
+    expect(events(game).every((event) => event.sent)).toBe(true);
+    expect(readRegistry(layout).harness).toBe("codex");
+  });
+
+  it("keeps an event unsent when the selected harness has no conversation", async () => {
+    const game = setup();
+    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+    updateRegistry(layout, 1, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+    });
+    const adapter = mockAdapter([]);
+    emitEvent(game, OPTIONS, "push", "one", "first");
+    await flushEventsWith({ claude: () => adapter, codex: () => adapter }, game);
+    expect(adapter.deliver).not.toHaveBeenCalled();
+    expect(events(game)[0]?.sent).toBe(false);
+  });
+
   it("delivers in creation order to the recipient and marks only accepted events", async () => {
     const game = setup();
     emitEvent(game, OPTIONS, "push", "one", "first");

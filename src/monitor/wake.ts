@@ -1,10 +1,11 @@
-// Scheduled monitor wake for a due slot. The adapter follows the registry's active harness; the monitor and
+// Scheduled monitor wake for a due slot. The adapter follows the monitor's selected harness; the monitor and
 // worker parents are role names resolved through the registry. The result is the one-line JSON
 // status the runner logs, or an empty string when this project does not dispatch the slot.
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
+import { claudeAdapter } from "../adapters/claude/index.ts";
 import { spoolMonitorBrief, unblockDir } from "../adapters/claude/spool.ts";
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { SOCKET_MISSING } from "../adapters/codex/index.ts";
@@ -29,10 +30,11 @@ import { emitEvent } from "../events.ts";
 import type { GameLayout, Layout } from "../layout.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { resolveRole } from "../registry/resolve.ts";
+import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type HealthEmit, recordHealth } from "./health.ts";
 import { reconcileSlot } from "./reconcile.ts";
-import { captureCodex } from "./snapshot.ts";
+import { captureMixed } from "./snapshot.ts";
 import { type Json, locked, snapshotPath } from "./store.ts";
 
 export const MONITOR_ROLE = "monitor";
@@ -146,6 +148,8 @@ function snapshotAdapter(client: RpcClient | null, deadline: number): HarnessAda
 }
 
 interface Wake {
+  readonly claude: HarnessAdapter;
+  readonly harnesses: Readonly<Record<string, Harness>>;
   readonly unblock: string;
   readonly busDir: string;
   readonly coordinator: string;
@@ -160,9 +164,10 @@ interface Wake {
 function capture(wake: Wake, client: RpcClient | null, deadline: number): Promise<Json> {
   const recipients = [...new Set([wake.coordinator, ...wake.peers])];
   return locked(wake.unblock, () =>
-    captureCodex(
+    captureMixed(
       { busDir: wake.busDir, unblock: wake.unblock },
-      snapshotAdapter(client, deadline),
+      { claude: wake.claude, codex: snapshotAdapter(client, deadline) },
+      wake.harnesses,
       recipients,
       wake.parents,
       { routeMembers: recipients, slot: wake.slot },
@@ -270,8 +275,14 @@ async function codexSlot(
   }
   const state = await runSlot({
     busDir: game.busDir,
+    claude: claudeAdapter(process.env, game),
     coordinator: scope.coordinator,
     emit: (kind, key, message) => emitEvent(game, { project }, kind, key, message),
+    harnesses:
+      scope.harnesses ??
+      Object.fromEntries(
+        [scope.coordinator, ...scope.peers, ...parents].map((id) => [id, "codex" as const]),
+      ),
     parents,
     peers: scope.peers,
     signal,
@@ -322,7 +333,7 @@ export async function deliverScheduledWake(
     const parentRoles = config.reports.workerParents.map((role) => resolveRole(registry, role));
     if (parentRoles.some((role) => !members.has(role))) {
       // The Codex observer reports a scope deferral on its own line; the Claude helper as status.
-      return registry.harness === "codex"
+      return send.harness === "codex"
         ? `${DEFERRED_PREFIX}workerParents requires parents in the active monitor route`
         : line({
             reason: "worker parents must be in the active monitor route",
@@ -337,7 +348,7 @@ export async function deliverScheduledWake(
       });
     }
     const unique = [...new Set(parents as string[])];
-    if (registry.harness === "codex") {
+    if (send.harness === "codex") {
       return await codexSlot(game, scope, unique, config.reports.project, slot, signal);
     }
     return line(

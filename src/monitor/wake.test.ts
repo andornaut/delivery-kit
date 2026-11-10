@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type FakeHandler, startFakeControl } from "../adapters/codex/testControlSocket.ts";
+import { gameLayout } from "../layout.ts";
 import { readRegistry, updateRegistry } from "../registry/index.ts";
 import { type ClaudeFixture, claudeFixture, GAME, MONITOR, SLOT, TECH } from "./fixtures.ts";
 import { DEFERRED_PREFIX, deliverScheduledWake } from "./wake.ts";
@@ -19,6 +20,25 @@ afterEach(() => {
 });
 
 describe("deliverScheduledWake (claude)", () => {
+  it("uses the Claude monitor transport while the global default remains Codex", async () => {
+    const fixture = claudeFixture();
+    useEnv(fixture);
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.harness = "codex";
+      draft.roles["game-dev"]!.harness = "claude";
+      draft.roles["archies-dog-walks/tech"]!.harness = "claude";
+    });
+    const result = JSON.parse(
+      await deliverScheduledWake(fixture.layout, fixture.game, SLOT),
+    ) as Record<string, unknown>;
+    expect(result.status).toBe("sending");
+    expect(readRegistry(fixture.layout).harness).toBe("codex");
+    const receipt = JSON.parse(
+      readFileSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`), "utf8"),
+    ) as Record<string, unknown>;
+    expect(receipt.method).toBe("claude-channel");
+  });
+
   it("spools one brief for the registry monitor and deduplicates the slot", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
@@ -131,6 +151,83 @@ describe("deliverScheduledWake (codex)", () => {
       }
     };
   }
+
+  it("keeps Chibi's Codex monitor slots and native collection separate from Claude peers", async () => {
+    const fixture = codexFixture();
+    const claudeTech = "00000000-0000-4000-8000-000000000011";
+    const chibiTech = "00000000-0000-4000-8000-000000000012";
+    const registry = readRegistry(fixture.layout);
+    updateRegistry(fixture.layout, registry.revision, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["archies-dog-walks/tech"]!.harness = "claude";
+      draft.roles["archies-dog-walks/tech"]!.conversations.claude = claudeTech;
+      draft.roles["chibis-way-home/tech"] = {
+        conversations: { codex: chibiTech },
+        harness: "codex",
+        ownership: "active",
+        worktree: "../chibis-way-home/.worktrees/tech",
+      };
+    });
+    fixture.route({ host: "chibis-way-home" });
+    const game = gameLayout(fixture.layout, "chibis-way-home");
+    const unblock = join(game.busDir, "unblock");
+    mkdirSync(join(unblock, "decisions"), { recursive: true });
+    const clearance = join(unblock, "decisions", `${MONITOR}.json`);
+    writeFileSync(clearance, JSON.stringify({ state: "clear", thread_id: MONITOR }));
+    const config = JSON.parse(readFileSync(game.configFile, "utf8")) as {
+      reports: { workerParents: string[] };
+    };
+    config.reports.workerParents = ["monitor", "archies-dog-walks/tech", "chibis-way-home/tech"];
+    writeFileSync(game.configFile, JSON.stringify(config));
+    const steers: Record<string, unknown>[] = [];
+    const control = await startFakeControl(fixture.base, handler(steers));
+    vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
+    try {
+      const first = JSON.parse(await deliverScheduledWake(fixture.layout, game, SLOT)) as Record<
+        string,
+        unknown
+      >;
+      expect(first.status).toBe("accepted");
+      expect(control.calls.filter((call) => call.method === "initialize")).toHaveLength(1);
+      const snapshot = JSON.parse(readFileSync(first.snapshot_path as string, "utf8")) as {
+        harnesses: Record<string, string>;
+        history: Record<string, unknown>;
+        native_queues: Record<string, unknown>;
+        queues: Record<string, unknown>;
+        worker_health: Record<string, unknown>;
+      };
+      expect(snapshot.harnesses).toMatchObject({
+        [MONITOR]: "codex",
+        [claudeTech]: "claude",
+        [chibiTech]: "codex",
+      });
+      expect(snapshot.native_queues[claudeTech]).toMatchObject({ status: "unavailable" });
+      expect(snapshot.history[claudeTech]).toMatchObject({ status: "unavailable" });
+      expect(snapshot.worker_health[claudeTech]).toMatchObject({ status: "unavailable" });
+      expect(snapshot.queues).not.toHaveProperty(claudeTech);
+      expect(JSON.stringify(control.calls)).not.toContain(claudeTech);
+      const repeated = JSON.parse(await deliverScheduledWake(fixture.layout, game, SLOT)) as Record<
+        string,
+        unknown
+      >;
+      expect(repeated.status).toBe("deduplicated");
+      const next = JSON.parse(
+        await deliverScheduledWake(fixture.layout, game, SLOT + 1800),
+      ) as Record<string, unknown>;
+      expect(next.status).toBe("accepted");
+      expect(steers).toHaveLength(2);
+      expect(control.calls.filter((call) => call.method === "initialize")).toHaveLength(3);
+      writeFileSync(clearance, JSON.stringify({ state: "pending", thread_id: MONITOR }));
+      const guarded = JSON.parse(
+        await deliverScheduledWake(fixture.layout, game, SLOT + 3600),
+      ) as Record<string, unknown>;
+      expect(guarded.status).toBe("deferred");
+      expect(steers).toHaveLength(2);
+      expect(JSON.stringify(control.calls)).not.toContain(claudeTech);
+    } finally {
+      await control.close();
+    }
+  });
 
   it("reminds the registry monitor once over one connection and deduplicates the slot", async () => {
     const fixture = codexFixture();

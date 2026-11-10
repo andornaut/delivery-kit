@@ -141,10 +141,11 @@ export interface SlotOutcome {
 }
 
 function unavailableDiagnostics(
-  parents: readonly string[],
   entries: readonly AgentEntry[] | null,
-  peers: readonly string[],
+  route: ActiveScope,
+  parents: readonly string[],
 ): Diagnostic[] {
+  const harness = (id: string) => (route.harnesses === undefined ? "claude" : route.harnesses[id]);
   return [
     ...["queue_inventory", "question_history"].map((kind) =>
       ordered([
@@ -153,15 +154,33 @@ function unavailableDiagnostics(
         ["reason_code", "claude_no_native_api"],
       ]),
     ),
-    ...parents.map((parent) =>
-      ordered([
+    ...parents.map((parent) => {
+      const provider = harness(parent);
+      return ordered([
         ["kind", "worker_health"],
         ["parent", parent],
         ["status", "unavailable"],
-        ["reason_code", "claude_no_native_api"],
-      ]),
+        [
+          "reason_code",
+          provider === "claude" ? "claude_no_native_api" : "provider_metadata_unsupported",
+        ],
+        ...(provider === "claude" ? [] : ([["harness", provider ?? "unknown"]] as const)),
+      ]);
+    }),
+    ...route.peers.flatMap((peer) =>
+      harness(peer) === "claude"
+        ? (roleDiagnostics(entries, [peer]) as unknown as Diagnostic[])
+        : [
+            ordered([
+              ["kind", "question_state"],
+              ["session_id", peer],
+              ["status", "unavailable"],
+              ["reason_code", "provider_metadata_unsupported"],
+              ["session_status", "unknown"],
+              ["harness", harness(peer) ?? "unknown"],
+            ]),
+          ],
     ),
-    ...(roleDiagnostics(entries, peers) as unknown as Diagnostic[]),
   ];
 }
 
@@ -209,6 +228,18 @@ export function spoolMonitorBrief(
     if (parents.some((parent) => !members.has(parent))) {
       return defer("worker parents require membership in the active monitor route");
     }
+    if (route.harness !== undefined && route.harness !== "claude") {
+      return defer("monitor transport requires the Claude harness");
+    }
+    if (
+      route.harnesses !== undefined &&
+      (route.harnesses[coordinator] !== "claude" ||
+        [...members].some(
+          (member) => !["claude", "codex"].includes(route.harnesses?.[member] ?? ""),
+        ))
+    ) {
+      return defer("monitor route endpoint harness missing or invalid");
+    }
     if (!decisionClear(unblock, coordinator)) {
       return defer("recipient-bound user-decision clearance missing, invalid or pending");
     }
@@ -221,7 +252,7 @@ export function spoolMonitorBrief(
     if (availability.status === null) {
       return defer(availability.reason);
     }
-    const diagnostics = unavailableDiagnostics(parents, entries, route.peers);
+    const diagnostics = unavailableDiagnostics(entries, route, parents);
     const entry: SpoolEntry = {
       kind: "monitor",
       receipt: `${UNBLOCK}/${basename(path)}`,

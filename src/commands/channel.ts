@@ -12,7 +12,7 @@ import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { MONITOR_ROLE } from "../monitor/wake.ts";
-import { resolveConversation } from "../registry/resolve.ts";
+import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { SPECS } from "./spec.ts";
 
@@ -71,8 +71,10 @@ function registryMonitor(root: string): string {
     }
     throw error;
   }
-  if (registry.harness !== "claude") {
-    throw new Error("channel requires the claude harness in var/registry.json");
+  if (resolveHarness(registry, MONITOR_ROLE) !== "claude") {
+    throw new Error(
+      "channel requires the claude harness for the monitor role in var/registry.json",
+    );
   }
   const monitor = resolveConversation(registry, MONITOR_ROLE);
   if (monitor === null) {

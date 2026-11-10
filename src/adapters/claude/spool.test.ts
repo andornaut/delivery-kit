@@ -56,6 +56,93 @@ function claimAll(fixture: ClaudeFixture): void {
 }
 
 describe("spoolMonitorBrief", () => {
+  it("reports Codex peer and parent metadata as unsupported without using Claude session status", () => {
+    const fixture = claudeFixture();
+    const codex = "00000000-0000-4000-8000-000000000022";
+    fixture.agents([idle(), idle(TECH), { sessionId: codex, status: "blocked" }]);
+    const route: ActiveScope = {
+      ...active(fixture),
+      harnesses: { [MONITOR]: "claude", [TECH]: "claude", [codex]: "codex" },
+      peers: [TECH, codex],
+      targets: [
+        { name: "archies-dog-walks/tech", sessionId: TECH },
+        { name: "chibis-way-home/tech", sessionId: codex },
+      ],
+    };
+    const state = spoolMonitorBrief(fixture.env, fixture.game.busDir, route, SLOT, [TECH, codex]);
+    expect(state.status).toBe("sending");
+    expect(state.diagnostics).toContainEqual({
+      harness: "codex",
+      kind: "question_state",
+      reason_code: "provider_metadata_unsupported",
+      session_id: codex,
+      session_status: "unknown",
+      status: "unavailable",
+    });
+    expect(state.diagnostics).toContainEqual({
+      harness: "codex",
+      kind: "worker_health",
+      parent: codex,
+      reason_code: "provider_metadata_unsupported",
+      status: "unavailable",
+    });
+    expect(state.diagnostics).toContainEqual({
+      kind: "question_state",
+      reason_code: "claude_session_reported_only",
+      session_id: TECH,
+      session_status: "idle",
+      status: "unavailable",
+    });
+  });
+
+  it("fails closed when an explicit endpoint harness map is incomplete", () => {
+    const fixture = claudeFixture();
+    const route = { ...active(fixture), harnesses: { [MONITOR]: "claude" as const } };
+    const state = spoolMonitorBrief(fixture.env, fixture.game.busDir, route, SLOT);
+    expect(state.status).toBe("deferred");
+    expect(state.reason).toContain("harness missing or invalid");
+    expect(spooled(fixture)).toEqual([]);
+  });
+
+  it("keeps homogeneous legacy diagnostics and brief text unchanged with explicit selection", () => {
+    const fixture = claudeFixture();
+    const scope = active(fixture);
+    const legacy: ActiveScope = {
+      coordinator: scope.coordinator,
+      monitorName: scope.monitorName,
+      peers: scope.peers,
+      status: "active",
+      targets: scope.targets,
+    };
+    const first = spoolMonitorBrief(fixture.env, fixture.game.busDir, legacy, SLOT, [TECH]);
+    const firstEntry = JSON.parse(
+      readFileSync(
+        join(spoolDir(fixture.game.busDir), `${slotRequestId(MONITOR, SLOT)}.json`),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    const other = claudeFixture();
+    const second = spoolMonitorBrief(
+      other.env,
+      other.game.busDir,
+      {
+        ...legacy,
+        harness: "claude",
+        harnesses: { [MONITOR]: "claude", [TECH]: "claude" },
+      },
+      SLOT,
+      [TECH],
+    );
+    const secondEntry = JSON.parse(
+      readFileSync(
+        join(spoolDir(other.game.busDir), `${slotRequestId(MONITOR, SLOT)}.json`),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    expect(second.diagnostics).toEqual(first.diagnostics);
+    expect(secondEntry.text).toBe(firstEntry.text);
+  });
+
   it("writes the sending receipt and one spool entry keyed by the slot request ID", () => {
     const fixture = claudeFixture();
     fixture.agents([{ kind: "interactive", sessionId: MONITOR, status: "busy" }, idle(TECH)]);

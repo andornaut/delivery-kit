@@ -8,7 +8,7 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { claudeFixture, MONITOR } from "../monitor/fixtures.ts";
 import type { Registry } from "../registry/schema.ts";
-import { createRegistry } from "../registry/store.ts";
+import { createRegistry, updateRegistry } from "../registry/store.ts";
 import { makeFixture, registryInput } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
 
@@ -18,6 +18,46 @@ function io(): Io & { errors: string[] } {
 }
 
 describe("claude channel options", () => {
+  it("serves a Claude monitor while the global default is Codex", async () => {
+    const fixture = claudeFixture();
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.harness = "codex";
+      draft.roles["game-dev"]!.harness = "claude";
+    });
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      [],
+    );
+    input.write(`${JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" })}\n`);
+    input.end();
+    expect(await done).toBe(EXIT_OK);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { id: 1, jsonrpc: "2.0", result: {} },
+    ]);
+  });
+
+  it("refuses a Codex monitor even while the global default is Claude", async () => {
+    const fixture = claudeFixture();
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-dev"]!.conversations.codex = MONITOR;
+    });
+    const errors = io();
+    expect(
+      await runChannel(
+        { input: new PassThrough(), write: () => undefined },
+        errors,
+        fixture.layout.root,
+        [],
+      ),
+    ).toBe(EXIT_INVALID);
+    expect(errors.errors.join("")).toContain("claude harness for the monitor role");
+  });
+
   it("rejects a repeated state directory, a relative one and a noncanonical monitor", async () => {
     const fixture = claudeFixture();
     const dir = join(fixture.game.busDir, "unblock");
