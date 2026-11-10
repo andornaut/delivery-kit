@@ -26,6 +26,8 @@ A pin changes only by a devDependency bump, `npm ci`, then an idle runner replac
 runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
 `claude channel`, the readiness probes and the monitor commands.
 
+<!-- CLEANUP (added 2026-11-10): Remove after reviewed 2.2.0 publication and install pin update. -->
+
 The mixed-harness changes are planned for a private, checked 2.2.0 candidate package. Publication
 and consumer adoption require separate approval. The published install pin above remains 2.1.1;
 no public 2.2.0 release asset is assumed.
@@ -276,6 +278,19 @@ state. Unavailable capabilities remain explicitly unknown. A Claude conversation
 queried through Codex, and unavailable native data is never presented as an empty queue or as
 permission to acknowledge work. Mixed selection preserves exact payload guards, ambiguous-delivery
 handling and the existing same-slot monitor acknowledgements.
+
+Mixed monitor snapshots expose `harnesses` (the provider per conversation), `native_queues`
+(native queue availability), `channel_queues` (delivered local-channel entries) and `queue_sources`
+(inventory origin). `complete` means the requested available inventories were collected without
+actual collection errors, preserving the legacy exit-0 success semantics. It proves neither
+native visibility nor clearance.
+
+`native_complete` is true only when every requested recipient is Codex and its native queue was
+captured. Any requested Claude recipient makes it false, even when its available delivered-channel
+inventory is empty. An unrequested Claude peer's diagnostics do not make a Codex recipient's
+`native_complete` false. Unsupported Claude APIs remain explicitly unknown; their absence adds
+neither collection errors nor scheduled-wake blockers. Actual inventory collection failures remain
+errors.
 
 `CLAUDE_BIN` overrides the `claude` executable. Events dedupe on `sha256(kind:key)`, and every
 `blocked-*` kind shares one identity, so a changed block reason is not reported again. Each
