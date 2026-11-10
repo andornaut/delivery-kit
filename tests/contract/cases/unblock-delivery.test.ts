@@ -225,7 +225,7 @@ suite("unblock delivery", () => {
         });
         expect(m.world.mutations()).toEqual([]);
         expect(m.ws.list("unblock", "snapshots")).toContain(`${tick.result?.snapshot_id}.json`);
-        expect(m.receipt(wake(0)).status).toBe(status === "sending" ? "ambiguous" : "accepted");
+        expect(m.receipt(wake(0)).status).toBe(status === "sending" ? "ambiguous" : status);
       }
     },
   );
