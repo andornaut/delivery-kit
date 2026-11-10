@@ -120,7 +120,7 @@ suite("mixed harness CLI", () => {
         adapters: { claude: { status: "available" }, codex: { status: "available" } },
       });
       expect(JSON.parse(result.stdout).roles).toHaveLength(7);
-      expect(socket.methods()).toEqual([]);
+      expect(socket.methods()).toEqual(["initialize", "initialized"]);
       expect(readFileSync(join(ws.gameDev, "var", "registry.json"), "utf8")).toBe(before);
       const unavailable = await execute(impl.bare(ws, ["claude", "ready", "--game", ADA]));
       expect(unavailable.code).toBe(1);
