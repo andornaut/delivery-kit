@@ -493,6 +493,11 @@ GNU Make is the check interface. Docker builds the verification image from the p
 version in `.nvmrc` and both lockfiles. Dependencies live in the image; each check receives a
 Git-free source snapshot in disposable `/work`, with no host home or Docker socket mounted.
 
+WORKAROUND: root overrides keep `markdownlint-cli2` 0.24.0 on patched Markdown and math
+dependencies for [GHSA-gg6h-894w-4m9c](https://github.com/advisories/GHSA-gg6h-894w-4m9c)
+and [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
+Remove them when upstream resolves the patched versions without overrides.
+
 | Command           | Checks                                                                                       |
 | ----------------- | -------------------------------------------------------------------------------------------- |
 | `make check`      | Every category in `CHECK_TASKS`: lint, test and build.                                       |
