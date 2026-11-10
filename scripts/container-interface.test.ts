@@ -1,63 +1,48 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { checkContext, testTargets, workerArguments } from "./container-check.ts";
+import { testTargets, workerArguments } from "./check.ts";
+import { checkContext, inspectionContext } from "./package-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-describe("container interface metadata", () => {
-  it("reports the declared categories without Docker, and follows the same overridden task list", () => {
-    for (const tasks of ["lint test build", "test", "build lint"]) {
-      const result = spawnSync(
-        "make",
-        ["--no-print-directory", "check-info", `CHECK_TASKS=${tasks}`],
-        {
-          cwd: root,
-          encoding: "utf8",
-        },
+describe("native check interface", () => {
+  it("keeps native npm checks independent of Make and Docker", () => {
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    for (const name of ["build", "check", "lint", "test", "verify", "contract", "package:check"]) {
+      expect(manifest.scripts[name], name).not.toMatch(/\b(?:make|docker)\b/);
+    }
+    for (const file of ["scripts/check.ts", "scripts/contract.ts", "scripts/package-check.ts"]) {
+      expect(readFileSync(join(root, file), "utf8"), file).not.toMatch(
+        /(?:run|spawnSync)\([^;]*["'](?:make|docker)["']/,
       );
-      expect(result.status, result.stderr).toBe(0);
-      expect(JSON.parse(result.stdout)).toEqual({ version: 1, checks: tasks.split(" ") });
     }
   });
 
-  it("rejects unknown and duplicate categories rather than advertising an inconsistent interface", () => {
-    for (const tasks of ["lint invalid", "test test", ""]) {
-      const result = spawnSync(
-        "make",
-        ["--no-print-directory", "check-info", `CHECK_TASKS=${tasks}`],
-        {
-          cwd: root,
-          encoding: "utf8",
-        },
-      );
-      expect(result.status).not.toBe(0);
-      expect(result.stdout).not.toContain('"version":1');
-    }
+  it("exposes only check as the public Make target", () => {
+    const makefile = readFileSync(join(root, "Makefile"), "utf8");
+    const targets = [...makefile.matchAll(/^([a-z][a-z-]*):(?:\s|$)/gm)].map((match) => match[1]);
+    expect(targets).toEqual(["check"]);
+    expect(makefile).toContain("./tests/container/run check");
+    expect(makefile).not.toContain("check-info");
   });
 
-  it("keeps COMMAND and TEST_ARGS literal when Make exports them", () => {
-    const scratch = mkdtempSync(join(tmpdir(), "make-literals-"));
-    const commandMarker = join(scratch, "command-expanded");
-    const testMarker = join(scratch, "test-expanded");
-    const result = spawnSync(
-      "make",
-      [
-        "--no-print-directory",
-        "check-info",
-        `COMMAND=$(shell touch ${commandMarker})`,
-        `TEST_ARGS=$(shell touch ${testMarker})`,
-      ],
-      { cwd: root, encoding: "utf8" },
+  it("uses ordinary serial lint-staged and direct local formatters", () => {
+    expect(readFileSync(join(root, ".husky/pre-commit"), "utf8")).toBe(
+      "npx lint-staged --concurrent false\n",
     );
-    expect(result.status, result.stderr).toBe(0);
-    expect(existsSync(commandMarker)).toBe(false);
-    expect(existsSync(testMarker)).toBe(false);
+    const config = JSON.parse(readFileSync(join(root, ".lintstagedrc"), "utf8"));
+    expect(config["*"]).toBe("prettier --write --ignore-unknown");
+    expect(config["*.{js,mjs}"]).toBe("eslint --fix --max-warnings 0");
+    expect(existsSync(join(root, "tests/container/staged"))).toBe(false);
+    expect(existsSync(join(root, "tests/container/staged-git"))).toBe(false);
   });
 });
 
@@ -101,20 +86,22 @@ describe("test selection", () => {
   });
 });
 
-describe("formatter argv", () => {
-  it("preserves argv literally and gives it precedence over shell COMMAND", () => {
-    const scratch = mkdtempSync(join(tmpdir(), "formatter-argv-"));
-    const output = join(scratch, "argv.json");
-    const marker = join(scratch, "must-not-execute");
+describe("native argv", () => {
+  it("passes whitespace and shell-shaped filenames literally without a shell command", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "native-argv-"));
+    const output = join(scratch, "argv.json"),
+      marker = join(scratch, "must-not-execute");
     const args = ["space in filename", `literal $(touch ${marker})`];
-    const module = join(root, "scripts/container-check.ts");
     const writer =
       "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))";
-    const invocation = [process.execPath, "-e", writer, output, ...args];
-    const result = spawnSync(process.execPath, [module, "exec", ...invocation], {
+    const module = join(root, "scripts/check.ts");
+    const program = `import { run } from ${JSON.stringify(module)}; run(${JSON.stringify(
+      scratch,
+    )}, process.execPath, ${JSON.stringify(["-e", writer, output, ...args])});`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", program], {
       cwd: scratch,
       encoding: "utf8",
-      env: { ...process.env, CHECK_WRITABLE: "1", COMMAND: `touch ${marker}` },
+      env: { ...process.env, COMMAND: `touch ${marker}` },
     });
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(readFileSync(output, "utf8"))).toEqual(args);
@@ -122,27 +109,26 @@ describe("formatter argv", () => {
   });
 });
 
-describe("snapshot provenance", () => {
-  it("preserves dirty snapshot identity without converting the revision into a clean source claim", () => {
-    expect(
-      checkContext({
-        CHECK_REVISION: "a".repeat(40),
-        CHECK_SOURCE_SHA256: "b".repeat(64),
-        CHECK_SOURCE_DIRTY: "true",
-      }),
-    ).toEqual({
-      CHECK_REVISION: "a".repeat(40),
-      CHECK_SOURCE_SHA256: "b".repeat(64),
+describe("package inspection provenance", () => {
+  const valid = {
+    CHECK_REVISION: "a".repeat(40),
+    CHECK_SOURCE_SHA256: "b".repeat(64),
+    CHECK_SOURCE_DIRTY: "true",
+  };
+
+  it("preserves dirty snapshot identity without making an immutable commit claim", () => {
+    expect(checkContext(valid)).toEqual({ ...valid, CHECK_SOURCE_DIRTY: true });
+    expect(inspectionContext(valid)).toMatchObject({
+      kind: "snapshot-package-inspection",
+      immutableCommitClaim: false,
       CHECK_SOURCE_DIRTY: true,
     });
+    expect(inspectionContext({ ...valid, CHECK_SOURCE_DIRTY: "false" }).immutableCommitClaim).toBe(
+      false,
+    );
   });
 
-  it("rejects missing or malformed revision, archive hash and dirty state", () => {
-    const valid = {
-      CHECK_REVISION: "a".repeat(40),
-      CHECK_SOURCE_SHA256: "b".repeat(64),
-      CHECK_SOURCE_DIRTY: "false",
-    };
+  it("rejects missing or malformed snapshot fields rather than silently losing identity", () => {
     for (const changes of [
       { CHECK_REVISION: "main" },
       { CHECK_SOURCE_SHA256: "missing" },
@@ -151,39 +137,13 @@ describe("snapshot provenance", () => {
       expect(() => checkContext({ ...valid, ...changes })).toThrow(/provenance/);
     }
     expect(() => checkContext({})).toThrow(/provenance/);
+    expect(() => inspectionContext({ CHECK_SOURCE_DIRTY: "true" })).toThrow(/provenance/);
   });
 
-  it("refuses existing package proof destinations before building or overwriting them", () => {
-    const module = join(root, "scripts/container-check.ts");
-    for (const target of ["scratch/package-proof", ".claude/release-output"]) {
-      const fixture = mkdtempSync(join(tmpdir(), "check-output-"));
-      mkdirSync(join(fixture, "tests/contract"), { recursive: true });
-      mkdirSync(join(fixture, "scratch"));
-      mkdirSync(join(fixture, target), { recursive: true });
-      const marker = join(fixture, target, "retained");
-      writeFileSync(marker, "unchanged");
-      const result = spawnSync(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          `import { runChecks } from ${JSON.stringify(module)}; process.exitCode = runChecks(['build']);`,
-        ],
-        {
-          cwd: fixture,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            TMPDIR: join(fixture, "scratch"),
-            CHECK_REVISION: "a".repeat(40),
-            CHECK_SOURCE_SHA256: "b".repeat(64),
-            CHECK_SOURCE_DIRTY: "true",
-          },
-        },
-      );
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain("snapshot package proof output already exists");
-      expect(readFileSync(marker, "utf8")).toBe("unchanged");
-    }
+  it("supports native inspection without inventing a commit or source hash", () => {
+    expect(inspectionContext({})).toEqual({
+      kind: "snapshot-package-inspection",
+      immutableCommitClaim: false,
+    });
   });
 });

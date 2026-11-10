@@ -14,7 +14,7 @@ const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json"];
 beforeAll(() => {
   for (const bundle of BUNDLES) {
     if (!existsSync(join(root, bundle))) {
-      throw new Error(`${bundle} is missing; make test builds the bundles before running units`);
+      throw new Error(`${bundle} is missing; run npm run build before running units`);
     }
   }
 });

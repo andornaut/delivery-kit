@@ -24,15 +24,16 @@
     "SOURCE_COMMIT"
   ],
   "scripts": {
-    "build": "make build",
-    "check": "make check",
+    "build": "node scripts/build.mjs",
+    "check": "tsc && npm --prefix tests/contract run check",
     "contract": "node scripts/contract.ts",
     "format": "prettier --write . && eslint --fix .",
-    "lint": "make lint",
+    "lint": "prettier --check . && eslint --max-warnings 0 . && markdownlint-cli2 && shellcheck -x -P SCRIPTDIR scripts/*.sh tests/contract/run.sh tests/container/run tests/container/check",
     "pack": "node scripts/pack.ts",
     "prepare": "husky",
-    "test": "make test",
-    "verify": "make check"
+    "test": "vitest run --maxWorkers=4",
+    "verify": "node scripts/check.ts",
+    "package:check": "node scripts/package-check.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

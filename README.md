@@ -489,73 +489,57 @@ Callers change:
 
 ## Development
 
-GNU Make is the check interface. Docker builds the verification image from the pinned Node
-version in `.nvmrc` and both lockfiles. Dependencies live in the image; each check receives a
-Git-free source snapshot in disposable `/work`, with no host home or Docker socket mounted.
+GNU Make exposes one automation target: `make check`. It runs the complete gate in the
+custom project image built from the pinned Node version in `.nvmrc`.
+The custom image installs root and contract dependencies from their lockfiles and retains
+the npm cache for the exact-commit release controller. Checks receive a sanitized read-only
+source archive in a disposable workspace, using those image-owned dependencies.
+
+Native npm commands run directly wherever they are invoked. Local prerequisites are the
+pinned Node version, root and contract dependencies, and ShellCheck 0.11.0.
+Install dependencies with `npm ci` and `npm --prefix tests/contract ci`.
 
 WORKAROUND: root overrides keep `markdownlint-cli2` 0.24.0 on patched Markdown and math
 dependencies for [GHSA-gg6h-894w-4m9c](https://github.com/advisories/GHSA-gg6h-894w-4m9c)
 and [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
 Remove them when upstream resolves the patched versions without overrides.
 
-| Command           | Checks                                                                                       |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| `make check`      | Every category in `CHECK_TASKS`: lint, test and build.                                       |
-| `make lint`       | Root and contract types, Prettier, ESLint, Markdown and wrapper syntax.                      |
-| `make test`       | Build the bundles, then unit and black-box contract tests with at most four workers.         |
-| `make build`      | Build and inspect an offline npm package, its CLI version and registry declarations/exports. |
-| `make check-info` | JSON `{"version":1,"checks":["lint","test","build"]}`, derived from `CHECK_TASKS`.           |
+| Command                 | Checks                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- |
+| `make check`            | Complete verification in the project image.                                                              |
+| `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection. |
+| `npm run check`         | Root and contract types.                                                                                 |
+| `npm run lint`          | Prettier, ESLint, Markdown and ShellCheck with `-x -P SCRIPTDIR`.                                        |
+| `npm run build`         | Build the CLI and registry bundles and declarations.                                                     |
+| `npm test`              | Unit tests, using at most four workers by default; build first.                                          |
+| `npm run contract`      | Build, contract types and the complete native contract suite.                                            |
+| `npm run package:check` | Inspect built package contents, CLI version and registry declarations/exports.                           |
 
-`npm run check` and `npm run verify` delegate to `make check`. The native `test`, `lint` and
-`build` npm scripts delegate to the matching Make targets. The inner dispatcher invokes tools
-directly, so these aliases never start another container from inside a check.
+Explicit source or contract paths passed to `npm run verify --` select the corresponding
+suite; unscoped filters apply to both. Standalone `npm run contract -- --lock` regenerates
+the contract lockfile with native npm. Ordinary Git commits run serial local lint-staged,
+with direct Prettier and ESLint fixes that preserve Git's staged/unstaged workflow.
 
-`TEST_ARGS` forwards whitespace-separated Vitest arguments. Explicit source or contract paths
-select that suite; without a file scope both suites run. For example:
+CI uses `make check` because this project builds a custom Dockerfile. Native npm commands
+remain direct host tools. Make owns the custom-image verification boundary and exports no
+generated files from the complete gate. Container CPU, memory and worker limits and source
+fingerprints remain enforced.
 
-```bash
-make test TEST_ARGS=src/ci.test.ts
-make test TEST_ARGS=tests/contract/cases/smoke.test.ts
-```
+Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
+`CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native
+inspection without that metadata invents no commit or source hash. Inspection writes its
+archive and `CHECK_CONTEXT.json` to a fresh temporary directory and prints that location.
 
-`BUILD_OUTPUTS` and `TEST_OUTPUTS` default to empty. `make check` never exports files.
-Explicit `make build BUILD_OUTPUTS=.claude/release-output` exports the package inspection output;
-explicit `make test TEST_OUTPUTS=IGNORED_PATH` exports generated test output. Export destinations
-must be ignored generated content and cannot include tracked files, symlinks or excluded entries.
-Validated exports replace the requested destination instead of merging stale files.
-`CHECK_CONTEXT.json` records `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and
-`CHECK_SOURCE_DIRTY`. Snapshot inspection packages make no immutable-commit claim and are not
-release assets. A changed source snapshot invalidates the check result.
-
-`CHECK_ADMISSION` is optional and unset by default. A configured relative regular executable
-receives `build-image`, `lint`, `test`, `build` or `exec` immediately before that phase starts.
-It has five seconds to accept; failure or timeout stops the phase and reports on stderr.
-
-`make staged` keeps host lint-staged Git/stash orchestration and invokes the canonical staged
-adapter for containerized Prettier and ESLint fixes with exact formatter argv. Private Git state
-stays outside the writable checkout. An unresolved container-writer marker prevents Git rollback,
-index and stash operations, preserving recovery evidence until the writer is resolved.
-
-The standard `exec` action is writable and separate from checks. `COMMAND` and `TEST_ARGS`
-remain literal when Make exports them. Ordinary lint, test and build actions use uid 19001 and
-read-only host inputs. They have no clock or host-load gate. The public runtime resource limits
-and delivery configuration remain independent of this development interface.
-
-The compatibility wrappers `scripts/check.sh`, `scripts/pack.sh` and `tests/contract/run.sh`
-remain thin Node entry points. Additional maintainer commands are:
-
-- `npm run contract -- [--lock] [VITEST_ARGS]`: the isolated standalone contract harness;
-  `--lock` regenerates `tests/contract/package-lock.json`.
-- `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory`: the offline exact-revision
-  release packer. `CONTAINER_IMAGE` selects an already prepared check image and its
-  `/opt/check/npm-cache`. A missing image or unavailable offline dependency fails without a
-  network fallback. Without `CONTAINER_IMAGE`, the existing Node image and read-only
-  `delivery-kit-npm-check` cache-volume path remain available.
-
-CI supplies the same explicit `CONTAINER_IMAGE` to `make check` and the subsequent exact-SHA
-pack. The release packer archives only the requested commit, retains its source epoch and
-copies `SOURCE_COMMIT` and `SHA256SUMS` out with the archive. It does not use a dirty snapshot
-inspection package as release input.
+The thin wrappers `scripts/check.sh` and `tests/contract/run.sh` invoke native Node helpers.
+The separately invoked `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the
+explicit host release-controller exception: it archives the requested commit and starts
+its own offline release container. For this controller, `CONTAINER_IMAGE` selects a prepared
+cache image containing `/opt/check/npm-cache`; an unavailable image or dependency fails
+without fallback.
+Without it, the pinned Node image and read-only `delivery-kit-npm-check` cache volume remain
+supported. The controller retains the source epoch and copies the exact revision's
+`SOURCE_COMMIT` and `SHA256SUMS` out with the archive. CI invokes this controller on the
+host after Make verification; package inspection inside the image does not invoke it.
 
 ## Compatibility and releases
 

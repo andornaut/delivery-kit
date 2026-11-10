@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CONTAINER_IMAGE: local-check:delivery-kit-ci
+      CHECK_TIMEOUT_SECONDS: "1800"
     # Offline contracts include timed observer waits alongside installs, builds
     # and packaging; at 30 minutes a check has hung rather than finished normally.
     timeout-minutes: 30
@@ -49,7 +50,8 @@ jobs:
           scandir: "."
       - name: Prepare verification image
         run: docker pull "node:$(sed 's/^v//' .nvmrc)"
-      - name: Isolated offline checks and package validation
+      - name: Check the custom project image
         run: make check
+      # The exact-commit host controller starts its own isolated release container.
       - name: Build the npm release asset offline
         run: npm run pack -- "$GITHUB_SHA" "$RUNNER_TEMP/release"
