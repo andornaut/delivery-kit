@@ -18,7 +18,7 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.1.0/delivery-kit-2.1.0.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.1.1/delivery-kit-2.1.1.tgz"
 }
 ```
 
