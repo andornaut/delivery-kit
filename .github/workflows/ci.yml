@@ -8,6 +8,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      CONTAINER_IMAGE: local-check:delivery-kit-ci
     # Offline contracts include timed observer waits alongside installs, builds
     # and packaging; at 30 minutes a check has hung rather than finished normally.
     timeout-minutes: 30
@@ -16,6 +18,9 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
+      - uses: docker/setup-docker-action@v5.7.0
+        with:
+          version: v29.9.3
       # -x follows a `source` into the file it names and -P SCRIPTDIR looks for
       # it beside the script doing the sourcing, which shellcheck cannot resolve
       # on its own. Set everywhere rather than only where something sources
@@ -44,6 +49,6 @@ jobs:
       - name: Prepare verification image
         run: docker pull "node:$(sed 's/^v//' .nvmrc)"
       - name: Isolated offline checks and package validation
-        run: npm run verify
+        run: make check
       - name: Build the npm release asset offline
         run: npm run pack -- "$GITHUB_SHA" "$RUNNER_TEMP/release"

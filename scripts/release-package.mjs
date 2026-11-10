@@ -1,5 +1,5 @@
 // Stage the built package, pack it and write SOURCE_COMMIT and SHA256SUMS beside the archive.
-// Usage: node scripts/release-package.mjs STAGING_DIRECTORY OUTPUT_DIRECTORY (after npm run build).
+// Usage: node scripts/release-package.mjs STAGING_DIRECTORY OUTPUT_DIRECTORY (after scripts/build.mjs).
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

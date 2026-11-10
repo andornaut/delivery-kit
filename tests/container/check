@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+import { runChecks } from "/work/scripts/container-check.ts";
+
+process.exitCode = runChecks(process.argv.slice(2));

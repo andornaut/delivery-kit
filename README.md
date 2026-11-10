@@ -489,27 +489,56 @@ Callers change:
 
 ## Development
 
-The maintainer scripts are TypeScript under `scripts/`, run directly by Node with only `node:`
-builtins: they run on the host as the invoking user and drive `docker`. `scripts/check.sh`,
-`scripts/pack.sh` and `tests/contract/run.sh` are thin wrappers that `exec` them, and are not
-shipped. The repository has no other shell or Python.
+GNU Make is the check interface. Docker builds the verification image from the pinned Node
+version in `.nvmrc` and both lockfiles. Dependencies live in the image; each check receives a
+Git-free source snapshot in disposable `/work`, with no host home or Docker socket mounted.
 
-- `npm run verify` (`scripts/check.ts`): types, lint, build, unit tests and the contract cases in
-  offline containers running as uid 19001 in the checkout's group (`--group-add`). The checkout
-  and its file list are bound read-only and copied into container scratch. The npm cache lives in
-  a named volume that one networked step populates. The contract cases run the built bundle. A
-  changed source fingerprint, ownership or mode change, or any file owned by uid or gid 19001
-  discards the result.
-- `npm run contract -- [--lock] [VITEST_ARGS]` (`scripts/contract.ts`): the contract harness alone,
-  with the source streamed in as a tar. `--lock` regenerates
-  `tests/contract/package-lock.json`.
-- `npm run check`: TypeScript only.
-- `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` (`scripts/pack.ts`): builds the
-  release asset from an exact commit, offline under the same container rules with the cache volume
-  read-only.
+| Command           | Checks                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `make check`      | Every category in `CHECK_TASKS`: lint, test and build.                                       |
+| `make lint`       | Root and contract types, Prettier, ESLint, Markdown and wrapper syntax.                      |
+| `make test`       | Build the bundles, then unit and black-box contract tests with at most four workers.         |
+| `make build`      | Build and inspect an offline npm package, its CLI version and registry declarations/exports. |
+| `make check-info` | JSON `{"version":1,"checks":["lint","test","build"]}`, derived from `CHECK_TASKS`.           |
 
-`.nvmrc` pins the Node version for both the host scripts and the container image. Containers
-start only below a one-minute load of 24 and use at most four CPUs.
+`npm run check` and `npm run verify` delegate to `make check`. The native `test`, `lint` and
+`build` npm scripts delegate to the matching Make targets. The inner dispatcher invokes tools
+directly, so these aliases never start another container from inside a check.
+
+`TEST_ARGS` forwards whitespace-separated Vitest arguments. Explicit source or contract paths
+select that suite; without a file scope both suites run. For example:
+
+```bash
+make test TEST_ARGS=src/ci.test.ts
+make test TEST_ARGS=tests/contract/cases/smoke.test.ts
+```
+
+`make check` exports no build files. An explicit `make build` exports only
+`.claude/release-output`; set `BUILD_OUTPUTS=` to inspect the package without exporting it.
+`CHECK_CONTEXT.json` records `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and
+`CHECK_SOURCE_DIRTY`. Snapshot inspection packages make no immutable-commit claim and are not
+release assets. A changed source snapshot invalidates the check result.
+
+The standard `exec` action is writable and separate from checks. `COMMAND` and `TEST_ARGS`
+remain literal when Make exports them. Ordinary lint, test and build actions use uid 19001 and
+read-only host inputs. They have no clock or host-load gate. The public runtime resource limits
+and delivery configuration remain independent of this development interface.
+
+The compatibility wrappers `scripts/check.sh`, `scripts/pack.sh` and `tests/contract/run.sh`
+remain thin Node entry points. Additional maintainer commands are:
+
+- `npm run contract -- [--lock] [VITEST_ARGS]`: the isolated standalone contract harness;
+  `--lock` regenerates `tests/contract/package-lock.json`.
+- `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory`: the offline exact-revision
+  release packer. `CONTAINER_IMAGE` selects an already prepared check image and its
+  `/opt/check/npm-cache`. A missing image or unavailable offline dependency fails without a
+  network fallback. Without `CONTAINER_IMAGE`, the existing Node image and read-only
+  `delivery-kit-npm-check` cache-volume path remain available.
+
+CI supplies the same explicit `CONTAINER_IMAGE` to `make check` and the subsequent exact-SHA
+pack. The release packer archives only the requested commit, retains its source epoch and
+copies `SOURCE_COMMIT` and `SHA256SUMS` out with the archive. It does not use a dirty snapshot
+inspection package as release input.
 
 ## Compatibility and releases
 

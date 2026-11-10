@@ -24,15 +24,15 @@
     "SOURCE_COMMIT"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "check": "tsc",
+    "build": "make build",
+    "check": "make check",
     "contract": "node scripts/contract.ts",
     "format": "prettier --write . && eslint --fix .",
-    "lint": "prettier --check . && eslint --max-warnings 0 . && markdownlint-cli2",
+    "lint": "make lint",
     "pack": "node scripts/pack.ts",
     "prepare": "husky",
-    "test": "vitest run",
-    "verify": "node scripts/check.ts"
+    "test": "make test",
+    "verify": "make check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

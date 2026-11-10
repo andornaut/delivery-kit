@@ -1,4 +1,4 @@
-// Static checks on the built bundles (run after `npm run build`) and the packed file list.
+// Static checks on the bundles built before the unit suite, and the packed file list.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +14,7 @@ const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json"];
 beforeAll(() => {
   for (const bundle of BUNDLES) {
     if (!existsSync(join(root, bundle))) {
-      throw new Error(`${bundle} is missing; run npm run build first`);
+      throw new Error(`${bundle} is missing; make test builds the bundles before running units`);
     }
   }
 });

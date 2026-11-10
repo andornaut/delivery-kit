@@ -1,7 +1,7 @@
 // Build the npm release asset from an exact committed revision, offline, in a container running
 // as uid 19001. The host writes the committed tree with git archive to a group-readable file
 // outside the checkout, bound read-only (--group-add its group); the npm cache comes read-only
-// from the volume check.ts populates, and the host user copies the artifacts out with docker cp.
+// from a prepared check image or the legacy volume; the host user copies artifacts with docker cp.
 // Output: delivery-kit-VERSION.tgz, SOURCE_COMMIT and SHA256SUMS.
 // Usage: pack.ts EXACT_COMMIT_SHA NEW_ABSOLUTE_DIRECTORY
 import { spawnSync } from "node:child_process";
@@ -16,7 +16,6 @@ import {
   DEFAULT_VOLUME,
   groupAdds,
   GuardError,
-  requireLoad,
   run,
   validPackArgs,
 } from "./guards.ts";
@@ -29,9 +28,9 @@ const PACK = `
   tar -x -f /source.tar -C /tmp/package
   cd /tmp/package
   printf "%s\\n" "$SOURCE_REVISION" >SOURCE_COMMIT
-  cp -R /var/tmp/npm /tmp/npm-cache
+  cp -R "$PACK_NPM_CACHE" /tmp/npm-cache
   npm ci --offline --ignore-scripts --no-audit --no-fund
-  npm run build
+  node scripts/build.mjs
   node scripts/release-package.mjs /tmp/release /tmp/out
 `;
 
@@ -62,12 +61,40 @@ function main(args: string[]): number {
     return 2;
   }
   const volume = process.env.DELIVERY_KIT_NPM_VOLUME ?? DEFAULT_VOLUME;
-  if (quiet("docker", ["volume", "inspect", volume]) !== 0) {
-    console.error(`delivery-kit: run npm run verify first to populate the ${volume} volume`);
-    return 2;
+  const prepared = process.env.CONTAINER_IMAGE;
+  let image: string;
+  let cacheMount: string[];
+  let cachePath: string;
+  if (prepared !== undefined) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/.test(prepared)) {
+      console.error("delivery-kit: CONTAINER_IMAGE must identify a prepared check image");
+      return 2;
+    }
+    const inspected = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", prepared], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    image = inspected.stdout?.trim() ?? "";
+    if (inspected.status !== 0 || !/^sha256:[0-9a-f]{64}$/.test(image)) {
+      console.error(
+        "delivery-kit: prepared CONTAINER_IMAGE unavailable; run make check with that image first",
+      );
+      return 2;
+    }
+    cacheMount = [];
+    cachePath = "/opt/check/npm-cache";
+  } else {
+    if (quiet("docker", ["volume", "inspect", volume]) !== 0) {
+      console.error(
+        `delivery-kit: prepare cache volume ${volume} or use a prepared CONTAINER_IMAGE`,
+      );
+      return 2;
+    }
+    image = checkImage(root);
+    cacheMount = ["--mount", `type=volume,src=${volume},dst=/var/tmp,readonly`];
+    cachePath = "/var/tmp/npm";
   }
-  const image = checkImage(root);
-  requireLoad();
+
   // Deterministic per revision, so a leftover container from an interrupted pack is replaced.
   const name = `delivery-kit-pack-${sha.slice(0, 12)}`;
   quiet("docker", ["rm", "--force", name]);
@@ -94,12 +121,13 @@ function main(args: string[]): number {
         ...groupAdds([archive]),
         "--mount",
         `type=bind,src=${archive},dst=/source.tar,readonly`,
-        "--mount",
-        `type=volume,src=${volume},dst=/var/tmp,readonly`,
+        ...cacheMount,
         "-e",
         `SOURCE_DATE_EPOCH=${epoch}`,
         "-e",
         `SOURCE_REVISION=${sha}`,
+        "-e",
+        `PACK_NPM_CACHE=${cachePath}`,
         "-e",
         "npm_config_cache=/tmp/npm-cache",
         "-w",

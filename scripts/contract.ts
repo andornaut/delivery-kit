@@ -17,7 +17,6 @@ import {
   discardReason,
   groupAdds,
   GuardError,
-  requireLoad,
   run,
   snapshot,
   sourceList,
@@ -39,7 +38,7 @@ const CASES = `
   mkdir /tmp/check && tar -x -C /tmp/check
   cd /tmp/check
   npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null
-  npm run build >/dev/null
+  node scripts/build.mjs >/dev/null
   cd tests/contract
   npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null
   npx tsc
@@ -107,7 +106,6 @@ function main(args: string[]): number {
   const scratch = mkdtempSync(join(tmpdir(), "delivery-kit-contract-"));
   try {
     if (args[0] === "--lock") {
-      requireLoad();
       const input = join(scratch, "lock.tar");
       tarFile(join(root, "tests/contract"), ["package.json"], input);
       return withStdin(input, (fd) => {
@@ -128,7 +126,6 @@ function main(args: string[]): number {
     const before = snapshot(root);
     let status = 1;
     try {
-      requireLoad();
       console.log("contract: populating the npm cache volume (network)");
       const populate = join(scratch, "populate.tar");
       tarFile(root, POPULATE_FILES, populate);
@@ -138,7 +135,6 @@ function main(args: string[]): number {
         }),
       );
       if (status === 0) {
-        requireLoad();
         console.log("contract: build, type check and cases offline");
         const source = join(scratch, "source.tar");
         tarFile(root, sourceList(root), source);
