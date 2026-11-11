@@ -8,11 +8,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      CONTAINER_IMAGE: local-check:delivery-kit-ci
-      CHECK_TIMEOUT_SECONDS: "1800"
-    # Offline contracts include timed observer waits alongside installs, builds
-    # and packaging; at 30 minutes a check has hung rather than finished normally.
+    # Contracts include timed observer waits alongside installs, builds and packaging;
+    # at 30 minutes a check has hung rather than finished normally.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -48,10 +45,23 @@ jobs:
           # Dependencies and local worktree copies are outside this source tree.
           ignore_paths: node_modules .worktrees
           scandir: "."
-      - name: Prepare verification image
-        run: docker pull "node:$(sed 's/^v//' .nvmrc)"
-      - name: Check the custom project image
-        run: make check
-      # The exact-commit host controller starts its own isolated release container.
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm --prefix tests/contract ci --ignore-scripts --no-audit --no-fund
+      - name: Lint
+        run: npm run check && npm run lint:node && npm run lint:markdown
+      - name: Test
+        run: npm run build && npm test && npm run contract
+      - name: Inspect the package
+        run: npm run package:check
+      # The exact-commit host controller starts its own offline release container, which
+      # reads the npm cache volume filled here from the lockfile.
       - name: Build the npm release asset offline
-        run: npm run pack -- "$GITHUB_SHA" "$RUNNER_TEMP/release"
+        run: |
+          docker run --rm --user 19001:19001 --env HOME=/tmp \
+            --mount type=volume,src=delivery-kit-npm-check,dst=/var/tmp \
+            --mount type=bind,src="$PWD",dst=/source,readonly \
+            "node:$(sed 's/^v//' .nvmrc)" sh -ec \
+            'cp /source/package.json /source/package-lock.json /tmp && cd /tmp && npm ci --ignore-scripts --no-audit --no-fund --cache /var/tmp/npm'
+          npm run pack -- "$GITHUB_SHA" "$RUNNER_TEMP/release"

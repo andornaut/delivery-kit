@@ -76,9 +76,7 @@ function main(args: string[]): number {
     });
     image = inspected.stdout?.trim() ?? "";
     if (inspected.status !== 0 || !/^sha256:[0-9a-f]{64}$/.test(image)) {
-      console.error(
-        "delivery-kit: prepared CONTAINER_IMAGE unavailable; run make check with that image first",
-      );
+      console.error("delivery-kit: prepared CONTAINER_IMAGE unavailable");
       return 2;
     }
     cacheMount = [];

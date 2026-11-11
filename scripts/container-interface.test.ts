@@ -26,12 +26,12 @@ describe("native check interface", () => {
     }
   });
 
-  it("exposes only check as the public Make target", () => {
+  it("exposes the check categories as Make targets that run stock images", () => {
     const makefile = readFileSync(join(root, "Makefile"), "utf8");
     const targets = [...makefile.matchAll(/^([a-z][a-z-]*):(?:\s|$)/gm)].map((match) => match[1]);
-    expect(targets).toEqual(["check"]);
-    expect(makefile).toContain("./tests/container/run check");
-    expect(makefile).not.toContain("check-info");
+    expect(targets).toEqual(["check", "lint", "test", "build"]);
+    expect(makefile).toContain("NODE_IMAGE := node:$(shell sed 's/^v//' .nvmrc)");
+    expect(makefile).not.toMatch(/docker build/);
   });
 
   it("uses ordinary serial lint-staged and direct local formatters", () => {

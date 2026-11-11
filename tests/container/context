@@ -1,7 +1,0 @@
-.nvmrc
-package.json
-package-lock.json
-tests/contract/package.json
-tests/contract/package-lock.json
-tests/container/Dockerfile
-tests/container/check

@@ -567,11 +567,13 @@ Callers change:
 
 ## Development
 
-GNU Make exposes one automation target: `make check`. It runs the complete gate in the
-custom project image built from the pinned Node version in `.nvmrc`.
-The custom image installs root and contract dependencies from their lockfiles and retains
-the npm cache for the exact-commit release controller. Checks receive a sanitized read-only
-source archive in a disposable workspace, using those image-owned dependencies.
+`make check` runs the complete gate in stock images: the Node version pinned in `.nvmrc` and
+`koalaman/shellcheck:v0.11.0`. `make lint`, `make test` and `make build` run one category. No
+image is built. Each container binds the checkout read-only, runs as the host user with four
+CPUs and 4 GiB memory (`CHECK_MEMORY`), a read-only root filesystem and no capabilities. The
+Node container copies the source without `.git`, dependencies or build output into tmpfs,
+installs the root and contract dependencies with `npm ci`, then runs the native npm checks.
+ShellCheck reads the bound source directly with no network.
 
 Native npm commands run directly wherever they are invoked. Local prerequisites are the
 pinned Node version, root and contract dependencies, and ShellCheck 0.11.0.
@@ -584,7 +586,7 @@ Remove them when upstream resolves the patched versions without overrides.
 
 | Command                 | Checks                                                                                                   |
 | ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| `make check`            | Complete verification in the project image.                                                              |
+| `make check`            | Complete verification in stock Node and ShellCheck images.                                               |
 | `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection. |
 | `npm run check`         | Root and contract types.                                                                                 |
 | `npm run lint`          | Prettier, ESLint, Markdown and ShellCheck with `-x -P SCRIPTDIR`.                                        |
@@ -598,10 +600,8 @@ suite; unscoped filters apply to both. Standalone `npm run contract -- --lock` r
 the contract lockfile with native npm. Ordinary Git commits run serial local lint-staged,
 with direct Prettier and ESLint fixes that preserve Git's staged/unstaged workflow.
 
-CI uses `make check` because this project builds a custom Dockerfile. Native npm commands
-remain direct host tools. Make owns the custom-image verification boundary and exports no
-generated files from the complete gate. Container CPU, memory and worker limits and source
-fingerprints remain enforced.
+CI runs the same native npm commands directly on the runner with the pinned Node version and
+the pinned ShellCheck step.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native
@@ -611,13 +611,12 @@ archive and `CHECK_CONTEXT.json` to a fresh temporary directory and prints that 
 The thin wrappers `scripts/check.sh` and `tests/contract/run.sh` invoke native Node helpers.
 The separately invoked `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the
 explicit host release-controller exception: it archives the requested commit and starts
-its own offline release container. For this controller, `CONTAINER_IMAGE` selects a prepared
-cache image containing `/opt/check/npm-cache`; an unavailable image or dependency fails
-without fallback.
-Without it, the pinned Node image and read-only `delivery-kit-npm-check` cache volume remain
-supported. The controller retains the source epoch and copies the exact revision's
-`SOURCE_COMMIT` and `SHA256SUMS` out with the archive. CI invokes this controller on the
-host after Make verification; package inspection inside the image does not invoke it.
+its own offline release container with the pinned Node image and the read-only
+`delivery-kit-npm-check` cache volume (`DELIVERY_KIT_NPM_VOLUME` names another). `CONTAINER_IMAGE`
+instead selects a prepared cache image containing `/opt/check/npm-cache`; an unavailable image
+or dependency fails without fallback. The controller retains the source epoch and copies the
+exact revision's `SOURCE_COMMIT` and `SHA256SUMS` out with the archive. CI fills the cache
+volume from the lockfile, then invokes this controller after the checks.
 
 ## Compatibility and releases
 
