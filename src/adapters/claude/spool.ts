@@ -9,6 +9,7 @@ import { holdLock, LockBusy } from "../../lock.ts";
 import { decisionClear } from "../shared/decisions.ts";
 import { eventRequestId, slotRequestId } from "../shared/ids.ts";
 import { pyJsonDumps } from "../shared/pyjson.ts";
+import { UNBLOCK_INSTRUCTIONS } from "../shared/review.ts";
 import type { ActiveScope } from "../shared/route.ts";
 import { type AgentEntry, listingOrNull, monitorReady, roleDiagnostics } from "./agents.ts";
 
@@ -123,13 +124,10 @@ export function brief(
 ): string {
   const targets = route.targets.map((target) => `${target.name}: ${target.sessionId}`).join("\n");
   return (
-    `Scheduled monitoring review, slot ${slot}. Review recent activity of these active route ` +
-    "targets and relay only confirmed unblockers through your own cross-session messaging. " +
-    "Preserve unanswered questions and independent work; silence is not a decision. Report only " +
-    "new or unresolved blockers. This is a triage reminder, not permission to interrupt turns, " +
-    "answer questions, restart work or duplicate deliveries. Channel acceptance is delivery only; " +
-    `record handling separately.\n${targets}` +
-    `\nCapability diagnostics (unavailable is never clearance): ${pyJsonDumps(diagnostics)}`
+    `Scheduled monitoring review, slot ${slot}, for these active route targets. ` +
+    `${UNBLOCK_INSTRUCTIONS} Channel acceptance is delivery only; record handling separately.` +
+    `\n${targets}\nCapability diagnostics (unavailable is never clearance): ` +
+    `${pyJsonDumps(diagnostics)}`
   );
 }
 

@@ -21,6 +21,7 @@ import {
   sameJson,
   unicodeDumps,
 } from "../adapters/shared/pyjson.ts";
+import { UNBLOCK_INSTRUCTIONS } from "../adapters/shared/review.ts";
 import { type Json, type QueueEntry, readRecord, retained, snapshotPath } from "./store.ts";
 
 const BRIEF_BOUND = 32768;
@@ -332,8 +333,7 @@ export function reminder(
     "and dependency unblockers. Use native live steering only for confirmed unblockers. Remove an " +
     "original only after confirmed delivery or reconciliation. Preserve unanswered questions and " +
     "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner " +
-    "question. Report only new or unresolved blockers. This is a triage reminder, not permission " +
-    "to interrupt turns, answer questions, restart work, or duplicate deliveries.\n" +
+    `question. ${UNBLOCK_INSTRUCTIONS}\n` +
     `Full local inventory: ${snapshotFile}\n${inventory}${workerReview}${questionReview}` +
     `${diagnosticReview}`
   );
