@@ -60,13 +60,30 @@ export function slotDetail(context: BusContext): string {
   return "no departure is currently active; main departs when it has a new commit.";
 }
 
+/** Seconds after its slot (a request: after it starts) that a departure re-checks a high load. */
+export const LOAD_WAIT_SECONDS = 15 * 60;
+/** Seconds between load re-checks while a departure waits. */
+export const LOAD_RECHECK_SECONDS = 60;
+
 interface Attempt {
   readonly activity: string;
   sha?: string;
   readonly key: string;
   readonly when: string;
   readonly slot: number;
+  /** Epoch seconds after which a departure that still meets a high load is skipped. */
+  readonly loadDeadline: number;
   readonly requestId?: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface DepartOptions {
+  /** A claimed one-off request; omitted for a scheduled departure. */
+  readonly requestId?: string | undefined;
+  /** The delivery activity the caller already began. */
+  readonly admission?: string | undefined;
+  /** The runner's shutdown signal; it ends a load wait as an interruption. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 function rethrowInterrupted(error: unknown): void {
@@ -100,21 +117,14 @@ function blocked(
 }
 
 /** 0 when the departure pushed or had nothing new, otherwise 1. */
-export async function depart(
-  context: BusContext,
-  requestId?: string,
-  admission?: string,
-): Promise<number> {
-  return withDeliveryRunner(context, () => departAdmitted(context, requestId, admission));
+export async function depart(context: BusContext, options: DepartOptions = {}): Promise<number> {
+  return withDeliveryRunner(context, () => departAdmitted(context, options));
 }
 
-async function departAdmitted(
-  context: BusContext,
-  requestId?: string,
-  admission?: string,
-): Promise<number> {
+async function departAdmitted(context: BusContext, options: DepartOptions): Promise<number> {
+  const { requestId, signal } = options;
   const lock = await holdLockAsync(context.paths.departureLock);
-  let activity = admission;
+  let activity = options.admission;
   try {
     activity ??= beginDeliveryWork(context, "checking", null);
     if (activity === undefined) {
@@ -123,12 +133,16 @@ async function departAdmitted(
     }
     const now = context.clock.now();
     const { departures, timezone } = context.config.schedule;
+    const slot = latestScheduledSlot(timezone, departures, now);
     const attempt: Attempt = {
       activity,
       key: requestId === undefined ? String(now) : `request-${requestId}`,
-      slot: latestScheduledSlot(timezone, departures, now),
+      // A scheduled departure's window opens at its slot; a request's opens when it starts.
+      loadDeadline: (requestId === undefined ? slot : now) + LOAD_WAIT_SECONDS,
+      slot,
       when: stamp(timezone, now),
       ...(requestId === undefined ? {} : { requestId }),
+      ...(signal === undefined ? {} : { signal }),
     };
     try {
       const result = await departLocked(context, attempt);
@@ -229,7 +243,7 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       scheduled ? "scheduled attempt" : `user-authorized one-off request ${attempt.requestId ?? ""}`
     }: main ${head}; push not started; deployment not started.`,
   );
-  if (!loadOk(context)) {
+  if (!(await waitForLoad(context, attempt))) {
     return blocked(
       context,
       attempt,
@@ -253,6 +267,39 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
     }
   }
   return gateAndPush(context, attempt, head, remote);
+}
+
+/**
+ * True once the one-minute load is below the limit, re-checked every LOAD_RECHECK_SECONDS until
+ * the attempt's load deadline; false when it is still at or above the limit at the deadline.
+ * The caller holds the departure and runner locks throughout, so nothing else departs meanwhile.
+ */
+async function waitForLoad(context: BusContext, attempt: Attempt): Promise<boolean> {
+  const limit = context.config.resources.loadLimit;
+  let announced = false;
+  for (;;) {
+    if (loadOk(context)) {
+      return true;
+    }
+    const remaining = attempt.loadDeadline - context.clock.now();
+    if (remaining <= 0) {
+      return false;
+    }
+    if (!announced) {
+      announced = true;
+      context.log(
+        `${attempt.when} bus: load at or above ${limit}; re-checking every ` +
+          `${LOAD_RECHECK_SECONDS} seconds until ` +
+          `${stamp(context.config.schedule.timezone, attempt.loadDeadline)}`,
+      );
+    }
+    // Sequential re-checks are the mechanism.
+    // eslint-disable-next-line no-await-in-loop
+    await context.clock.sleep(Math.min(LOAD_RECHECK_SECONDS, remaining), attempt.signal);
+    if (attempt.signal?.aborted === true) {
+      throw new Interrupted("the load wait");
+    }
+  }
 }
 
 function nonFastForward(

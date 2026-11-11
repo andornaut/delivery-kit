@@ -5,16 +5,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deployAfterCi } from "../deploy.ts";
-import { depart, requestStore } from "./departure.ts";
+import { depart, LOAD_RECHECK_SECONDS, LOAD_WAIT_SECONDS, requestStore } from "./departure.ts";
 import type { Exec, ExecResult, ExecSpec } from "./exec.ts";
 import { captureRequest } from "./requests.ts";
 import {
   commitFile,
+  type ContextParts,
   FAKE_WRANGLER,
   fakeExec,
   gateDocker,
   gitSync,
   makeGame,
+  manualClock,
   mergeFastForward,
   mergeWithCommit,
   recordingEvents,
@@ -26,7 +28,11 @@ function originMain(test: TestGame): string {
   return gitSync(test.origin, "rev-parse", "main");
 }
 
-function setup(mode: "none" | "wrangler" = "none", gate: { noNodeModules?: boolean } = {}) {
+function setup(
+  mode: "none" | "wrangler" = "none",
+  gate: { noNodeModules?: boolean } = {},
+  parts: Pick<ContextParts, "clock" | "load"> = {},
+) {
   const test = makeGame((config) => {
     (config.deploy as Record<string, unknown>).mode = mode;
     delete (config.deploy as Record<string, unknown>).skipPattern;
@@ -51,7 +57,12 @@ function setup(mode: "none" | "wrangler" = "none", gate: { noNodeModules?: boole
           : { status: 0, stderr: "", stdout: "lint ok\n" },
     })(spec);
   });
-  const context = testContext(test, { events, exec, startCi: (sha) => started.push(sha) });
+  const context = testContext(test, {
+    ...parts,
+    events,
+    exec,
+    startCi: (sha) => started.push(sha),
+  });
   const kinds = (): string[] => events.list.map(([kind]) => kind);
   const creates = (): number => exec.calls.filter((call) => call.args[0] === "create").length;
   return { context, creates, dockerDown, events, exec, failGate, kinds, started, test, wrangler };
@@ -191,7 +202,7 @@ describe("trunk-based departures", () => {
     const head = mergeFastForward(test, "feature");
     const receipt = await captureRequest(requestStore(context), "r1");
     expect(receipt).toBe(`{"head": "${head}", "id": "r1", "state": "pending"}\n`);
-    expect(await depart(context, "r1")).toBe(0);
+    expect(await depart(context, { requestId: "r1" })).toBe(0);
     expect(originMain(test)).toBe(head);
     expect(kinds()).toEqual(["attempt", "push"]);
     await expect(captureRequest(requestStore(context), "r2")).rejects.toThrow(
@@ -200,7 +211,7 @@ describe("trunk-based departures", () => {
     mergeFastForward(test, "next");
     await captureRequest(requestStore(context), "r3");
     mergeFastForward(test, "later");
-    expect(await depart(context, "r3")).toBe(1);
+    expect(await depart(context, { requestId: "r3" })).toBe(1);
     expect(
       JSON.parse(readFileSync(join(test.game.busDir, "requests", "r3.json"), "utf8")),
     ).toMatchObject({
@@ -208,18 +219,109 @@ describe("trunk-based departures", () => {
       state: "rejected",
     });
   });
+});
 
-  it("holds main at high load", async () => {
-    const test = makeGame();
-    const events = recordingEvents();
-    const context = testContext(test, { events, load: 30 });
+describe("departures at high load", () => {
+  // 03:00 America/Toronto: the fixture's scheduled departure slot. The fixture loadLimit is 24.
+  const SLOT = 1_800_000_000;
+
+  it("re-checks the load every minute and departs once it falls within the window", async () => {
+    const clock = manualClock(SLOT);
+    const checks: number[] = [];
+    const load = (): number => {
+      checks.push(clock.time - SLOT);
+      return clock.time < SLOT + 5 * 60 ? 30 : 1;
+    };
+    const { context, creates, kinds, started, test } = setup("none", {}, { clock, load });
+    const head = mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(0);
+    expect(checks).toEqual([0, 60, 120, 180, 240, 300]);
+    expect(originMain(test)).toBe(head);
+    expect(creates()).toBe(1);
+    expect(started).toEqual([head]);
+    expect(kinds()).toEqual(["scheduled-status", "attempt", "push"]);
+    expect(context.lines).toContain(
+      "2027-01-15 03:00 EST bus: load at or above 24; re-checking every 60 seconds until " +
+        "2027-01-15 03:15 EST",
+    );
+  });
+
+  it("skips the slot, main retained, when the load stays high for the whole window", async () => {
+    const clock = manualClock(SLOT);
+    let checks = 0;
+    const load = (): number => {
+      checks += 1;
+      return 30;
+    };
+    const { context, creates, events, kinds, test } = setup("none", {}, { clock, load });
     const before = originMain(test);
     mergeFastForward(test, "feature");
     expect(await depart(context)).toBe(1);
+    expect(clock.time).toBe(SLOT + LOAD_WAIT_SECONDS);
+    expect(checks).toBe(LOAD_WAIT_SECONDS / LOAD_RECHECK_SECONDS + 1);
+    expect(originMain(test)).toBe(before);
+    expect(creates()).toBe(0);
+    expect(kinds()).toEqual(["scheduled-status", "attempt", "blocked-load"]);
+    expect(context.lines).toContain(
+      "2027-01-15 03:00 EST bus: blocked at load: load at or above 24; main retained",
+    );
+    const report = events.list.at(-1)?.[2] ?? "";
+    expect(report).toContain("blocked at load: load at or above 24; main retained");
+    expect(report).toContain("this clears by itself");
+    expect(report).not.toContain("operator fix");
+  });
+
+  it("holds every departure at a loadLimit of 0, after waiting out the window", async () => {
+    const test = makeGame((config) => {
+      (config.resources as Record<string, unknown>).loadLimit = 0;
+    });
+    const clock = manualClock(SLOT);
+    const events = recordingEvents();
+    const context = testContext(test, { clock, events, load: 0 });
+    const before = originMain(test);
+    mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(1);
+    expect(clock.time).toBe(SLOT + LOAD_WAIT_SECONDS);
     expect(originMain(test)).toBe(before);
     expect(events.list.at(-1)?.[0]).toBe("blocked-load");
-    expect(events.list.at(-1)?.[2]).toContain("this clears by itself");
-    expect(events.list.at(-1)?.[2]).not.toContain("operator fix");
+    expect(events.list.at(-1)?.[2]).toContain("load at or above 0; main retained");
+  });
+
+  it("waits for a one-off request from the moment it starts", async () => {
+    // Mid-hour, so a window measured from the 03:00 slot would already have closed.
+    const start = SLOT + 30 * 60;
+    const clock = manualClock(start);
+    const load = (): number => (clock.time < start + 10 * 60 ? 30 : 1);
+    const { context, kinds, test } = setup("none", {}, { clock, load });
+    const head = mergeFastForward(test, "feature");
+    await captureRequest(requestStore(context), "r1");
+    expect(await depart(context, { requestId: "r1" })).toBe(0);
+    expect(clock.time).toBe(start + 10 * 60);
+    expect(originMain(test)).toBe(head);
+    expect(kinds()).toEqual(["attempt", "push"]);
+  });
+
+  it("stops a load wait on shutdown without a blocked report", async () => {
+    const clock = manualClock(SLOT);
+    const shutdown = new AbortController();
+    const load = (): number => {
+      if (clock.time >= SLOT + 2 * 60) {
+        shutdown.abort();
+      }
+      return 30;
+    };
+    const { context, creates, kinds, test } = setup("none", {}, { clock, load });
+    const before = originMain(test);
+    mergeFastForward(test, "feature");
+    expect(await depart(context, { signal: shutdown.signal })).toBe(1);
+    expect(clock.time).toBe(SLOT + 2 * 60);
+    expect(originMain(test)).toBe(before);
+    expect(creates()).toBe(0);
+    expect(kinds()).toEqual(["scheduled-status", "attempt"]);
+    expect(context.lines).toContain(
+      "2027-01-15 03:00 EST bus: departure stopped by shutdown " +
+        "(the load wait was stopped by a shutdown signal)",
+    );
   });
 });
 

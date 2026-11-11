@@ -226,7 +226,8 @@ export interface ContextParts {
   readonly exec?: Exec;
   readonly clock?: Clock;
   readonly events?: Events;
-  readonly load?: number;
+  /** A fixed one-minute load, or a source read at every load check. */
+  readonly load?: number | (() => number);
   readonly startCi?: (sha: string) => void;
 }
 
@@ -235,12 +236,13 @@ export function testContext(
   parts: ContextParts = {},
 ): BusContext & { lines: string[] } {
   const lines: string[] = [];
+  const load = parts.load ?? 0;
   const context = busContext(
     {
       clock: parts.clock ?? manualClock(1_800_000_000),
       events: parts.events ?? recordingEvents(),
       exec: parts.exec ?? fakeExec(() => ok()),
-      loadAverage: () => parts.load ?? 0,
+      loadAverage: typeof load === "function" ? load : () => load,
       log: (line) => lines.push(line),
       ...(parts.startCi === undefined ? {} : { startCi: parts.startCi }),
     },

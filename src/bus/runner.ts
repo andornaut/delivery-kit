@@ -201,7 +201,7 @@ async function departureLoop(
             writeLines(paths.activeDeparture, String(now));
             hooks.beforeDeparture?.();
             // eslint-disable-next-line no-await-in-loop
-            const result = await depart(context, request, admission);
+            const result = await depart(context, { admission, requestId: request, signal });
             // eslint-disable-next-line no-await-in-loop
             await finishRequest(store, request, result);
           } finally {
@@ -228,7 +228,7 @@ async function departureLoop(
       writeLines(paths.activeDeparture, String(now));
       hooks.beforeDeparture?.();
       // eslint-disable-next-line no-await-in-loop
-      await depart(context);
+      await depart(context, { signal });
       truncate(paths.activeDeparture);
       now = context.clock.now();
       next = now + untilNext(timezone, departures, now);

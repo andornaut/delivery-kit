@@ -117,7 +117,10 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
   `art`), so every game lists the shared steps the same way and opts into extras by adding them.
 - `resources`: `cpus` (1 to 4) and `loadLimit` (0 to 30). A departure starts only below
-  `loadLimit`, so 0 holds every departure.
+  `loadLimit`. At or above it, the departure re-checks the one-minute load every 60 seconds and
+  starts once the load is below the limit, up to 15 minutes after its scheduled slot; a load still
+  at or above the limit then skips the slot with `blocked-load`. A `loadLimit` of 0 holds every
+  departure, each after the full 15 minutes.
 - `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
   pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400).
 - `deploy`: `mode` is `wrangler` or `none`; the optional `skipPattern` is a regular expression
@@ -294,12 +297,12 @@ errors.
 
 `CLAUDE_BIN` overrides the `claude` executable. Events dedupe on `sha256(kind:key)`, and every
 `blocked-*` kind shares one identity, so a changed block reason is not reported again. Each
-`blocked-*` report states its own remedy: `blocked-load` clears by itself, `blocked-gate` is gated
-again at the next departure, `blocked-fetch` and a failed push are retried, a red gate needs a fix
-merged on main, a non-fast-forward needs Tech to merge the remote `main`, and an unreadable local
-`main` needs an operator fix. Events are
-delivered in creation order and marked sent only after the adapter accepts them; the first
-refusal stops a flush and the next flush resumes there.
+`blocked-*` report states its own remedy: `blocked-load` (a load still at or above `loadLimit` 15
+minutes after the slot) clears by itself, `blocked-gate` is gated again at the next departure,
+`blocked-fetch` and a failed push are retried, a red gate needs a fix merged on main, a
+non-fast-forward needs Tech to merge the remote `main`, and an unreadable local `main` needs an
+operator fix. Events are delivered in creation order and marked sent only after the adapter
+accepts them; the first refusal stops a flush and the next flush resumes there.
 
 ## State
 
@@ -436,7 +439,11 @@ cherry-pick, rewrite or revert. Each scheduled or requested departure, under `de
 2. Reads `refs/heads/main` in the canonical checkout and the remote `main` with `git ls-remote`.
 3. Skips when HEAD is the remote `main` or the last pushed SHA, or has a `gate-failed/<sha>`
    record. Nothing new means nothing departs.
-4. Holds the departure while the one-minute load is at or above `loadLimit` (`blocked-load`).
+4. Waits while the one-minute load is at or above `loadLimit`, re-checking it every 60 seconds
+   with `departure.lock` and the runner locks held, so nothing else departs meanwhile. It
+   continues once the load is below the limit. A load still at or above the limit 15 minutes after
+   the scheduled slot (for a request, 15 minutes after it starts) skips the slot with
+   `blocked-load` and `main` retained. A runner shutdown ends the wait without a report.
 5. Stops with `blocked-push` when the remote `main` is known locally and is not an ancestor of
    HEAD. Nothing is gated or pushed; Tech merges the remote `main` into local `main`.
 6. Gates HEAD on a detached scratch worktree, so merge commits are gated as they are.
@@ -478,8 +485,9 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   assets and is retried at a later departure. A deployment that cannot be staged after its push
   is reported as `deploy_failure` with the cause, so a pushed SHA never goes undeployed silently.
 - **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
-  rules and receipts. A HEAD that is the last pushed SHA or failed its gate is refused, and a
-  request whose HEAD moved before it departs is rejected.
+  rules and receipts, including the 15-minute load wait, which starts when the request departs. A
+  HEAD that is the last pushed SHA or failed its gate is refused, and a request whose HEAD moved
+  before it departs is rejected.
 
 ### Gate container
 
@@ -515,7 +523,8 @@ Two environment variables are test-only overrides for the contract harness, neve
   real wait is at most that long and the clock is re-read after it, so a stepped clock ends the
   sleep promptly.
 - `DELIVERY_KIT_TEST_LOADAVG` is a one-minute load average, a decimal number of at least 0 such as
-  `0.5`, read in place of the host load. A `loadLimit` of 0 still holds every departure.
+  `0.5`, read in place of the host load. A `loadLimit` of 0 still holds every departure, after the
+  15-minute load wait.
 
 ## Registry library
 

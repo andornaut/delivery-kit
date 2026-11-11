@@ -6,6 +6,9 @@ export function at(minute: number, second = 0, hours = 0): number {
   return HOUR + hours * 3600 + minute * 60 + second;
 }
 
+/** How long after its slot a departure re-checks a load at or above the limit before skipping. */
+export const LOAD_WAIT_SECONDS = 15 * 60;
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

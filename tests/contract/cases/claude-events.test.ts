@@ -14,7 +14,7 @@ import {
   RECIPIENT,
 } from "../lib/claude-fixture.ts";
 import { CASE_TIMEOUT_MS, contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
-import { at } from "../lib/time.ts";
+import { at, LOAD_WAIT_SECONDS } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
 
@@ -54,6 +54,16 @@ function blockedDeparture(ws: Workspace): void {
   ws.setClock(at(-1, 50));
 }
 
+/**
+ * Step the virtual clock past the load wait once the departure has reported its attempt, then
+ * wait for its blocked-load event.
+ */
+async function loadWaitOver(ws: Workspace, runner: Resident): Promise<void> {
+  await runner.until(() => events(ws).length >= 1);
+  ws.advanceClock(LOAD_WAIT_SECONDS);
+  await runner.until(() => events(ws).length === 2);
+}
+
 /** Wait for two further notifier flushes (one virtual minute each). */
 async function flushes(runner: Resident): Promise<void> {
   const before = Date.now();
@@ -71,6 +81,7 @@ suite("claude bus events", () => {
       const runner = startRunner(ws);
       try {
         await runner.until(() => spooled(ws).length === 1);
+        await loadWaitOver(ws, runner);
         const [first] = events(ws);
         expect(first!.kind).toBe("attempt");
         const requestId = eventRequestId(first!.id, RECIPIENT);
@@ -121,6 +132,7 @@ suite("claude bus events", () => {
       const runner = startRunner(ws);
       try {
         await runner.until(() => spooled(ws).length === 1);
+        await loadWaitOver(ws, runner);
         await flushes(runner);
         expect(spooled(ws)).toHaveLength(1);
         expect(events(ws).map((event) => event.sent)).toEqual([false, false]);
@@ -149,6 +161,7 @@ suite("claude bus events", () => {
       const runner = startRunner(ws);
       try {
         await runner.until(() => spooled(ws).length === 1);
+        await loadWaitOver(ws, runner);
         rmSync(ws.path("unblock", "claude-spool", spooled(ws)[0]!.name));
         const [first] = events(ws);
         await runner.until(() => eventReceipt(ws, first!).status === "ambiguous");
@@ -208,7 +221,7 @@ suite("claude bus events", () => {
         change(ws);
         const runner = startRunner(ws);
         try {
-          await runner.until(() => events(ws).length === 2);
+          await loadWaitOver(ws, runner);
           await flushes(runner);
         } finally {
           await runner.stop();

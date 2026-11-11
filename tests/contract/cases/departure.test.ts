@@ -6,7 +6,7 @@ import { expect } from "vitest";
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
-import { at, sleep } from "../lib/time.ts";
+import { at, LOAD_WAIT_SECONDS, sleep } from "../lib/time.ts";
 import { SHA, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000001";
@@ -267,7 +267,7 @@ suite("departure", () => {
   );
 
   contract(
-    "a high-load departure keeps main unpushed and persists attempt and blocked events",
+    "a high-load departure waits out the load window, then keeps main unpushed and reports it",
     async () => {
       const ws = workspace();
       bus(ws);
@@ -275,8 +275,14 @@ suite("departure", () => {
       ws.hostLoad = "real";
       ws.config.resources = { cpus: 4, loadLimit: 0 };
       impl.offer(ws, ["bus/queued"]);
-      const runner = await departOnce(ws, () => kinds(ws).includes("blocked-load"));
+      const runner = await departOnce(ws, () => kinds(ws).includes("attempt"));
+      // Over a virtual minute later the departure is still re-checking the load.
+      await sleep(3_000);
+      expect(kinds(ws)).toEqual(["attempt"]);
+      ws.advanceClock(LOAD_WAIT_SECONDS);
+      await runner.until(() => kinds(ws).includes("blocked-load"));
       await runner.stop();
+      expect(pushes(ws)).toBe(0);
       expect(new Set(kinds(ws))).toEqual(new Set(["attempt", "blocked-load"]));
       expect(containers(ws)).toEqual([]);
     },
