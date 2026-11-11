@@ -46,16 +46,16 @@ export function listingOrNull(env: NodeJS.ProcessEnv): AgentEntry[] | null {
   }
 }
 
-export function monitorAvailability(
+export function recipientAvailability(
   entries: readonly AgentEntry[],
   sessionId: string,
 ): Availability {
   const matches = entries.filter((entry) => entry.sessionId === sessionId);
   if (matches.length === 0) {
-    return { reason: "monitor session missing from claude agents listing", status: null };
+    return { reason: "recipient session missing from claude agents listing", status: null };
   }
   if (matches.some((entry) => entry.state === "blocked")) {
-    return { reason: "monitor session blocked", status: null };
+    return { reason: "recipient session blocked", status: null };
   }
   const ready = matches.find(
     (entry) => (entry.status === "idle" || entry.status === "busy") && entry.state == null,
@@ -63,10 +63,10 @@ export function monitorAvailability(
   if (ready !== undefined) {
     return { status: ready.status as "busy" | "idle" };
   }
-  return { reason: "monitor session state unknown", status: null };
+  return { reason: "recipient session state unknown", status: null };
 }
 
-export function monitorReady(
+export function recipientReady(
   env: NodeJS.ProcessEnv,
   sessionId: string,
   entries: readonly AgentEntry[] | null = listingOrNull(env),
@@ -74,7 +74,7 @@ export function monitorReady(
   if (entries === null) {
     return { reason: "claude agents listing unavailable", status: null };
   }
-  return monitorAvailability(entries, sessionId);
+  return recipientAvailability(entries, sessionId);
 }
 
 /** The reported status or state token, else missing, unknown or unavailable. */

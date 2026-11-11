@@ -1,4 +1,4 @@
-// Drive the resident runner's scheduled monitor and departure ticks under the virtual clock.
+// Drive the resident runner's scheduled review and departure ticks under the virtual clock.
 // The clock runs at wall speed with short real sleeps; a slot is reached by jumping the clock
 // one second past it, so each observer iteration sees exactly one new minute.
 import { existsSync, readFileSync } from "node:fs";
@@ -26,7 +26,7 @@ export function virtualNow(ws: Workspace): number {
   return Math.floor(clock.epoch + offset + ((Date.now() - clock.realStartMs) * clock.speed) / 1000);
 }
 
-/** The Codex monitor route from Tech to Art and Gameplay, hosted by this game. */
+/** The Codex review route from Tech to Art and Gameplay, hosted by this game. */
 export function codexRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
@@ -40,7 +40,7 @@ function codexRegistry(ws: Workspace): void {
     revision: 1,
     harness: "codex",
     roles: {
-      monitor: { conversations: { codex: TECH } },
+      "dev-manager": { conversations: { codex: TECH } },
       art: { conversations: { codex: ART } },
       gameplay: { conversations: { codex: GAMEPLAY } },
     },
@@ -60,13 +60,13 @@ export function confirmedAt(): string {
 }
 
 export interface Tick {
-  /** Parsed `bus: scheduled monitor SLOT: {...}` JSON, when the helper ran. */
+  /** Parsed `bus: scheduled review SLOT: {...}` JSON, when the helper ran. */
   result: Record<string, unknown> | undefined;
   /** Runner output produced for this tick. */
   output: string;
 }
 
-export class Monitored {
+export class Reviewed {
   readonly world = new NativeWorld();
   readonly socket: CodexSocket;
   runner: Resident | undefined;
@@ -76,15 +76,15 @@ export class Monitored {
     this.socket = new CodexSocket(ws);
   }
 
-  /** Route-mode setup: registry, route, clear monitor decision and departures that never fire. */
-  static async routed(ws: Workspace, route: Record<string, unknown> = {}): Promise<Monitored> {
+  /** Route-mode setup: registry, route, clear recipient decision and departures that never fire. */
+  static async routed(ws: Workspace, route: Record<string, unknown> = {}): Promise<Reviewed> {
     codexRegistry(ws);
     ws.config.schedule = { departures: ["05"], timezone: "America/Toronto" };
     ws.writeRoute(codexRoute(ws, route));
     decide(ws, TECH, { thread_id: TECH, state: "clear" });
-    const monitored = new Monitored(ws);
-    await monitored.listen();
-    return monitored;
+    const reviewed = new Reviewed(ws);
+    await reviewed.listen();
+    return reviewed;
   }
 
   async listen(): Promise<void> {
@@ -140,12 +140,12 @@ export class Monitored {
     return this.output.slice(mark);
   }
 
-  /** Reach a monitor wake slot and return the helper's reported status. */
+  /** Reach a review slot and return the helper's reported status. */
   async slot(epoch: number): Promise<Tick> {
-    const marker = `scheduled monitor ${epoch}`;
+    const marker = `scheduled review ${epoch}`;
     const output = await this.jump(
       epoch,
-      (text) => text.includes(marker) || text.includes("monitor deferred"),
+      (text) => text.includes(marker) || text.includes("review deferred"),
     );
     const line = output.split("\n").find((row) => row.includes(`${marker}: `));
     const result = line
@@ -162,12 +162,12 @@ export class Monitored {
     return this.output;
   }
 
-  receipt(epoch: number, coordinator = TECH): Record<string, unknown> {
-    return this.ws.readJson(`unblock/${coordinator}-${epoch}.json`);
+  receipt(epoch: number, recipient = TECH): Record<string, unknown> {
+    return this.ws.readJson(`unblock/${recipient}-${epoch}.json`);
   }
 
-  health(coordinator = TECH): Record<string, unknown> {
-    return this.ws.readJson(`unblock/health/${coordinator}.json`);
+  health(recipient = TECH): Record<string, unknown> {
+    return this.ws.readJson(`unblock/health/${recipient}.json`);
   }
 }
 

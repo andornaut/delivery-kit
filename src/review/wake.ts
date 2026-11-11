@@ -1,12 +1,13 @@
-// Scheduled monitor wake for a due slot. The adapter follows the monitor's selected harness; the monitor and
-// worker parents are role names resolved through the registry. The result is the one-line JSON
+// Scheduled review for a due slot. The adapter follows the recipient's selected harness; the
+// recipient (the host game's reports.recipient) and worker parents are role names resolved through
+// the registry. The result is the one-line JSON
 // status the runner logs, or an empty string when this project does not dispatch the slot.
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { claudeAdapter } from "../adapters/claude/index.ts";
-import { spoolMonitorBrief, unblockDir } from "../adapters/claude/spool.ts";
+import { spoolReviewBrief, unblockDir } from "../adapters/claude/spool.ts";
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
 import { SOCKET_MISSING } from "../adapters/codex/index.ts";
 import { queueEntries, queuePayload } from "../adapters/codex/inventory.ts";
@@ -20,7 +21,9 @@ import {
   readRoleRoute,
   roleConversation,
   type RoleRoute,
+  ROUTE_SCHEMA_1,
   RouteError,
+  routeRecipient,
   sendRoute,
 } from "../adapters/shared/route.ts";
 import type { HarnessAdapter, Inventory } from "../adapters/types.ts";
@@ -37,7 +40,6 @@ import { reconcileSlot } from "./reconcile.ts";
 import { captureMixed } from "./snapshot.ts";
 import { type Json, locked, snapshotPath } from "./store.ts";
 
-export const MONITOR_ROLE = "monitor";
 const PRINTED = [
   "status",
   "previousStatus",
@@ -47,12 +49,12 @@ const PRINTED = [
   "history_status",
   "worker_health_status",
   "question_state_status",
-  "monitor_status",
-  "monitor_reason",
+  "review_status",
+  "review_reason",
   "recipient",
   "backlog_slots",
   "deferral_slots",
-  "monitor_session_status",
+  "recipient_session_status",
 ] as const;
 
 function line(outcome: Readonly<Record<string, unknown>>): string {
@@ -65,15 +67,20 @@ function line(outcome: Readonly<Record<string, unknown>>): string {
   return pyJsonDumps(printed);
 }
 
-/** A runner log line for a wake the runner defers before any helper runs. */
-export const DEFERRED_PREFIX = "bus: monitor deferred: ";
+/** A runner log line for a review the runner defers before any helper runs. */
+export const DEFERRED_PREFIX = "bus: review deferred: ";
 
 const PARENTS_INVALID =
   "worker parents must resolve through var/registry.json roles to distinct canonical UUIDs " +
   "in the active var/route.json";
 const CONNECT_MS = 25_000;
 const ROUTE_UNAVAILABLE =
-  "monitor route is unavailable or invalid; its owner must verify identities and ownership";
+  "review route is unavailable or invalid; its owner must verify identities and ownership";
+
+/** A schema 1 route names its exact migration edit; any other invalid route the generic remedy. */
+function routeUnavailable(error: RouteError): string {
+  return error.message === ROUTE_SCHEMA_1 ? ROUTE_SCHEMA_1 : ROUTE_UNAVAILABLE;
+}
 
 function socketAvailable(path: string): boolean {
   try {
@@ -152,7 +159,8 @@ interface Wake {
   readonly harnesses: Readonly<Record<string, Harness>>;
   readonly unblock: string;
   readonly busDir: string;
-  readonly coordinator: string;
+  /** The recipient's conversation. */
+  readonly recipient: string;
   readonly peers: readonly string[];
   readonly parents: readonly string[];
   readonly slot: number;
@@ -162,7 +170,7 @@ interface Wake {
 }
 
 function capture(wake: Wake, client: RpcClient | null, deadline: number): Promise<Json> {
-  const recipients = [...new Set([wake.coordinator, ...wake.peers])];
+  const recipients = [...new Set([wake.recipient, ...wake.peers])];
   return locked(wake.unblock, () =>
     captureMixed(
       { busDir: wake.busDir, unblock: wake.unblock },
@@ -177,7 +185,7 @@ function capture(wake: Wake, client: RpcClient | null, deadline: number): Promis
 
 /** One slot under the non-blocking unblock lock, over one native connection. */
 async function runSlot(wake: Wake): Promise<Json> {
-  const { coordinator, slot, unblock } = wake;
+  const { recipient, slot, unblock } = wake;
   const health = { emit: wake.emit, unblock };
   if (
     wake.parents.some((parent) => !isCanonicalUuid(parent)) ||
@@ -186,7 +194,7 @@ async function runSlot(wake: Wake): Promise<Json> {
     return { reason: PARENTS_INVALID, status: "deferred" };
   }
   mkdirSync(unblock, { recursive: true });
-  const path = join(unblock, `${coordinator}-${slot}.json`);
+  const path = join(unblock, `${recipient}-${slot}.json`);
   let lock: LockHandle;
   try {
     lock = holdLock(join(unblock, "unblock.lock"), { nonBlocking: true });
@@ -203,7 +211,7 @@ async function runSlot(wake: Wake): Promise<Json> {
       if (!socketAvailable(wake.socket)) {
         snapshot = await capture(wake, null, 0);
         const state: Json = { reason: SOCKET_MISSING, status: "deferred" };
-        Object.assign(state, recordHealth(health, coordinator, slot, snapshot, state));
+        Object.assign(state, recordHealth(health, recipient, slot, snapshot, state));
         state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
         return state;
       }
@@ -220,7 +228,7 @@ async function runSlot(wake: Wake): Promise<Json> {
       if (previous === undefined) {
         state = await reconcileSlot(
           client,
-          { coordinator, signal: wake.signal, slot, unblock },
+          { recipient, signal: wake.signal, slot, unblock },
           snapshot,
         );
         outcome = state;
@@ -228,7 +236,7 @@ async function runSlot(wake: Wake): Promise<Json> {
         state = { previousStatus: previous.status, status: "deduplicated" };
         outcome = { ...state, reason: previous.reason ?? null };
       }
-      Object.assign(state, recordHealth(health, coordinator, slot, snapshot, outcome));
+      Object.assign(state, recordHealth(health, recipient, slot, snapshot, outcome));
       state.snapshot_id = snapshot.snapshot_id;
       state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
       return state;
@@ -250,7 +258,7 @@ async function runSlot(wake: Wake): Promise<Json> {
       }
       persistSlot(path, state);
       snapshot ??= await capture(wake, null, 0);
-      Object.assign(state, recordHealth(health, coordinator, slot, snapshot, state));
+      Object.assign(state, recordHealth(health, recipient, slot, snapshot, state));
       state.snapshot_path = snapshotPath(unblock, String(snapshot.snapshot_id));
       return state;
     }
@@ -276,15 +284,15 @@ async function codexSlot(
   const state = await runSlot({
     busDir: game.busDir,
     claude: claudeAdapter(process.env, game),
-    coordinator: scope.coordinator,
     emit: (kind, key, message) => emitEvent(game, { project }, kind, key, message),
     harnesses:
       scope.harnesses ??
       Object.fromEntries(
-        [scope.coordinator, ...scope.peers, ...parents].map((id) => [id, "codex" as const]),
+        [scope.recipient, ...scope.peers, ...parents].map((id) => [id, "codex" as const]),
       ),
     parents,
     peers: scope.peers,
+    recipient: scope.recipient,
     signal,
     slot,
     socket,
@@ -294,8 +302,9 @@ async function codexSlot(
 }
 
 /**
- * Resolve the role-name route and the worker parents through the registry as it is now. A
- * route this runner does not host, a held route or no route returns "" before any native call.
+ * Resolve the role-name route, its recipient and the worker parents through the registry as it is
+ * now. A route this runner does not host, a held route or no route returns "" before any native
+ * call.
  */
 export async function deliverScheduledWake(
   layout: Layout,
@@ -309,34 +318,43 @@ export async function deliverScheduledWake(
       route = readRoleRoute(layout);
     } catch (error) {
       if (error instanceof RouteError) {
-        return `${DEFERRED_PREFIX}${ROUTE_UNAVAILABLE}`;
+        return `${DEFERRED_PREFIX}${routeUnavailable(error)}`;
       }
       throw error;
     }
-    if (route === null) {
+    if (route === null || route.host !== game.id) {
       return "";
     }
+    let recipient: string;
+    try {
+      recipient = routeRecipient(layout, route);
+    } catch (error) {
+      if (error instanceof RouteError) {
+        return `${DEFERRED_PREFIX}${routeUnavailable(error)}`;
+      }
+      throw error;
+    }
     const registry = readRegistry(layout);
-    const send = sendRoute(registry, route, game.id);
+    const send = sendRoute(registry, recipient, route, game.id);
     if (send.status !== "active") {
       return "";
     }
     const scope = activeScope(send);
     if (scope === null) {
       return line({
-        reason: "monitor has no conversation for the active harness",
+        reason: "recipient has no conversation for the active harness",
         status: "deferred",
       });
     }
     const config = loadProjectConfig(game.configFile);
-    const members = new Set([route.monitor, ...route.targets]);
+    const members = new Set([recipient, ...route.targets]);
     const parentRoles = config.reports.workerParents.map((role) => resolveRole(registry, role));
     if (parentRoles.some((role) => !members.has(role))) {
       // The Codex observer reports a scope deferral on its own line; the Claude helper as status.
       return send.harness === "codex"
-        ? `${DEFERRED_PREFIX}workerParents requires parents in the active monitor route`
+        ? `${DEFERRED_PREFIX}workerParents requires parents in the active review route`
         : line({
-            reason: "worker parents must be in the active monitor route",
+            reason: "worker parents must be in the active review route",
             status: "deferred",
           });
     }
@@ -352,7 +370,7 @@ export async function deliverScheduledWake(
       return await codexSlot(game, scope, unique, config.reports.project, slot, signal);
     }
     return line(
-      spoolMonitorBrief(process.env, game.busDir, scope, slot, unique) as unknown as Record<
+      spoolReviewBrief(process.env, game.busDir, scope, slot, unique) as unknown as Record<
         string,
         unknown
       >,
@@ -361,6 +379,6 @@ export async function deliverScheduledWake(
     if (error instanceof SlotInterrupted) {
       return "";
     }
-    return line({ reason: "monitor route or state unavailable", status: "blocked" });
+    return line({ reason: "review route or state unavailable", status: "blocked" });
   }
 }

@@ -36,7 +36,7 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
   fill("reports", {
     project: "Fixture",
     scheduledTicks: false,
-    recipient: "monitor",
+    recipient: "dev-manager",
     workerParents: [],
   });
   // Cases spell "no exclusions" as an empty pattern; the configuration omits the field.
@@ -81,17 +81,19 @@ function env(ws: Workspace): Record<string, string> {
 
 /**
  * A report recipient must resolve through the registry. A case that names none gets the default
- * "monitor" role with a fixture conversation.
+ * "dev-manager" role with a fixture conversation.
  */
 function ensureRecipient(ws: Workspace): void {
   if (ws.config.reports?.recipient !== undefined) return;
   const registry = ws.registry();
-  if (registry.roles.monitor) return;
+  if (registry.roles["dev-manager"]) return;
   ws.writeRegistry({
     ...registry,
     roles: {
       ...registry.roles,
-      monitor: { conversations: { [registry.harness]: "00000000-0000-4000-8000-0000000000ff" } },
+      "dev-manager": {
+        conversations: { [registry.harness]: "00000000-0000-4000-8000-0000000000ff" },
+      },
     },
   });
 }
@@ -137,8 +139,8 @@ function ensureRouteRoles(ws: Workspace): void {
     return;
   }
   if (typeof route !== "object" || route === null) return;
-  const { monitor, targets } = route as { monitor?: unknown; targets?: unknown };
-  const names = [monitor, ...(Array.isArray(targets) ? targets : [])];
+  const { targets } = route as { targets?: unknown };
+  const names: unknown[] = Array.isArray(targets) ? targets : [];
   const registry = ws.registry();
   const missing = names.filter(
     (name): name is string =>
@@ -173,8 +175,8 @@ function command(ws: Workspace, words: string[]): Command {
   ensureRecipient(ws);
   ensureRouteRoles(ws);
   registerUsedConversations(ws, words);
-  // A noun group (monitor, claude, codex) takes a verb; the other commands are one word.
-  const width = ["monitor", "claude", "codex"].includes(words[0] ?? "") ? 2 : 1;
+  // A noun group (inbox, harness, claude, codex) takes a verb; the other commands are one word.
+  const width = ["inbox", "harness", "claude", "codex"].includes(words[0] ?? "") ? 2 : 1;
   const verb = words.slice(0, width);
   const rest = words.slice(width);
   return {

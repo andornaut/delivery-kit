@@ -1,4 +1,4 @@
-// The committed examples are valid 1.0 configuration.
+// The committed examples are valid 3.0 configuration.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,9 +12,9 @@ import { validateGameDevConfig } from "./layout.ts";
 const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "examples");
 
 describe("examples", () => {
-  it("delivery-kit.json is a valid project configuration addressing the monitor duty", () => {
+  it("delivery-kit.json is a valid project configuration addressing the dev-manager role", () => {
     const config = loadProjectConfig(join(examples, "delivery-kit.json"));
-    expect(addressedRoles(config)).toEqual(["monitor"]);
+    expect(addressedRoles(config)).toEqual(["dev-manager"]);
   });
 
   it("config.json is a valid game-dev configuration naming each report project", () => {
@@ -23,10 +23,12 @@ describe("examples", () => {
     );
     const project = loadProjectConfig(join(examples, "delivery-kit.json")).reports.project;
     expect(Object.values(config.games).map((game) => game.name)).toContain(project);
-    expect(config.sharedRoles).toContain("game-dev");
+    expect(config.sharedRoles).toContain(
+      loadProjectConfig(join(examples, "delivery-kit.json")).reports.recipient,
+    );
   });
 
-  it("route.json is a valid schema 1 role-name route for config.json", () => {
+  it("route.json is a valid schema 2 role-name route for config.json", () => {
     const config = validateGameDevConfig(
       JSON.parse(readFileSync(join(examples, "config.json"), "utf8")),
     );
@@ -34,14 +36,14 @@ describe("examples", () => {
       config,
       JSON.parse(readFileSync(join(examples, "route.json"), "utf8")),
     );
-    expect(route).toMatchObject({ monitor: "game-dev", schema: 1, state: "active" });
+    expect(route).toMatchObject({ schema: 2, state: "active" });
   });
 
   it("the channel server runs the packaged CLI", () => {
     const mcp = JSON.parse(readFileSync(join(examples, "claude-channel.mcp.json"), "utf8")) as {
       mcpServers: Record<string, { command: string; args: string[] }>;
     };
-    const server = mcp.mcpServers["delivery-kit-monitor"];
+    const server = mcp.mcpServers["delivery-kit-channel"];
     expect(server?.command).toBe("npx");
     expect(server?.args.slice(-2)).toEqual(["claude", "channel"]);
   });

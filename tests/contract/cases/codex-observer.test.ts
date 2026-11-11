@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
-import { clearMonitor } from "../lib/claude-codex.ts";
+import { clearRecipient } from "../lib/claude-codex.ts";
 import { codexWorld, tick } from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
 import { CodexSocket } from "../lib/codex-socket.ts";
@@ -16,7 +16,7 @@ import { roleRoute } from "../lib/routes.ts";
 const TECH = "00000000-0000-0000-0000-000000000001";
 const ART = "00000000-0000-0000-0000-000000000002";
 const GAMEPLAY = "00000000-0000-0000-0000-000000000003";
-const MONITOR = "00000000-0000-0000-0000-000000000004";
+const RECIPIENT = "00000000-0000-0000-0000-000000000004";
 const PRIVATE = "PRIVATE_QUEUE_PAYLOAD";
 const QUEUE = [
   { id: "queued-one", clientUserMessageId: "client-one", input: [{ type: "text", text: PRIVATE }] },
@@ -32,14 +32,14 @@ async function nativeGame(ws: Workspace, sockets: CodexSocket[]): Promise<CodexS
       tech: { conversations: { codex: TECH } },
       art: { conversations: { codex: ART } },
       gameplay: { conversations: { codex: GAMEPLAY } },
-      monitor: { conversations: { codex: MONITOR } },
+      "dev-manager": { conversations: { codex: RECIPIENT } },
     },
   });
   ws.config.git = { main: "main", remote: "origin", github: "" };
   ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
   ws.config.reports = { project: "Fixture", recipient: "tech" };
-  clearMonitor(ws, TECH);
+  clearRecipient(ws, TECH);
   const socket = await codexWorld(new CodexSocket(ws), { [TECH]: QUEUE }).listen();
   sockets.push(socket);
   ws.env.CODEX_CONTROL_SOCKET = socket.path;
@@ -54,32 +54,32 @@ suite("codex observer", () => {
   });
 
   contract(
-    "the routed observer uses monitor clearance and deduplicates a slot persistently",
+    "the routed observer uses recipient clearance and deduplicates a slot persistently",
     async () => {
       const ws = workspace();
       const socket = await nativeGame(ws, sockets);
-      ws.writeRoute(roleRoute(ws, "codex", MONITOR, [TECH, GAMEPLAY]));
+      ws.writeRoute(roleRoute(ws, "codex", RECIPIENT, [TECH, GAMEPLAY]));
       const twenty = at(20);
       const fifty = at(50);
       const first = await tick(ws, twenty);
-      const receipt = ws.readJson<Json>(`unblock/${MONITOR}-${twenty}.json`);
+      const receipt = ws.readJson<Json>(`unblock/${RECIPIENT}-${twenty}.json`);
       expect(receipt.status).toBe("deferred");
       const queues = JSON.parse(readFileSync(receipt.snapshot_path, "utf8")).queues;
-      expect(new Set(Object.keys(queues))).toEqual(new Set([MONITOR, TECH, GAMEPLAY]));
+      expect(new Set(Object.keys(queues))).toEqual(new Set([RECIPIENT, TECH, GAMEPLAY]));
       expect(queues[TECH][0].input[0].text).toBe(PRIVATE);
       expect(socket.methods().some((method) => method.startsWith("turn/"))).toBe(false);
-      clearMonitor(ws, MONITOR);
+      clearRecipient(ws, RECIPIENT);
       const next = await tick(ws, fifty);
-      expect(next.monitor[0]!.result.status).toBe("accepted");
+      expect(next.review[0]!.result.status).toBe("accepted");
       const duplicate = await tick(ws, fifty);
-      expect(duplicate.monitor[0]!.result.status).toBe("deduplicated");
-      // 1.0 also delivers health events natively to the monitor; only slot requests count.
+      expect(duplicate.review[0]!.result.status).toBe("deduplicated");
+      // 1.0 also delivers health events natively to the recipient; only slot requests count.
       const mutations = socket.slotMutations();
       expect(
         mutations.map((call) => [call.method, call.params.threadId]),
         JSON.stringify(socket.calls.filter(CodexSocket.isEvent).map((c) => c.params.input)),
-      ).toEqual([["turn/steer", MONITOR]]);
-      expect(ws.readJson<Json>(`unblock/${MONITOR}-${fifty}.json`).status).toBe("accepted");
+      ).toEqual([["turn/steer", RECIPIENT]]);
+      expect(ws.readJson<Json>(`unblock/${RECIPIENT}-${fifty}.json`).status).toBe("accepted");
       expect(first.stdout + next.stdout + duplicate.stdout).not.toContain(PRIVATE);
     },
   );
@@ -88,7 +88,7 @@ suite("codex observer", () => {
     const ws = workspace();
     const socket = await nativeGame(ws, sockets);
     socket.on("initialize", { close: true });
-    const result = await cli(ws, ["monitor", "snapshot", "--recipient", TECH]);
+    const result = await cli(ws, ["inbox", "snapshot", "--recipient", TECH]);
     expect(result.code).toBe(1);
     expect(result.stdout + result.stderr).not.toContain("PRIVATE_");
   });

@@ -16,13 +16,13 @@ export interface CommandSpec {
 
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
+  conversation: "UUID",
   disposition: "handled|superseded|retained",
   "expected-revision": "N",
   game: "ID",
   harness: "claude|codex|default",
   "history-cursor": "CURSOR",
   id: "SAFE_ID",
-  monitor: "UUID",
   parent: "ROLE|UUID",
   "poll-seconds": "SECONDS",
   "queue-id": "ID",
@@ -39,7 +39,7 @@ const VALUES: Readonly<Record<string, string>> = {
 export const GROUPS = {
   game: "game operations",
   harness: "harness (claude, codex)",
-  monitor: "monitor (game-dev)",
+  inbox: "inbox (recipient)",
 } as const;
 
 export interface GroupedSpec extends CommandSpec {
@@ -51,7 +51,7 @@ const SCOPE = {
   game: { multiple: true, type: "string" },
   role: { multiple: true, type: "string" },
 } as const;
-const MONITOR = {
+const INBOX = {
   ...GAME,
   parent: { multiple: true, type: "string" },
   recipient: { type: "string" },
@@ -70,18 +70,18 @@ export const SPECS = {
     forms: [["game?"]],
     group: "game",
     options: GAME,
-    summary: "validate config.json, var/registry.json and each delivery-kit.json",
+    summary: "validate config.json, var/registry.json, var/route.json and each delivery-kit.json",
   },
   "claude channel": {
-    forms: [["game?", "monitor?", "state-dir?", "poll-seconds?"]],
+    forms: [["game?", "conversation?", "state-dir?", "poll-seconds?"]],
     group: "harness",
     options: {
+      conversation: { type: "string" },
       game: { multiple: true, type: "string" },
-      monitor: { type: "string" },
       "poll-seconds": { type: "string" },
       "state-dir": { multiple: true, type: "string" },
     },
-    summary: "the stdio server the Claude monitor session starts; delivers the channel spool",
+    summary: "the stdio server the Claude recipient session starts; delivers the channel spool",
   },
   "claude ready": READY,
   "codex ready": READY,
@@ -115,23 +115,23 @@ export const SPECS = {
     },
     summary: "atomically select harness overrides for an explicit scope without activating roles",
   },
-  "monitor ack": {
+  "inbox ack": {
     forms: [["game", "snapshot", "queue-id", "disposition", "reason?", "recipient?", "parent?"]],
-    group: "monitor",
+    group: "inbox",
     options: {
-      ...MONITOR,
+      ...INBOX,
       disposition: { type: "string" },
       "queue-id": { multiple: true, type: "string" },
       reason: { type: "string" },
       snapshot: { type: "string" },
     },
-    summary: "acknowledge monitor queue items from a snapshot",
+    summary: "acknowledge inbox queue items from a snapshot",
   },
-  "monitor snapshot": {
+  "inbox snapshot": {
     forms: [["game", "recipient?", "parent?", "history-cursor?"]],
-    group: "monitor",
-    options: { ...MONITOR, "history-cursor": { type: "string" } },
-    summary: "capture the monitor review snapshot",
+    group: "inbox",
+    options: { ...INBOX, "history-cursor": { type: "string" } },
+    summary: "capture the recipient's inbox snapshot",
   },
   request: {
     forms: [["game", "id"]],

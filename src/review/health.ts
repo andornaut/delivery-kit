@@ -1,6 +1,6 @@
-// Scheduled monitor health in `<unblock>/health/<recipient>.json`: per-item backlog ages across
+// Scheduled review health in `<unblock>/health/<recipient>.json`: per-item backlog ages across
 // distinct slots, deferral counts, question observation history, and one
-// `monitor-stuck` event per failed episode. Delivery acceptance deduplicates worker and question
+// `review-stuck` event per failed episode. Delivery acceptance deduplicates worker and question
 // notices, never distinct scheduled reviews. It never acknowledges queue work or records recovery.
 import {
   hasErrors,
@@ -65,9 +65,9 @@ function recordQuestions(
 
 function stuckMessage(unblock: string, recipient: string, snapshotId: string): string {
   return (
-    `Monitor needs owner reconciliation for ${recipient} after two distinct slots: ` +
+    `Review needs owner reconciliation for ${recipient} after two distinct slots: ` +
     `inspect local snapshot ${snapshotPath(unblock, snapshotId)}; classify queued work, preserve ` +
-    "independent work, and explicitly monitor-ack handled, superseded or retained IDs. Check " +
+    "independent work, and explicitly inbox ack handled, superseded or retained IDs. Check " +
     "recipient clearance/native question state for deferred reminders. Accepted reminders do not " +
     "acknowledge queue work."
   );
@@ -194,17 +194,17 @@ export function recordHealth(
     );
   });
   const anyDegraded = degraded || workersDegraded || questionsDegraded;
-  let monitorStatus = "ok";
+  let reviewStatus = "ok";
   if (failed) {
-    monitorStatus = "failed";
+    reviewStatus = "failed";
   } else if (anyDegraded) {
-    monitorStatus = "degraded";
+    reviewStatus = "degraded";
   }
   // The printed line selects its own key order.
   const health: Json = Object.fromEntries([
     ["question_state_status", questionsDegraded ? "degraded" : "ok"],
     ["worker_health_status", workersDegraded ? "degraded" : "ok"],
-    ["monitor_status", monitorStatus],
+    ["review_status", reviewStatus],
     ["history_status", degraded ? "degraded" : "ok"],
     ["recipient", recipient],
     ["snapshot_id", snapshot.snapshot_id],
@@ -242,9 +242,9 @@ export function recordHealth(
     }
   }
   if (failed || anyDegraded) {
-    health.monitor_reason = reasons.join("; ");
+    health.review_reason = reasons.join("; ");
   }
-  delete record.monitor_reason;
+  delete record.review_reason;
   Object.assign(record, health);
   record.last_delivery_status = outcome.status;
   if (!failed) {
@@ -267,7 +267,7 @@ export function recordHealth(
     record.problem_signature = problemSignature;
     record.episode_first_slot = slot;
     context.emit(
-      "monitor-stuck",
+      "review-stuck",
       `${recipient}-${slot}-${problemSignature}`,
       stuckMessage(unblock, recipient, String(snapshot.snapshot_id)),
     );

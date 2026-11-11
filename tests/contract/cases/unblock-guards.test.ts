@@ -14,9 +14,9 @@ import {
   workspaces,
 } from "../lib/cases.ts";
 import { ART, type Params, TECH } from "../lib/unblock-native.ts";
-import { decide, Monitored, wake } from "../lib/unblock-runner.ts";
+import { decide, Reviewed, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
-import { routeRole } from "../lib/routes.ts";
+import { routeRole, setRecipient } from "../lib/routes.ts";
 
 const COMPACTION = "native latest-turn context compaction prevents complete question proof";
 
@@ -25,20 +25,20 @@ const turnOne = (item: Item) => ({ turnId: "turn-one", item });
 
 suite("unblock guards", () => {
   const workspace = workspaces();
-  const open: Monitored[] = [];
+  const open: Reviewed[] = [];
   afterEach(async () => {
-    for (const monitored of open.splice(0)) await monitored.close();
+    for (const reviewed of open.splice(0)) await reviewed.close();
   });
   async function routed(
     ws: Workspace = workspace(),
     route: Record<string, unknown> = {},
-  ): Promise<Monitored> {
-    const monitored = await Monitored.routed(ws, route);
-    open.push(monitored);
-    return monitored;
+  ): Promise<Reviewed> {
+    const reviewed = await Reviewed.routed(ws, route);
+    open.push(reviewed);
+    return reviewed;
   }
-  /** Script the monitor's item history for every items/list call on its thread. */
-  function history(m: Monitored, items: (params: Params) => unknown): void {
+  /** Script the recipient's item history for every items/list call on its thread. */
+  function history(m: Reviewed, items: (params: Params) => unknown): void {
     m.world.thread(TECH).items = items;
   }
 
@@ -70,7 +70,7 @@ suite("unblock guards", () => {
   });
 
   contract(
-    "another recipient's pending record neither blocks the monitor nor changes any record",
+    "another recipient's pending record neither blocks the recipient nor changes any record",
     async () => {
       const m = await routed();
       decide(m.ws, ART, { thread_id: ART, state: "pending" });
@@ -88,11 +88,12 @@ suite("unblock guards", () => {
     },
   );
 
-  contract("a monitor that is not a registered role is never a clear recipient", async () => {
-    for (const identity of ["../other", "no-such-role"]) {
-      const m = await routed(workspace(), { monitor: identity });
+  contract("a recipient that is not a configured role is never a clear recipient", async () => {
+    for (const identity of ["no-such-role", "absent-game/tech"]) {
+      const m = await routed(workspace());
+      setRecipient(m.ws, m.ws.game, identity);
       await m.start();
-      const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
+      const output = await m.jump(wake(0), (text) => text.includes("review deferred"));
       expect(output).toContain(ROUTE_INVALID_MESSAGE);
       expect(m.socket.connections).toEqual([]);
     }
@@ -392,7 +393,7 @@ suite("unblock guards", () => {
       const m = await routed(ws, { targets: [routeRole(ws, "codex", ART)] });
       m.ws.config.reports = { workerParents: ["gameplay"] };
       await m.start();
-      const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
+      const output = await m.jump(wake(0), (text) => text.includes("review deferred"));
       expect(output).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
       expect(m.socket.connections).toEqual([]);
     },
@@ -418,7 +419,7 @@ suite("unblock guards", () => {
       registry([ART, ART]);
       ws.config.reports = { workerParents: ["parent-0", "parent-1"] };
       await m.start();
-      const output = await m.jump(wake(0), (text) => text.includes("monitor deferred"));
+      const output = await m.jump(wake(0), (text) => text.includes("review deferred"));
       expect(output).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
       await m.stop();
       registry(["ABCDEFAB-0000-0000-0000-000000000002"]);

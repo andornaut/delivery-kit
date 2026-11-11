@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { watchCi } from "../ci.ts";
 import { deployAfterCi } from "../deploy.ts";
 import { lockIsFree } from "../lock.ts";
-import { deliverScheduledWake } from "../monitor/wake.ts";
+import { deliverScheduledWake } from "../review/wake.ts";
 import { readDeliveryControl, setDesiredDelivery } from "./control.ts";
 import { depart, requestStore } from "./departure.ts";
 import { captureRequest, claimRequest } from "./requests.ts";
@@ -26,7 +26,7 @@ vi.mock("../ci.ts", async (original) => ({
   ...(await original<typeof import("../ci.ts")>()),
   watchCi: vi.fn(() => Promise.resolve("success")),
 }));
-vi.mock("../monitor/wake.ts", () => ({
+vi.mock("../review/wake.ts", () => ({
   deliverScheduledWake: vi.fn(() => Promise.resolve("delivered")),
 }));
 vi.mock("./requests.ts", async (original) => {

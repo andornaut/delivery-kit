@@ -18,7 +18,7 @@ import {
 import { payloadSignature, persist, queueEntry, retentionPath, snapshotPath } from "./store.ts";
 
 const OWNER = "00000000-0000-4000-8000-000000000002";
-const MONITOR = "00000000-0000-4000-8000-000000000001";
+const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 
 function question(index: number, options: unknown): Record<string, unknown> {
   return {
@@ -49,12 +49,12 @@ describe("reconcile", () => {
     (binding) => {
       const unblock = mkdtempSync(join(tmpdir(), "reconcile-retention-"));
       const entry = queueEntry("same-id", "same payload");
-      persist(retentionPath(unblock, MONITOR, entry.id), {
+      persist(retentionPath(unblock, RECIPIENT, entry.id), {
         active: true,
         ...(binding === "wrong provider" ? { harness: "claude" } : {}),
         payload_signature: payloadSignature(entry),
         queue_id: entry.id,
-        recipient: MONITOR,
+        recipient: RECIPIENT,
         snapshot_id: "original",
       });
       if (binding === "legacy matching") {
@@ -62,11 +62,11 @@ describe("reconcile", () => {
       }
       const [queues, count] = unacknowledged(unblock, {
         harness: "codex",
-        harnesses: { [MONITOR]: "codex" },
-        queues: { [MONITOR]: [entry] },
+        harnesses: { [RECIPIENT]: "codex" },
+        queues: { [RECIPIENT]: [entry] },
       });
       expect(count).toBe(binding === "legacy matching" ? 1 : 0);
-      expect(queues[MONITOR]).toEqual(binding === "legacy matching" ? [] : [entry]);
+      expect(queues[RECIPIENT]).toEqual(binding === "legacy matching" ? [] : [entry]);
     },
   );
 
@@ -107,9 +107,9 @@ describe("reconcile", () => {
   it("escalates a proven question once at a distinct slot", () => {
     const unblock = mkdtempSync(join(tmpdir(), "reconcile-"));
     const snapshot = { question_state: { [OWNER]: { questions: [question(0, ["a"])] } }, slot: 2 };
-    const [notice] = questionNotices(unblock, MONITOR, snapshot);
+    const [notice] = questionNotices(unblock, RECIPIENT, snapshot);
     expect(notice?.level).toBe("initial");
-    persist(join(unblock, "health", `${MONITOR}.json`), {
+    persist(join(unblock, "health", `${RECIPIENT}.json`), {
       question_observations: {
         [notice!.identity]: {
           accepted_levels: ["initial"],
@@ -119,7 +119,7 @@ describe("reconcile", () => {
         },
       },
     });
-    expect(questionNotices(unblock, MONITOR, snapshot)[0]?.level).toBe("escalation");
+    expect(questionNotices(unblock, RECIPIENT, snapshot)[0]?.level).toBe("escalation");
   });
 
   it.each(["empty", "unchanged", "retained"])(
@@ -132,9 +132,9 @@ describe("reconcile", () => {
         queues: { [OWNER]: inventory === "empty" ? [] : [entry] },
         snapshot_id: "snapshot",
       };
-      persist(join(unblock, "decisions", `${MONITOR}.json`), {
+      persist(join(unblock, "decisions", `${RECIPIENT}.json`), {
         state: "clear",
-        thread_id: MONITOR,
+        thread_id: RECIPIENT,
       });
       if (inventory === "retained") {
         persist(retentionPath(unblock, OWNER, entry.id), {
@@ -161,14 +161,14 @@ describe("reconcile", () => {
       const client: RpcClient = { call, close: () => {} };
       const first = await reconcileSlot(
         client,
-        { coordinator: MONITOR, slot: 1, unblock },
+        { recipient: RECIPIENT, slot: 1, unblock },
         snapshot,
       );
       expect(first.status).toBe("accepted");
-      recordHealth({ emit: vi.fn(), unblock }, MONITOR, 1, snapshot, first);
+      recordHealth({ emit: vi.fn(), unblock }, RECIPIENT, 1, snapshot, first);
       const second = await reconcileSlot(
         client,
-        { coordinator: MONITOR, slot: 2, unblock },
+        { recipient: RECIPIENT, slot: 2, unblock },
         snapshot,
       );
       expect(second.status).toBe("accepted");
@@ -185,10 +185,10 @@ describe("reconcile", () => {
       ]);
       const sends = call.mock.calls.filter(([method]) => method === "turn/start");
       expect(sends[0]?.[1]).toMatchObject({
-        input: [{ text: expect.stringContaining("Scheduled monitoring review, slot 1.") }],
+        input: [{ text: expect.stringContaining("Scheduled review, slot 1.") }],
       });
       expect(sends[1]?.[1]).toMatchObject({
-        input: [{ text: expect.stringContaining("Scheduled monitoring review, slot 2.") }],
+        input: [{ text: expect.stringContaining("Scheduled review, slot 2.") }],
       });
     },
   );
@@ -197,20 +197,20 @@ describe("reconcile", () => {
     "blocks a distinct slot with accepted inventory and %s",
     async (blocker) => {
       const unblock = mkdtempSync(join(tmpdir(), "reconcile-"));
-      const snapshot = { errors: {}, queues: { [MONITOR]: [] } };
-      persist(join(unblock, "health", `${MONITOR}.json`), {
+      const snapshot = { errors: {}, queues: { [RECIPIENT]: [] } };
+      persist(join(unblock, "health", `${RECIPIENT}.json`), {
         accepted_signature: inventorySignature(unblock, snapshot),
       });
       if (blocker === "inventory error") {
-        persist(join(unblock, "decisions", `${MONITOR}.json`), {
+        persist(join(unblock, "decisions", `${RECIPIENT}.json`), {
           state: "clear",
-          thread_id: MONITOR,
+          thread_id: RECIPIENT,
         });
       }
       const call = vi.fn<RpcClient["call"]>();
       const result = await reconcileSlot(
         { call, close: () => {} },
-        { coordinator: MONITOR, slot: 2, unblock },
+        { recipient: RECIPIENT, slot: 2, unblock },
         { ...snapshot, errors: blocker === "inventory error" ? { [OWNER]: "unavailable" } : {} },
       );
       expect(result.status).toBe("deferred");

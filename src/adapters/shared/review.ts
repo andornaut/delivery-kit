@@ -1,4 +1,4 @@
-// The instruction every scheduled monitor review carries: find each hold, block and pending
+// The instruction every scheduled review carries: find each hold, block and pending
 // user decision, and get it surfaced to the user or released.
 export const UNBLOCK_INSTRUCTIONS =
   "Find every hold, block and pending user decision. For a pending decision, make sure its owner " +

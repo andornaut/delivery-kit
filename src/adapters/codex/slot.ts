@@ -1,4 +1,4 @@
-// The scheduled slot receipt `<unblock>/<coordinator>-<slot>.json` and its bounded send loop.
+// The scheduled slot receipt `<unblock>/<recipient>-<slot>.json` and its bounded send loop.
 // The receipt is durable as `sending` before each native request, so an interrupted send
 // becomes `ambiguous` and is never resent; only an explicit stale-turn rejection of turn/steer
 // permits one refreshed attempt with the same request ID.

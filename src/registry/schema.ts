@@ -12,7 +12,6 @@ import {
   checkRelativePath,
   checkString,
   CONVERSATION_ID_PATTERN,
-  ID_PATTERN,
   Issues,
 } from "../validate.ts";
 
@@ -39,7 +38,6 @@ export interface RoleRecord {
   readonly conversations: Readonly<Partial<Record<Harness, string | null>>>;
   readonly phase?: string;
   readonly activation?: Activation;
-  readonly duties?: readonly string[];
 }
 
 export interface Adoption {
@@ -52,7 +50,7 @@ export interface Adoption {
 }
 
 export interface Operation {
-  /** Role key or duty name of the bus operator. */
+  /** Role key of the bus operator. */
   readonly busOwner: string;
   readonly activation?: { readonly marker: string };
   readonly lastAdoption?: Adoption;
@@ -114,11 +112,23 @@ function checkConversations(issues: Issues, at: string, value: unknown): void {
   }
 }
 
+/** The edit a pre-3.0 registry needs, reported instead of a bare unknown key. */
+export const DUTIES_REMOVED =
+  "duties were removed in 3.0.0; remove this field and name roles explicitly " +
+  "(scheduled reviews go to each game's reports.recipient)";
+
 function checkRole(issues: Issues, at: string, value: unknown): void {
   const shape = {
-    optional: ["branch", "phase", "activation", "duties", "harness"],
+    optional: ["branch", "phase", "activation", "harness"],
     required: ["ownership", "worktree", "conversations"],
   };
+  if (typeof value === "object" && value !== null && Object.hasOwn(value, "duties")) {
+    issues.add(`${at}/duties`, DUTIES_REMOVED);
+    const rest: Record<string, unknown> = { ...value };
+    delete rest.duties;
+    checkRole(issues, at, rest);
+    return;
+  }
   if (!checkObject(issues, at, shape, value)) {
     return;
   }
@@ -136,14 +146,6 @@ function checkRole(issues: Issues, at: string, value: unknown): void {
   }
   if (value.activation !== undefined) {
     checkActivation(issues, `${at}/activation`, value.activation);
-  }
-  if (
-    value.duties !== undefined &&
-    checkArray(issues, `${at}/duties`, { unique: true }, value.duties)
-  ) {
-    value.duties.forEach((duty, index) =>
-      checkString(issues, `${at}/duties/${index}`, ID_PATTERN, duty),
-    );
   }
 }
 
@@ -246,28 +248,20 @@ function checkStructure(issues: Issues, value: unknown): value is Registry {
   return issues.list.length === 0;
 }
 
-/** Keys and names must agree with config.json: role keys, games, duties and role references. */
+/** Keys and names must agree with config.json: role keys, games and role references. */
 function checkAgainstConfig(issues: Issues, config: GameDevConfig, registry: Registry): void {
   const keys = new Set(roleKeys(config));
-  const duties = new Set<string>();
-  for (const [key, role] of Object.entries(registry.roles)) {
+  for (const key of Object.keys(registry.roles)) {
     if (!keys.has(key)) {
       issues.add(`/roles/${key}`, "is not a role in config.json");
     }
-    for (const duty of role.duties ?? []) {
-      if (keys.has(duty)) {
-        issues.add(`/roles/${key}/duties`, `duty ${duty} must not be a role key`);
-      }
-      duties.add(duty);
-    }
   }
-  const known = (name: string): boolean => Object.hasOwn(registry.roles, name) || duties.has(name);
   for (const [game, operation] of Object.entries(registry.operations)) {
     if (!Object.hasOwn(config.games, game)) {
       issues.add(`/operations/${game}`, "is not a game in config.json");
     }
-    if (!known(operation.busOwner)) {
-      issues.add(`/operations/${game}/busOwner`, "is not a registered role or duty");
+    if (!Object.hasOwn(registry.roles, operation.busOwner)) {
+      issues.add(`/operations/${game}/busOwner`, "is not a registered role");
     }
   }
   registry.transfers.forEach((transfer, index) =>

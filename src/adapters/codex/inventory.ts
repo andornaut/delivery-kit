@@ -1,6 +1,6 @@
 // Native queue inventory (thread/queue/list), history references (thread/items/list) and the
 // native half of an explicit acknowledgement (thread/queue/delete).
-// Durable acknowledgement and retention records stay with the monitor that owns the snapshot.
+// Durable acknowledgement and retention records stay with the inbox that owns the snapshot.
 import { dumpsJson, isRecord, type PyJson, sameJson } from "../shared/pyjson.ts";
 import { NATIVE_ITEM_TYPES, questionItem } from "./guard.ts";
 import { NativeTimeout, type RpcClient, RpcError } from "./rpc.ts";

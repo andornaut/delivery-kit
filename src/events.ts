@@ -13,7 +13,7 @@ import { claudeAdapter } from "./adapters/claude/index.ts";
 import { codexAdapter, type ReceiptSeed } from "./adapters/codex/index.ts";
 import { eventRequestId, isCanonicalUuid, SHA_PATTERN } from "./adapters/shared/ids.ts";
 import { dumpsJson, isRecord, type PyJson } from "./adapters/shared/pyjson.ts";
-import { readRoleRoute, type RoleRoute } from "./adapters/shared/route.ts";
+import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
 import type { DeliveryReceipt, HarnessAdapter } from "./adapters/types.ts";
 import { loadProjectConfig } from "./config.ts";
 import { readJson, writeDurable } from "./durable.ts";
@@ -249,19 +249,21 @@ function gameDevRoot(game: GameLayout): string {
 
 /**
  * Event routing by role. Events go only to the registry recipient through the active adapter,
- * with no queue fallback. An invalid route, or a held one for its own monitor, defers every
- * event; any other recipient, or no route at all, is delivered.
+ * with no queue fallback. An invalid route, or a held one whose recipient is this recipient,
+ * defers every event; any other recipient, or no route at all, is delivered.
  */
 function eventRouting(layout: Layout, recipientRole: string): "defer" | "deliver" {
-  let route: RoleRoute | null;
   try {
-    route = readRoleRoute(layout);
+    const route = readRoleRoute(layout);
+    if (route === null) {
+      return "deliver";
+    }
+    return routeRecipient(layout, route) === recipientRole && route.state === "held"
+      ? "defer"
+      : "deliver";
   } catch {
     return "defer";
   }
-  return route !== null && route.monitor === recipientRole && route.state === "held"
-    ? "defer"
-    : "deliver";
 }
 
 interface Destination {

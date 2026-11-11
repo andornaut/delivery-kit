@@ -7,7 +7,6 @@ import { holdLock, LockBusy } from "../lock.ts";
 import { makeFixture, registryInput, writeFixtureJson } from "../testFixtures.ts";
 import { ValidationError } from "../validate.ts";
 import {
-  AmbiguousRole,
   createRegistry,
   type HarnessSelection,
   readRegistry,
@@ -43,7 +42,6 @@ function setup() {
           claude: `00000000-0000-4000-8000-${String(index + 101).padStart(12, "0")}`,
           codex: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
         },
-        duties: key === "game-dev" ? ["monitor"] : [],
         ownership: "active",
         phase: "source-held",
         worktree: `.worktrees/${key.replaceAll("/", "-")}`,
@@ -61,12 +59,12 @@ function setup() {
 const ARCHIE = "archies-dog-walks";
 
 describe("resolveSelectedRoles", () => {
-  it("expands configured game roles and deduplicates explicit duties and roles", () => {
+  it("expands configured game roles and deduplicates explicit roles", () => {
     const layout = setup();
     expect(
       resolveSelectedRoles(layout, readRegistry(layout), {
         games: [ARCHIE],
-        roles: ["monitor", `${ARCHIE}/tech`],
+        roles: ["game-dev", `${ARCHIE}/tech`],
       }),
     ).toEqual([`${ARCHIE}/art`, `${ARCHIE}/gameplay`, `${ARCHIE}/tech`, "game-dev"]);
   });
@@ -78,7 +76,7 @@ describe("resolveSelectedRoles", () => {
       { games: [] },
       { roles: [] },
       { games: ["absent"] },
-      { roles: ["monitor", "monitor"] },
+      { roles: ["game-dev", "game-dev"] },
       { roles: [null] },
       { all: true },
       null,
@@ -92,16 +90,12 @@ describe("resolveSelectedRoles", () => {
     );
   });
 
-  it("rejects games with unregistered roles and ambiguously held duties", () => {
+  it("rejects games with unregistered roles", () => {
     const layout = setup();
     const registry = updateRegistry(layout, 1, (draft) => {
       delete draft.roles[`${ARCHIE}/art`];
-      draft.roles["art-kit"]!.duties = ["monitor"];
     });
     expect(() => resolveSelectedRoles(layout, registry, { games: [ARCHIE] })).toThrow(UnknownRole);
-    expect(() => resolveSelectedRoles(layout, registry, { roles: ["monitor"] })).toThrow(
-      AmbiguousRole,
-    );
   });
 });
 
@@ -120,7 +114,7 @@ describe("selectHarness", () => {
     expect(resolveHarness(next, `${ARCHIE}/tech`)).toBe("claude");
     expect(resolveHarness(next, "chibis-way-home/tech")).toBe("codex");
     expect(resolveHarness(next, "ada/tech")).toBe("codex");
-    expect(resolveHarness(next, "monitor")).toBe("codex");
+    expect(resolveHarness(next, "game-dev")).toBe("codex");
     expect(next.roles[`${ARCHIE}/tech`]!.phase).toBe("source-held");
   });
 
@@ -137,13 +131,13 @@ describe("selectHarness", () => {
     expect(next.roles[`${ARCHIE}/gameplay`]).toEqual(selected.roles[`${ARCHIE}/gameplay`]);
   });
 
-  it("selects a duty holder and retains both providers' conversation IDs", () => {
+  it("selects a shared role and retains both providers' conversation IDs", () => {
     const layout = setup();
     const before = readRegistry(layout);
-    const next = selectHarness(layout, 1, { harness: "claude", roles: ["monitor"] });
-    expect(resolveHarness(next, "monitor")).toBe("claude");
+    const next = selectHarness(layout, 1, { harness: "claude", roles: ["game-dev"] });
+    expect(resolveHarness(next, "game-dev")).toBe("claude");
     expect(next.roles["game-dev"]!.conversations).toEqual(before.roles["game-dev"]!.conversations);
-    expect(resolveConversation(next, "monitor")).toBe(
+    expect(resolveConversation(next, "game-dev")).toBe(
       before.roles["game-dev"]!.conversations.claude,
     );
   });
@@ -173,10 +167,10 @@ describe("selectHarness", () => {
     const layout = setup();
     const before = readFileSync(layout.registryFile);
     for (const selection of [
-      { harness: "other", roles: ["monitor"] },
+      { harness: "other", roles: ["game-dev"] },
       { harness: "claude" },
       { harness: "claude", roles: [] },
-      { harness: "claude", roles: ["monitor"], activation: true },
+      { harness: "claude", roles: ["game-dev"], activation: true },
       null,
     ]) {
       expect(() => selectHarness(layout, 1, selection as HarnessSelection)).toThrow(
@@ -189,13 +183,13 @@ describe("selectHarness", () => {
   it("checks the revision before resolving selection against the locked current registry", () => {
     const layout = setup();
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.duties = [];
+      delete draft.roles["art-kit"];
     });
     const before = readFileSync(layout.registryFile);
-    expect(() => selectHarness(layout, 1, { harness: "claude", roles: ["monitor"] })).toThrow(
+    expect(() => selectHarness(layout, 1, { harness: "claude", roles: ["art-kit"] })).toThrow(
       RevisionConflict,
     );
-    expect(() => selectHarness(layout, 2, { harness: "claude", roles: ["monitor"] })).toThrow(
+    expect(() => selectHarness(layout, 2, { harness: "claude", roles: ["art-kit"] })).toThrow(
       UnknownRole,
     );
     expect(readFileSync(layout.registryFile)).toEqual(before);
@@ -207,11 +201,11 @@ describe("selectHarness", () => {
     const before = readFileSync(layout.registryFile);
     try {
       expect(() =>
-        selectHarness(layout, 1, { harness: "claude", roles: ["monitor"] }, { timeoutSeconds: 0 }),
+        selectHarness(layout, 1, { harness: "claude", roles: ["game-dev"] }, { timeoutSeconds: 0 }),
       ).toThrow(LockBusy);
       expect(readFileSync(layout.registryFile)).toEqual(before);
       expect(
-        selectHarness(layout, 1, { harness: "claude", roles: ["monitor"] }, { held }).revision,
+        selectHarness(layout, 1, { harness: "claude", roles: ["game-dev"] }, { held }).revision,
       ).toBe(2);
     } finally {
       held.release();

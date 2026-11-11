@@ -43,11 +43,11 @@ export async function selectTarget(
   }
   const status = isRecord(thread.status) ? thread.status : {};
   if (thread.canAcceptDirectInput !== true) {
-    return [null, "coordinator input availability unknown"];
+    return [null, "recipient input availability unknown"];
   }
   const flags = status.activeFlags;
   if (status.type === "active" && !(Array.isArray(flags) && flags.length === 0)) {
-    return [null, "coordinator waiting on a question or approval"];
+    return [null, "recipient waiting on a question or approval"];
   }
   const listed = await client.call("thread/turns/list", {
     itemsView: "notLoaded",
@@ -71,7 +71,7 @@ export async function selectTarget(
       return [{ method: "turn/start" }, null];
     }
   }
-  return [null, "coordinator state ambiguous or interrupted; no automatic resume"];
+  return [null, "recipient state ambiguous or interrupted; no automatic resume"];
 }
 
 // A type alias, not an interface, so it satisfies the receipt's JSON index signature.

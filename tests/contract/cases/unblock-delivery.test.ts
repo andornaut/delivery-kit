@@ -1,4 +1,4 @@
-// Scheduled Codex monitor reminder delivery through the resident runner.
+// Scheduled Codex review reminder delivery through the resident runner.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";
@@ -6,7 +6,7 @@ import { afterEach, expect } from "vitest";
 import { CodexSocket, type RpcCall } from "../lib/codex-socket.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { ART, emptyQueue, GAMEPLAY, rpcError, STALE, TECH } from "../lib/unblock-native.ts";
-import { Monitored, wake } from "../lib/unblock-runner.ts";
+import { Reviewed, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const STDOUT_KEYS = [
@@ -19,8 +19,8 @@ const STDOUT_KEYS = [
   "worker_health_status",
   "question_state_status",
   "process_health_status",
-  "monitor_status",
-  "monitor_reason",
+  "review_status",
+  "review_reason",
   "recipient",
   "backlog_slots",
   "deferral_slots",
@@ -28,14 +28,14 @@ const STDOUT_KEYS = [
 
 suite("unblock delivery", () => {
   const workspace = workspaces();
-  const open: Monitored[] = [];
+  const open: Reviewed[] = [];
   afterEach(async () => {
-    for (const monitored of open.splice(0)) await monitored.close();
+    for (const reviewed of open.splice(0)) await reviewed.close();
   });
-  async function routed(ws: Workspace = workspace()): Promise<Monitored> {
-    const monitored = await Monitored.routed(ws);
-    open.push(monitored);
-    return monitored;
+  async function routed(ws: Workspace = workspace()): Promise<Reviewed> {
+    const reviewed = await Reviewed.routed(ws);
+    open.push(reviewed);
+    return reviewed;
   }
 
   contract("an active reminder reads every peer queue page and persists only IDs", async () => {
@@ -101,7 +101,7 @@ suite("unblock delivery", () => {
   );
 
   contract(
-    "a completed idle monitor gets turn/start without model or permission overrides",
+    "a completed idle recipient gets turn/start without model or permission overrides",
     async () => {
       const m = await routed();
       Object.assign(m.world.thread(TECH), {
@@ -170,7 +170,7 @@ suite("unblock delivery", () => {
       await m.start();
       for (const [index, outcome] of outcomes.entries()) {
         m.world.outcomes.push(outcome);
-        // 1.0 also delivers health events (such as monitor-stuck) natively to the monitor;
+        // 1.0 also delivers health events (such as review-stuck) natively to the recipient;
         // only the slot's own requests count here.
         const slotRequests = () => m.world.mutations().filter((call) => !CodexSocket.isEvent(call));
         const before = slotRequests().length;

@@ -8,7 +8,7 @@ import { contract, suite, workspaces } from "../lib/cases.ts";
 
 import type { Workspace } from "../lib/workspace.ts";
 
-const MONITOR = "00000000-0000-4000-8000-000000000001";
+const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 
 function setup(
   ws: Workspace,
@@ -28,9 +28,9 @@ function setup(
       schema: 1,
       revision: 1,
       harness: "codex",
-      roles: { monitor: { conversations: { codex: MONITOR } } },
+      roles: { "dev-manager": { conversations: { codex: RECIPIENT } } },
     });
-    ws.config.reports = { project: "Fixture", recipient: "monitor" };
+    ws.config.reports = { project: "Fixture", recipient: "dev-manager" };
   }
 }
 

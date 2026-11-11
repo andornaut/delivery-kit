@@ -1,4 +1,4 @@
-// Claude monitor inventory and acknowledgements over delivered channel entries. One brief is
+// Claude inbox inventory and acknowledgements over delivered channel entries. One brief is
 // dispatched and delivered first.
 import { rmSync, writeFileSync } from "node:fs";
 import { expect } from "vitest";
@@ -9,7 +9,7 @@ import {
   ARCHIE,
   claudeGame,
   deliver,
-  MONITOR,
+  RECIPIENT,
   pythonDigest,
   slotRequestId,
   tick,
@@ -20,7 +20,7 @@ import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
 
 const SLOT = at(20);
-const REQUEST = slotRequestId(MONITOR, SLOT);
+const REQUEST = slotRequestId(RECIPIENT, SLOT);
 
 async function delivered(ws: Workspace): Promise<void> {
   claudeGame(ws);
@@ -28,8 +28,8 @@ async function delivered(ws: Workspace): Promise<void> {
   await deliver(ws);
 }
 
-async function snapshot(ws: Workspace, recipient = MONITOR): Promise<Json> {
-  const result = await cli(ws, ["monitor", "snapshot", "--recipient", recipient]);
+async function snapshot(ws: Workspace, recipient = RECIPIENT): Promise<Json> {
+  const result = await cli(ws, ["inbox", "snapshot", "--recipient", recipient]);
   expect(result.code, result.stdout + result.stderr).toBe(0);
   return JSON.parse(result.stdout);
 }
@@ -47,7 +47,7 @@ async function ack(
 ) {
   const args = [
     "--recipient",
-    MONITOR,
+    RECIPIENT,
     "--snapshot",
     output.snapshot_id,
     "--disposition",
@@ -55,7 +55,7 @@ async function ack(
     ...extra,
   ];
   for (const id of ids) args.push("--queue-id", id);
-  const result = await cli(ws, ["monitor", "ack", ...args]);
+  const result = await cli(ws, ["inbox", "ack", ...args]);
   return {
     ...result,
     json: result.stdout ? (JSON.parse(result.stdout) as Json) : {},
@@ -66,7 +66,7 @@ function deliveredPath(ws: Workspace): string {
   return ws.path("unblock", "claude-delivered", `${REQUEST}.json`);
 }
 
-suite("claude monitor inventory", () => {
+suite("claude inbox inventory", () => {
   const workspace = workspaces();
 
   contract("a snapshot lists delivered entries and reports native state unavailable", async () => {
@@ -74,41 +74,41 @@ suite("claude monitor inventory", () => {
     await delivered(ws);
     const output = await snapshot(ws);
     const record = stored(ws, output);
-    expect(record.queues[MONITOR].map((entry: { id: string }) => entry.id)).toEqual([REQUEST]);
-    expect(record.queues[MONITOR][0].receipt_status).toBe("accepted");
+    expect(record.queues[RECIPIENT].map((entry: { id: string }) => entry.id)).toEqual([REQUEST]);
+    expect(record.queues[RECIPIENT][0].receipt_status).toBe("accepted");
     expect(new Set(Object.values(record.history).map((row) => (row as Json).status))).toEqual(
       new Set(["unavailable"]),
     );
     expect(output.question_state_status).toEqual({
-      [MONITOR]: "unavailable",
+      [RECIPIENT]: "unavailable",
       [ARCHIE]: "unavailable",
     });
-    expect(output.session_status).toEqual({ [MONITOR]: "idle", [ARCHIE]: "idle" });
+    expect(output.session_status).toEqual({ [RECIPIENT]: "idle", [ARCHIE]: "idle" });
     expect(output.target_queue_status[ARCHIE]).toBe("unavailable");
     for (const [rows, expected] of [
       [
         [
-          { sessionId: MONITOR, status: "idle" },
+          { sessionId: RECIPIENT, status: "idle" },
           { sessionId: ARCHIE, status: "waiting" },
         ],
         "waiting",
       ],
       [
         [
-          { sessionId: MONITOR, status: "idle" },
+          { sessionId: RECIPIENT, status: "idle" },
           { sessionId: ARCHIE, status: "Bad value" },
         ],
         "unknown",
       ],
-      [[{ sessionId: MONITOR, status: "idle" }], "missing"],
+      [[{ sessionId: RECIPIENT, status: "idle" }], "missing"],
     ] as const) {
       agents(ws, [...rows]);
       expect((await snapshot(ws)).session_status[ARCHIE]).toBe(expected);
     }
     agents(ws, "fail");
-    expect((await snapshot(ws)).session_status[MONITOR]).toBe("unavailable");
+    expect((await snapshot(ws)).session_status[RECIPIENT]).toBe("unavailable");
     agents(ws, "idle");
-    const other = await cli(ws, ["monitor", "snapshot", "--recipient", ARCHIE]);
+    const other = await cli(ws, ["inbox", "snapshot", "--recipient", ARCHIE]);
     expect(other.code).toBe(1);
     expect(JSON.parse(other.stdout).status).toBe("unavailable");
   });
@@ -146,12 +146,12 @@ suite("claude monitor inventory", () => {
     expect((await ack(ws, fresh, "retained", ["--reason", " "])).code).not.toBe(0);
     const retained = await ack(ws, fresh, "retained", ["--reason", "waiting on Archie tech"]);
     expect(retained.json.results[0].state).toBe("retained");
-    expect(stored(ws, await snapshot(ws)).queues[MONITOR][0].retained).toBe(true);
+    expect(stored(ws, await snapshot(ws)).queues[RECIPIENT][0].retained).toBe(true);
     writeFileSync(
       deliveredPath(ws),
       JSON.stringify({ ...JSON.parse(original), text: "changed again" }),
     );
-    expect(stored(ws, await snapshot(ws)).queues[MONITOR][0].retained).toBe(false);
+    expect(stored(ws, await snapshot(ws)).queues[RECIPIENT][0].retained).toBe(false);
   });
 
   contract("an interrupted removal is recorded ambiguous, then confirmed absent", async () => {
@@ -159,11 +159,11 @@ suite("claude monitor inventory", () => {
     await delivered(ws);
     const output = await snapshot(ws);
     // Crash state: the operation was persisted as deleting and the entry already removed.
-    const operation = `unblock/acks/${pythonDigest([MONITOR, output.snapshot_id, REQUEST])}.json`;
+    const operation = `unblock/acks/${pythonDigest([RECIPIENT, output.snapshot_id, REQUEST])}.json`;
     ws.write(
       operation,
       JSON.stringify({
-        recipient: MONITOR,
+        recipient: RECIPIENT,
         snapshot_id: output.snapshot_id,
         queue_id: REQUEST,
         harness: "claude",
@@ -181,10 +181,10 @@ suite("claude monitor inventory", () => {
     expect(record.history).toContainEqual({ attempt: 1, state: "ambiguous" });
   });
 
-  contract("the public CLI selects the Claude monitor for its route", async () => {
+  contract("the public CLI selects the Claude recipient for its route", async () => {
     const ws = workspace();
     await delivered(ws);
-    const result = await cli(ws, ["monitor", "snapshot", "--recipient", MONITOR]);
+    const result = await cli(ws, ["inbox", "snapshot", "--recipient", RECIPIENT]);
     expect(result.code, result.stdout + result.stderr).toBe(0);
     const output = JSON.parse(result.stdout);
     expect([output.harness, output.queue_ids]).toEqual(["claude", [REQUEST]]);

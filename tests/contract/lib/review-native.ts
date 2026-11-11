@@ -1,5 +1,5 @@
-// Native fixture for monitor cases: queues, history and delivery targets scripted on the fake
-// Codex control socket, plus `monitor snapshot` and `monitor ack` wrappers.
+// Native fixture for review and inbox cases: queues, history and delivery targets scripted on the
+// fake Codex control socket, plus `inbox snapshot` and `inbox ack` wrappers.
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -166,10 +166,11 @@ export function writeCodexRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
   targets = [ART],
+  recipient = TECH,
 ): void {
   // A Codex route runs under a Codex registry.
   ws.writeRegistry({ ...ws.registry(), harness: "codex" });
-  ws.writeRoute(roleRoute(ws, "codex", TECH, targets, change));
+  ws.writeRoute(roleRoute(ws, "codex", recipient, targets, change));
 }
 
 /** Recipient-bound decision marker in STATE/unblock/decisions/. */
@@ -196,7 +197,7 @@ export async function snapshot(
   recipient: string,
   extra: string[] = [],
 ): Promise<SnapshotOutput> {
-  const result = await cli(ws, ["monitor", "snapshot", "--recipient", recipient, ...extra]);
+  const result = await cli(ws, ["inbox", "snapshot", "--recipient", recipient, ...extra]);
   let output: Json = {};
   try {
     output = JSON.parse(result.stdout) as Json;
@@ -217,7 +218,7 @@ export async function ack(
   disposition: string,
   reason?: string,
 ): Promise<{ result: Result; rows: Array<{ queue_id: string; state: string }> | undefined }> {
-  const args = ["monitor", "ack", "--recipient", recipient, "--snapshot", snapshotId];
+  const args = ["inbox", "ack", "--recipient", recipient, "--snapshot", snapshotId];
   for (const id of ids) args.push("--queue-id", id);
   args.push("--disposition", disposition);
   if (reason !== undefined) args.push("--reason", reason);
@@ -252,6 +253,6 @@ export function health(ws: Workspace, recipient = TECH): Json {
   return ws.readJson<Json>(join("unblock", "health", recipient + ".json"));
 }
 
-export function monitorEvents(ws: Workspace): Array<Record<string, unknown>> {
-  return ws.events().filter((event) => event.kind === "monitor-stuck");
+export function reviewEvents(ws: Workspace): Array<Record<string, unknown>> {
+  return ws.events().filter((event) => event.kind === "review-stuck");
 }

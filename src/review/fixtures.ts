@@ -1,14 +1,19 @@
-// Test scaffolding for the Claude adapter and monitor: a scratch game-dev with a registry, a
+// Test scaffolding for the Claude adapter and the review: a scratch game-dev with a registry, a
 // version 2 route, recipient clearance and a fake `claude` executable. Used only by tests.
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { type ActiveScope, readRoleRoute, routeScope } from "../adapters/shared/route.ts";
+import {
+  type ActiveScope,
+  readRoleRoute,
+  routeRecipient,
+  routeScope,
+} from "../adapters/shared/route.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
 import { CLAUDE_GAME_DEV, CLAUDE_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 
-export const MONITOR = CLAUDE_GAME_DEV;
+export const RECIPIENT = CLAUDE_GAME_DEV;
 export const TECH = CLAUDE_TECH;
 export const HELD = "00000000-0000-4000-8000-000000000009";
 export const GAME = "archies-dog-walks";
@@ -29,15 +34,14 @@ export interface ClaudeFixture {
 function routeValue(change: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     host: GAME,
-    monitor: "game-dev",
-    schema: 1,
+    schema: 2,
     state: "active",
     targets: ["archies-dog-walks/tech", "chibis-way-home/tech"],
     ...change,
   };
 }
 
-export function idle(sessionId: string = MONITOR): Record<string, unknown> {
+export function idle(sessionId: string = RECIPIENT): Record<string, unknown> {
   return { kind: "interactive", sessionId, status: "idle" };
 }
 
@@ -72,8 +76,8 @@ export function claudeFixture(): ClaudeFixture {
     base,
     clear(state = "clear") {
       writeFileSync(
-        join(unblock, "decisions", `${MONITOR}.json`),
-        JSON.stringify({ state, thread_id: MONITOR }),
+        join(unblock, "decisions", `${RECIPIENT}.json`),
+        JSON.stringify({ state, thread_id: RECIPIENT }),
       );
     },
     env: { CLAUDE_BIN: fake, PATH: process.env.PATH ?? "/usr/bin:/bin" },
@@ -96,7 +100,10 @@ export function claudeFixture(): ClaudeFixture {
 /** The fixture route resolved through the fixture registry, as a send resolves it. */
 export function activeRoute(fixture: ClaudeFixture): ActiveScope {
   const route = readRoleRoute(fixture.layout);
-  const scope = route === null ? null : routeScope(readRegistry(fixture.layout), route);
+  const scope =
+    route === null
+      ? null
+      : routeScope(readRegistry(fixture.layout), routeRecipient(fixture.layout, route), route);
   if (scope === null) {
     throw new Error("fixture route must be active");
   }

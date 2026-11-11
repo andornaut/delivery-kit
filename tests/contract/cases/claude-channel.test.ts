@@ -9,7 +9,7 @@ import {
   claudeGame,
   claudeRoute,
   deliver,
-  MONITOR,
+  RECIPIENT,
   tick,
 } from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
@@ -22,7 +22,7 @@ const NEXT = at(50);
 const ACCEPTED_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 
 function receipt(ws: Workspace, slot = SLOT): Json {
-  return ws.readJson(`unblock/${MONITOR}-${slot}.json`);
+  return ws.readJson(`unblock/${RECIPIENT}-${slot}.json`);
 }
 
 function spooled(ws: Workspace): string[] {
@@ -49,12 +49,12 @@ suite("claude channel consumer", () => {
     expect(initialize.result.protocolVersion).toBe("2025-06-18");
     const notifications = channel.channel();
     expect(notifications.map((m) => m.params.meta.slot)).toEqual([String(NEXT)]);
-    expect(notifications[0]!.params.meta.kind).toBe("monitor");
+    expect(notifications[0]!.params.meta.kind).toBe("review");
     for (const slot of [SLOT, NEXT]) {
       expect(receipt(ws, slot).status).toBe("accepted");
       expect(receipt(ws, slot).acceptedAt).toMatch(ACCEPTED_AT);
     }
-    expect((await tick(ws, SLOT)).monitor[0]!.result.previousStatus).toBe("accepted");
+    expect((await tick(ws, SLOT)).review[0]!.result.previousStatus).toBe("accepted");
     expect((await channel.close()).code).toBe(0);
     const restarted = Channel.open(ws, [ws.path("unblock")]);
     restarted.initialize();
@@ -135,8 +135,8 @@ suite("claude channel consumer", () => {
         expect(ws.list("unblock", "claude-delivered")).toHaveLength(1);
       }
       const repeated = impl.channel(host, [
-        "--monitor",
-        MONITOR,
+        "--conversation",
+        RECIPIENT,
         "--state-dir",
         dirs[0]!,
         "--state-dir",

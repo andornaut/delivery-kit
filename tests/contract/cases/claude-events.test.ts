@@ -11,7 +11,7 @@ import {
   claudeGame,
   claudeRoute,
   eventRequestId,
-  MONITOR,
+  RECIPIENT,
 } from "../lib/claude-fixture.ts";
 import { CASE_TIMEOUT_MS, contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
 import { at } from "../lib/time.ts";
@@ -32,7 +32,7 @@ function events(ws: Workspace): Event[] {
 }
 
 function eventReceipt(ws: Workspace, event: Event): Json {
-  return ws.readJson(`events/native/${event.id}-${MONITOR}.json`);
+  return ws.readJson(`events/native/${event.id}-${RECIPIENT}.json`);
 }
 
 function deliveryMessage(event: Event): string {
@@ -48,7 +48,7 @@ function blockedDeparture(ws: Workspace): void {
   // A zero limit against the real host load forces a load block.
   ws.hostLoad = "real";
   ws.config.resources = { cpus: 4, loadLimit: 0 };
-  // Keep monitor slots out of the event window.
+  // Keep review slots out of the event window.
   ws.updateGameDevConfig({ wakeMinutes: [45] });
   impl.offer(ws, ["bus/queued"]);
   ws.setClock(at(-1, 50));
@@ -73,7 +73,7 @@ suite("claude bus events", () => {
         await runner.until(() => spooled(ws).length === 1);
         const [first] = events(ws);
         expect(first!.kind).toBe("attempt");
-        const requestId = eventRequestId(first!.id, MONITOR);
+        const requestId = eventRequestId(first!.id, RECIPIENT);
         const receipt = eventReceipt(ws, first!);
         expect([receipt.status, receipt.clientUserMessageId, receipt.attempts]).toEqual([
           "sending",
@@ -82,7 +82,7 @@ suite("claude bus events", () => {
         ]);
         expect(JSON.stringify(receipt)).not.toContain(first!.message);
         expect(spooled(ws).map((entry) => entry.name)).toEqual([`${requestId}.json`]);
-        expect(spooled(ws)[0]!.recipient).toBe(MONITOR);
+        expect(spooled(ws)[0]!.recipient).toBe(RECIPIENT);
         await flushes(runner);
         expect(spooled(ws).map((entry) => entry.name)).toEqual([`${requestId}.json`]);
         const channel = Channel.open(ws, [ws.path("unblock")]);
@@ -160,37 +160,40 @@ suite("claude bus events", () => {
         ]);
         expect(spooled(ws)).toEqual([]);
         expect(events(ws).map((event) => event.sent)).toEqual([false, false]);
-        expect(ws.list("events", "native")).toEqual([`${first!.id}-${MONITOR}.json`]);
+        expect(ws.list("events", "native")).toEqual([`${first!.id}-${RECIPIENT}.json`]);
       } finally {
         await runner.stop();
       }
     },
   );
 
-  contract("a missing monitor or absent clearance defers the event without spooling", async () => {
-    const ws = workspace();
-    blockedDeparture(ws);
-    agents(ws, "missing");
-    const runner = startRunner(ws);
-    try {
-      await runner.until(() => ws.list("events", "native").length === 1);
-      const [first] = events(ws);
-      expect(eventReceipt(ws, first!).status).toBe("deferred");
-      clear(ws, MONITOR, "pending");
-      agents(ws, "idle");
-      await flushes(runner);
-      expect(spooled(ws)).toEqual([]);
-      expect(eventReceipt(ws, first!).status).toBe("deferred");
-      clear(ws);
-      await runner.until(() => spooled(ws).length === 1);
-      expect(eventReceipt(ws, first!).status).toBe("sending");
-    } finally {
-      await runner.stop();
-    }
-  });
+  contract(
+    "a missing recipient or absent clearance defers the event without spooling",
+    async () => {
+      const ws = workspace();
+      blockedDeparture(ws);
+      agents(ws, "missing");
+      const runner = startRunner(ws);
+      try {
+        await runner.until(() => ws.list("events", "native").length === 1);
+        const [first] = events(ws);
+        expect(eventReceipt(ws, first!).status).toBe("deferred");
+        clear(ws, RECIPIENT, "pending");
+        agents(ws, "idle");
+        await flushes(runner);
+        expect(spooled(ws)).toEqual([]);
+        expect(eventReceipt(ws, first!).status).toBe("deferred");
+        clear(ws);
+        await runner.until(() => spooled(ws).length === 1);
+        expect(eventReceipt(ws, first!).status).toBe("sending");
+      } finally {
+        await runner.stop();
+      }
+    },
+  );
 
   contract(
-    "events go to the channel only for the active route monitor and never fall back to Codex",
+    "events go to the channel only for the active route recipient and never fall back to Codex",
     async () => {
       const cases: Array<[string, (ws: Workspace) => void]> = [
         [
@@ -224,7 +227,7 @@ suite("claude bus events", () => {
     const ws = workspace();
     claudeGame(ws, { recipient: true });
     for (const [value, expected] of [
-      [MONITOR, 0],
+      [RECIPIENT, 0],
       ["AAAAAAAA-0000-4000-8000-000000000001", EXIT_INVALID],
       ["not-a-uuid", EXIT_INVALID],
     ] as const) {
@@ -232,7 +235,7 @@ suite("claude bus events", () => {
         schema: 1,
         revision: 1,
         harness: "claude",
-        roles: { monitor: { conversations: { claude: value } } },
+        roles: { "dev-manager": { conversations: { claude: value } } },
       });
       const result = await execute(impl.checkConfig(ws));
       expect(result.code, `${value} ${result.stderr}`).toBe(expected);

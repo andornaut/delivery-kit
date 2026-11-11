@@ -24,8 +24,7 @@ function setup(): Layout {
     layout.routeFile,
     JSON.stringify({
       host: "archies-dog-walks",
-      monitor: "game-dev",
-      schema: 1,
+      schema: 2,
       state: "active",
       targets: ["archies-dog-walks/tech"],
     }),

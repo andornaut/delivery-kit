@@ -3,7 +3,7 @@
 // absent entry `confirmed_absent`, `retained` binds an active retention to the exact payload,
 // and `handled` or `superseded` removes the entry through the adapter (`deleted`). A durable
 // operation records every attempt; an interrupted removal becomes `ambiguous` first.
-/* eslint-disable require-atomic-updates -- every operation runs under monitor.lock, one item at a time */
+/* eslint-disable require-atomic-updates -- every operation runs under inbox.lock, one item at a time */
 import type { Disposition, HarnessAdapter, InventoryEntry } from "../adapters/types.ts";
 import {
   ackPath,

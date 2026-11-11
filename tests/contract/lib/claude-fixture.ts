@@ -1,5 +1,5 @@
-// Helpers for Claude route, channel and monitor-tick cases: identities, request IDs, a
-// scheduled monitor tick driven through the resident runner, and an MCP channel client.
+// Helpers for Claude route, channel and review-tick cases: identities, request IDs, a
+// scheduled review tick driven through the resident runner, and an MCP channel client.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import type { Workspace } from "./workspace.ts";
 import type { Json } from "./json.ts";
 import { roleRoute } from "./routes.ts";
 
-export const MONITOR = "00000000-0000-4000-8000-000000000001";
+export const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 export const ARCHIE = "00000000-0000-4000-8000-000000000002";
 export const CHIBI = "00000000-0000-4000-8000-000000000003";
 
@@ -35,8 +35,8 @@ export function briefTarget(ws: Workspace, name: string, id: string): string {
   return `${role ?? name}: ${id}`;
 }
 
-export const slotRequestId = (monitor: string, slot: number) =>
-  uuid5(`hourly-unblock:${monitor}:${slot}`);
+export const slotRequestId = (recipient: string, slot: number) =>
+  uuid5(`hourly-unblock:${recipient}:${slot}`);
 export const eventRequestId = (event: string, recipient: string) =>
   uuid5(`bus-event:${event}:${recipient}`);
 
@@ -69,9 +69,9 @@ export function agents(
     else if (Array.isArray(mode)) control.claude = { agents: mode };
     else {
       const rows: Record<string, Agent[]> = {
-        idle: [{ sessionId: MONITOR, kind: "interactive", status: "idle" }],
-        busy: [{ sessionId: MONITOR, kind: "interactive", status: "busy" }],
-        blocked: [{ sessionId: MONITOR, kind: "background", state: "blocked" }],
+        idle: [{ sessionId: RECIPIENT, kind: "interactive", status: "idle" }],
+        busy: [{ sessionId: RECIPIENT, kind: "interactive", status: "busy" }],
+        blocked: [{ sessionId: RECIPIENT, kind: "background", state: "blocked" }],
         missing: [],
       };
       control.claude = { agents: [OTHER, ...rows[mode]!] };
@@ -79,26 +79,26 @@ export function agents(
   });
 }
 
-/** The Claude route: the monitor routes to Archie's Tech; Chibi's Tech is not a target. */
+/** The Claude route: the recipient routes to Archie's Tech; Chibi's Tech is not a target. */
 export function claudeRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return roleRoute(ws, "claude", MONITOR, [ARCHIE], change);
+  return roleRoute(ws, "claude", RECIPIENT, [ARCHIE], change);
 }
 
-export function clear(ws: Workspace, recipient = MONITOR, state = "clear"): void {
+export function clear(ws: Workspace, recipient = RECIPIENT, state = "clear"): void {
   ws.write(`unblock/decisions/${recipient}.json`, JSON.stringify({ thread_id: recipient, state }));
 }
 
-/** A Claude-harness game: registry roles, its route, clearance and an idle monitor. */
+/** A Claude-harness game: registry roles, its route, clearance and an idle recipient. */
 export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {}): void {
   ws.writeRegistry({
     schema: 1,
     revision: 1,
     harness: "claude",
     roles: {
-      monitor: { conversations: { claude: MONITOR } },
+      "dev-manager": { conversations: { claude: RECIPIENT } },
       "archie-tech": { conversations: { claude: ARCHIE } },
       "chibi-tech": { conversations: { claude: CHIBI } },
     },
@@ -106,7 +106,7 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
   ws.config.schedule = { departures: ["05"], timezone: "America/Toronto" };
   ws.config.reports = {
     project: "Fixture",
-    ...(options.recipient ? { recipient: "monitor" } : {}),
+    ...(options.recipient ? { recipient: "dev-manager" } : {}),
   };
   ws.writeRoute(claudeRoute(ws));
   clear(ws);
@@ -123,13 +123,13 @@ export function virtualNow(ws: Workspace): number {
 }
 
 export interface Tick extends Result {
-  /** Parsed `bus: scheduled monitor SLOT: JSON` lines, in order. */
-  monitor: Array<{ slot: number; result: Record<string, unknown> }>;
+  /** Parsed `bus: scheduled review SLOT: JSON` lines, in order. */
+  review: Array<{ slot: number; result: Record<string, unknown> }>;
 }
 
-function parseMonitor(stdout: string): Tick["monitor"] {
-  const rows: Tick["monitor"] = [];
-  for (const match of stdout.matchAll(/bus: scheduled monitor (\d+): (\{.*\})/g)) {
+function parseReview(stdout: string): Tick["review"] {
+  const rows: Tick["review"] = [];
+  for (const match of stdout.matchAll(/bus: scheduled review (\d+): (\{.*\})/g)) {
     rows.push({ slot: Number(match[1]), result: JSON.parse(match[2]!) as Record<string, unknown> });
   }
   return rows;
@@ -158,12 +158,12 @@ export async function tick(
   const done =
     options.done ??
     (() =>
-      stdout.includes(`bus: scheduled monitor ${slot}`) ||
-      /monitor (deferred|\d+ unavailable)/.test(stderr));
+      stdout.includes(`bus: scheduled review ${slot}`) ||
+      /review (deferred|\d+ unavailable)/.test(stderr));
   const settle = slot + (options.settle ?? 150);
   await runner.until(() => done({ stdout, stderr }) || virtualNow(ws) >= settle, 30_000);
   const result = await runner.stop();
-  return { ...result, monitor: parseMonitor(result.stdout) };
+  return { ...result, review: parseReview(result.stdout) };
 }
 
 /** Hold a flock on a state file from another process until released. */
@@ -206,8 +206,8 @@ export class Channel {
     });
   }
 
-  static open(ws: Workspace, stateDirs: string[], monitor = MONITOR): Channel {
-    const args = ["--monitor", monitor, "--poll-seconds", "0.05"];
+  static open(ws: Workspace, stateDirs: string[], conversation = RECIPIENT): Channel {
+    const args = ["--conversation", conversation, "--poll-seconds", "0.05"];
     for (const dir of stateDirs) args.push("--state-dir", dir);
     return new Channel(impl.channel(ws, args));
   }
@@ -256,13 +256,13 @@ export class Channel {
 export async function deliver(
   ws: Workspace,
   stateDirs = [ws.path("unblock")],
-  monitor = MONITOR,
+  conversation = RECIPIENT,
 ): Promise<Message[]> {
   const spool = (dir: string) =>
     existsSync(`${dir}/claude-spool`)
       ? readdirSync(`${dir}/claude-spool`).filter((n) => n.endsWith(".json"))
       : [];
-  const channel = Channel.open(ws, stateDirs, monitor);
+  const channel = Channel.open(ws, stateDirs, conversation);
   channel.initialize();
   channel.initialized();
   await channel.waitFor(
@@ -273,7 +273,7 @@ export async function deliver(
   return channel.channel();
 }
 
-/** The default Codex world of the original fixtures: active coordinator mid-turn, empty history. */
+/** The default Codex world of the original fixtures: active recipient mid-turn, empty history. */
 export function codexWorld(
   socket: CodexSocket,
   queues: Record<string, unknown[]> = {},

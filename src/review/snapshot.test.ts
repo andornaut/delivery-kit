@@ -9,7 +9,7 @@ import type { Harness } from "../registry/schema.ts";
 import { captureCodex, captureMixed } from "./snapshot.ts";
 import { payloadSignature, persist, queueEntry, retentionPath, snapshotPath } from "./store.ts";
 
-const MONITOR = "00000000-0000-4000-8000-000000000001";
+const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 const CLAUDE = "00000000-0000-4000-8000-000000000002";
 const CODEX_PARENT = "00000000-0000-4000-8000-000000000003";
 const CLAUDE_PARENT = "00000000-0000-4000-8000-000000000004";
@@ -41,28 +41,32 @@ function adapter(harness: Harness) {
   };
 }
 
-describe("mixed monitor capture", () => {
+describe("mixed inbox capture", () => {
   it("reports uncollected Codex route peer diagnostics without issuing cross-harness RPCs", async () => {
     const codex = adapter("codex");
     const claude = adapter("claude");
     const record = await captureMixed(
       context(),
       { claude, codex },
-      { [CLAUDE]: "claude", [MONITOR]: "codex" },
+      { [CLAUDE]: "claude", [RECIPIENT]: "codex" },
       [CLAUDE],
       [],
-      { routeMembers: [CLAUDE, MONITOR] },
+      { routeMembers: [CLAUDE, RECIPIENT] },
     );
     expect(record.history).toMatchObject({
-      [MONITOR]: { status: "unavailable", reason_code: "native_collection_not_requested" },
+      [RECIPIENT]: { status: "unavailable", reason_code: "native_collection_not_requested" },
     });
     expect(record.question_state).toMatchObject({
-      [MONITOR]: { status: "unavailable", pending_status: "unavailable", ui_visibility: "unknown" },
+      [RECIPIENT]: {
+        status: "unavailable",
+        pending_status: "unavailable",
+        ui_visibility: "unknown",
+      },
     });
     expect(record.native_queues).toMatchObject({
-      [MONITOR]: { status: "unavailable", reason_code: "native_collection_not_requested" },
+      [RECIPIENT]: { status: "unavailable", reason_code: "native_collection_not_requested" },
     });
-    expect(record.queues).not.toHaveProperty(MONITOR);
+    expect(record.queues).not.toHaveProperty(RECIPIENT);
     expect(record.errors).toEqual({});
     expect(codex.inventory).not.toHaveBeenCalled();
     expect(codex.collectors.collect).not.toHaveBeenCalled();
@@ -73,10 +77,10 @@ describe("mixed monitor capture", () => {
     const record = await captureMixed(
       context(),
       { codex: adapter("codex") },
-      { [CLAUDE]: "claude", [MONITOR]: "codex" },
-      [MONITOR],
+      { [CLAUDE]: "claude", [RECIPIENT]: "codex" },
+      [RECIPIENT],
       [],
-      { routeMembers: [MONITOR, CLAUDE] },
+      { routeMembers: [RECIPIENT, CLAUDE] },
     );
     expect(record.native_complete).toBe(true);
     expect(record.errors).toEqual({});
@@ -87,7 +91,7 @@ describe("mixed monitor capture", () => {
     const target = context();
     const entry = queueEntry("same-id", "work");
     for (const [recipient, harness] of [
-      [MONITOR, "claude"],
+      [RECIPIENT, "claude"],
       [CLAUDE, "codex"],
     ]) {
       persist(retentionPath(target.unblock, recipient as string, entry.id), {
@@ -101,12 +105,12 @@ describe("mixed monitor capture", () => {
     const record = await captureMixed(
       target,
       { claude: adapter("claude"), codex: adapter("codex") },
-      { [CLAUDE]: "claude", [MONITOR]: "codex" },
-      [MONITOR, CLAUDE],
+      { [CLAUDE]: "claude", [RECIPIENT]: "codex" },
+      [RECIPIENT, CLAUDE],
       [],
     );
     expect(record.queues).toMatchObject({
-      [MONITOR]: [{ retained: false, retention_status: "conflicting_harness" }],
+      [RECIPIENT]: [{ retained: false, retention_status: "conflicting_harness" }],
     });
     expect(record.channel_queues).toMatchObject({
       [CLAUDE]: [{ retained: false, retention_status: "conflicting_harness" }],
@@ -119,8 +123,8 @@ describe("mixed monitor capture", () => {
     const collect = vi.fn(() =>
       Promise.resolve({
         collection_budget: { calls_used: 1 },
-        history: { [MONITOR]: { status: "complete" } },
-        question_state: { [MONITOR]: { status: "complete" } },
+        history: { [RECIPIENT]: { status: "complete" } },
+        question_state: { [RECIPIENT]: { status: "complete" } },
         worker_health: { [CODEX_PARENT]: { status: "complete" } },
       }),
     );
@@ -129,24 +133,24 @@ describe("mixed monitor capture", () => {
       [CLAUDE]: "claude",
       [CLAUDE_PARENT]: "claude",
       [CODEX_PARENT]: "codex",
-      [MONITOR]: "codex",
+      [RECIPIENT]: "codex",
     } as const;
     const record = await captureMixed(
       target,
       { claude, codex: { ...codex, collectors: { collect } } },
       harnesses,
-      [MONITOR, CLAUDE],
+      [RECIPIENT, CLAUDE],
       [CODEX_PARENT, CLAUDE_PARENT],
       { routeMembers: Object.keys(harnesses), slot: 2 },
     );
-    expect(codex.inventory.mock.calls).toEqual([[MONITOR]]);
+    expect(codex.inventory.mock.calls).toEqual([[RECIPIENT]]);
     expect(claude.inventory.mock.calls).toEqual([[CLAUDE]]);
     expect(claude.collectors.collect).not.toHaveBeenCalled();
     expect(collect).toHaveBeenCalledWith({
       historyCursor: null,
       parents: [CODEX_PARENT],
-      recipients: [MONITOR],
-      routeMembers: [CODEX_PARENT, MONITOR],
+      recipients: [RECIPIENT],
+      routeMembers: [CODEX_PARENT, RECIPIENT],
       slot: 2,
       unblockDir: target.unblock,
     });
@@ -159,8 +163,8 @@ describe("mixed monitor capture", () => {
       native_queues: { [CLAUDE]: { status: "unavailable" } },
       native_complete: false,
       question_state: { [CLAUDE]: { status: "unavailable" } },
-      queue_sources: { [CLAUDE]: "local_channel_delivered", [MONITOR]: "native_queue" },
-      queues: { [MONITOR]: [{ id: "same-id" }] },
+      queue_sources: { [CLAUDE]: "local_channel_delivered", [RECIPIENT]: "native_queue" },
+      queues: { [RECIPIENT]: [{ id: "same-id" }] },
       slot: 2,
       worker_health: { [CLAUDE_PARENT]: { status: "unavailable" } },
     });
@@ -192,7 +196,7 @@ describe("mixed monitor capture", () => {
 
   it("rejects missing endpoint bindings and mismatched adapters before inventory calls", async () => {
     const codex = adapter("codex");
-    await expect(captureMixed(context(), { codex }, {}, [MONITOR], [])).rejects.toThrow(
+    await expect(captureMixed(context(), { codex }, {}, [RECIPIENT], [])).rejects.toThrow(
       "harness missing or invalid",
     );
     await expect(
@@ -207,20 +211,20 @@ describe("mixed monitor capture", () => {
     const record = await captureMixed(
       context(),
       { claude: adapter("claude"), codex },
-      { [CLAUDE]: "claude", [MONITOR]: "codex" },
-      [MONITOR, CLAUDE],
+      { [CLAUDE]: "claude", [RECIPIENT]: "codex" },
+      [RECIPIENT, CLAUDE],
       [],
     );
-    expect(record.errors).toHaveProperty(MONITOR);
+    expect(record.errors).toHaveProperty(RECIPIENT);
     expect(record.errors).not.toHaveProperty(CLAUDE);
-    expect(record.queues).not.toHaveProperty(MONITOR);
+    expect(record.queues).not.toHaveProperty(RECIPIENT);
   });
 
   it("preserves homogeneous legacy capture fields without requiring a harness map", async () => {
     const codex = adapter("codex");
-    const record = await captureCodex(context(), codex, [MONITOR], []);
+    const record = await captureCodex(context(), codex, [RECIPIENT], []);
     expect(record.harness).toBe("codex");
     expect(record).not.toHaveProperty("harnesses");
-    expect(record.queues).toHaveProperty(MONITOR);
+    expect(record.queues).toHaveProperty(RECIPIENT);
   });
 });

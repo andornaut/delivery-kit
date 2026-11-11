@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { loadLayout } from "../layout.ts";
-import { claudeFixture, MONITOR } from "../monitor/fixtures.ts";
 import type { Registry } from "../registry/schema.ts";
 import { createRegistry, updateRegistry } from "../registry/store.ts";
-import { makeFixture, registryInput } from "../testFixtures.ts";
+import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
+import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
 
 function io(): Io & { errors: string[] } {
@@ -18,7 +18,7 @@ function io(): Io & { errors: string[] } {
 }
 
 describe("claude channel options", () => {
-  it("serves a Claude monitor while the global default is Codex", async () => {
+  it("serves the Claude recipient while the global default is Codex", async () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {
       draft.harness = "codex";
@@ -40,11 +40,11 @@ describe("claude channel options", () => {
     ]);
   });
 
-  it("refuses a Codex monitor even while the global default is Claude", async () => {
+  it("refuses a Codex recipient even while the global default is Claude", async () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {
       draft.roles["game-dev"]!.harness = "codex";
-      draft.roles["game-dev"]!.conversations.codex = MONITOR;
+      draft.roles["game-dev"]!.conversations.codex = RECIPIENT;
     });
     const errors = io();
     expect(
@@ -55,18 +55,18 @@ describe("claude channel options", () => {
         [],
       ),
     ).toBe(EXIT_INVALID);
-    expect(errors.errors.join("")).toContain("claude harness for the monitor role");
+    expect(errors.errors.join("")).toContain("claude harness for the recipient game-dev");
   });
 
-  it("rejects a repeated state directory, a relative one and a noncanonical monitor", async () => {
+  it("rejects a repeated state directory, a relative one and a noncanonical conversation", async () => {
     const fixture = claudeFixture();
     const dir = join(fixture.game.busDir, "unblock");
     mkdirSync(dir, { recursive: true });
     const streams = { input: new PassThrough(), write: () => undefined };
     for (const args of [
-      ["--monitor", MONITOR, "--state-dir", dir, "--state-dir", dir],
-      ["--monitor", MONITOR, "--state-dir", "relative"],
-      ["--monitor", MONITOR.toUpperCase().replace("0", "A"), "--state-dir", dir],
+      ["--conversation", RECIPIENT, "--state-dir", dir, "--state-dir", dir],
+      ["--conversation", RECIPIENT, "--state-dir", "relative"],
+      ["--conversation", RECIPIENT.toUpperCase().replace("0", "A"), "--state-dir", dir],
       ["--state-dir", dir, "--game", "archies-dog-walks"],
       ["--unknown"],
     ]) {
@@ -77,7 +77,7 @@ describe("claude channel options", () => {
     }
   });
 
-  it("serves explicit state directories for an explicit monitor until input ends", async () => {
+  it("serves explicit state directories for an explicit conversation until input ends", async () => {
     const fixture = claudeFixture();
     const dir = join(fixture.game.busDir, "unblock");
     const input = new PassThrough();
@@ -86,7 +86,7 @@ describe("claude channel options", () => {
       { input, write: (line) => void lines.push(line) },
       io(),
       fixture.layout.root,
-      ["--monitor", MONITOR, "--poll-seconds", "0.05", "--state-dir", dir],
+      ["--conversation", RECIPIENT, "--poll-seconds", "0.05", "--state-dir", dir],
     );
     input.write(`${JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" })}\n`);
     input.end();
@@ -126,5 +126,25 @@ describe("claude channel options", () => {
     input.end();
     expect(await done).toBe(EXIT_OK);
     expect(existsSync(join(layout.varDir, "games"))).toBe(false);
+  });
+
+  it("requires one reports.recipient across the selected games without --conversation", async () => {
+    const fixture = claudeFixture();
+    const config = projectConfig("Chibi");
+    (config.reports as Record<string, unknown>).recipient = "archies-dog-walks/tech";
+    writeFixtureJson(join(fixture.base, "chibis-way-home/delivery-kit.json"), config);
+    const errors = io();
+    const streams = { input: new PassThrough(), write: () => undefined };
+    expect(await runChannel(streams, errors, fixture.layout.root, [])).toBe(EXIT_INVALID);
+    expect(errors.errors.join("")).toContain(
+      "the selected games name different reports.recipient roles",
+    );
+    const input = new PassThrough();
+    const done = runChannel({ input, write: () => undefined }, io(), fixture.layout.root, [
+      "--game",
+      "archies-dog-walks",
+    ]);
+    input.end();
+    expect(await done).toBe(EXIT_OK);
   });
 });

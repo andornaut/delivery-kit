@@ -19,5 +19,5 @@ export function adapterFor(
   if (harness === "codex") {
     return codexAdapter(layout);
   }
-  throw new Error("monitor adapter harness invalid");
+  throw new Error("inbox adapter harness invalid");
 }

@@ -16,7 +16,6 @@ import {
 } from "../testFixtures.ts";
 import { ValidationError } from "../validate.ts";
 import {
-  AmbiguousRole,
   createRegistry,
   readRegistry,
   type Registry,
@@ -87,9 +86,7 @@ describe("createRegistry and readRegistry", () => {
       const issues = (error as ValidationError).issues.join("\n");
       expect(issues).toContain("/roles/unknown-game/tech: is not a role in config.json");
       expect(issues).toContain("/operations/unknown-game: is not a game in config.json");
-      expect(issues).toContain(
-        "/operations/unknown-game/busOwner: is not a registered role or duty",
-      );
+      expect(issues).toContain("/operations/unknown-game/busOwner: is not a registered role");
     }
   });
 });
@@ -266,7 +263,7 @@ describe("resolveConversation", () => {
     const layout = setup();
     const claude = readRegistry(layout);
     expect(resolveConversation(claude, "archies-dog-walks/tech")).toBe(CLAUDE_TECH);
-    expect(resolveConversation(claude, "monitor")).toBe(CLAUDE_GAME_DEV);
+    expect(resolveConversation(claude, "game-dev")).toBe(CLAUDE_GAME_DEV);
     const codex = updateRegistry(layout, claude.revision, (draft) => {
       draft.harness = "codex";
     });
@@ -275,27 +272,40 @@ describe("resolveConversation", () => {
     expect(codex.roles["archies-dog-walks/tech"]?.conversations.claude).toBe(CLAUDE_TECH);
   });
 
-  it("rejects unknown roles and duties held by more than one role", () => {
-    const layout = setup();
-    const registry = updateRegistry(layout, 1, (draft) => {
-      draft.roles["archies-dog-walks/tech"]!.duties = ["coordinator"];
-    });
+  it("resolves only registered role keys", () => {
+    const registry = readRegistry(setup());
     expect(() => resolveRole(registry, "nobody")).toThrow(UnknownRole);
-    expect(() => resolveRole(registry, "coordinator")).toThrow(AmbiguousRole);
-    expect(resolveRole(registry, "monitor")).toBe("game-dev");
+    expect(() => resolveRole(registry, "nobody")).toThrow("no registered role named nobody");
+    expect(resolveRole(registry, "game-dev")).toBe("game-dev");
+  });
+
+  it("names the exact edit for a role that still has duties", () => {
+    const layout = setup();
+    const value = structuredClone(readRegistry(layout)) as unknown as {
+      roles: Record<string, Record<string, unknown>>;
+    };
+    value.roles["game-dev"]!.duties = ["review"];
+    try {
+      RegistrySchema.validate(layout.config, value);
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ValidationError).issues).toEqual([
+        "/roles/game-dev/duties: duties were removed in 3.0.0; remove this field and name roles " +
+          "explicitly (scheduled reviews go to each game's reports.recipient)",
+      ]);
+    }
   });
 });
 
 describe("role harness overrides", () => {
-  it("uses the role or duty holder's override while preserving the global default", () => {
+  it("uses the role's override while preserving the global default", () => {
     const layout = setup();
     const registry = updateRegistry(layout, 1, (draft) => {
       draft.roles["archies-dog-walks/tech"]!.harness = "codex";
-      draft.roles["archies-dog-walks/tech"]!.duties = ["implementation"];
     });
-    expect(resolveHarness(registry, "implementation")).toBe("codex");
-    expect(resolveHarness(registry, "monitor")).toBe("claude");
-    expect(resolveConversation(registry, "implementation")).toBe(CODEX_TECH);
+    expect(resolveHarness(registry, "archies-dog-walks/tech")).toBe("codex");
+    expect(resolveHarness(registry, "game-dev")).toBe("claude");
+    expect(resolveConversation(registry, "archies-dog-walks/tech")).toBe(CODEX_TECH);
     expect(registry.harness).toBe("claude");
   });
 
@@ -304,7 +314,7 @@ describe("role harness overrides", () => {
     const registry = updateRegistry(layout, 1, (draft) => {
       draft.roles["game-dev"]!.harness = "codex";
     });
-    expect(resolveConversation(registry, "monitor")).toBeNull();
+    expect(resolveConversation(registry, "game-dev")).toBeNull();
     expect(registry.roles["game-dev"]!.conversations.claude).toBe(CLAUDE_GAME_DEV);
   });
 

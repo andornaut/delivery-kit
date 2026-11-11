@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,7 +13,13 @@ import {
   type RegistryDraft,
   type RoleRecord,
 } from "../registry/index.ts";
-import { gameDevConfig, makeFixture, registryInput } from "../testFixtures.ts";
+import {
+  gameDevConfig,
+  makeFixture,
+  projectConfig,
+  registryInput,
+  writeFixtureJson,
+} from "../testFixtures.ts";
 
 const ARCHIE = "archies-dog-walks";
 const CHIBI = "chibis-way-home";
@@ -33,6 +39,8 @@ function setup() {
     roles: ["art", "gameplay", "tech"],
   };
   writeFileSync(join(root, "config.json"), JSON.stringify(config));
+  mkdirSync(join(base, ADA));
+  writeFixtureJson(join(base, ADA, "delivery-kit.json"), projectConfig("Ada the Navigator"));
   const layout = loadLayout(root);
   const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
   const roles: Record<string, RoleRecord> = {
@@ -110,7 +118,7 @@ describe("harness select", () => {
     expect(result.out.trim().split("\n")).toHaveLength(1);
   });
 
-  it("resolves duties and default removes only the selected override", async () => {
+  it("selects shared roles and default removes only the selected override", async () => {
     const test = setup();
     const selected = await run(test, ...select("--role", `${ARCHIE}/tech`));
     expect(selected.code).toBe(0);
@@ -127,7 +135,7 @@ describe("harness select", () => {
     );
     expect(reset.code).toBe(0);
     expect(readRegistry(test.layout).roles[`${ARCHIE}/tech`]).not.toHaveProperty("harness");
-    const duty = await run(
+    const shared = await run(
       test,
       "harness",
       "select",
@@ -136,9 +144,9 @@ describe("harness select", () => {
       "--expected-revision",
       "3",
       "--role",
-      "monitor",
+      "game-dev",
     );
-    expect(duty.code).toBe(0);
+    expect(shared.code).toBe(0);
     expect(readRegistry(test.layout).roles["game-dev"]!.harness).toBe("codex");
   });
 
@@ -229,7 +237,7 @@ describe("scoped and mixed readiness", () => {
       "--game",
       CHIBI,
       "--role",
-      "monitor",
+      "game-dev",
     );
     expect(result).toMatchObject({ code: 0, err: "" });
     const report = JSON.parse(result.out);

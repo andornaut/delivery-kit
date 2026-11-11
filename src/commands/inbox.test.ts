@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
-import { deliveredDir, spoolDir, spoolMonitorBrief } from "../adapters/claude/spool.ts";
+import { deliveredDir, spoolDir, spoolReviewBrief } from "../adapters/claude/spool.ts";
 import { slotRequestId } from "../adapters/shared/ids.ts";
 import { digest } from "../adapters/shared/pyjson.ts";
 import { main } from "../cli.ts";
@@ -14,11 +14,11 @@ import {
   type ClaudeFixture,
   claudeFixture,
   GAME,
-  MONITOR,
+  RECIPIENT,
   SLOT,
   TECH,
-} from "../monitor/fixtures.ts";
-import { persist } from "../monitor/store.ts";
+} from "../review/fixtures.ts";
+import { persist } from "../review/store.ts";
 import { CODEX_TECH } from "../testFixtures.ts";
 
 async function run(
@@ -42,13 +42,13 @@ async function run(
 async function delivered(): Promise<{ fixture: ClaudeFixture; requestId: string }> {
   const fixture = claudeFixture();
   const route = activeRoute(fixture);
-  spoolMonitorBrief(fixture.env, fixture.game.busDir, route, SLOT);
-  await deliverPending(() => undefined, fixture.game.busDir, MONITOR);
-  return { fixture, requestId: slotRequestId(MONITOR, SLOT) };
+  spoolReviewBrief(fixture.env, fixture.game.busDir, route, SLOT);
+  await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
+  return { fixture, requestId: slotRequestId(RECIPIENT, SLOT) };
 }
 
 async function snapshot(fixture: ClaudeFixture): Promise<Record<string, unknown>> {
-  const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
+  const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
   expect(result.code, result.err + result.out).toBe(EXIT_OK);
   return JSON.parse(result.out) as Record<string, unknown>;
 }
@@ -57,7 +57,7 @@ function ack(fixture: ClaudeFixture, id: string, disposition: string, ...extra: 
   return async (snapshotId: string) =>
     run(
       fixture,
-      "monitor",
+      "inbox",
       "ack",
       "--game",
       GAME,
@@ -80,7 +80,7 @@ function select(
   writeFileSync(fixture.layout.registryFile, JSON.stringify(registry));
 }
 
-describe("monitor effective harness selection", () => {
+describe("inbox effective harness selection", () => {
   it("distinguishes mixed local inventory success from unavailable requested native queues", async () => {
     const fixture = claudeFixture();
     select(fixture, (registry) => {
@@ -88,12 +88,12 @@ describe("monitor effective harness selection", () => {
     });
     const output = await snapshot(fixture);
     expect(output).toMatchObject({
-      channel_queues: { [MONITOR]: { count: 0, queue_ids: [], status: "available" } },
+      channel_queues: { [RECIPIENT]: { count: 0, queue_ids: [], status: "available" } },
       complete: true,
       harness: "claude",
       native_complete: false,
-      native_queues: { [MONITOR]: { status: "unavailable" } },
-      queue_sources: { [MONITOR]: "local_channel_delivered" },
+      native_queues: { [RECIPIENT]: { status: "unavailable" } },
+      queue_sources: { [RECIPIENT]: "local_channel_delivered" },
     });
   });
 
@@ -106,20 +106,20 @@ describe("monitor effective harness selection", () => {
     select(fixture, (registry) => {
       registry.roles["archies-dog-walks/tech"]!.harness = "codex";
     });
-    const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
+    const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
     expect(result.code, result.err).toBe(EXIT_OK);
     expect(result.out).not.toContain("private-channel-body");
     expect(result.out).not.toContain('"input"');
     expect(result.out.length).toBeLessThan(5000);
     const output = JSON.parse(result.out);
     expect(output.channel_queues).toEqual({
-      [MONITOR]: { count: 1, queue_ids: [requestId], status: "available" },
+      [RECIPIENT]: { count: 1, queue_ids: [requestId], status: "available" },
     });
     const persisted = JSON.parse(readFileSync(output.path, "utf8"));
-    expect(persisted.channel_queues[MONITOR][0].input[0].text).toBe(privateText);
+    expect(persisted.channel_queues[RECIPIENT][0].input[0].text).toBe(privateText);
   });
 
-  it("rejects an outside parent before a mixed Claude monitor can query Codex", async () => {
+  it("rejects an outside parent before a mixed Claude recipient can query Codex", async () => {
     const fixture = claudeFixture();
     select(fixture, (registry) => {
       registry.roles["archies-dog-walks/tech"]!.harness = "codex";
@@ -130,39 +130,31 @@ describe("monitor effective harness selection", () => {
         worktree: ".",
       };
     });
-    const result = await run(
-      fixture,
-      "monitor",
-      "snapshot",
-      "--game",
-      GAME,
-      "--parent",
-      "game-kit",
-    );
+    const result = await run(fixture, "inbox", "snapshot", "--game", GAME, "--parent", "game-kit");
     expect(result.code).toBe(EXIT_INVALID);
     expect(result.err).toContain("parent outside active route");
   });
 
-  it("uses the monitor's Claude selection when the global fallback is Codex", async () => {
+  it("uses the recipient's Claude selection when the global fallback is Codex", async () => {
     const { fixture } = await delivered();
     select(fixture, (registry) => {
       registry.harness = "codex";
       registry.roles["game-dev"]!.harness = "claude";
       registry.roles["archies-dog-walks/tech"]!.harness = "claude";
     });
-    const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
+    const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
     expect(result.code, result.err).toBe(EXIT_OK);
     expect(JSON.parse(result.out).harness).toBe("claude");
   });
 
-  it("refuses an inactive conversation UUID and unsupported Claude nonmonitor recipient", async () => {
+  it("refuses an inactive conversation UUID and unsupported Claude non-route recipient", async () => {
     const fixture = claudeFixture();
     select(fixture, (registry) => {
       registry.roles["archies-dog-walks/tech"]!.harness = "claude";
     });
     const inactive = await run(
       fixture,
-      "monitor",
+      "inbox",
       "snapshot",
       "--game",
       GAME,
@@ -173,7 +165,7 @@ describe("monitor effective harness selection", () => {
     expect(inactive.err).toContain("exactly one active registered role");
     const unsupported = await run(
       fixture,
-      "monitor",
+      "inbox",
       "snapshot",
       "--game",
       GAME,
@@ -181,7 +173,7 @@ describe("monitor effective harness selection", () => {
       TECH,
     );
     expect(unsupported.code).toBe(EXIT_INVALID);
-    expect(unsupported.err).toContain("recipient must be the active route monitor");
+    expect(unsupported.err).toContain("recipient must be the active route's recipient");
   });
 
   it("refuses an ambiguous active UUID before choosing either adapter", async () => {
@@ -189,7 +181,7 @@ describe("monitor effective harness selection", () => {
     select(fixture, (registry) => {
       registry.roles["game-dev"]!.conversations = { claude: TECH };
     });
-    const result = await run(fixture, "monitor", "snapshot", "--game", GAME, "--recipient", TECH);
+    const result = await run(fixture, "inbox", "snapshot", "--game", GAME, "--recipient", TECH);
     expect(result.code).toBe(EXIT_USAGE);
     expect(result.err).toContain("exactly one active registered role");
   });
@@ -199,7 +191,7 @@ describe("monitor effective harness selection", () => {
     const captured = await snapshot(fixture);
     select(fixture, (registry) => {
       registry.roles["game-dev"]!.harness = "codex";
-      registry.roles["game-dev"]!.conversations = { claude: MONITOR, codex: MONITOR };
+      registry.roles["game-dev"]!.conversations = { claude: RECIPIENT, codex: RECIPIENT };
     });
     const result = await ack(fixture, requestId, "handled")(captured.snapshot_id as string);
     expect(result.code).toBe(EXIT_INVALID);
@@ -210,7 +202,7 @@ describe("monitor effective harness selection", () => {
   });
 });
 
-describe("monitor snapshot (claude)", () => {
+describe("inbox snapshot (claude)", () => {
   it("lists delivered entries and reports native state unavailable", async () => {
     const { fixture, requestId } = await delivered();
     const output = await snapshot(fixture);
@@ -229,22 +221,22 @@ describe("monitor snapshot (claude)", () => {
     ]);
     expect(output).toMatchObject({
       harness: "claude",
-      question_state_status: { [MONITOR]: "unavailable", [TECH]: "unavailable" },
+      question_state_status: { [RECIPIENT]: "unavailable", [TECH]: "unavailable" },
       queue_ids: [requestId],
-      session_status: { [MONITOR]: "idle", [TECH]: "idle" },
+      session_status: { [RECIPIENT]: "idle", [TECH]: "idle" },
       target_queue_status: { [TECH]: "unavailable" },
     });
     const record = JSON.parse(readFileSync(output.path as string, "utf8")) as {
       queues: Record<string, { receipt_status: string }[]>;
     };
-    expect(record.queues[MONITOR]?.[0]?.receipt_status).toBe("accepted");
+    expect(record.queues[RECIPIENT]?.[0]?.receipt_status).toBe("accepted");
   });
 
-  it("refuses a recipient that is not the route monitor", async () => {
+  it("refuses a recipient that is not the route recipient", async () => {
     const { fixture } = await delivered();
     const result = await run(
       fixture,
-      "monitor",
+      "inbox",
       "snapshot",
       "--game",
       GAME,
@@ -253,11 +245,11 @@ describe("monitor snapshot (claude)", () => {
     );
     expect(result.code).toBe(EXIT_INVALID);
     expect(JSON.parse(result.out)).toEqual({
-      reason: "inspect local monitor state and retry explicit reconciliation",
+      reason: "inspect local inbox state and retry explicit reconciliation",
       status: "unavailable",
     });
-    expect(result.err).toBe("delivery-kit: recipient must be the active route monitor\n");
-    expect((await run(fixture, "monitor", "snapshot")).code).toBe(EXIT_USAGE);
+    expect(result.err).toBe("delivery-kit: recipient must be the active route's recipient\n");
+    expect((await run(fixture, "inbox", "snapshot")).code).toBe(EXIT_USAGE);
   });
 
   it("reports an unreadable channel spool under the snapshot's errors", async () => {
@@ -265,7 +257,7 @@ describe("monitor snapshot (claude)", () => {
     const spool = spoolDir(fixture.game.busDir);
     rmSync(spool, { force: true, recursive: true });
     writeFileSync(spool, "");
-    const result = await run(fixture, "monitor", "snapshot", "--game", GAME);
+    const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
     expect(result.code).toBe(EXIT_INVALID);
     const output = JSON.parse(result.out) as { complete: boolean; path: string };
     expect(output.complete).toBe(false);
@@ -276,13 +268,13 @@ describe("monitor snapshot (claude)", () => {
   it("accepts a registered conversation UUID and refuses an unregistered one", async () => {
     const { fixture } = await delivered();
     const recipient = (id: string) =>
-      run(fixture, "monitor", "snapshot", "--game", GAME, "--recipient", id);
-    expect((await recipient(MONITOR)).code).toBe(EXIT_OK);
+      run(fixture, "inbox", "snapshot", "--game", GAME, "--recipient", id);
+    expect((await recipient(RECIPIENT)).code).toBe(EXIT_OK);
     expect((await recipient("00000000-0000-4000-8000-0000000000ff")).code).toBe(EXIT_USAGE);
   });
 });
 
-describe("monitor ack (claude)", () => {
+describe("inbox ack (claude)", () => {
   it("removes the exact handled entry once and keeps the durable disposition", async () => {
     const { fixture, requestId } = await delivered();
     const id = (await snapshot(fixture)).snapshot_id as string;
@@ -324,13 +316,13 @@ describe("monitor ack (claude)", () => {
     const record = JSON.parse(readFileSync((await snapshot(fixture)).path as string, "utf8")) as {
       queues: Record<string, { retained: boolean }[]>;
     };
-    expect(record.queues[MONITOR]?.[0]?.retained).toBe(true);
+    expect(record.queues[RECIPIENT]?.[0]?.retained).toBe(true);
   });
 
   it("records an interrupted removal as ambiguous, then confirmed absent", async () => {
     const { fixture, requestId } = await delivered();
     const id = (await snapshot(fixture)).snapshot_id as string;
-    const operation = join(fixture.unblock, "acks", `${digest([MONITOR, id, requestId])}.json`);
+    const operation = join(fixture.unblock, "acks", `${digest([RECIPIENT, id, requestId])}.json`);
     persist(operation, {
       attempt: 1,
       attempts: [{ attempt: 1, state: "deleting" }],
@@ -338,7 +330,7 @@ describe("monitor ack (claude)", () => {
       harness: "claude",
       history: [],
       queue_id: requestId,
-      recipient: MONITOR,
+      recipient: RECIPIENT,
       snapshot_id: id,
       state: "deleting",
     });

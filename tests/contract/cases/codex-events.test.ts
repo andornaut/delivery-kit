@@ -1,4 +1,4 @@
-// Bus events for the confirmed Codex monitor, flushed by the resident runner's observer
+// Bus events for the confirmed Codex recipient, flushed by the resident runner's observer
 //.
 import { rmSync } from "node:fs";
 import { afterEach, expect } from "vitest";
@@ -6,7 +6,7 @@ import { afterEach, expect } from "vitest";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { sleep } from "../lib/time.ts";
 import { rpcError, STALE, TECH } from "../lib/unblock-native.ts";
-import { codexRoute, Monitored } from "../lib/unblock-runner.ts";
+import { codexRoute, Reviewed } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import { otherGame } from "../lib/routes.ts";
 
@@ -41,9 +41,9 @@ function receiptStatus(ws: Workspace): string | undefined {
 
 suite("codex events", () => {
   const workspace = workspaces();
-  const open: Monitored[] = [];
+  const open: Reviewed[] = [];
   afterEach(async () => {
-    for (const monitored of open.splice(0)) await monitored.close();
+    for (const reviewed of open.splice(0)) await reviewed.close();
   });
 
   /** A reporter whose events go to `recipient`; the route names a different dispatch host. */
@@ -54,19 +54,19 @@ suite("codex events", () => {
       route?: ((ws: Workspace) => unknown) | null;
       ws?: Workspace;
     } = {},
-  ): Promise<Monitored> {
+  ): Promise<Reviewed> {
     const ws = options.ws ?? workspace();
-    const m = await Monitored.routed(ws, { host: otherGame(ws) });
+    const m = await Reviewed.routed(ws, { host: otherGame(ws) });
     open.push(m);
     if (options.route === null) rmSync(ws.routeFile);
     else if (options.route !== undefined) ws.writeRoute(options.route(ws));
-    ws.config.reports = { project: "Fixture", recipient: options.recipient ?? "monitor" };
+    ws.config.reports = { project: "Fixture", recipient: options.recipient ?? "dev-manager" };
     seed(ws);
     return m;
   }
 
   /** Wait for `count` more observer flush connections to the control socket. */
-  async function flushes(m: Monitored, count: number): Promise<void> {
+  async function flushes(m: Reviewed, count: number): Promise<void> {
     const target = m.socket.connections.length + count;
     await m.runner!.until(() => m.socket.connections.length >= target);
   }
@@ -103,7 +103,7 @@ suite("codex events", () => {
   );
 
   contract(
-    "a completed idle monitor gets turn/start; an interrupted idle one gets nothing",
+    "a completed idle recipient gets turn/start; an interrupted idle one gets nothing",
     async () => {
       const m = await reporter();
       Object.assign(m.world.thread(TECH), {
@@ -205,7 +205,7 @@ suite("codex events", () => {
         [{ result: { turnId: "wrong" } }, "ambiguous"],
         [rpcError("PRIVATE_BODY", 1), "rejected"],
       ];
-      let last: Monitored | undefined;
+      let last: Reviewed | undefined;
       for (const [outcome, status] of outcomes) {
         const m = await reporter();
         m.world.outcomes.push(outcome);
@@ -236,9 +236,9 @@ suite("codex events", () => {
     async () => {
       const cases: Array<[string, (ws: Workspace) => unknown]> = [
         ["malformed", () => "not json"],
-        ["invalid", (ws) => codexRoute(ws, { schema: 2 })],
+        ["invalid", (ws) => codexRoute(ws, { schema: 1 })],
         ["held", (ws) => codexRoute(ws, { state: "held" })],
-        ["held-unknown", (ws) => codexRoute(ws, { monitor: "no-such-role", state: "held" })],
+        ["held-unknown", (ws) => codexRoute(ws, { recipient: "no-such-role", state: "held" })],
       ];
       for (const [name, route] of cases) {
         const ws = workspace();

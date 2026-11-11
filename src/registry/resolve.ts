@@ -1,46 +1,25 @@
-// Role names resolve to a role key, then to the active harness's conversation ID.
+// Role names resolve to a registered role key, then to its selected harness's conversation ID.
 import type { Harness, Registry } from "./schema.ts";
 
 export class UnknownRole extends Error {
   readonly role: string;
 
   constructor(role: string) {
-    super(`no registered role or duty named ${role}`);
+    super(`no registered role named ${role}`);
     this.name = "UnknownRole";
     this.role = role;
   }
 }
 
-export class AmbiguousRole extends Error {
-  readonly role: string;
-  readonly holders: readonly string[];
-
-  constructor(role: string, holders: readonly string[]) {
-    super(`duty ${role} is held by more than one role: ${holders.join(", ")}`);
-    this.name = "AmbiguousRole";
-    this.role = role;
-    this.holders = holders;
-  }
-}
-
-/** A role key resolves to itself; a duty name resolves to the one role holding it. */
+/** A registered role key resolves to itself; any other name throws UnknownRole. */
 export function resolveRole(registry: Registry, role: string): string {
-  if (Object.hasOwn(registry.roles, role)) {
-    return role;
-  }
-  const holders = Object.entries(registry.roles)
-    .filter(([, record]) => record.duties?.includes(role) === true)
-    .map(([key]) => key);
-  if (holders.length === 0) {
+  if (!Object.hasOwn(registry.roles, role)) {
     throw new UnknownRole(role);
   }
-  if (holders.length > 1) {
-    throw new AmbiguousRole(role, holders);
-  }
-  return holders[0] as string;
+  return role;
 }
 
-/** The role or duty holder's selected transport, falling back to the global default. */
+/** The role's selected transport, falling back to the global default. */
 export function resolveHarness(registry: Registry, role: string): Harness {
   return registry.roles[resolveRole(registry, role)]?.harness ?? registry.harness;
 }

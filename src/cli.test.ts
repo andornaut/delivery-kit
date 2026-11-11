@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -6,7 +7,13 @@ import { COMMANDS, EXIT_INVALID, EXIT_OK, EXIT_USAGE, main, USAGE } from "./cli.
 import { SPECS } from "./commands/spec.ts";
 import { loadLayout } from "./layout.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
-import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
+import {
+  CLAUDE_GAME_DEV,
+  makeFixture,
+  projectConfig,
+  registryInput,
+  writeFixtureJson,
+} from "./testFixtures.ts";
 
 async function run(
   root: string,
@@ -42,20 +49,68 @@ describe("check-config", () => {
     expect((await run(root, "check-config")).out).toContain("registry revision 1");
     const config = projectConfig("Chibi");
     (config.reports as Record<string, unknown>).workerParents = [
-      "coordinator",
+      "game-dev",
       "chibis-way-home/tech",
     ];
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
     const result = await run(root, "check-config");
     expect(result.code).toBe(EXIT_INVALID);
-    expect(result.err).toContain("no registered role or duty named chibis-way-home/tech");
+    expect(result.err).toContain("no registered role named chibis-way-home/tech");
+  });
+
+  it("names the exact edit for a registry role that still has duties", async () => {
+    const { root } = makeFixture();
+    const layout = loadLayout(root);
+    const input = registryInput() as { roles: Record<string, Record<string, unknown>> };
+    input.roles["game-dev"]!.duties = ["monitor"];
+    mkdirSync(layout.varDir, { recursive: true });
+    writeFixtureJson(layout.registryFile, {
+      ...input,
+      revision: 1,
+      updatedAt: "2026-11-04T03:00:00Z",
+    });
+    const result = await run(root, "check-config");
+    expect(result.code).toBe(EXIT_INVALID);
+    expect(result.err).toContain(
+      "/roles/game-dev/duties: duties were removed in 3.0.0; remove this field",
+    );
+  });
+
+  it("validates var/route.json and names the exact edit for a schema 1 route", async () => {
+    const { root } = makeFixture();
+    withRegistry(root);
+    const layout = loadLayout(root);
+    mkdirSync(layout.varDir, { recursive: true });
+    const route = {
+      host: "archies-dog-walks",
+      state: "active",
+      targets: ["archies-dog-walks/tech"],
+    };
+    writeFixtureJson(layout.routeFile, { ...route, schema: 2 });
+    expect((await run(root, "check-config")).code).toBe(EXIT_OK);
+    writeFixtureJson(layout.routeFile, { ...route, monitor: "game-dev", schema: 1 });
+    const legacy = await run(root, "check-config");
+    expect(legacy.code).toBe(EXIT_INVALID);
+    expect(legacy.err).toContain(
+      'var/route.json schema 1 is not supported: remove "monitor" and set "schema" to 2',
+    );
+    writeFixtureJson(layout.routeFile, { ...route, schema: 2, targets: ["game-dev"] });
+    expect((await run(root, "check-config")).err).toContain(
+      "active route targets must not include the recipient game-dev",
+    );
   });
 
   it("names workerParents when parents share a conversation", async () => {
     const { base, root } = makeFixture();
-    withRegistry(root);
+    const input = registryInput() as { roles: Record<string, unknown> };
+    input.roles["art-kit"] = {
+      conversations: { claude: CLAUDE_GAME_DEV },
+      ownership: "active",
+      worktree: ".",
+    };
+    createRegistry(loadLayout(root), input as unknown as Omit<Registry, "revision" | "updatedAt">);
     const config = projectConfig("Chibi");
-    (config.reports as Record<string, unknown>).workerParents = ["monitor", "game-dev"];
+    (config.reports as Record<string, unknown>).workerParents = ["art-kit", "game-dev"];
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
     const result = await run(root, "check-config");
     expect(result.code).toBe(EXIT_INVALID);
@@ -117,12 +172,12 @@ describe("dispatcher", () => {
     expect(twice.seen.err).toContain("--root is given more than once");
   });
 
-  it("names the 2.0.0 form of each removed command and runs nothing", async () => {
+  it("names the current form of each command removed in 2.0.0 and runs nothing", async () => {
     const { root } = makeFixture();
     const cases: [string[], string][] = [
       [["channel"], "delivery-kit claude channel"],
-      [["monitor-snapshot", "--game", "x"], "delivery-kit monitor snapshot"],
-      [["monitor-ack"], "delivery-kit monitor ack"],
+      [["monitor-snapshot", "--game", "x"], "delivery-kit inbox snapshot"],
+      [["monitor-ack"], "delivery-kit inbox ack"],
       [["resource-report", "--game", "x"], "delivery-kit status --game ID --resources"],
       [["status", "--harness", "codex"], "delivery-kit codex ready"],
       [["status", "--harness", "claude"], "delivery-kit claude ready"],
@@ -135,6 +190,36 @@ describe("dispatcher", () => {
       expect(result.err, argv.join(" ")).toMatch(
         new RegExp(`^delivery-kit: ".*" was removed in 2\\.0\\.0; use "${replacement}"\\n$`),
       );
+    }
+  });
+
+  it("names the replacement of each form removed in 3.0.0 and runs nothing", async () => {
+    const { root } = makeFixture();
+    const cases: [string[], string][] = [
+      [
+        ["monitor", "snapshot", "--game", "x"],
+        '"monitor snapshot" was removed in 3.0.0; use "delivery-kit inbox snapshot"',
+      ],
+      [
+        ["monitor", "ack", "--game", "x"],
+        '"monitor ack" was removed in 3.0.0; use "delivery-kit inbox ack"',
+      ],
+      [["monitor"], '"monitor" was removed in 3.0.0; use "delivery-kit inbox snapshot|ack"'],
+      [
+        ["claude", "channel", "--monitor", "00000000-0000-4000-8000-000000000001"],
+        '"claude channel --monitor" was removed in 3.0.0; use "delivery-kit claude channel --conversation UUID"',
+      ],
+      [
+        ["claude", "channel", "--monitor=00000000-0000-4000-8000-000000000001"],
+        '"claude channel --monitor" was removed in 3.0.0; use "delivery-kit claude channel --conversation UUID"',
+      ],
+    ];
+    for (const [argv, hint] of cases) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await run(root, ...argv);
+      expect(result.code, argv.join(" ")).toBe(EXIT_USAGE);
+      expect(result.out, argv.join(" ")).toBe("");
+      expect(result.err, argv.join(" ")).toBe(`delivery-kit: ${hint}\n`);
     }
   });
 });
@@ -164,7 +249,7 @@ describe("help", () => {
       }
     }
     expect(Object.keys(SPECS).sort()).toEqual([...COMMANDS].sort());
-    const groups = ["Game operations:", "Monitor (game-dev):", "Harness (claude, codex):"];
+    const groups = ["Game operations:", "Inbox (recipient):", "Harness (claude, codex):"];
     expect(groups.map((heading) => USAGE.indexOf(heading))).toEqual(
       groups.map((heading) => USAGE.indexOf(heading)).sort((x, y) => x - y),
     );

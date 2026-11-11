@@ -343,7 +343,7 @@ export function reminder(
       ? `\nQuestion capability diagnostics (no pending-decision inference): ${ascii(brief.questionDiagnostics)}`
       : "";
   return (
-    `Scheduled monitoring review, slot ${slot}. Review recent Art, Gameplay and Tech activity ` +
+    `Scheduled review, slot ${slot}. Review recent Art, Gameplay and Tech activity ` +
     "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies " +
     "and dependency unblockers. Use native live steering only for confirmed unblockers. Remove an " +
     "original only after confirmed delivery or reconciliation. Preserve unanswered questions and " +
@@ -377,7 +377,8 @@ function questionDiagnostics(snapshot: Json, snapshotFile: string): Json[] {
 
 export interface ReconcileTarget {
   readonly unblock: string;
-  readonly coordinator: string;
+  /** The recipient's conversation. */
+  readonly recipient: string;
   readonly slot: number;
   /** Aborts when the runner stops. */
   readonly signal?: AbortSignal | undefined;
@@ -393,8 +394,8 @@ export async function reconcileSlot(
   target: ReconcileTarget,
   captured: Json,
 ): Promise<SlotState> {
-  const { coordinator, slot, unblock } = target;
-  const path = join(unblock, `${coordinator}-${slot}.json`);
+  const { recipient, slot, unblock } = target;
+  const path = join(unblock, `${recipient}-${slot}.json`);
   const snapshot: Json = { ...captured, slot };
   const queues = Object.fromEntries(
     Object.entries(snapshotQueues(snapshot)).map(([thread, entries]) => [
@@ -404,12 +405,12 @@ export async function reconcileSlot(
   );
   const snapshotFile = snapshotPath(unblock, String(snapshot.snapshot_id));
   const state: SlotState = Object.fromEntries([
-    ["coordinator", coordinator],
+    ["recipient", recipient],
     ["slot", slot],
     ["queues", queues],
     ["snapshot_id", snapshot.snapshot_id],
     ["snapshot_path", snapshotFile],
-    ["requestId", slotRequestId(coordinator, slot)],
+    ["requestId", slotRequestId(recipient, slot)],
   ]);
   const finish = (updates: SlotState): SlotState => {
     Object.assign(state, updates);
@@ -422,28 +423,28 @@ export async function reconcileSlot(
       status: "deferred",
     });
   }
-  const ownWait = list(rec(rec(snapshot.question_state)[coordinator]).questions).some((question) =>
-    pendingProven(coordinator, rec(question)),
+  const ownWait = list(rec(rec(snapshot.question_state)[recipient]).questions).some((question) =>
+    pendingProven(recipient, rec(question)),
   );
-  if (!decisionClear(unblock, coordinator)) {
+  if (!decisionClear(unblock, recipient)) {
     state.waiting_on_user = ownWait;
     return finish({ reason: CLEARANCE_MISSING, status: "deferred" });
   }
   const [questions, noticeKeys] = questionBrief(
-    questionNotices(unblock, coordinator, snapshot, slot),
+    questionNotices(unblock, recipient, snapshot, slot),
   );
   state.question_notice_keys = noticeKeys;
   const qDiagnostics = questionDiagnostics(snapshot, snapshotFile);
   const text = reminder(slot, queues, snapshotFile, {
     questionDiagnostics: qDiagnostics,
     questions,
-    workerFailures: pendingWorkerFailures(unblock, coordinator, snapshot),
+    workerFailures: pendingWorkerFailures(unblock, recipient, snapshot),
   });
   return sendSlot(
     client,
     unblock,
     { stopping: () => target.signal?.aborted === true },
-    { ownWait, path, recipient: coordinator, text },
+    { ownWait, path, recipient, text },
     state,
   );
 }

@@ -29,7 +29,7 @@ function fixture() {
   return { file: join(store.dir, "delivery-control.json"), root, store };
 }
 
-function args(state = "paused", requester = "monitor"): string[] {
+function args(state = "paused", requester = "game-dev"): string[] {
   return [
     "control",
     "--game",
@@ -44,7 +44,7 @@ function args(state = "paused", requester = "monitor"): string[] {
 }
 
 describe("control command", () => {
-  it("explicitly adopts missing control, resolves a duty and prints only validated desired JSON", async () => {
+  it("explicitly adopts missing control, resolves the role and prints only validated desired JSON", async () => {
     const test = fixture();
     expect(existsSync(test.file)).toBe(false);
     const result = await run(test.root, ...args());
@@ -83,13 +83,13 @@ describe("control command", () => {
     expect(existsSync(test.store.dir)).toBe(false);
   });
 
-  it("requires a registered requester role or duty and rejects conversation identifiers", async () => {
+  it("requires a registered requester role and rejects conversation identifiers", async () => {
     const test = fixture();
-    for (const requester of ["missing-role", CLAUDE_GAME_DEV]) {
+    for (const requester of ["missing-role", "monitor", CLAUDE_GAME_DEV]) {
       // eslint-disable-next-line no-await-in-loop
       const result = await run(test.root, ...args("paused", requester));
       expect(result).toMatchObject({ code: 1, out: "" });
-      expect(result.err).toContain("no registered role or duty");
+      expect(result.err).toContain("no registered role named");
     }
     expect(existsSync(test.file)).toBe(false);
     const { root } = makeFixture();

@@ -47,8 +47,8 @@ export interface Layout {
   readonly registryLock: string;
   readonly routeFile: string;
   readonly handoffsDir: string;
-  /** Monitor review snapshots, health history, acknowledgements and retentions. */
-  readonly monitorDir: string;
+  /** Review and inbox state: snapshots, health history, acknowledgements and retentions. */
+  readonly reviewDir: string;
 }
 
 export interface GameLayout {
@@ -114,7 +114,7 @@ export function validateGameDevConfig(value: unknown): GameDevConfig {
       issues.add("/schema", "must be 1");
     }
     checkTimezone(issues, "/timezone", config.timezone);
-    // An empty list schedules no monitor wake.
+    // An empty list schedules no review.
     if (checkArray(issues, "/wakeMinutes", { unique: true }, config.wakeMinutes)) {
       config.wakeMinutes.forEach((minute, index) =>
         checkInteger(issues, `/wakeMinutes/${index}`, { max: 59, min: 0 }, minute),
@@ -141,9 +141,9 @@ export function loadLayout(gameDevRoot: string): Layout {
     config,
     configFile,
     handoffsDir: resolve(varDir, "handoffs"),
-    monitorDir: resolve(varDir, "game-dev"),
     registryFile: resolve(varDir, "registry.json"),
     registryLock: resolve(varDir, "registry.lock"),
+    reviewDir: resolve(varDir, "game-dev"),
     root,
     routeFile: resolve(varDir, "route.json"),
     varDir,

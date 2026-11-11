@@ -1,4 +1,4 @@
-// Public `monitor snapshot` inventory, history, question and worker metadata
+// Public `inbox snapshot` inventory, history, question and worker metadata
 //. Assertions read stdout and STATE/unblock/snapshots/<id>.json.
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -16,7 +16,7 @@ import {
   TECH,
   writeCodexRoute,
   writeDecision,
-} from "../lib/monitor-native.ts";
+} from "../lib/review-native.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const CHILD = "00000000-0000-0000-0000-000000000003";
@@ -42,7 +42,7 @@ export function workerFailures(snap: Json): string[][] {
   return [...out].sort().map((row) => JSON.parse(row) as string[]);
 }
 
-suite("monitor snapshot", () => {
+suite("inbox snapshot", () => {
   const workspace = workspaces();
   const natives: Native[] = [];
   afterEach(async () => {
@@ -153,7 +153,7 @@ suite("monitor snapshot", () => {
       const { ws, native } = await setup();
       for (const parents of [[TECH, TECH], [TECH.replace("00000000", "ABCDEFAB")], [OTHER]]) {
         const result = await cli(ws, [
-          "monitor",
+          "inbox",
           "snapshot",
           "--recipient",
           TECH,
@@ -163,14 +163,7 @@ suite("monitor snapshot", () => {
       }
       for (const change of [{ state: "held" }, { schema: 99 }]) {
         writeCodexRoute(ws, change);
-        const result = await cli(ws, [
-          "monitor",
-          "snapshot",
-          "--recipient",
-          TECH,
-          "--parent",
-          TECH,
-        ]);
+        const result = await cli(ws, ["inbox", "snapshot", "--recipient", TECH, "--parent", TECH]);
         expect(result.code, JSON.stringify(change)).not.toBe(0);
       }
       expect(native.socket.connections).toEqual([]);

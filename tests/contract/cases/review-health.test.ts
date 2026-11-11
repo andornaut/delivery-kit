@@ -1,4 +1,4 @@
-// Scheduled monitor health across distinct slots, driven through the resident runner's
+// Scheduled review health across distinct slots, driven through the resident runner's
 // observer. Each slot is one wall-clock minute.
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import {
   entry,
   health,
   type Json,
-  monitorEvents,
+  reviewEvents,
   Native,
   retentionName,
   pyJson,
@@ -20,10 +20,9 @@ import {
   TECH,
   writeCodexRoute,
   writeDecision,
-} from "../lib/monitor-native.ts";
-import { MonitorSchedule } from "../lib/monitor-schedule.ts";
+} from "../lib/review-native.ts";
+import { ReviewSchedule } from "../lib/review-schedule.ts";
 import type { Workspace } from "../lib/workspace.ts";
-import { routeRole } from "../lib/routes.ts";
 
 const SLOW = 120_000;
 
@@ -31,7 +30,7 @@ function readSnapshot(output: Json | undefined): Json {
   return JSON.parse(readFileSync(output!.snapshot_path as string, "utf8")) as Json;
 }
 
-suite("monitor scheduled health", () => {
+suite("review scheduled health", () => {
   const workspace = workspaces();
   const cleanups: Array<() => Promise<void>> = [];
   afterEach(async () => {
@@ -40,12 +39,12 @@ suite("monitor scheduled health", () => {
 
   async function setup(
     prepare: (ws: Workspace) => void = (ws) => writeCodexRoute(ws),
-  ): Promise<{ ws: Workspace; native: Native; schedule: MonitorSchedule }> {
+  ): Promise<{ ws: Workspace; native: Native; schedule: ReviewSchedule }> {
     const ws = workspace();
     prepare(ws);
     const native = await new Native(ws).listen();
     cleanups.push(() => native.close());
-    const schedule = new MonitorSchedule(ws);
+    const schedule = new ReviewSchedule(ws);
     cleanups.push(() => schedule.stop());
     return { ws, native, schedule };
   }
@@ -62,25 +61,25 @@ suite("monitor scheduled health", () => {
       clear(ws);
       await schedule.start();
       const first = await schedule.slot();
-      expect(first.output).toMatchObject({ status: "accepted", monitor_status: "ok" });
+      expect(first.output).toMatchObject({ status: "accepted", review_status: "ok" });
       const second = await schedule.slot();
       expect(second.output).toMatchObject({
         status: "accepted",
-        monitor_status: "failed",
+        review_status: "failed",
         backlog_slots: 2,
       });
       await schedule.slot();
-      expect(monitorEvents(ws)).toHaveLength(1);
+      expect(reviewEvents(ws)).toHaveLength(1);
       native.queues = { [TECH]: [], [ART]: [] };
       expect((await schedule.slot()).output).toMatchObject({
         status: "accepted",
-        monitor_status: "ok",
+        review_status: "ok",
       });
       rmSync(ws.path("unblock", "decisions", TECH + ".json"));
       expect((await schedule.slot()).output!.status).toBe("deferred");
       const failed = await schedule.slot();
-      expect(failed.output).toMatchObject({ status: "deferred", monitor_status: "failed" });
-      expect(monitorEvents(ws)).toHaveLength(2);
+      expect(failed.output).toMatchObject({ status: "deferred", review_status: "failed" });
+      expect(reviewEvents(ws)).toHaveLength(2);
     },
     SLOW,
   );
@@ -96,9 +95,9 @@ suite("monitor scheduled health", () => {
         JSON.stringify({
           seen_slots: [10, 20],
           deferral_slots: 8,
-          monitor_status: "failed",
+          review_status: "failed",
           reported: true,
-          monitor_reason: "old failure",
+          review_reason: "old failure",
           problem_signature: "old",
         }),
       );
@@ -111,7 +110,7 @@ suite("monitor scheduled health", () => {
       for (let i = 0; i < 2; i++) {
         const result = (await schedule.slot()).output!;
         expect(result).toMatchObject({
-          monitor_status: "degraded",
+          review_status: "degraded",
           history_status: "degraded",
           deferral_slots: 0,
           backlog_slots: 0,
@@ -124,26 +123,26 @@ suite("monitor scheduled health", () => {
       ]) {
         history = () => page;
         expect((await schedule.slot()).output).toMatchObject({
-          monitor_status: "degraded",
+          review_status: "degraded",
           deferral_slots: 0,
         });
       }
       native.queues[TECH] = [entry("one")];
       expect((await schedule.slot()).output!.backlog_slots).toBe(1);
       const failed = (await schedule.slot()).output!;
-      expect(failed.monitor_status).toBe("failed");
+      expect(failed.review_status).toBe("failed");
       expect(failed.history_status).toBe("degraded");
-      expect(failed.monitor_reason).toContain("unacknowledged queue items");
-      expect(failed.monitor_reason).not.toContain("repeatedly deferred");
-      expect(monitorEvents(ws)).toHaveLength(1);
+      expect(failed.review_reason).toContain("unacknowledged queue items");
+      expect(failed.review_reason).not.toContain("repeatedly deferred");
+      expect(reviewEvents(ws)).toHaveLength(1);
       native.queues[TECH] = [];
       // One more page exists for history; the question collector's second page completes.
       history = (params: Json) =>
         params.cursor ? { data: [] } : { data: [], nextCursor: "older" };
       const recovered = (await schedule.slot()).output!;
-      expect(recovered.monitor_status).toBe("ok");
+      expect(recovered.review_status).toBe("ok");
       expect(recovered.history_status).toBe("ok");
-      expect(health(ws).monitor_reason).toBeUndefined();
+      expect(health(ws).review_reason).toBeUndefined();
     },
     SLOW,
   );
@@ -165,12 +164,12 @@ suite("monitor scheduled health", () => {
         await schedule.start();
         const first = (await schedule.slot()).output!;
         expect(first.status).toBe("deferred");
-        expect(first.monitor_status).toBe("degraded");
+        expect(first.review_status).toBe("degraded");
         const second = (await schedule.slot()).output!;
-        expect(second.monitor_status).toBe("failed");
+        expect(second.review_status).toBe("failed");
         expect(second.deferral_slots).toBe(2);
-        expect(second.monitor_reason).toContain("inventory or reminder delivery");
-        expect(monitorEvents(ws)).toHaveLength(1);
+        expect(second.review_reason).toContain("inventory or reminder delivery");
+        expect(reviewEvents(ws)).toHaveLength(1);
       },
       SLOW,
     );
@@ -198,14 +197,14 @@ suite("monitor scheduled health", () => {
       await schedule.start();
       for (let i = 0; i < 2; i++) {
         const { output } = await schedule.slot();
-        expect(output!.monitor_status).toBe("degraded");
+        expect(output!.review_status).toBe("degraded");
         expect(output!.question_state_status).toBe("degraded");
         expect(output!.deferral_slots).toBe(0);
         const snap = readSnapshot(output);
         expect(snap.question_state[TECH].pending_status).toBe("unavailable");
         expect(JSON.stringify(snap)).not.toContain("PRIVATE_NATIVE_ERROR");
       }
-      expect(monitorEvents(ws)).toEqual([]);
+      expect(reviewEvents(ws)).toEqual([]);
     },
     SLOW,
   );
@@ -222,7 +221,7 @@ suite("monitor scheduled health", () => {
       });
       // The route names the roles of the registry it runs under.
       writeCodexRoute(ws);
-      ws.config.reports = { workerParents: ["tech"] };
+      ws.config.reports = { ...ws.config.reports, workerParents: ["tech"] };
       clear(ws);
       native.queues = { [TECH]: [], [ART]: [] };
       native.socket.on("thread/list", { error: { code: -32000, message: "unavailable" } });
@@ -231,14 +230,14 @@ suite("monitor scheduled health", () => {
         const result = (await schedule.slot()).output!;
         expect(result).toMatchObject({
           worker_health_status: "degraded",
-          monitor_status: "degraded",
+          review_status: "degraded",
           history_status: "ok",
           backlog_slots: 0,
           deferral_slots: 0,
         });
-        expect(result.monitor_reason).toContain("worker metadata");
+        expect(result.review_reason).toContain("worker metadata");
       }
-      expect(monitorEvents(ws)).toEqual([]);
+      expect(reviewEvents(ws)).toEqual([]);
     },
     SLOW,
   );
@@ -254,13 +253,13 @@ suite("monitor scheduled health", () => {
       expect(ages(ws)).toEqual({ A: 1 });
       native.queues[TECH] = [entry("A"), entry("B")];
       const second = (await schedule.slot()).output!;
-      // A reminder delivery can be accepted while monitor health has failed.
-      expect(second).toMatchObject({ status: "accepted", monitor_status: "failed" });
+      // A reminder delivery can be accepted while review health has failed.
+      expect(second).toMatchObject({ status: "accepted", review_status: "failed" });
       expect(ages(ws)).toEqual({ A: 2, B: 1 });
       native.queues[TECH] = [entry("A"), entry("B"), entry("C")];
       await schedule.slot();
       expect(ages(ws)).toEqual({ A: 3, B: 2, C: 1 });
-      expect(monitorEvents(ws)).toHaveLength(1);
+      expect(reviewEvents(ws)).toHaveLength(1);
       native.queueError.add(TECH);
       await schedule.slot();
       expect(ages(ws)).toEqual({ A: 3, B: 2, C: 1 });
@@ -272,15 +271,15 @@ suite("monitor scheduled health", () => {
       await ack(ws, TECH, taken.public.snapshot_id as string, ["B"], "retained", "planned work");
       await schedule.slot();
       expect(ages(ws)).toEqual({ A: 5, C: 3 });
-      expect(monitorEvents(ws)).toHaveLength(1);
+      expect(reviewEvents(ws)).toHaveLength(1);
       native.queues[TECH] = [entry("C")];
       await schedule.slot();
       expect(ages(ws)).toEqual({ C: 4 });
       native.queues[TECH]![0]!.input = [];
       const resolved = (await schedule.slot()).output!;
       expect(ages(ws)).toEqual({ C: 1 });
-      expect(resolved.monitor_status).toBe("ok");
-      expect(monitorEvents(ws)).toHaveLength(1);
+      expect(resolved.review_status).toBe("ok");
+      expect(reviewEvents(ws)).toHaveLength(1);
     },
     SLOW,
   );
@@ -323,16 +322,16 @@ suite("monitor scheduled health", () => {
       for (let i = 0; i < 2; i++) {
         const result = (await schedule.slot()).output!;
         expect(result.status).toBe("accepted");
-        expect(result.monitor_status).toBe("ok");
+        expect(result.review_status).toBe("ok");
       }
-      expect(monitorEvents(ws)).toEqual([]);
+      expect(reviewEvents(ws)).toEqual([]);
       expect(native.deletions()).toEqual([]);
       expect(native.queues[TECH]).toEqual([entry("one")]);
       expect(native.reminders()).toHaveLength(2);
       expect(ws.readJson(retentionName(TECH, "one")).active).toBe(true);
       native.queues[TECH]![0]!.input = [];
       await schedule.slot();
-      expect((await schedule.slot()).output!.monitor_status).toBe("failed");
+      expect((await schedule.slot()).output!.review_status).toBe("failed");
       native.queues[TECH] = [entry("one"), entry("new-work")];
       await schedule.slot();
       expect(Object.keys(ages(ws))).toEqual(["new-work"]);
@@ -360,9 +359,7 @@ suite("monitor scheduled health", () => {
   contract(
     "the real question collector keeps partial old history apart from complete current proof",
     async () => {
-      const { ws, native, schedule } = await setup((w) =>
-        writeCodexRoute(w, { monitor: routeRole(w, "codex", ART) }, [TECH]),
-      );
+      const { ws, native, schedule } = await setup((w) => writeCodexRoute(w, {}, [TECH], ART));
       clear(ws, ART);
       const question = {
         turnId: "current",
@@ -472,7 +469,7 @@ suite("monitor scheduled health", () => {
           roles: { tech: { conversations: { codex: TECH } } },
         });
         writeCodexRoute(ws);
-        ws.config.reports = { workerParents: ["tech"] };
+        ws.config.reports = { ...ws.config.reports, workerParents: ["tech"] };
         clear(ws);
         native.queues = { [TECH]: [], [ART]: [] };
         native.socket.on("thread/list", (params: Json) => ({
@@ -513,7 +510,7 @@ suite("monitor scheduled health", () => {
       roles: { tech: { conversations: { codex: TECH } } },
     });
     writeCodexRoute(ws, {}, targets);
-    ws.config.reports = { workerParents: ["tech"] };
+    ws.config.reports = { ...ws.config.reports, workerParents: ["tech"] };
     clear(ws);
     native.queues = {};
     let page = 0;

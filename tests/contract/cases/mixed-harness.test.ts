@@ -15,7 +15,7 @@ const ADA = "ada-the-navigator";
 function configure(ws: Workspace): void {
   const roles: Record<string, RoleRecord> = {
     "art-kit": { conversations: { codex: uuid(90) } },
-    "game-dev": { conversations: { codex: uuid(91) }, duties: ["monitor"] },
+    "game-dev": { conversations: { codex: uuid(91) } },
   };
   const games: Record<string, unknown> = {};
   let index = 1;
@@ -111,7 +111,16 @@ suite("mixed harness CLI", () => {
     try {
       const before = readFileSync(join(ws.gameDev, "var", "registry.json"), "utf8");
       const result = await execute(
-        impl.bare(ws, ["harness", "ready", "--game", ARCHIE, "--game", CHIBI, "--role", "monitor"]),
+        impl.bare(ws, [
+          "harness",
+          "ready",
+          "--game",
+          ARCHIE,
+          "--game",
+          CHIBI,
+          "--role",
+          "game-dev",
+        ]),
       );
       expect(result.code, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({

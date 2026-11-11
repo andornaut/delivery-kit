@@ -4,7 +4,7 @@ import { afterEach, expect } from "vitest";
 
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { ART, CHILD, emptyQueue, GAMEPLAY, type NativeWorld, TECH } from "../lib/unblock-native.ts";
-import { confirmedAt, decide, Monitored, wake } from "../lib/unblock-runner.ts";
+import { confirmedAt, decide, Reviewed, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const TITLE = "Choose the local path";
@@ -20,7 +20,7 @@ interface Question {
 
 /** A rendered question on the owner's latest turn, optionally with an exact owner attestation. */
 function question(
-  m: Monitored,
+  m: Reviewed,
   owner: string,
   {
     item = "question-item",
@@ -57,7 +57,7 @@ function question(
 }
 
 /** The owner's exact reply after its question, attested in its resolution record. */
-function answered(m: Monitored, owner: string, item = "question-item"): void {
+function answered(m: Reviewed, owner: string, item = "question-item"): void {
   const thread = m.world.thread(owner);
   thread.status = { type: "idle" };
   thread.items = () => ({
@@ -91,7 +91,7 @@ function emptyQueues(world: NativeWorld): void {
   for (const thread of [TECH, ART, GAMEPLAY]) world.thread(thread).queue = emptyQueue;
 }
 
-/** Give the monitor a fresh queued entry so the next slot has a new inventory to remind. */
+/** Give the recipient a fresh queued entry so the next slot has a new inventory to remind. */
 function newWork(world: NativeWorld, id: string): void {
   world.thread(TECH).queue = () => ({ data: [{ id, clientUserMessageId: id, input: [] }] });
 }
@@ -106,15 +106,15 @@ function briefQuestions(text: string): Array<Record<string, unknown>> {
 
 suite("unblock briefs", () => {
   const workspace = workspaces();
-  const open: Monitored[] = [];
+  const open: Reviewed[] = [];
   afterEach(async () => {
-    for (const monitored of open.splice(0)) await monitored.close();
+    for (const reviewed of open.splice(0)) await reviewed.close();
   });
-  async function routed(ws: Workspace = workspace()): Promise<Monitored> {
-    const monitored = await Monitored.routed(ws);
-    emptyQueues(monitored.world);
-    open.push(monitored);
-    return monitored;
+  async function routed(ws: Workspace = workspace()): Promise<Reviewed> {
+    const reviewed = await Reviewed.routed(ws);
+    emptyQueues(reviewed.world);
+    open.push(reviewed);
+    return reviewed;
   }
 
   contract(
@@ -163,7 +163,7 @@ suite("unblock briefs", () => {
         expect(text).not.toContain(title);
         expect(text).not.toContain("Owner-attested confirmed pending questions");
       }
-      // Proven, but the monitor's own decision guard is pending.
+      // Proven, but the recipient's own decision guard is pending.
       question(m, ART, { title });
       decide(m.ws, TECH, { thread_id: TECH, state: "pending" });
       newWork(m.world, "work-3");
@@ -210,7 +210,7 @@ suite("unblock briefs", () => {
     expect(m.world.mutations()).toHaveLength(3);
   });
 
-  contract("the monitor's own confirmed question wait never fails health by itself", async () => {
+  contract("the recipient's own confirmed question wait never fails health by itself", async () => {
     const m = await routed();
     question(m, TECH);
     await m.start();
@@ -218,12 +218,12 @@ suite("unblock briefs", () => {
       const tick = await m.slot(wake(index));
       expect(tick.result).toMatchObject({
         status: "deferred",
-        monitor_status: "ok",
+        review_status: "ok",
         deferral_slots: 0,
       });
       expect(m.receipt(wake(index)).waiting_on_user).toBe(true);
     }
-    expect(m.ws.events().filter((event) => event.kind === "monitor-stuck")).toEqual([]);
+    expect(m.ws.events().filter((event) => event.kind === "review-stuck")).toEqual([]);
     expect(m.world.mutations()).toEqual([]);
   });
 

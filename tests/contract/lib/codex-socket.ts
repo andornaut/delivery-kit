@@ -95,7 +95,7 @@ export class CodexSocket {
     );
   }
 
-  /** Connections that delivered a bus event, which 1.0 sends natively to the monitor. */
+  /** Connections that delivered a bus event, which 1.0 sends natively to the recipient. */
   eventConnections(): number[] {
     return [
       ...new Set(this.calls.filter(CodexSocket.isEvent).map((call) => call.connection ?? -1)),

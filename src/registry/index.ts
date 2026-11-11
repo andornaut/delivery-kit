@@ -13,13 +13,7 @@ export {
 } from "../layout.ts";
 export { LockBusy, LockError } from "../lock.ts";
 export { ValidationError } from "../validate.ts";
-export {
-  AmbiguousRole,
-  resolveConversation,
-  resolveHarness,
-  resolveRole,
-  UnknownRole,
-} from "./resolve.ts";
+export { resolveConversation, resolveHarness, resolveRole, UnknownRole } from "./resolve.ts";
 export {
   type Activation,
   type Adoption,

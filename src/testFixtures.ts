@@ -42,7 +42,7 @@ export function projectConfig(project: string): Record<string, unknown> {
       ],
     },
     git: { github: "owner/game", main: "main", remote: "origin" },
-    reports: { project, recipient: "monitor", scheduledTicks: true, workerParents: ["monitor"] },
+    reports: { project, recipient: "game-dev", scheduledTicks: true, workerParents: ["game-dev"] },
     resources: { cpus: 4, loadLimit: 24 },
     schedule: { departures: ["00"], timezone: "America/Toronto" },
     schema: 1,
@@ -67,7 +67,6 @@ export function registryInput(): Record<string, unknown> {
       },
       "game-dev": {
         conversations: { claude: CLAUDE_GAME_DEV },
-        duties: ["monitor", "coordinator"],
         ownership: "active",
         worktree: ".",
       },

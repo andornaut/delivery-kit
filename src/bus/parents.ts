@@ -1,5 +1,5 @@
-// check-config's worker-parent rule: each reports.workerParents role must resolve, through the
-// each role's selected harness, to a canonical lowercase conversation UUID, and no two parents may
+// check-config's worker-parent rule: each reports.workerParents role must resolve, through its
+// selected harness, to a canonical lowercase conversation UUID, and no two parents may
 // share one. Problems name the delivery-kit.json field, read from the raw registry so a registry
 // that fails its own validation still points at the parent that caused it.
 import { CANONICAL_UUID } from "../adapters/shared/ids.ts";
@@ -13,16 +13,10 @@ function object(value: unknown): Json | undefined {
     : undefined;
 }
 
-/** The selected ID of a role or unambiguous duty, without accepting an invalid override. */
+/** The selected ID of a registered role, without accepting an invalid override. */
 function conversation(registry: Json, role: string): unknown {
   const roles = object(registry.roles) ?? {};
-  const holders = Object.hasOwn(roles, role)
-    ? [role]
-    : Object.keys(roles).filter((name) => {
-        const duties = object(roles[name])?.duties;
-        return Array.isArray(duties) && duties.includes(role);
-      });
-  const record = holders.length === 1 ? object(roles[holders[0]!]) : undefined;
+  const record = Object.hasOwn(roles, role) ? object(roles[role]) : undefined;
   if (record === undefined) {
     return undefined;
   }

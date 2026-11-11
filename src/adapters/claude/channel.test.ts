@@ -16,23 +16,23 @@ import {
   activeRoute,
   type ClaudeFixture,
   claudeFixture,
-  MONITOR,
+  RECIPIENT,
   SLOT,
   TECH,
-} from "../../monitor/fixtures.ts";
+} from "../../review/fixtures.ts";
 import { slotRequestId } from "../shared/ids.ts";
 import { deliverPending, handle, serve } from "./channel.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
-import { deliveredDir, spoolDir, spoolMonitorBrief } from "./spool.ts";
+import { deliveredDir, spoolDir, spoolReviewBrief } from "./spool.ts";
 
 function spool(fixture: ClaudeFixture, busDir = fixture.game.busDir, slot = SLOT): void {
   const route = activeRoute(fixture);
-  expect(spoolMonitorBrief(fixture.env, busDir, route, slot).status).toBe("sending");
+  expect(spoolReviewBrief(fixture.env, busDir, route, slot).status).toBe("sending");
 }
 
 function receipt(busDir: string, slot = SLOT): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(join(busDir, "unblock", `${MONITOR}-${slot}.json`), "utf8"),
+    readFileSync(join(busDir, "unblock", `${RECIPIENT}-${slot}.json`), "utf8"),
   ) as Record<string, unknown>;
 }
 
@@ -40,9 +40,9 @@ describe("protocol", () => {
   it("isolates the notification and initialize shapes", () => {
     expect(
       channelNotification({
-        kind: "monitor",
+        kind: "review",
         receipt: "unblock/x.json",
-        recipient: MONITOR,
+        recipient: RECIPIENT,
         requestId: "r",
         slot: 5,
         text: "t",
@@ -50,7 +50,7 @@ describe("protocol", () => {
     ).toEqual({
       jsonrpc: "2.0",
       method: "notifications/claude/channel",
-      params: { content: "t", meta: { kind: "monitor", request_id: "r", slot: "5" } },
+      params: { content: "t", meta: { kind: "review", request_id: "r", slot: "5" } },
     });
     expect(initializeResult({ protocolVersion: "2025-03-26" })).toMatchObject({
       capabilities: { experimental: { "claude/channel": {} } },
@@ -67,7 +67,7 @@ describe("protocol", () => {
     expect(handle(write, { id: 3, method: "tools/list" })).toBe(false);
     expect(handle(write, { method: "notifications/initialized" })).toBe(true);
     expect(lines.map((line) => JSON.parse(line) as Record<string, unknown>)).toMatchObject([
-      { id: 1, result: { serverInfo: { name: "delivery-kit-monitor" } } },
+      { id: 1, result: { serverInfo: { name: "delivery-kit-channel" } } },
       { id: 2, result: {} },
       { error: { code: -32601 }, id: 3 },
     ]);
@@ -80,18 +80,33 @@ describe("deliverPending", () => {
     spool(fixture);
     const lines: string[] = [];
     expect(
-      await deliverPending((line) => void lines.push(line), fixture.game.busDir, MONITOR),
+      await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT),
     ).toBe(true);
     expect(
-      await deliverPending((line) => void lines.push(line), fixture.game.busDir, MONITOR),
+      await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT),
     ).toBe(true);
     expect(lines).toHaveLength(1);
     const state = receipt(fixture.game.busDir);
     expect(state.status).toBe("accepted");
     expect(state.acceptedAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
-    const requestId = slotRequestId(MONITOR, SLOT);
+    const requestId = slotRequestId(RECIPIENT, SLOT);
     expect(readdirSync(deliveredDir(fixture.game.busDir))).toEqual([`${requestId}.json`]);
     expect(readdirSync(spoolDir(fixture.game.busDir))).toEqual([]);
+  });
+
+  it("delivers a review brief a 2.x runner spooled under its former kind", async () => {
+    const fixture = claudeFixture();
+    spool(fixture);
+    const requestId = slotRequestId(RECIPIENT, SLOT);
+    const path = join(spoolDir(fixture.game.busDir), `${requestId}.json`);
+    const entry = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    writeFileSync(path, JSON.stringify({ ...entry, kind: "monitor" }));
+    const lines: string[] = [];
+    await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT);
+    expect(lines.map((line) => JSON.parse(line) as Record<string, unknown>)).toMatchObject([
+      { params: { meta: { kind: "review", request_id: requestId } } },
+    ]);
+    expect(receipt(fixture.game.busDir).status).toBe("accepted");
   });
 
   it("emits nothing for another recipient", async () => {
@@ -109,18 +124,18 @@ describe("deliverPending", () => {
     const broken = (): void => {
       throw new Error("closed");
     };
-    expect(await deliverPending(broken, fixture.game.busDir, MONITOR)).toBe(false);
+    expect(await deliverPending(broken, fixture.game.busDir, RECIPIENT)).toBe(false);
     expect(receipt(fixture.game.busDir).status).toBe("ambiguous");
     const lines: string[] = [];
     expect(
-      await deliverPending((line) => void lines.push(line), fixture.game.busDir, MONITOR),
+      await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT),
     ).toBe(true);
     expect(lines).toEqual([]);
     spool(fixture, fixture.game.busDir, SLOT + 1);
     const directory = spoolDir(fixture.game.busDir);
     const pending = readdirSync(directory).find((name) => name.endsWith(".json")) as string;
     renameSync(join(directory, pending), join(directory, pending.replace(/\.json$/, ".claimed")));
-    await deliverPending((line) => void lines.push(line), fixture.game.busDir, MONITOR);
+    await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT);
     expect(lines).toEqual([]);
     expect(receipt(fixture.game.busDir, SLOT + 1).status).toBe("ambiguous");
   });
@@ -133,8 +148,8 @@ describe("serve", () => {
     const other = gameLayout(fixture.layout, "chibis-way-home");
     mkdirSync(join(other.busDir, "unblock", "decisions"), { recursive: true });
     writeFileSync(
-      join(other.busDir, "unblock", "decisions", `${MONITOR}.json`),
-      JSON.stringify({ state: "clear", thread_id: MONITOR }),
+      join(other.busDir, "unblock", "decisions", `${RECIPIENT}.json`),
+      JSON.stringify({ state: "clear", thread_id: RECIPIENT }),
     );
     spool(fixture, other.busDir);
     const input = new PassThrough();
@@ -144,7 +159,7 @@ describe("serve", () => {
       input,
       (line) => void lines.push(line),
       [fixture.game.busDir, other.busDir],
-      MONITOR,
+      RECIPIENT,
     );
     input.write(`${JSON.stringify({ id: 1, jsonrpc: "2.0", method: "initialize", params: {} })}\n`);
     await new Promise((resolve) => {

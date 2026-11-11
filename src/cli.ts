@@ -1,13 +1,14 @@
-// delivery-kit command dispatcher. Top-level verbs are game operations; the monitor, claude and
-// codex groups take a verb. Every command resolves game-dev from --root (in any position, once),
+// delivery-kit command dispatcher. Top-level verbs are game operations; the inbox, harness,
+// claude and codex groups take a verb. Every command resolves game-dev from --root (in any position, once),
 // DELIVERY_KIT_ROOT or the working directory, in that order.
 import { parseArgs } from "node:util";
 
+import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
 import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
 import { control } from "./commands/control.ts";
 import { harnessSelect } from "./commands/harness.ts";
-import { monitorAck, monitorSnapshot } from "./commands/monitor.ts";
+import { inboxAck, inboxSnapshot } from "./commands/inbox.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
@@ -31,8 +32,8 @@ export const COMMANDS = [
   "control",
   "check-config",
   "request",
-  "monitor snapshot",
-  "monitor ack",
+  "inbox snapshot",
+  "inbox ack",
   "claude ready",
   "codex ready",
   "harness ready",
@@ -41,7 +42,7 @@ export const COMMANDS = [
 ] as const satisfies readonly Command[];
 export type { Command };
 
-const GROUP_ORDER = ["game", "monitor", "harness"] as const;
+const GROUP_ORDER = ["game", "inbox", "harness"] as const;
 
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
@@ -65,19 +66,37 @@ export const USAGE = [
   "",
 ].join("\n");
 
-/** Removed 1.x command forms and the 2.0.0 form that replaces each. */
+/** Removed 1.x command forms and the current form that replaces each. */
 const REMOVED: Readonly<Record<string, string>> = {
   channel: "delivery-kit claude channel",
-  "monitor-ack": "delivery-kit monitor ack",
-  "monitor-snapshot": "delivery-kit monitor snapshot",
+  "monitor-ack": "delivery-kit inbox ack",
+  "monitor-snapshot": "delivery-kit inbox snapshot",
   "resource-report": "delivery-kit status --game ID --resources",
+};
+
+/** Command forms removed in 3.0.0, with their replacements. */
+const REMOVED_3: Readonly<Record<string, string>> = {
+  "monitor ack": "delivery-kit inbox ack",
+  "monitor snapshot": "delivery-kit inbox snapshot",
 };
 
 /** The removed form a command line uses, with its replacement, or undefined. */
 function removedForm(args: readonly string[]): string | undefined {
-  const [first] = args;
+  const [first, second] = args;
   if (first === undefined) {
     return undefined;
+  }
+  if (first === "monitor") {
+    const form = `monitor ${second ?? ""}`.trim();
+    const replacement = REMOVED_3[form] ?? "delivery-kit inbox snapshot|ack";
+    return `"${form}" was removed in 3.0.0; use "${replacement}"`;
+  }
+  if (
+    first === "claude" &&
+    second === "channel" &&
+    args.some((arg) => arg === "--monitor" || arg.startsWith("--monitor="))
+  ) {
+    return '"claude channel --monitor" was removed in 3.0.0; use "delivery-kit claude channel --conversation UUID"';
   }
   if (first === "status" && args.includes("--harness")) {
     const harness = args[args.indexOf("--harness") + 1];
@@ -126,6 +145,19 @@ function checkGame(
   return problems;
 }
 
+/** var/route.json, when present, with its recipient resolved from the host game. */
+function checkRoute(layout: Layout): string[] {
+  try {
+    const route = readRoleRoute(layout);
+    if (route !== null) {
+      routeRecipient(layout, route);
+    }
+    return [];
+  } catch (error) {
+    return [`${layout.routeFile}: ${errorMessage(error)}`];
+  }
+}
+
 function checkConfig(io: Io, root: string, args: string[]): number {
   const { values } = parseArgs({ args, options: SPECS["check-config"].options, strict: true });
   let layout: Layout;
@@ -152,6 +184,7 @@ function checkConfig(io: Io, root: string, args: string[]): number {
     }
     problems.push(...checkGame(layout, registry, rawRegistry, game));
   }
+  problems.push(...checkRoute(layout));
   if (problems.length > 0) {
     io.err(problems.map((problem) => `delivery-kit: ${problem}\n`).join(""));
     return EXIT_INVALID;
@@ -174,8 +207,8 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   control,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
-  "monitor ack": monitorAck,
-  "monitor snapshot": monitorSnapshot,
+  "inbox ack": inboxAck,
+  "inbox snapshot": inboxSnapshot,
   request,
   run,
   status,

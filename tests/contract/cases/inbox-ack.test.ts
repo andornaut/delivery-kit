@@ -1,4 +1,4 @@
-// Snapshot-bound explicit acknowledgements through `monitor ack`.
+// Snapshot-bound explicit acknowledgements through `inbox ack`.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect } from "vitest";
@@ -17,10 +17,10 @@ import {
   TECH,
   writeCodexRoute,
   writeDecision,
-} from "../lib/monitor-native.ts";
+} from "../lib/review-native.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
-suite("monitor acknowledgements", () => {
+suite("inbox acknowledgements", () => {
   const workspace = workspaces();
   const natives: Native[] = [];
   afterEach(async () => {

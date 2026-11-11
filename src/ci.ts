@@ -1,4 +1,4 @@
-// Exact-commit CI monitoring, run as an in-runner task. A replacement runner
+// Exact-commit CI watch, run as an in-runner task. A replacement runner
 // resumes every watch whose ci/<sha>.status is still running, keeping the original deadline.
 // A watch that timed out or lost GitHub authentication is restarted by the next departure.
 import { appendFileSync, readdirSync, statSync } from "node:fs";
@@ -230,7 +230,7 @@ async function poll(
   if (options.signal?.aborted === true) {
     return { result: "busy", state };
   }
-  say(`CI monitor timed out; ${timeoutDetail(state)}`);
+  say(`CI watch timed out; ${timeoutDetail(state)}`);
   return { result: "timeout", state };
 }
 
@@ -257,7 +257,7 @@ export async function watchCi(
     context.events.emit(
       "ci_pending",
       sha,
-      `CI monitoring pending/running for pushed ${sha}; completion not confirmed; deployment tracked separately.`,
+      `CI watch pending/running for pushed ${sha}; completion not confirmed; deployment tracked separately.`,
     );
     const { result, state } = await poll(context, sha, options, deadlineFor(context, sha));
     if (result === "busy") {
@@ -275,7 +275,7 @@ export async function watchCi(
         "ci_failure",
         sha,
         [
-          `CI FAILED for pushed ${sha}: required runs failed: ${listed(state.failed)}; monitor`,
+          `CI FAILED for pushed ${sha}: required runs failed: ${listed(state.failed)}; watch`,
           "stopped on red; deployment state tracked separately; inspect checks and merge a fix on",
           "main. No automatic CI rerun.",
         ].join(" "),

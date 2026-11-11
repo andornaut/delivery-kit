@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { deliverScheduledWake } from "../monitor/wake.ts";
+import { deliverScheduledWake } from "../review/wake.ts";
 import { requestStore } from "./departure.ts";
 import { captureRequest } from "./requests.ts";
 import { RunnerRefused, runRunner } from "./runner.ts";
@@ -21,7 +21,7 @@ import {
 } from "./testGame.ts";
 import { zonedParts } from "./time.ts";
 
-vi.mock("../monitor/wake.ts", () => ({
+vi.mock("../review/wake.ts", () => ({
   deliverScheduledWake: vi.fn(() => Promise.resolve("delivered")),
 }));
 
@@ -73,7 +73,7 @@ describe("runRunner", () => {
     }
   });
 
-  it("records identity and pin, serves a request, wakes the monitor and stops on abort", async () => {
+  it("records identity and pin, serves a request, runs the review and stops on abort", async () => {
     const test = makeGame((config) => {
       (config.deploy as Record<string, unknown>).mode = "none";
     });

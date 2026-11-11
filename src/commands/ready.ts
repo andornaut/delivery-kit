@@ -4,9 +4,9 @@ import { parseArgs } from "node:util";
 import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type Layout, loadLayout } from "../layout.ts";
-import { effectiveReadiness, harnessReadiness, type ReadinessScope } from "../monitor/readiness.ts";
 import type { Harness, Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
+import { effectiveReadiness, harnessReadiness, type ReadinessScope } from "../review/readiness.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 async function readiness(

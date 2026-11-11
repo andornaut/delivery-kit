@@ -1,5 +1,5 @@
 // Bounded read-only child failure evidence for explicitly scoped parents, and
-// the monitor's worker_health wrapper. This module performs no delivery,
+// the review's worker_health wrapper. This module performs no delivery,
 // persistence, scheduling or lifecycle mutation.
 import { performance } from "node:perf_hooks";
 
@@ -564,7 +564,7 @@ function collectorUnavailable(reasonCode: string): Record<string, unknown> {
 }
 
 /**
- * The monitor's worker health for parents the caller has already scoped, under a deadline the
+ * The review's worker health for parents the caller has already scoped, under a deadline the
  * caller has already reserved. A collector failure marks every parent unavailable, never omitted.
  */
 export async function workerHealth(

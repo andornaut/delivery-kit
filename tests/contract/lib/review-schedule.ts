@@ -1,6 +1,6 @@
-// Step the resident runner's monitor observer one wall-clock minute at a time.
+// Step the resident runner's review observer one wall-clock minute at a time.
 // The virtual clock is effectively frozen (speed 0.001) and every minute is a wake minute,
-// so each advance of 60 seconds dispatches exactly one scheduled monitor slot. Real-time mode
+// so each advance of 60 seconds dispatches exactly one scheduled review slot. Real-time mode
 // runs the clock at wall speed for collectors that compare slots with the real time.
 import { type Resident, startRunner } from "./adapter.ts";
 import { at, sleep } from "./time.ts";
@@ -12,7 +12,7 @@ export interface SlotOutput {
   output: Record<string, unknown> | undefined;
 }
 
-export class MonitorSchedule {
+export class ReviewSchedule {
   private runner: Resident | undefined;
   private lines: string[] = [];
   private now: number;
@@ -48,7 +48,7 @@ export class MonitorSchedule {
     await sleep(800);
   }
 
-  /** Advance one minute and wait for that slot's scheduled monitor result. */
+  /** Advance one minute and wait for that slot's scheduled review result. */
   async slot(timeoutMs = 30_000): Promise<SlotOutput> {
     let slot: number;
     if (this.realtime) {
@@ -61,7 +61,7 @@ export class MonitorSchedule {
       this.ws.advanceClock(60);
       slot = this.now - (this.now % 60);
     }
-    const prefix = `bus: scheduled monitor ${slot}`;
+    const prefix = `bus: scheduled review ${slot}`;
     let line: string | undefined;
     await this.runner!.until(
       () => (line = this.lines.find((row) => row.startsWith(prefix))) !== undefined,

@@ -1,5 +1,5 @@
-// Slot briefs and bus events for a Claude monitor go through a spool that the monitor's own
-// channel consumer drains. The receipt is always written at `sending`
+// Review briefs and bus events for a Claude recipient go through a spool that the recipient's
+// own channel consumer drains. The receipt is always written at `sending`
 // before its spool entry, so an interruption between the two is never resent.
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -11,20 +11,32 @@ import { eventRequestId, slotRequestId } from "../shared/ids.ts";
 import { pyJsonDumps } from "../shared/pyjson.ts";
 import { UNBLOCK_INSTRUCTIONS } from "../shared/review.ts";
 import type { ActiveScope } from "../shared/route.ts";
-import { type AgentEntry, listingOrNull, monitorReady, roleDiagnostics } from "./agents.ts";
+import { type AgentEntry, listingOrNull, recipientReady, roleDiagnostics } from "./agents.ts";
 
 const UNBLOCK = "unblock";
 export const SPOOL = "claude-spool";
 export const DELIVERED = "claude-delivered";
 export const LOCK_FILE = "unblock.lock";
 
-export type EntryKind = "event" | "monitor";
+export type EntryKind = "event" | "review";
 
 /** The receipt field that carries the request ID, per entry kind. */
 export const RECEIPT_KEYS: Readonly<Record<EntryKind, string>> = {
   event: "clientUserMessageId",
-  monitor: "requestId",
+  review: "requestId",
 };
+
+// CLEANUP (added 2026-11-11): 2.x spooled review briefs under this kind. Remove once no 2.x entry
+// remains in any game's unblock/claude-spool/.
+const LEGACY_REVIEW_KIND = "monitor";
+
+/** A spool entry's kind, reading a 2.x review brief as `review`; undefined for anything else. */
+export function entryKind(value: unknown): EntryKind | undefined {
+  if (value === "event" || value === "review") {
+    return value;
+  }
+  return value === LEGACY_REVIEW_KIND ? "review" : undefined;
+}
 
 export interface SpoolEntry {
   readonly kind: EntryKind;
@@ -82,7 +94,7 @@ export function pendingEntries(busDir: string, kind: EntryKind, recipient: strin
     .map((name) => join(spool, name))
     .filter((path) => {
       const entry = readEntry(path);
-      return entry?.kind === kind && entry.recipient === recipient;
+      return entryKind(entry?.kind) === kind && entry?.recipient === recipient;
     });
 }
 
@@ -124,7 +136,7 @@ export function brief(
 ): string {
   const targets = route.targets.map((target) => `${target.name}: ${target.sessionId}`).join("\n");
   return (
-    `Scheduled monitoring review, slot ${slot}, for these active route targets. ` +
+    `Scheduled review, slot ${slot}, for these active route targets. ` +
     `${UNBLOCK_INSTRUCTIONS} Channel acceptance is delivery only; record handling separately.` +
     `\n${targets}\nCapability diagnostics (unavailable is never clearance): ` +
     `${pyJsonDumps(diagnostics)}`
@@ -135,7 +147,7 @@ export interface SlotOutcome {
   readonly status: string;
   readonly previousStatus?: string;
   readonly reason?: string | null;
-  readonly monitor_session_status?: string;
+  readonly recipient_session_status?: string;
   readonly requestId?: string;
   readonly diagnostics?: readonly Diagnostic[];
 }
@@ -184,18 +196,18 @@ function unavailableDiagnostics(
   ];
 }
 
-/** One brief per monitor slot. */
-export function spoolMonitorBrief(
+/** One brief per review slot. */
+export function spoolReviewBrief(
   env: NodeJS.ProcessEnv,
   busDir: string,
   route: ActiveScope,
   slot: number,
   parents: readonly string[] = [],
 ): SlotOutcome {
-  const { coordinator } = route;
+  const { recipient } = route;
   const unblock = unblockDir(busDir);
-  const path = join(unblock, `${coordinator}-${slot}.json`);
-  const requestId = slotRequestId(coordinator, slot);
+  const path = join(unblock, `${recipient}-${slot}.json`);
+  const requestId = slotRequestId(recipient, slot);
   const lock = tryUnblockLock(busDir);
   if (lock === null) {
     return { status: "busy" };
@@ -218,45 +230,45 @@ export function spoolMonitorBrief(
         status: "deduplicated",
       };
     }
-    const state: Json = { coordinator, harness: "claude", requestId, slot };
+    const state: Json = { harness: "claude", recipient, requestId, slot };
     const defer = (reason: string): SlotOutcome => {
       Object.assign(state, { reason, status: "deferred" });
       persist(path, state);
       return state as unknown as SlotOutcome;
     };
-    const members = new Set([coordinator, ...route.peers]);
+    const members = new Set([recipient, ...route.peers]);
     if (parents.some((parent) => !members.has(parent))) {
-      return defer("worker parents require membership in the active monitor route");
+      return defer("worker parents require membership in the active review route");
     }
     if (route.harness !== undefined && route.harness !== "claude") {
-      return defer("monitor transport requires the Claude harness");
+      return defer("recipient transport requires the Claude harness");
     }
     if (
       route.harnesses !== undefined &&
-      (route.harnesses[coordinator] !== "claude" ||
+      (route.harnesses[recipient] !== "claude" ||
         [...members].some(
           (member) => !["claude", "codex"].includes(route.harnesses?.[member] ?? ""),
         ))
     ) {
-      return defer("monitor route endpoint harness missing or invalid");
+      return defer("review route endpoint harness missing or invalid");
     }
-    if (!decisionClear(unblock, coordinator)) {
+    if (!decisionClear(unblock, recipient)) {
       return defer("recipient-bound user-decision clearance missing, invalid or pending");
     }
     // One unclaimed brief bounds the spool while the consumer is not running.
-    if (pendingEntries(busDir, "monitor", coordinator).length > 0) {
-      return defer("channel consumer has not claimed an earlier monitor brief");
+    if (pendingEntries(busDir, "review", recipient).length > 0) {
+      return defer("channel consumer has not claimed an earlier review brief");
     }
     const entries = listingOrNull(env);
-    const availability = monitorReady(env, coordinator, entries);
+    const availability = recipientReady(env, recipient, entries);
     if (availability.status === null) {
       return defer(availability.reason);
     }
     const diagnostics = unavailableDiagnostics(entries, route, parents);
     const entry: SpoolEntry = {
-      kind: "monitor",
+      kind: "review",
       receipt: `${UNBLOCK}/${basename(path)}`,
-      recipient: coordinator,
+      recipient,
       requestId,
       slot,
       text: brief(slot, route, diagnostics),
@@ -264,7 +276,7 @@ export function spoolMonitorBrief(
     Object.assign(state, {
       diagnostics,
       method: "claude-channel",
-      monitor_session_status: availability.status,
+      recipient_session_status: availability.status,
       spool: join(spoolDir(busDir), `${requestId}.json`),
       status: "sending",
     });
@@ -333,7 +345,7 @@ export function spoolEvent(
         return false;
       }
     }
-    if (!decisionClear(unblock, recipient) || monitorReady(env, recipient).status === null) {
+    if (!decisionClear(unblock, recipient) || recipientReady(env, recipient).status === null) {
       state.status = "deferred";
       persist(receiptPath, state);
       return false;

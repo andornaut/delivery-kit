@@ -17,7 +17,7 @@ import {
   startFakeControl,
 } from "./testControlSocket.ts";
 
-const MONITOR = "00000000-0000-4000-8000-000000000003";
+const RECIPIENT = "00000000-0000-4000-8000-000000000003";
 const TURN = "turn-1";
 
 const controls: FakeControl[] = [];
@@ -89,14 +89,14 @@ async function setup(scene: Scene, decision: Record<string, unknown> | null = {}
   mkdirSync(join(unblock, "decisions"), { recursive: true });
   if (decision !== null) {
     writeFileSync(
-      join(unblock, "decisions", `${MONITOR}.json`),
-      JSON.stringify({ resolutions: [], state: "clear", thread_id: MONITOR, ...decision }),
+      join(unblock, "decisions", `${RECIPIENT}.json`),
+      JSON.stringify({ resolutions: [], state: "clear", thread_id: RECIPIENT, ...decision }),
     );
   }
   const socketDir = mkdtempSync(join(tmpdir(), "codex-"));
   const control = await startFakeControl(socketDir, sceneHandler(scene));
   controls.push(control);
-  return { control, layout, receipt: join(unblock, `${MONITOR}-1793757000.json`), unblock };
+  return { control, layout, receipt: join(unblock, `${RECIPIENT}-1793757000.json`), unblock };
 }
 
 function adapter(context: Setup) {
@@ -107,12 +107,12 @@ function receiptOf(context: Setup): Record<string, unknown> {
   return JSON.parse(readFileSync(context.receipt, "utf8")) as Record<string, unknown>;
 }
 
-const REQUEST = uuid5(NAMESPACE_URL, `hourly-unblock:${MONITOR}:1793757000`);
+const REQUEST = uuid5(NAMESPACE_URL, `hourly-unblock:${RECIPIENT}:1793757000`);
 
 describe("Python-compatible identifiers and JSON", () => {
   it("derives uuid5 request IDs exactly as uuid.uuid5(NAMESPACE_URL, ...)", () => {
     expect(REQUEST).toBe("1b46490f-6992-563e-aa4e-5de4399e6d56");
-    expect(uuid5(NAMESPACE_URL, `bus-event:${"a".repeat(64)}:${MONITOR}`)).toBe(
+    expect(uuid5(NAMESPACE_URL, `bus-event:${"a".repeat(64)}:${RECIPIENT}`)).toBe(
       "749c82df-1ea3-5f1b-b902-03c8e9ebd25d",
     );
   });
@@ -133,7 +133,7 @@ describe("connectControl", () => {
     const context = await setup({});
     const client = await connectControl(performance.now() + 5000, context.control.path);
     try {
-      const listed = await client.call("thread/queue/list", { threadId: MONITOR });
+      const listed = await client.call("thread/queue/list", { threadId: RECIPIENT });
       expect(listed).toEqual({ data: [] });
     } finally {
       client.close();
@@ -163,18 +163,18 @@ describe("connectControl", () => {
 describe("codexAdapter.deliver", () => {
   it("starts a turn on an idle thread and records the accepted receipt", async () => {
     const context = await setup({});
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result).toEqual({ requestId: REQUEST, status: "accepted" });
     const start = context.control.calls.find((call) => call.method === "turn/start");
     expect(start?.params).toEqual({
       clientUserMessageId: REQUEST,
       input: [{ text: "review", type: "text" }],
-      threadId: MONITOR,
+      threadId: RECIPIENT,
     });
     expect(receiptOf(context)).toEqual({
       attempts: [{ method: "turn/start", status: "accepted", turnId: "turn-2" }],
       clientUserMessageId: REQUEST,
-      recipient: MONITOR,
+      recipient: RECIPIENT,
       status: "accepted",
     });
     expect(readFileSync(context.receipt, "utf8")).toMatch(/^\{"attempts": \[\{"method": /);
@@ -185,7 +185,7 @@ describe("codexAdapter.deliver", () => {
       status: { activeFlags: [], type: "active" },
       turn: { id: TURN, status: "inProgress" },
     });
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("accepted");
     const steer = context.control.calls.find((call) => call.method === "turn/steer");
     expect(steer?.params.expectedTurnId).toBe(TURN);
@@ -205,7 +205,7 @@ describe("codexAdapter.deliver", () => {
       status: { activeFlags: [], type: "active" },
       turn: { id: TURN, status: "inProgress" },
     });
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("accepted");
     expect(receiptOf(context).attempts).toEqual([
       { expectedTurnId: TURN, method: "turn/steer", status: "rejected" },
@@ -217,7 +217,7 @@ describe("codexAdapter.deliver", () => {
     const context = await setup({
       overrides: { "turn/start": () => ({ error: { code: -32000, message: "refused" } }) },
     });
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("rejected");
     expect(context.control.methods().filter((method) => method === "turn/start")).toHaveLength(1);
     expect(receiptOf(context).status).toBe("rejected");
@@ -225,7 +225,7 @@ describe("codexAdapter.deliver", () => {
 
   it("defers without a recipient-bound clearance and opens no connection", async () => {
     const context = await setup({}, null);
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("deferred");
     expect(context.control.calls).toEqual([]);
     expect(context.control.methods().some((method) => method.startsWith("turn/"))).toBe(false);
@@ -236,13 +236,13 @@ describe("codexAdapter.deliver", () => {
     const context = await setup({
       status: { activeFlags: ["waitingOnUserInput"], type: "active" },
     });
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
-    expect(result).toMatchObject({ reason: "coordinator waiting on a question or approval" });
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
+    expect(result).toMatchObject({ reason: "recipient waiting on a question or approval" });
   });
 
   it("defers on an unanswered native question in the latest turn", async () => {
     const context = await setup({ items: [{ id: "q1", questions: [{}], type: "agentMessage" }] });
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result).toMatchObject({
       reason: `native question pending: question_turn_id=${TURN} question_item_id=q1`,
       status: "deferred",
@@ -268,15 +268,15 @@ describe("codexAdapter.deliver", () => {
         ],
       },
     );
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("accepted");
   });
 
   it("records an interrupted send as ambiguous and never resends it", async () => {
     const context = await setup({ overrides: { "turn/start": () => ({ drop: true }) } });
-    const first = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const first = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(first.status).toBe("ambiguous");
-    const second = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const second = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(second.status).toBe("ambiguous");
     expect(context.control.methods().filter((method) => method === "turn/start")).toHaveLength(1);
   });
@@ -288,11 +288,11 @@ describe("codexAdapter.deliver", () => {
       JSON.stringify({
         attempts: [{ method: "turn/start", status: "sending" }],
         clientUserMessageId: REQUEST,
-        recipient: MONITOR,
+        recipient: RECIPIENT,
         status: "sending",
       }),
     );
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("ambiguous");
     expect(receiptOf(context).status).toBe("ambiguous");
     expect(context.control.methods().some((method) => method.startsWith("turn/"))).toBe(false);
@@ -300,15 +300,15 @@ describe("codexAdapter.deliver", () => {
 
   it("treats an acceptance without a turn ID as ambiguous", async () => {
     const context = await setup({ overrides: { "turn/start": () => ({ result: {} }) } });
-    const result = await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("ambiguous");
   });
 
   it("refuses a receipt bound to another request", async () => {
     const context = await setup({});
-    await adapter(context).deliver(context.receipt, REQUEST, MONITOR, "review");
+    await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     const other = uuid5(NAMESPACE_URL, "other");
-    const result = await adapter(context).deliver(context.receipt, other, MONITOR, "review");
+    const result = await adapter(context).deliver(context.receipt, other, RECIPIENT, "review");
     expect(result.status).toBe("blocked");
   });
 
@@ -316,18 +316,18 @@ describe("codexAdapter.deliver", () => {
     const context = await setup({});
     const codex = adapter(context);
     const first = { event_id: "e1" };
-    const result = await codex.deliver(context.receipt, REQUEST, MONITOR, "review", first);
+    const result = await codex.deliver(context.receipt, REQUEST, RECIPIENT, "review", first);
     expect(result.status).toBe("accepted");
     expect(receiptOf(context).event_id).toBe("e1");
     const seed = { event_id: "e2" };
-    const rebound = await codex.deliver(context.receipt, REQUEST, MONITOR, "review", seed);
+    const rebound = await codex.deliver(context.receipt, REQUEST, RECIPIENT, "review", seed);
     expect(rebound.status).toBe("blocked");
   });
 
   it("defers without a control socket and writes no receipt", async () => {
     const context = await setup({});
     const missing = codexAdapter(context.layout, { controlSocket: join(tmpdir(), "absent.sock") });
-    const result = await missing.deliver(context.receipt, REQUEST, MONITOR, "review");
+    const result = await missing.deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("deferred");
     expect(existsSync(context.receipt)).toBe(false);
   });
@@ -335,7 +335,7 @@ describe("codexAdapter.deliver", () => {
   it("refuses a receipt outside the bus layout", async () => {
     const context = await setup({});
     const outside = join(mkdtempSync(join(tmpdir(), "outside-")), "unblock", "r.json");
-    const result = await adapter(context).deliver(outside, REQUEST, MONITOR, "review");
+    const result = await adapter(context).deliver(outside, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("blocked");
   });
 });
@@ -352,7 +352,7 @@ describe("codexAdapter.status", () => {
       // eslint-disable-next-line no-await-in-loop
       const context = await setup({ status });
       // eslint-disable-next-line no-await-in-loop
-      await expect(adapter(context).status(MONITOR), expected).resolves.toMatchObject({
+      await expect(adapter(context).status(RECIPIENT), expected).resolves.toMatchObject({
         status: expected,
       });
     }
@@ -368,7 +368,7 @@ describe("codexAdapter.inventory and ack", () => {
 
   it("lists queued submissions with their payload signature form", async () => {
     const context = await setup({ queue: [entry] });
-    const inventory = await adapter(context).inventory(MONITOR);
+    const inventory = await adapter(context).inventory(RECIPIENT);
     expect(inventory).toEqual({
       entries: [{ clientUserMessageId: "cm-1", payload: "caf\u00e9", queueId: "q-1" }],
       status: "available",
@@ -387,13 +387,13 @@ describe("codexAdapter.inventory and ack", () => {
         },
       },
     });
-    const listed = await adapter(paged).inventory(MONITOR);
+    const listed = await adapter(paged).inventory(RECIPIENT);
     expect(listed.entries.map((item) => item.queueId)).toEqual(["q-1", "q-2"]);
     expect(pages).toBe(2);
     const truncated = await setup({
       overrides: { "thread/queue/list": () => ({ result: { data: [], truncated: true } }) },
     });
-    const incomplete = await adapter(truncated).inventory(MONITOR);
+    const incomplete = await adapter(truncated).inventory(RECIPIENT);
     expect(incomplete.status).toBe("unavailable");
   });
 
@@ -401,15 +401,15 @@ describe("codexAdapter.inventory and ack", () => {
     const context = await setup({ queue: [entry] });
     const payload = "caf\u00e9";
     const codex = adapter(context);
-    const handled = await codex.ack(MONITOR, "q-1", payload, "handled");
+    const handled = await codex.ack(RECIPIENT, "q-1", payload, "handled");
     expect(handled).toMatchObject({ reason: "deleted", status: "accepted" });
-    const changed = await codex.ack(MONITOR, "q-1", "[]", "handled");
+    const changed = await codex.ack(RECIPIENT, "q-1", "[]", "handled");
     expect(changed).toMatchObject({ reason: "changed_payload", status: "rejected" });
-    const absent = await codex.ack(MONITOR, "q-9", payload, "handled");
+    const absent = await codex.ack(RECIPIENT, "q-9", payload, "handled");
     expect(absent).toMatchObject({ reason: "confirmed_absent", status: "unchanged" });
-    const retained = await codex.ack(MONITOR, "q-1", payload, "retained", "waiting on Tech");
+    const retained = await codex.ack(RECIPIENT, "q-1", payload, "retained", "waiting on Tech");
     expect(retained).toMatchObject({ reason: "retained", status: "unchanged" });
-    const unexplained = await codex.ack(MONITOR, "q-1", payload, "retained");
+    const unexplained = await codex.ack(RECIPIENT, "q-1", payload, "retained");
     expect(unexplained.status).toBe("rejected");
     const deletes = context.control.methods().filter((method) => method === "thread/queue/delete");
     expect(deletes).toHaveLength(1);
@@ -426,7 +426,7 @@ describe("historyRefs", () => {
     });
     const client = await connectControl(performance.now() + 5000, context.control.path);
     try {
-      const refs = await historyRefs(client, MONITOR);
+      const refs = await historyRefs(client, RECIPIENT);
       expect(refs).toMatchObject({
         complete: true,
         question_refs: [{ item_id: "q1", kind: "rendered_prompt", turn_id: TURN }],
@@ -447,16 +447,16 @@ describe("collectors", () => {
     const missing = codexAdapter(context.layout, { controlSocket: join(tmpdir(), "absent.sock") });
     const collected = await missing.collectors.collect({
       historyCursor: null,
-      parents: [MONITOR],
-      recipients: [MONITOR],
+      parents: [RECIPIENT],
+      recipients: [RECIPIENT],
       slot: null,
       unblockDir: context.unblock,
     });
     expect(collected.history).toEqual({
-      [MONITOR]: { reason_code: "collector_unavailable", status: "unavailable" },
+      [RECIPIENT]: { reason_code: "collector_unavailable", status: "unavailable" },
     });
-    expect(collected.question_state[MONITOR]).toMatchObject({ status: "unavailable" });
-    expect(collected.worker_health[MONITOR]).toMatchObject({ status: "unavailable" });
+    expect(collected.question_state[RECIPIENT]).toMatchObject({ status: "unavailable" });
+    expect(collected.worker_health[RECIPIENT]).toMatchObject({ status: "unavailable" });
   });
 
   it("collects history over the socket within the shared call budget", async () => {
@@ -464,11 +464,11 @@ describe("collectors", () => {
     const collected = await adapter(context).collectors.collect({
       historyCursor: null,
       parents: [],
-      recipients: [MONITOR],
+      recipients: [RECIPIENT],
       slot: null,
       unblockDir: context.unblock,
     });
-    expect(collected.history[MONITOR]).toMatchObject({
+    expect(collected.history[RECIPIENT]).toMatchObject({
       status: "complete",
       user_reply_refs: [{ item_id: "u1", turn_id: TURN }],
     });

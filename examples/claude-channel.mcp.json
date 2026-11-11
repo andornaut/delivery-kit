@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "delivery-kit-monitor": {
+    "delivery-kit-channel": {
       "command": "npx",
       "args": [
         "--no-install",

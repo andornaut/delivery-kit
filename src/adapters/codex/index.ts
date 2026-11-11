@@ -31,8 +31,7 @@ export const SOCKET_MISSING =
 const METADATA_UNAVAILABLE = "native metadata unavailable";
 /** Inventory reasons for a control socket that is missing or refused the connection. */
 export const SOCKET_MISSING_OUTPUT = "configure an available absolute CODEX_CONTROL_SOCKET";
-export const TRANSPORT_UNAVAILABLE =
-  "inspect local monitor state and retry explicit reconciliation";
+export const TRANSPORT_UNAVAILABLE = "inspect local inbox state and retry explicit reconciliation";
 const INVENTORY_UNAVAILABLE =
   "queue inventory unavailable or incomplete; retry snapshot before reconciliation";
 
@@ -93,7 +92,7 @@ function unblockDirFor(layout: Layout, receiptPath: string): string | null {
 }
 
 /**
- * The receipt status `monitor ack` maps back to its operation state: accepted is deleted,
+ * The receipt status `inbox ack` maps back to its operation state: accepted is deleted,
  * unchanged is confirmed absent (or retained), rejected is a changed payload, anything else
  * ambiguous. The exact native outcome is the receipt reason.
  */
@@ -256,11 +255,11 @@ export function availability(read: unknown): Availability {
   }
   const status = isRecord(thread.status) ? thread.status : {};
   if (thread.canAcceptDirectInput !== true) {
-    return { reason: "coordinator input availability unknown", status: "unavailable" };
+    return { reason: "recipient input availability unknown", status: "unavailable" };
   }
   const flags = status.activeFlags;
   if (status.type === "active" && !(Array.isArray(flags) && flags.length === 0)) {
-    return { reason: "coordinator waiting on a question or approval", status: "blocked" };
+    return { reason: "recipient waiting on a question or approval", status: "blocked" };
   }
   if (status.type === "active") {
     return { status: "busy" };
@@ -268,5 +267,5 @@ export function availability(read: unknown): Availability {
   if (status.type === "idle") {
     return { status: "available" };
   }
-  return { reason: "coordinator state ambiguous or interrupted", status: "unavailable" };
+  return { reason: "recipient state ambiguous or interrupted", status: "unavailable" };
 }

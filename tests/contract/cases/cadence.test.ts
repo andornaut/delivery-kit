@@ -1,4 +1,4 @@
-// Wall-clock monitor cadence on a Codex route, independent of release ticks. The native boundary is
+// Wall-clock review cadence on a Codex route, independent of release ticks. The native boundary is
 // the fake control socket: one connection per dispatched slot, queue reads name the route members,
 // thread/list names parents.
 
@@ -6,11 +6,11 @@ import { afterAll, expect } from "vitest";
 
 import { cli, execute, impl, startRunner } from "../lib/adapter.ts";
 import {
-  clearMonitor,
+  clearRecipient,
   codexGame,
   codexRoles,
   HELD,
-  MONITOR,
+  RECIPIENT,
   role,
   TARGET,
   TECH,
@@ -29,11 +29,11 @@ import { otherGame, routeRole } from "../lib/routes.ts";
 import { at } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
-function monitorLines(text: string): string[] {
-  return text.split("\n").filter((line) => /monitor|unblock/.test(line));
+function reviewLines(text: string): string[] {
+  return text.split("\n").filter((line) => /review|unblock/.test(line));
 }
 
-suite("monitor cadence", () => {
+suite("review cadence", () => {
   const workspace = workspaces();
   const sockets: CodexSocket[] = [];
   const game = async (ws: Workspace) => {
@@ -52,16 +52,16 @@ suite("monitor cadence", () => {
       const socket = await game(ws);
       // Started after :20 has begun: that slot is not replayed.
       const late = await tick(ws, at(20), { lead: -30, settle: 120 });
-      expect(late.monitor).toEqual([]);
+      expect(late.review).toEqual([]);
       expect(socket.connections).toHaveLength(0);
       const slots: number[] = [];
       for (const slot of [at(20), at(50)]) {
         const result = await tick(ws, slot);
-        slots.push(...result.monitor.map((row) => row.slot));
+        slots.push(...result.review.map((row) => row.slot));
       }
       expect(slots).toEqual([at(20), at(50)]);
       expect(socket.connections).toHaveLength(2);
-      expect(threads(socket, "thread/queue/list")).toEqual([MONITOR, TARGET]);
+      expect(threads(socket, "thread/queue/list")).toEqual([RECIPIENT, TARGET]);
       expect(socket.callsOf("thread/queue/list")).toHaveLength(4);
       expect(socket.callsOf("thread/list")).toEqual([]);
       expect(socket.calls.some((call) => JSON.stringify(call.params).includes(TECH))).toBe(false);
@@ -98,22 +98,22 @@ suite("monitor cadence", () => {
         { length: 8 },
         (_, i) => `00000000-0000-0000-0000-${String(10 + i).padStart(12, "0")}`,
       );
-      const parents = [MONITOR, TARGET, ...extra];
+      const parents = [RECIPIENT, TARGET, ...extra];
       codexRoles(ws, extra);
       ws.writeRoute(
         cadenceRoute(ws, { targets: [TARGET, ...extra].map((id) => routeRole(ws, "codex", id)) }),
       );
       ws.config.reports = {
         project: "Fixture",
-        recipient: "tech",
-        workerParents: ["monitor", "target", ...extra.map(role)],
+        recipient: "dev-manager",
+        workerParents: ["dev-manager", "target", ...extra.map(role)],
       };
       const result = await tick(ws, at(20));
-      expect(result.monitor.map((row) => row.slot)).toEqual([at(20)]);
-      expect(result.stderr).not.toContain("monitor deferred");
+      expect(result.review.map((row) => row.slot)).toEqual([at(20)]);
+      expect(result.stderr).not.toContain("review deferred");
       expect(result.stderr).not.toContain(WORKER_PARENTS_ROUTE_MESSAGE);
       expect(threads(socket, "thread/list", "parentThreadId")).toEqual(parents);
-      expect(threads(socket, "thread/queue/list")[0]).toBe(MONITOR);
+      expect(threads(socket, "thread/queue/list")[0]).toBe(RECIPIENT);
       expect(threads(socket, "thread/queue/list")).not.toContain(TECH);
       expect(threads(socket, "thread/queue/list")).not.toContain(HELD);
     },
@@ -124,12 +124,12 @@ suite("monitor cadence", () => {
     const socket = await game(ws);
     ws.config.reports = {
       project: "Fixture",
-      recipient: "tech",
-      workerParents: ["monitor", "target"],
+      recipient: "dev-manager",
+      workerParents: ["dev-manager", "target"],
     };
     ws.writeRoute(cadenceRoute(ws, { host: otherGame(ws) }));
     const result = await tick(ws, at(20));
-    expect(monitorLines(result.stdout + result.stderr)).toEqual([]);
+    expect(reviewLines(result.stdout + result.stderr)).toEqual([]);
     expect(socket.calls).toEqual([]);
   });
 
@@ -143,8 +143,8 @@ suite("monitor cadence", () => {
       for (const parent of ["held", "tech", role(unrelated)]) {
         ws.config.reports = {
           project: "Fixture",
-          recipient: "tech",
-          workerParents: ["monitor", parent],
+          recipient: "dev-manager",
+          workerParents: ["dev-manager", parent],
         };
         const result = await tick(ws, at(20), {
           done: ({ stderr }) => stderr.includes(WORKER_PARENTS_ROUTE_MESSAGE),
@@ -161,16 +161,20 @@ suite("monitor cadence", () => {
     async () => {
       const ws = workspace();
       const socket = await game(ws);
-      ws.config.reports = { project: "Fixture", recipient: "tech", workerParents: ["monitor"] };
+      ws.config.reports = {
+        project: "Fixture",
+        recipient: "dev-manager",
+        workerParents: ["dev-manager"],
+      };
       for (const content of [
         "",
         "not json",
-        JSON.stringify(cadenceRoute(ws, { schema: 2 })),
+        JSON.stringify(cadenceRoute(ws, { schema: 1 })),
         JSON.stringify(cadenceRoute(ws, { state: "held" })),
       ]) {
         ws.writeRoute(content);
         const result = await tick(ws, at(20));
-        expect(result.monitor, content).toEqual([]);
+        expect(result.review, content).toEqual([]);
         expect(socket.calls, content).toEqual([]);
       }
     },
@@ -178,21 +182,21 @@ suite("monitor cadence", () => {
   );
 
   contract(
-    "route guards and disabled monitoring do not depend on the reporting flag",
+    "route guards and disabled reviews do not depend on the reporting flag",
     async () => {
       const ws = workspace();
       const socket = await game(ws);
-      ws.config.reports = { project: "Fixture", recipient: "tech", scheduledTicks: false };
+      ws.config.reports = { project: "Fixture", recipient: "dev-manager", scheduledTicks: false };
       await tick(ws, at(20));
       expect(socket.connections).toHaveLength(1);
       const updates: Array<Record<string, unknown>> = [
         { host: otherGame(ws) },
         { state: "held" },
-        { monitor: "no-such-role" },
-        { monitor: undefined },
+        { schema: 1 },
+        { recipient: "no-such-role" },
         { harness: "codex" },
         { targets: [] },
-        { targets: [MONITOR, TARGET].map((id) => routeRole(ws, "codex", id)) },
+        { targets: [RECIPIENT, TARGET].map((id) => routeRole(ws, "codex", id)) },
         { targets: ["no-such-role"] },
       ];
       for (const update of updates) {
@@ -205,12 +209,12 @@ suite("monitor cadence", () => {
   );
 
   contract(
-    "the monitor report sink and route keep the Tech role distinct",
+    "the report recipient and route keep the Tech role distinct",
     async () => {
       for (const host of [true, false]) {
         const ws = workspace();
         const socket = await game(ws);
-        ws.config.reports = { project: "Fixture", recipient: "monitor", scheduledTicks: true };
+        ws.config.reports = { project: "Fixture", recipient: "dev-manager", scheduledTicks: true };
         ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
         ws.updateGameDevConfig({ wakeMinutes: [1] });
         ws.writeRoute(cadenceRoute(ws, { host: host ? ws.game : otherGame(ws) }));
@@ -230,7 +234,7 @@ suite("monitor cadence", () => {
         // The wake's slot comes from the runner's own report line, and its receipt is written
         // after its native calls; wait for both rather than a precomputed slot or a time span.
         const wake = () => {
-          const match = /bus: scheduled monitor (\d+): /.exec(runner.output().stdout);
+          const match = /bus: scheduled review (\d+): /.exec(runner.output().stdout);
           return match ? Number(match[1]) : undefined;
         };
         try {
@@ -238,7 +242,7 @@ suite("monitor cadence", () => {
             if (steered().length === 0) return false;
             if (!host) return virtualNow(ws) > at(2, 30);
             const slot = wake();
-            return slot !== undefined && ws.exists(`unblock/${MONITOR}-${slot}.json`);
+            return slot !== undefined && ws.exists(`unblock/${RECIPIENT}-${slot}.json`);
           });
         } finally {
           await runner.stop();
@@ -250,12 +254,12 @@ suite("monitor cadence", () => {
           expect(wake()).toBeUndefined();
         }
         for (const call of steered()) {
-          expect(call.params.threadId).toBe(MONITOR);
+          expect(call.params.threadId).toBe(RECIPIENT);
           expect(call.params.expectedTurnId).toBe("turn-one");
         }
         const dispatched = socket.callsOf("thread/queue/list").map((call) => call.params.threadId);
         expect(dispatched.includes(TECH)).toBe(false);
-        expect(dispatched.includes(MONITOR)).toBe(host);
+        expect(dispatched.includes(RECIPIENT)).toBe(host);
         expect(ws.registry().roles.tech!.conversations.codex).toBe(TECH);
       }
     },
@@ -263,7 +267,7 @@ suite("monitor cadence", () => {
   );
 
   contract(
-    "monitor minutes are validated at the observer without blocking or coupling to releases",
+    "review minutes are validated at the observer without blocking or coupling to releases",
     async () => {
       const ws = workspace();
       const socket = await game(ws);
@@ -271,7 +275,7 @@ suite("monitor cadence", () => {
       // when the configuration loads, naming /wakeMinutes.
       ws.updateGameDevConfig({ wakeMinutes: [] });
       const none = await tick(ws, at(20));
-      expect(none.monitor).toEqual([]);
+      expect(none.review).toEqual([]);
       expect(socket.connections).toHaveLength(0);
       for (const value of [[60], ["20+1"]]) {
         ws.updateGameDevConfig({ wakeMinutes: value });
@@ -288,8 +292,8 @@ suite("monitor cadence", () => {
 
       ws.updateGameDevConfig({ wakeMinutes: [10] });
       const ten = await tick(ws, at(10));
-      expect(ten.monitor.map((row) => row.slot)).toEqual([at(10)]);
-      // 1.0 delivers health events natively to the monitor on their own connections.
+      expect(ten.review.map((row) => row.slot)).toEqual([at(10)]);
+      // 1.0 delivers health events natively to the recipient on their own connections.
       expect(
         socket.ownConnections(),
         JSON.stringify(socket.calls.filter(CodexSocket.isEvent).map((c) => c.params.input)),
@@ -303,15 +307,15 @@ suite("monitor cadence", () => {
     async () => {
       const ws = workspace();
       await game(ws);
-      clearMonitor(ws);
+      clearRecipient(ws);
       const first = Date.UTC(2026, 10, 1, 5, 20) / 1000; // 01:20 EDT
       const second = Date.UTC(2026, 10, 1, 6, 20) / 1000; // 01:20 EST
       const slots: number[] = [];
       for (const slot of [first, second])
-        slots.push(...(await tick(ws, slot)).monitor.map((row) => row.slot));
+        slots.push(...(await tick(ws, slot)).review.map((row) => row.slot));
       expect(slots).toEqual([first, second]);
-      expect(ws.exists(`unblock/${MONITOR}-${first}.json`)).toBe(true);
-      expect(ws.exists(`unblock/${MONITOR}-${second}.json`)).toBe(true);
+      expect(ws.exists(`unblock/${RECIPIENT}-${first}.json`)).toBe(true);
+      expect(ws.exists(`unblock/${RECIPIENT}-${second}.json`)).toBe(true);
     },
   );
 });

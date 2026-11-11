@@ -30,8 +30,8 @@ export function uuid5(namespace: string, name: string): string {
 }
 
 /** Slot request ID shared by the Claude spool and the Codex steer. */
-export function slotRequestId(coordinator: string, slot: number): string {
-  return uuid5(NAMESPACE_URL, `hourly-unblock:${coordinator}:${slot}`);
+export function slotRequestId(recipient: string, slot: number): string {
+  return uuid5(NAMESPACE_URL, `hourly-unblock:${recipient}:${slot}`);
 }
 
 /** Event request ID shared by both harnesses. */

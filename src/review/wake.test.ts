@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type FakeHandler, startFakeControl } from "../adapters/codex/testControlSocket.ts";
+import { ROUTE_SCHEMA_1 } from "../adapters/shared/route.ts";
 import { gameLayout } from "../layout.ts";
 import { readRegistry, updateRegistry } from "../registry/index.ts";
-import { type ClaudeFixture, claudeFixture, GAME, MONITOR, SLOT, TECH } from "./fixtures.ts";
+import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
+import { type ClaudeFixture, claudeFixture, GAME, RECIPIENT, SLOT, TECH } from "./fixtures.ts";
 import { DEFERRED_PREFIX, deliverScheduledWake } from "./wake.ts";
 
 function useEnv(fixture: ClaudeFixture): void {
@@ -20,7 +22,7 @@ afterEach(() => {
 });
 
 describe("deliverScheduledWake (claude)", () => {
-  it("uses the Claude monitor transport while the global default remains Codex", async () => {
+  it("uses the Claude recipient transport while the global default remains Codex", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
     updateRegistry(fixture.layout, 1, (draft) => {
@@ -34,26 +36,28 @@ describe("deliverScheduledWake (claude)", () => {
     expect(result.status).toBe("sending");
     expect(readRegistry(fixture.layout).harness).toBe("codex");
     const receipt = JSON.parse(
-      readFileSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`), "utf8"),
+      readFileSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`), "utf8"),
     ) as Record<string, unknown>;
     expect(receipt.method).toBe("claude-channel");
   });
 
-  it("spools one brief for the registry monitor and deduplicates the slot", async () => {
+  it("spools one brief for the configured recipient and deduplicates the slot", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
     const first = await deliverScheduledWake(fixture.layout, fixture.game, SLOT);
-    expect(first).toBe('{"status": "sending", "monitor_session_status": "idle"}');
+    expect(first).toBe(
+      `{"status": "sending", "recipient": "${RECIPIENT}", "recipient_session_status": "idle"}`,
+    );
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
       '{"status": "deduplicated", "previousStatus": "sending", "reason": null}',
     );
     const receipt = JSON.parse(
-      readFileSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`), "utf8"),
+      readFileSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`), "utf8"),
     ) as {
       diagnostics: { kind: string; parent?: string }[];
     };
     expect(receipt.diagnostics).toContainEqual(
-      expect.objectContaining({ kind: "worker_health", parent: MONITOR }),
+      expect.objectContaining({ kind: "worker_health", parent: RECIPIENT }),
     );
   });
 
@@ -64,32 +68,54 @@ describe("deliverScheduledWake (claude)", () => {
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe("");
   });
 
-  it("defers when the route monitor has no conversation for the active harness", async () => {
+  it("defers when the host's recipient has no conversation for the active harness", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
-    fixture.route({ monitor: "art-kit" });
+    const config = projectConfig("Archie");
+    (config.reports as Record<string, unknown>).recipient = "art-kit";
+    writeFixtureJson(fixture.game.configFile, config);
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toContain(
-      "monitor has no conversation for the active harness",
+      "recipient has no conversation for the active harness",
     );
-    expect(existsSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`))).toBe(false);
+    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
   });
 
   it("defers on an invalid route that names a conversation ID", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
-    fixture.route({ monitor: MONITOR });
+    fixture.route({ targets: [RECIPIENT] });
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-      `${DEFERRED_PREFIX}monitor route is unavailable or invalid; ` +
+      `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
         "its owner must verify identities and ownership",
     );
-    expect(existsSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`))).toBe(false);
+    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
+  });
+
+  it("defers a schema 1 route with its exact migration edit", async () => {
+    const fixture = claudeFixture();
+    useEnv(fixture);
+    fixture.route({ monitor: "game-dev", schema: 1 });
+    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
+      `${DEFERRED_PREFIX}${ROUTE_SCHEMA_1}`,
+    );
+    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
+  });
+
+  it("defers an active route that targets its recipient", async () => {
+    const fixture = claudeFixture();
+    useEnv(fixture);
+    fixture.route({ targets: ["game-dev", "archies-dog-walks/tech"] });
+    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
+      `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
+        "its owner must verify identities and ownership",
+    );
   });
 
   it("defers when the route is unreadable", async () => {
     const fixture = claudeFixture();
     writeFileSync(fixture.layout.routeFile, "not json");
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-      `${DEFERRED_PREFIX}monitor route is unavailable or invalid; ` +
+      `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
         "its owner must verify identities and ownership",
     );
   });
@@ -103,7 +129,7 @@ describe("deliverScheduledWake (codex)", () => {
       draft.harness = "codex";
       const gameDev = draft.roles["game-dev"];
       if (gameDev !== undefined) {
-        gameDev.conversations.codex = MONITOR;
+        gameDev.conversations.codex = RECIPIENT;
       }
       const tech = draft.roles["archies-dog-walks/tech"];
       if (tech !== undefined) {
@@ -114,8 +140,7 @@ describe("deliverScheduledWake (codex)", () => {
       fixture.layout.routeFile,
       JSON.stringify({
         host: GAME,
-        monitor: "game-dev",
-        schema: 1,
+        schema: 2,
         state: "active",
         targets: ["archies-dog-walks/tech"],
       }),
@@ -152,7 +177,7 @@ describe("deliverScheduledWake (codex)", () => {
     };
   }
 
-  it("keeps Chibi's Codex monitor slots and native collection separate from Claude peers", async () => {
+  it("keeps Chibi's Codex review slots and native collection separate from Claude peers", async () => {
     const fixture = codexFixture();
     const claudeTech = "00000000-0000-4000-8000-000000000011";
     const chibiTech = "00000000-0000-4000-8000-000000000012";
@@ -172,12 +197,12 @@ describe("deliverScheduledWake (codex)", () => {
     const game = gameLayout(fixture.layout, "chibis-way-home");
     const unblock = join(game.busDir, "unblock");
     mkdirSync(join(unblock, "decisions"), { recursive: true });
-    const clearance = join(unblock, "decisions", `${MONITOR}.json`);
-    writeFileSync(clearance, JSON.stringify({ state: "clear", thread_id: MONITOR }));
+    const clearance = join(unblock, "decisions", `${RECIPIENT}.json`);
+    writeFileSync(clearance, JSON.stringify({ state: "clear", thread_id: RECIPIENT }));
     const config = JSON.parse(readFileSync(game.configFile, "utf8")) as {
       reports: { workerParents: string[] };
     };
-    config.reports.workerParents = ["monitor", "archies-dog-walks/tech", "chibis-way-home/tech"];
+    config.reports.workerParents = ["game-dev", "archies-dog-walks/tech", "chibis-way-home/tech"];
     writeFileSync(game.configFile, JSON.stringify(config));
     const steers: Record<string, unknown>[] = [];
     const control = await startFakeControl(fixture.base, handler(steers));
@@ -197,7 +222,7 @@ describe("deliverScheduledWake (codex)", () => {
         worker_health: Record<string, unknown>;
       };
       expect(snapshot.harnesses).toMatchObject({
-        [MONITOR]: "codex",
+        [RECIPIENT]: "codex",
         [claudeTech]: "claude",
         [chibiTech]: "codex",
       });
@@ -219,7 +244,7 @@ describe("deliverScheduledWake (codex)", () => {
       expect(next.status).toBe("accepted");
       expect(steers).toHaveLength(2);
       expect(control.calls.filter((call) => call.method === "initialize")).toHaveLength(3);
-      writeFileSync(clearance, JSON.stringify({ state: "pending", thread_id: MONITOR }));
+      writeFileSync(clearance, JSON.stringify({ state: "pending", thread_id: RECIPIENT }));
       const guarded = JSON.parse(
         await deliverScheduledWake(fixture.layout, game, SLOT + 3600),
       ) as Record<string, unknown>;
@@ -233,7 +258,7 @@ describe("deliverScheduledWake (codex)", () => {
     }
   });
 
-  it("reminds the registry monitor once over one connection and deduplicates the slot", async () => {
+  it("reminds the configured recipient once over one connection and deduplicates the slot", async () => {
     const fixture = codexFixture();
     const steers: Record<string, unknown>[] = [];
     const control = await startFakeControl(fixture.base, handler(steers));
@@ -242,14 +267,18 @@ describe("deliverScheduledWake (codex)", () => {
       const first = JSON.parse(
         await deliverScheduledWake(fixture.layout, fixture.game, SLOT),
       ) as Record<string, unknown>;
-      expect(first).toMatchObject({ monitor_status: "ok", recipient: MONITOR, status: "accepted" });
+      expect(first).toMatchObject({
+        review_status: "ok",
+        recipient: RECIPIENT,
+        status: "accepted",
+      });
       expect(steers).toHaveLength(1);
       expect(steers[0]?.clientUserMessageId).toBe("7abe3e43-9217-5727-9bc2-9b9c22636262");
       const text = JSON.stringify(steers[0]?.input);
       expect(text).toContain(`${TECH}: q1`);
-      expect(text).toContain(`${MONITOR}: none`);
+      expect(text).toContain(`${RECIPIENT}: none`);
       const receipt = JSON.parse(
-        readFileSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`), "utf8"),
+        readFileSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`), "utf8"),
       ) as Record<string, unknown>;
       expect(receipt).toMatchObject({ attempt: 1, method: "turn/steer", status: "accepted" });
       const second = JSON.parse(
@@ -294,10 +323,10 @@ describe("deliverScheduledWake (codex)", () => {
       // Each route variant is checked in turn against the same fixture.
       // eslint-disable-next-line no-await-in-loop
       expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-        `${DEFERRED_PREFIX}monitor route is unavailable or invalid; ` +
+        `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
           "its owner must verify identities and ownership",
       );
     }
-    expect(existsSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`))).toBe(false);
+    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
   });
 });

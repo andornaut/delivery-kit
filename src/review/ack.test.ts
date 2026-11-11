@@ -157,17 +157,17 @@ describe("mixed snapshot acknowledgement binding", () => {
     expect(retargeted.ack).not.toHaveBeenCalled();
   });
 
-  it("acknowledges local channel entries using their Claude binding in a Codex monitor snapshot", async () => {
+  it("acknowledges local channel entries using their Claude binding in a Codex recipient snapshot", async () => {
     const busDir = mkdtempSync(join(tmpdir(), "mixed-ack-"));
     const unblock = join(busDir, "unblock");
-    const monitor = "00000000-0000-4000-8000-000000000001";
+    const codexRecipient = "00000000-0000-4000-8000-000000000001";
     const claude: HarnessAdapter = { ...codex(), harness: "claude" };
     const native = codex();
     const captured = await captureMixed(
       { busDir, unblock },
       { claude, codex: native },
-      { [monitor]: "codex", [RECIPIENT]: "claude" },
-      [monitor, RECIPIENT],
+      { [codexRecipient]: "codex", [RECIPIENT]: "claude" },
+      [codexRecipient, RECIPIENT],
       [],
     );
     expect(captured.harness).toBe("codex");

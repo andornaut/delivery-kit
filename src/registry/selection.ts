@@ -7,7 +7,7 @@ import { type UpdateOptions, updateRegistry } from "./store.ts";
 
 export interface RoleSelection {
   readonly games?: readonly string[];
-  /** Registered role keys or unambiguous duties. */
+  /** Registered role keys. */
   readonly roles?: readonly string[];
 }
 

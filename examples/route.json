@@ -1,7 +1,6 @@
 {
-  "schema": 1,
+  "schema": 2,
   "state": "active",
   "host": "archies-dog-walks",
-  "monitor": "game-dev",
   "targets": ["archies-dog-walks/tech", "chibis-way-home/tech", "art-kit"]
 }

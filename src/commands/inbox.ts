@@ -1,32 +1,37 @@
-// `delivery-kit monitor snapshot` and `monitor ack` for one game. The recipient is a role name
-// (default: the monitor duty) resolved through the registry for its active harness.
+// `delivery-kit inbox snapshot` and `inbox ack` for one game. The recipient is a role name
+// (default: the game's reports.recipient) resolved through the registry for its active harness.
 import { parseArgs } from "node:util";
 
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { unblockDir } from "../adapters/claude/spool.ts";
 import { canonicalUuid, isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
-import { type ActiveScope, readRoleRoute, routeScope } from "../adapters/shared/route.ts";
+import {
+  type ActiveScope,
+  readRoleRoute,
+  routeRecipient,
+  routeScope,
+} from "../adapters/shared/route.ts";
 import type { Disposition } from "../adapters/types.ts";
+import { loadProjectConfig } from "../config.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
-import { acknowledge, ackSucceeded, DISPOSITIONS } from "../monitor/ack.ts";
-import { adapterFor } from "../monitor/harnesses.ts";
+import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
+import type { Harness, Registry } from "../registry/schema.ts";
+import { readRegistry } from "../registry/store.ts";
+import { acknowledge, ackSucceeded, DISPOSITIONS } from "../review/ack.ts";
+import { adapterFor } from "../review/harnesses.ts";
 import {
   captureClaude,
   captureCodex,
   captureMixed,
   TransportUnavailable,
-} from "../monitor/snapshot.ts";
-import { type Json, locked, snapshotPath } from "../monitor/store.ts";
-import { MONITOR_ROLE } from "../monitor/wake.ts";
-import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
-import type { Harness, Registry } from "../registry/schema.ts";
-import { readRegistry } from "../registry/store.ts";
+} from "../review/snapshot.ts";
+import { type Json, locked, snapshotPath } from "../review/store.ts";
 import { SPECS } from "./spec.ts";
 
 const UNAVAILABLE_OUTPUT = {
-  reason: "inspect local monitor state and retry explicit reconciliation",
+  reason: "inspect local inbox state and retry explicit reconciliation",
   status: "unavailable",
 };
 
@@ -39,7 +44,7 @@ interface Scope {
   readonly harnesses: Readonly<Record<string, Harness>>;
   readonly parents: string[];
   /**
-   * Coordinator and peers of an active route; null when a declared route is not active;
+   * Recipient and peers of an active route; null when a declared route is not active;
    * undefined when no route is declared, which leaves collection unscoped.
    */
   readonly members: readonly string[] | null | undefined;
@@ -54,8 +59,8 @@ function codexMembers(layout: Layout, registry: Registry): string[] | null | und
     if (route === null) {
       return undefined;
     }
-    const active = routeScope(registry, route);
-    return active === null ? null : [active.coordinator, ...active.peers];
+    const active = routeScope(registry, routeRecipient(layout, route), route);
+    return active === null ? null : [active.recipient, ...active.peers];
   } catch {
     return null;
   }
@@ -98,7 +103,11 @@ function scope(
   }
   const layout = loadLayout(root);
   const registry = readRegistry(layout);
-  const resolvedRecipient = conversation(registry, recipient ?? MONITOR_ROLE);
+  const entry = gameLayout(layout, game);
+  const resolvedRecipient = conversation(
+    registry,
+    recipient ?? loadProjectConfig(entry.configFile).reports.recipient,
+  );
   const resolvedParents = parents.map((parent) => conversation(registry, parent).id);
   if (new Set(resolvedParents).size !== resolvedParents.length) {
     throw new UsageError("duplicate parent");
@@ -110,7 +119,7 @@ function scope(
     resolvedParents.length > 0 &&
     (members == null || resolvedParents.some((parent) => !members.includes(parent)))
   ) {
-    throw new UsageError("worker parents require membership in the active monitor route");
+    throw new UsageError("worker parents require membership in the active review route");
   }
   const harnesses: Record<string, Harness> = {};
   for (const role of Object.keys(registry.roles)) {
@@ -125,7 +134,7 @@ function scope(
     harnesses[id] = harness;
   }
   return {
-    game: gameLayout(layout, game),
+    game: entry,
     harness: resolvedRecipient.harness,
     harnesses,
     layout,
@@ -136,12 +145,12 @@ function scope(
   };
 }
 
-/** The recipient must be the active route monitor, resolved for the active harness now. */
+/** The recipient must be the active route's recipient, resolved for the active harness now. */
 function claudeRoute(layout: Layout, registry: Registry, recipient: string): ActiveScope {
   const route = readRoleRoute(layout);
-  const active = route === null ? null : routeScope(registry, route);
-  if (active === null || active.coordinator !== recipient) {
-    throw new Error("recipient must be the active route monitor");
+  const active = route === null ? null : routeScope(registry, routeRecipient(layout, route), route);
+  if (active === null || active.recipient !== recipient) {
+    throw new Error("recipient must be the active route's recipient");
   }
   return active;
 }
@@ -322,10 +331,10 @@ async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
   }
 }
 
-export const monitorSnapshot: Handler = (io, root, args) => {
+export const inboxSnapshot: Handler = (io, root, args) => {
   const { values } = parseArgs({
     args,
-    options: SPECS["monitor snapshot"].options,
+    options: SPECS["inbox snapshot"].options,
     strict: true,
   });
   return guarded(io, () =>
@@ -337,16 +346,16 @@ export const monitorSnapshot: Handler = (io, root, args) => {
   );
 };
 
-export const monitorAck: Handler = (io, root, args) => {
+export const inboxAck: Handler = (io, root, args) => {
   const { values } = parseArgs({
     args,
-    options: SPECS["monitor ack"].options,
+    options: SPECS["inbox ack"].options,
     strict: true,
   });
   const queueIds = values["queue-id"] ?? [];
   const disposition = values.disposition as Disposition | undefined;
   if (values.snapshot === undefined || queueIds.length === 0 || disposition === undefined) {
-    io.err("delivery-kit: monitor ack requires --snapshot, --queue-id and --disposition\n");
+    io.err("delivery-kit: inbox ack requires --snapshot, --queue-id and --disposition\n");
     return EXIT_USAGE;
   }
   if (!DISPOSITIONS.includes(disposition)) {

@@ -1,5 +1,5 @@
 // Python json.dumps output with its default separators: the one encoder for briefs, receipts,
-// events, bus and monitor state records, status output and monitor digests, so persisted records
+// events, bus and inbox state records, status output and inbox digests, so persisted records
 // and the digests that key existing acknowledgements and retentions stay byte-identical. It
 // follows Python where a JavaScript serializer differs: keys sort by code point, ensure_ascii
 // escapes U+007F, ensure_ascii=False leaves lone surrogates unescaped, and floats use repr().

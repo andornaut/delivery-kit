@@ -14,7 +14,7 @@ export const P = "00000000-0000-0000-0000-000000000001";
 export const C = "00000000-0000-0000-0000-000000000002";
 export const OTHER = "00000000-0000-0000-0000-000000000003";
 export const N = "00000000-0000-0000-0000-000000000004";
-/** Monitor (route coordinator) and an out-of-route recipient that makes no question calls. */
+/** The route recipient and an out-of-route recipient that makes no question calls. */
 export const M = "00000000-0000-4000-8000-0000000000aa";
 export const R = "00000000-0000-4000-8000-0000000000bb";
 
@@ -38,10 +38,10 @@ export function sockets(): (ws: Workspace) => Promise<CodexSocket> {
   };
 }
 
-/** An active route from the monitor coordinator to `targets`, under a Codex registry. */
-export function codexRoute(ws: Workspace, targets: string[], monitor = M): void {
+/** An active route from the recipient to `targets`, under a Codex registry. */
+export function codexRoute(ws: Workspace, targets: string[], recipient = M): void {
   ws.writeRegistry({ ...ws.registry(), harness: "codex" });
-  ws.writeRoute(roleRoute(ws, "codex", monitor, targets));
+  ws.writeRoute(roleRoute(ws, "codex", recipient, targets));
 }
 
 export function decision(ws: Workspace, recipient: string, record: unknown): void {
@@ -55,7 +55,7 @@ export interface Snapshot {
   text: string;
 }
 
-/** Public `monitor snapshot`; returns stdout JSON and the persisted snapshot record. */
+/** Public `inbox snapshot`; returns stdout JSON and the persisted snapshot record. */
 export async function snapshot(
   ws: Workspace,
   recipient: string,
@@ -63,7 +63,7 @@ export async function snapshot(
 ): Promise<Snapshot> {
   const result = await cli(
     ws,
-    ["monitor", "snapshot", "--recipient", recipient, ...parents.flatMap((p) => ["--parent", p])],
+    ["inbox", "snapshot", "--recipient", recipient, ...parents.flatMap((p) => ["--parent", p])],
     {
       timeoutMs: 60_000,
     },
@@ -89,7 +89,7 @@ export interface Scheduled {
 }
 
 /**
- * One scheduled monitor slot through the resident runner. The collector compares the slot
+ * One scheduled review slot through the resident runner. The collector compares the slot
  * with the real wall clock, so the virtual slot is the current real minute (lag 0) or an
  * earlier one (lag in seconds). Waits for the slot's health record, then stops the runner.
  */

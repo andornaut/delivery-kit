@@ -63,7 +63,7 @@ suite("entry", () => {
       schema: 1,
       revision: 1,
       harness: "claude",
-      roles: { "game-dev": { conversations: {}, duties: ["coordinator"] } },
+      roles: { "game-dev": { conversations: {} } },
     });
     const result = await cli(ws, [
       "control",
@@ -72,7 +72,7 @@ suite("entry", () => {
       "--reason",
       "operator pause",
       "--requester",
-      "coordinator",
+      "game-dev",
     ]);
     expect(result.code, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({

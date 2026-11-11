@@ -16,7 +16,7 @@ import {
   updateDeliveryWork,
 } from "../deploy.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import { DEFERRED_PREFIX, deliverScheduledWake } from "../monitor/wake.ts";
+import { DEFERRED_PREFIX, deliverScheduledWake } from "../review/wake.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
 import { loadedIdentity, pinGuard, recordPin } from "./pin.ts";
@@ -87,7 +87,7 @@ class CiTasks {
   }
 }
 
-/** One observer pass: monitor wakes, scheduled-slot reports and an event flush. */
+/** One observer pass: scheduled reviews, scheduled-slot reports and an event flush. */
 async function observe(
   context: BusContext,
   after: number,
@@ -104,11 +104,11 @@ async function observe(
         context.log(outcome);
         process.stderr.write(`${outcome}\n`);
       } else if (outcome !== "") {
-        context.log(`bus: scheduled monitor ${wake}: ${outcome}`);
+        context.log(`bus: scheduled review ${wake}: ${outcome}`);
       }
     } catch (error) {
       context.log(
-        `bus: scheduled monitor ${wake} unavailable (${String(error)}); no delivery claimed`,
+        `bus: scheduled review ${wake} unavailable (${String(error)}); no delivery claimed`,
       );
     }
   }

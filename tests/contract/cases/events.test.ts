@@ -8,7 +8,7 @@ import { contract, suite, workspaces } from "../lib/cases.ts";
 import { at, sleep } from "../lib/time.ts";
 import { type Workspace } from "../lib/workspace.ts";
 
-const MONITOR = "00000000-0000-4000-8000-000000000001";
+const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 const EVERY_MINUTE = Array.from({ length: 60 }, (_, m) => String(m).padStart(2, "0"));
 
 function bus(ws: Workspace, options: { github?: string } = {}): void {
@@ -18,9 +18,9 @@ function bus(ws: Workspace, options: { github?: string } = {}): void {
     schema: 1,
     revision: 1,
     harness: "codex",
-    roles: { monitor: { conversations: { codex: MONITOR } } },
+    roles: { "dev-manager": { conversations: { codex: RECIPIENT } } },
   });
-  ws.config.reports = { project: "Fixture", recipient: "monitor" };
+  ws.config.reports = { project: "Fixture", recipient: "dev-manager" };
 }
 
 function kinds(ws: Workspace): string[] {

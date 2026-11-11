@@ -1,4 +1,4 @@
-// Monitor review snapshots. The inventory comes
+// Inbox snapshots. The inventory comes
 // from the active harness adapter; every capability the harness cannot report is `unavailable`,
 // which is never clearance.
 import { randomUUID } from "node:crypto";

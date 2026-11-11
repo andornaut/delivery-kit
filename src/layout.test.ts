@@ -23,7 +23,7 @@ describe("loadLayout", () => {
     expect(roleKeys(layout.config)).toContain("game-dev");
   });
 
-  it("accepts an empty wake minute list, which schedules no monitor wake", () => {
+  it("accepts an empty wake minute list, which schedules no review", () => {
     const { root } = makeFixture();
     writeFixtureJson(join(root, "config.json"), { ...gameDevConfig(), wakeMinutes: [] });
     expect(loadLayout(root).config.wakeMinutes).toEqual([]);

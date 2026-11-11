@@ -6,23 +6,23 @@ import { roleRoute } from "./routes.ts";
 import type { Workspace } from "./workspace.ts";
 
 export const TECH = "00000000-0000-0000-0000-000000000001";
-export const MONITOR = "00000000-0000-0000-0000-000000000002";
+export const RECIPIENT = "00000000-0000-0000-0000-000000000002";
 export const TARGET = "00000000-0000-0000-0000-000000000003";
 export const HELD = "00000000-0000-0000-0000-000000000004";
 
-/** The cadence route: the monitor routes to the target; HELD is a registered role it leaves out. */
+/** The cadence route: the recipient routes to the target; HELD is a registered role it leaves out. */
 export function cadenceRoute(
   ws: Workspace,
   change: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return roleRoute(ws, "codex", MONITOR, [TARGET], change);
+  return roleRoute(ws, "codex", RECIPIENT, [TARGET], change);
 }
 
 /** Register roles for every ID (role name = `r-<id suffix>` plus the named roles). */
 export function codexRoles(ws: Workspace, extra: string[] = []): void {
   const roles: Record<string, { conversations: { codex: string } }> = {
     tech: { conversations: { codex: TECH } },
-    monitor: { conversations: { codex: MONITOR } },
+    "dev-manager": { conversations: { codex: RECIPIENT } },
     target: { conversations: { codex: TARGET } },
     held: { conversations: { codex: HELD } },
   };
@@ -34,7 +34,7 @@ export function role(id: string): string {
   return `r-${id.slice(-12)}`;
 }
 
-export function clearMonitor(ws: Workspace, recipient = MONITOR): void {
+export function clearRecipient(ws: Workspace, recipient = RECIPIENT): void {
   ws.write(
     `unblock/decisions/${recipient}.json`,
     JSON.stringify({ thread_id: recipient, state: "clear" }),
@@ -50,9 +50,9 @@ export async function codexGame(
   ws.config.git = { main: "main", remote: "origin", github: "" };
   ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
-  ws.config.reports = { project: "Fixture", recipient: "tech", scheduledTicks: true };
+  ws.config.reports = { project: "Fixture", recipient: "dev-manager", scheduledTicks: true };
   ws.writeRoute(cadenceRoute(ws));
-  clearMonitor(ws);
+  clearRecipient(ws);
   const socket = await codexWorld(new CodexSocket(ws), queues).listen();
   ws.env.CODEX_CONTROL_SOCKET = socket.path;
   return socket;

@@ -1,6 +1,7 @@
 // A game's committed delivery-kit.json. It holds project values only: no conversation IDs,
 // absolute paths or secret material. Reports address roles by name; the registry resolves them.
 import { readJson } from "./durable.ts";
+import { gameLayout, type Layout } from "./layout.ts";
 import {
   checkArray,
   checkBoolean,
@@ -53,7 +54,7 @@ export interface ProjectConfig {
     /** The game's display name, matching config.json. */
     readonly project: string;
     readonly scheduledTicks: boolean;
-    /** A registry role key or duty name, for example "monitor". */
+    /** A registered role key, for example "dev-manager". */
     readonly recipient: string;
     readonly workerParents: readonly string[];
   };
@@ -69,7 +70,7 @@ const STEP_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const CHECK_NAME_PATTERN = /^[^|]{1,128}$/;
 const PROJECT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 const IMAGE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$/;
-// A role key (`<game>/<role>`) or a shared role or duty name.
+// A role key: `<game>/<role>` or a shared role name.
 const ROLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(\/[a-z0-9][a-z0-9-]{0,63})?$/;
 // An inline assignment of secret-like material in a command, such as `TOKEN=x npm ci`.
 const INLINE_SECRET_PATTERN =
@@ -238,4 +239,12 @@ export function loadProjectConfig(path: string): ProjectConfig {
 /** Every role name the configuration addresses, for resolution against the registry. */
 export function addressedRoles(config: ProjectConfig): string[] {
   return [...new Set([config.reports.recipient, ...config.reports.workerParents])];
+}
+
+/** The reports.recipient of each of `games`, each role once, in the order given. */
+export function gameRecipients(layout: Layout, games: readonly string[]): string[] {
+  const recipients = games.map(
+    (game) => loadProjectConfig(gameLayout(layout, game).configFile).reports.recipient,
+  );
+  return [...new Set(recipients)];
 }

@@ -1,4 +1,4 @@
-// Claude monitor slots: receipts, spool bounds and guards. Slots are dispatched by the resident
+// Claude review slots: receipts, spool bounds and guards. Slots are dispatched by the resident
 // observer.
 import { renameSync, rmSync } from "node:fs";
 import { expect } from "vitest";
@@ -13,7 +13,7 @@ import {
   clear,
   deliver,
   holdLock,
-  MONITOR,
+  RECIPIENT,
   slotRequestId,
   tick,
 } from "../lib/claude-fixture.ts";
@@ -32,7 +32,7 @@ const SLOT = at(20);
 const NEXT = at(50);
 
 function receipt(ws: Workspace, slot = SLOT): Json {
-  return ws.readJson(`unblock/${MONITOR}-${slot}.json`);
+  return ws.readJson(`unblock/${RECIPIENT}-${slot}.json`);
 }
 
 function spooled(ws: Workspace): string[] {
@@ -48,65 +48,68 @@ function claimAll(ws: Workspace): void {
   }
 }
 
-suite("claude monitor slots", () => {
+suite("claude review slots", () => {
   const workspace = workspaces();
 
-  contract("idle and busy monitors spool one brief per slot with the slot request ID", async () => {
-    const ws = workspace();
-    claudeGame(ws);
-    for (const [slot, mode] of [
-      [SLOT, "idle"],
-      [NEXT, "busy"],
-    ] as const) {
-      claimAll(ws);
-      agents(ws, mode);
-      const result = await tick(ws, slot);
-      expect(result.monitor.map((row) => row.slot)).toEqual([slot]);
-      expect(result.monitor[0]!.result.status).toBe("sending");
-      expect(result.monitor[0]!.result.monitor_session_status).toBe(mode);
-      const requestId = slotRequestId(MONITOR, slot);
-      expect(receipt(ws, slot).requestId).toBe(requestId);
-      const entry = ws.readJson<Record<string, string>>(`unblock/claude-spool/${requestId}.json`);
-      expect(entry.receipt).toBe(`unblock/${MONITOR}-${slot}.json`);
-      expect(entry.text).toContain(briefTarget(ws, "Archie tech", ARCHIE));
-      expect(entry.text).not.toContain(CHIBI);
-      expect(entry.text).toContain('"queue_inventory", "status": "unavailable"');
-      expect(entry.text).toContain('"question_history", "status": "unavailable"');
-    }
-    expect(spooled(ws)).toHaveLength(1);
-    agents(ws, "idle");
-    const rerun = await tick(ws, NEXT);
-    expect(rerun.monitor[0]!.result).toEqual({
-      status: "deduplicated",
-      previousStatus: "sending",
-      reason: null,
-    });
-    expect(spooled(ws)).toHaveLength(1);
-  });
+  contract(
+    "idle and busy recipients spool one brief per slot with the slot request ID",
+    async () => {
+      const ws = workspace();
+      claudeGame(ws);
+      for (const [slot, mode] of [
+        [SLOT, "idle"],
+        [NEXT, "busy"],
+      ] as const) {
+        claimAll(ws);
+        agents(ws, mode);
+        const result = await tick(ws, slot);
+        expect(result.review.map((row) => row.slot)).toEqual([slot]);
+        expect(result.review[0]!.result.status).toBe("sending");
+        expect(result.review[0]!.result.recipient_session_status).toBe(mode);
+        const requestId = slotRequestId(RECIPIENT, slot);
+        expect(receipt(ws, slot).requestId).toBe(requestId);
+        const entry = ws.readJson<Record<string, string>>(`unblock/claude-spool/${requestId}.json`);
+        expect(entry.receipt).toBe(`unblock/${RECIPIENT}-${slot}.json`);
+        expect(entry.text).toContain(briefTarget(ws, "Archie tech", ARCHIE));
+        expect(entry.text).not.toContain(CHIBI);
+        expect(entry.text).toContain('"queue_inventory", "status": "unavailable"');
+        expect(entry.text).toContain('"question_history", "status": "unavailable"');
+      }
+      expect(spooled(ws)).toHaveLength(1);
+      agents(ws, "idle");
+      const rerun = await tick(ws, NEXT);
+      expect(rerun.review[0]!.result).toEqual({
+        status: "deduplicated",
+        previousStatus: "sending",
+        reason: null,
+      });
+      expect(spooled(ws)).toHaveLength(1);
+    },
+  );
 
   contract(
     "an unclaimed brief bounds the spool across later slots",
     async () => {
       const ws = workspace();
       claudeGame(ws);
-      expect((await tick(ws, SLOT)).monitor[0]!.result.status).toBe("sending");
+      expect((await tick(ws, SLOT)).review[0]!.result.status).toBe("sending");
       for (const slot of [NEXT, at(20, 0, 1), at(50, 0, 1)]) {
         const result = await tick(ws, slot);
-        expect(result.monitor[0]!.result.status).toBe("deferred");
-        expect(String(result.monitor[0]!.result.reason)).toContain("earlier monitor brief");
+        expect(result.review[0]!.result.status).toBe("deferred");
+        expect(String(result.review[0]!.result.reason)).toContain("earlier review brief");
         expect(receipt(ws, slot).status).toBe("deferred");
       }
       expect(spooled(ws)).toHaveLength(1);
       expect(receipt(ws).status).toBe("sending");
       await deliver(ws);
       expect(receipt(ws).status).toBe("accepted");
-      expect((await tick(ws, at(20, 0, 2))).monitor[0]!.result.status).toBe("sending");
+      expect((await tick(ws, at(20, 0, 2))).review[0]!.result.status).toBe("sending");
     },
     CASE_TIMEOUT_MS,
   );
 
   contract(
-    "missing, blocked, unknown and unavailable monitors defer without spooling",
+    "missing, blocked, unknown and unavailable recipients defer without spooling",
     async () => {
       const ws = workspace();
       claudeGame(ws);
@@ -116,18 +119,18 @@ suite("claude monitor slots", () => {
         [at(20, 0, 1), "fail", "listing unavailable"],
         [
           at(50, 0, 1),
-          [{ sessionId: MONITOR, status: "waiting" }],
-          "monitor session state unknown",
+          [{ sessionId: RECIPIENT, status: "waiting" }],
+          "recipient session state unknown",
         ],
       ] as const;
       for (const [slot, mode, reason] of cases) {
         agents(ws, mode as never);
         const result = await tick(ws, slot);
-        expect(result.monitor[0]!.result.status).toBe("deferred");
-        expect(String(result.monitor[0]!.result.reason)).toContain(reason);
+        expect(result.review[0]!.result.status).toBe("deferred");
+        expect(String(result.review[0]!.result.reason)).toContain(reason);
         expect(receipt(ws, slot).status).toBe("deferred");
         agents(ws, "idle");
-        expect((await tick(ws, slot)).monitor[0]!.result.status).toBe("deduplicated");
+        expect((await tick(ws, slot)).review[0]!.result.status).toBe("deduplicated");
       }
       expect(spooled(ws)).toEqual([]);
     },
@@ -139,14 +142,14 @@ suite("claude monitor slots", () => {
     async () => {
       const ws = workspace();
       claudeGame(ws);
-      clear(ws, MONITOR, "pending");
-      expect(String((await tick(ws, SLOT)).monitor[0]!.result.reason)).toContain("clearance");
+      clear(ws, RECIPIENT, "pending");
+      expect(String((await tick(ws, SLOT)).review[0]!.result.reason)).toContain("clearance");
       clear(ws);
       ws.config.reports = { project: "Fixture", workerParents: ["chibi-tech"] };
-      expect(String((await tick(ws, NEXT)).monitor[0]!.result.reason)).toContain("parents");
+      expect(String((await tick(ws, NEXT)).review[0]!.result.reason)).toContain("parents");
       ws.config.reports = { project: "Fixture", workerParents: ["archie-tech"] };
       const slot = at(20, 0, 1);
-      expect((await tick(ws, slot)).monitor[0]!.result.status).toBe("sending");
+      expect((await tick(ws, slot)).review[0]!.result.status).toBe("sending");
       expect(receipt(ws, slot).diagnostics).toContainEqual({
         kind: "worker_health",
         parent: ARCHIE,
@@ -164,7 +167,7 @@ suite("claude monitor slots", () => {
     await tick(ws, SLOT);
     rmSync(ws.path("unblock", "claude-spool", spooled(ws)[0]!));
     const result = await tick(ws, SLOT);
-    expect(result.monitor[0]!.result.previousStatus).toBe("ambiguous");
+    expect(result.review[0]!.result.previousStatus).toBe("ambiguous");
     expect(receipt(ws).status).toBe("ambiguous");
     expect(spooled(ws)).toEqual([]);
   });
@@ -175,16 +178,16 @@ suite("claude monitor slots", () => {
     ws.write("unblock/unblock.lock", "");
     const release = await holdLock(ws.path("unblock", "unblock.lock"));
     try {
-      expect((await tick(ws, SLOT)).monitor[0]!.result).toEqual({ status: "busy" });
+      expect((await tick(ws, SLOT)).review[0]!.result).toEqual({ status: "busy" });
     } finally {
       await release();
     }
-    expect(ws.exists(`unblock/${MONITOR}-${SLOT}.json`)).toBe(false);
+    expect(ws.exists(`unblock/${RECIPIENT}-${SLOT}.json`)).toBe(false);
     ws.writeRoute(claudeRoute(ws, { state: "held" }));
     const held = await tick(ws, SLOT);
-    expect(held.monitor).toEqual([]);
-    expect(held.stderr).not.toContain("monitor deferred");
-    expect(ws.exists(`unblock/${MONITOR}-${SLOT}.json`)).toBe(false);
+    expect(held.review).toEqual([]);
+    expect(held.stderr).not.toContain("review deferred");
+    expect(ws.exists(`unblock/${RECIPIENT}-${SLOT}.json`)).toBe(false);
   });
 
   contract("the observer spools, deduplicates a slot and defers an invalid route", async () => {
@@ -193,7 +196,7 @@ suite("claude monitor slots", () => {
     const first = await tick(ws, SLOT);
     expect(first.code, first.stderr).not.toBeNull();
     expect(first.stdout).toContain('"status": "sending"');
-    expect(first.stdout).toContain('"monitor_session_status": "idle"');
+    expect(first.stdout).toContain('"recipient_session_status": "idle"');
     const duplicate = await tick(ws, SLOT);
     expect(duplicate.stdout).toContain("deduplicated");
     expect(spooled(ws)).toHaveLength(1);

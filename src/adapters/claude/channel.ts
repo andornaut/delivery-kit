@@ -1,4 +1,4 @@
-// Channel consumer: a stdio MCP server started by the monitor session itself.
+// Channel consumer: a stdio MCP server started by the recipient session itself.
 // It delivers each spooled entry once, records `accepted` (delivery, not handling) or
 // `ambiguous` on a failed write, and never resends.
 import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
@@ -9,7 +9,7 @@ import { holdLockAsync } from "../../lock.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
 import {
   deliveredDir,
-  type EntryKind,
+  entryKind,
   type Json,
   LOCK_FILE,
   readEntry,
@@ -29,9 +29,8 @@ export function now(): string {
 }
 
 function receiptFor(busDir: string, entry: Json): string {
-  const kind = entry.kind;
   const name = entry.receipt;
-  if ((kind !== "event" && kind !== "monitor") || typeof name !== "string" || !RECEIPT.test(name)) {
+  if (entryKind(entry.kind) === undefined || typeof name !== "string" || !RECEIPT.test(name)) {
     throw new Error("invalid receipt reference");
   }
   return join(busDir, name);
@@ -39,7 +38,7 @@ function receiptFor(busDir: string, entry: Json): string {
 
 function matches(receipt: Json, entry: Json): boolean {
   return (
-    receipt[RECEIPT_KEYS[entry.kind as EntryKind]] === entry.requestId &&
+    receipt[RECEIPT_KEYS[entryKind(entry.kind) ?? "event"]] === entry.requestId &&
     receipt.status === "sending"
   );
 }
@@ -99,7 +98,7 @@ function reconcileClaims(busDir: string): void {
   }
 }
 
-function deliverLocked(write: LineWriter, busDir: string, monitor: string): boolean {
+function deliverLocked(write: LineWriter, busDir: string, recipient: string): boolean {
   reconcileClaims(busDir);
   const spool = spoolDir(busDir);
   for (const name of names(spool, ".json")) {
@@ -113,7 +112,7 @@ function deliverLocked(write: LineWriter, busDir: string, monitor: string): bool
       const loaded = readEntry(pending);
       if (
         loaded === undefined ||
-        loaded.recipient !== monitor ||
+        loaded.recipient !== recipient ||
         name !== `${String(loaded.requestId)}.json` ||
         typeof loaded.text !== "string"
       ) {
@@ -140,7 +139,7 @@ function deliverLocked(write: LineWriter, busDir: string, monitor: string): bool
       return false;
     }
     const acceptedAt = now();
-    // The delivered copy is the monitor's acknowledgeable inventory (monitor-ack).
+    // The delivered copy is the recipient's acknowledgeable inventory (inbox ack).
     mkdirSync(deliveredDir(busDir), { mode: 0o700, recursive: true });
     writeJsonDurable(join(deliveredDir(busDir), name), { ...entry, acceptedAt });
     mark(receipt, "accepted", { acceptedAt });
@@ -151,20 +150,20 @@ function deliverLocked(write: LineWriter, busDir: string, monitor: string): bool
 }
 
 /**
- * Deliver every pending entry for `monitor` in one bus directory. False once output fails. A bus
+ * Deliver every pending entry for `recipient` in one bus directory. False once output fails. A bus
  * without a spool directory has nothing to deliver and is left as it is: nothing is created.
  */
 export async function deliverPending(
   write: LineWriter,
   busDir: string,
-  monitor: string,
+  recipient: string,
 ): Promise<boolean> {
   if (!isDirectory(spoolDir(busDir))) {
     return true;
   }
   const lock = await holdLockAsync(join(unblockDir(busDir), LOCK_FILE));
   try {
-    return deliverLocked(write, busDir, monitor);
+    return deliverLocked(write, busDir, recipient);
   } finally {
     lock.release();
   }
@@ -207,7 +206,7 @@ export function serve(
   input: NodeJS.ReadableStream,
   write: LineWriter,
   busDirs: readonly string[],
-  monitor: string,
+  recipient: string,
 ): Promise<number> {
   return new Promise((resolve) => {
     let initialized = false;
@@ -234,7 +233,7 @@ export function serve(
         for (const busDir of busDirs) {
           // Projects are drained in order; a failed write stops the consumer.
           // eslint-disable-next-line no-await-in-loop
-          if (!(await deliverPending(write, busDir, monitor))) {
+          if (!(await deliverPending(write, busDir, recipient))) {
             finish(1);
             return;
           }

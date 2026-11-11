@@ -4,9 +4,9 @@
 // string-valued `meta` keys matching [A-Za-z_][A-Za-z0-9_]*, the experimental claude/channel
 // capability, and a protocol version the client treats as legacy (it skips channel
 // registration on a "modern" revision). Re-verify after Claude Code upgrades.
-import type { SpoolEntry } from "./spool.ts";
+import { entryKind, type SpoolEntry } from "./spool.ts";
 
-const SERVER_NAME = "delivery-kit-monitor";
+const SERVER_NAME = "delivery-kit-channel";
 const LEGACY_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
 const DEFAULT_PROTOCOL = "2025-06-18";
 
@@ -17,7 +17,10 @@ export interface ChannelNotification {
 }
 
 export function channelNotification(entry: SpoolEntry): ChannelNotification {
-  const meta: Record<string, string> = { kind: entry.kind, request_id: entry.requestId };
+  const meta: Record<string, string> = {
+    kind: entryKind(entry.kind) ?? entry.kind,
+    request_id: entry.requestId,
+  };
   if (entry.slot !== undefined) {
     meta.slot = String(entry.slot);
   }
@@ -42,7 +45,7 @@ export function initializeResult(params: unknown): Record<string, unknown> {
   return {
     capabilities: { experimental: { "claude/channel": {} } },
     instructions:
-      "Scheduled delivery-kit monitor briefs arrive as channel events. " +
+      "Scheduled delivery-kit review briefs arrive as channel events. " +
       "Delivery is not handling; record handling separately.",
     protocolVersion,
     serverInfo: { name: SERVER_NAME, version: "1" },

@@ -9,7 +9,7 @@ import { hold } from "../lib/locks.ts";
 import { at, sleep } from "../lib/time.ts";
 import { SHA, type Workspace } from "../lib/workspace.ts";
 
-const MONITOR = "00000000-0000-4000-8000-000000000001";
+const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 const EVERY_MINUTE = Array.from({ length: 60 }, (_, m) => String(m).padStart(2, "0"));
 const WRANGLER = "node_modules/wrangler/bin/wrangler.js";
 
@@ -31,9 +31,9 @@ function bus(ws: Workspace, options: { github?: string; reports?: boolean } = {}
       schema: 1,
       revision: 1,
       harness: "codex",
-      roles: { monitor: { conversations: { codex: MONITOR } } },
+      roles: { "dev-manager": { conversations: { codex: RECIPIENT } } },
     });
-    ws.config.reports = { project: "Fixture", recipient: "monitor" };
+    ws.config.reports = { project: "Fixture", recipient: "dev-manager" };
   }
 }
 

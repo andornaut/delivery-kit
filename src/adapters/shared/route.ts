@@ -1,24 +1,20 @@
-// The role-name monitor route, var/route.json schema 1. It names roles only; every send resolves
-// them through var/registry.json for each role's selected harness at that moment.
+// The role-name review route, var/route.json schema 2. It names roles only; every send resolves
+// them through var/registry.json for each role's selected harness at that moment. The review's
+// recipient is the host game's reports.recipient.
 import { existsSync } from "node:fs";
 
+import { loadProjectConfig } from "../../config.ts";
 import { readJson } from "../../durable.ts";
-import { type GameDevConfig, type Layout, roleKeys } from "../../layout.ts";
-import {
-  AmbiguousRole,
-  resolveConversation,
-  resolveHarness,
-  UnknownRole,
-} from "../../registry/resolve.ts";
+import { type GameDevConfig, gameLayout, type Layout, roleKeys } from "../../layout.ts";
+import { resolveConversation, resolveHarness, UnknownRole } from "../../registry/resolve.ts";
 import type { Harness, Registry } from "../../registry/schema.ts";
 import { isRecord } from "./pyjson.ts";
 
 export interface RoleRoute {
-  readonly schema: 1;
+  readonly schema: 2;
   readonly state: "active" | "held";
-  /** The game whose runner dispatches the scheduled wake. */
+  /** The game whose runner dispatches the scheduled review. */
   readonly host: string;
-  readonly monitor: string;
   readonly targets: readonly string[];
 }
 
@@ -29,23 +25,29 @@ export class RouteError extends Error {
   }
 }
 
-const ROUTE_KEYS = ["host", "monitor", "schema", "state", "targets"];
+const ROUTE_KEYS = ["host", "schema", "state", "targets"];
 
-/** Validate a schema 1 route against config.json; throws RouteError when it is not one. */
+/** The edit a schema 1 route needs. */
+export const ROUTE_SCHEMA_1 =
+  'var/route.json schema 1 is not supported: remove "monitor" and set "schema" to 2; ' +
+  "scheduled reviews go to the host game's reports.recipient";
+
+/** Validate a schema 2 route against config.json; throws RouteError when it is not one. */
 export function validateRoleRoute(config: GameDevConfig, value: unknown): RoleRoute {
+  if (isRecord(value) && (value.schema === 1 || Object.hasOwn(value, "monitor"))) {
+    throw new RouteError(ROUTE_SCHEMA_1);
+  }
   const roles = new Set(roleKeys(config));
   if (
     !isRecord(value) ||
     Object.keys(value).sort().join() !== ROUTE_KEYS.join() ||
-    value.schema !== 1 ||
+    value.schema !== 2 ||
     (value.state !== "active" && value.state !== "held") ||
     typeof value.host !== "string" ||
     !Object.hasOwn(config.games, value.host) ||
-    typeof value.monitor !== "string" ||
-    !roles.has(value.monitor) ||
     !Array.isArray(value.targets)
   ) {
-    throw new RouteError("invalid monitor route schema");
+    throw new RouteError("invalid review route schema");
   }
   const targets = value.targets as unknown[];
   if (targets.some((target) => typeof target !== "string" || !roles.has(target))) {
@@ -55,16 +57,10 @@ export function validateRoleRoute(config: GameDevConfig, value: unknown): RoleRo
   if (new Set(names).size !== names.length) {
     throw new RouteError("route targets must be distinct");
   }
-  if (value.state === "active" && (names.length === 0 || names.includes(value.monitor))) {
-    throw new RouteError("an active route needs targets distinct from its monitor");
+  if (value.state === "active" && names.length === 0) {
+    throw new RouteError("an active route needs at least one target");
   }
-  return {
-    host: value.host,
-    monitor: value.monitor,
-    schema: 1,
-    state: value.state,
-    targets: names,
-  };
+  return { host: value.host, schema: 2, state: value.state, targets: names };
 }
 
 /** Read and validate var/route.json against config.json; null when no route is declared. */
@@ -76,9 +72,29 @@ export function readRoleRoute(layout: Layout): RoleRoute | null {
   try {
     value = readJson(layout.routeFile);
   } catch {
-    throw new RouteError("monitor route is unreadable");
+    throw new RouteError("review route is unreadable");
   }
   return validateRoleRoute(layout.config, value);
+}
+
+/**
+ * The role that receives the route's scheduled review: the host game's reports.recipient, which
+ * must be a role in config.json. An active route whose targets include it is invalid.
+ */
+export function routeRecipient(layout: Layout, route: RoleRoute): string {
+  let recipient: string;
+  try {
+    recipient = loadProjectConfig(gameLayout(layout, route.host).configFile).reports.recipient;
+  } catch {
+    throw new RouteError(`the route host ${route.host} has no readable reports.recipient`);
+  }
+  if (!roleKeys(layout.config).includes(recipient)) {
+    throw new RouteError(`the route recipient ${recipient} is not a role in config.json`);
+  }
+  if (route.state === "active" && route.targets.includes(recipient)) {
+    throw new RouteError(`active route targets must not include the recipient ${recipient}`);
+  }
+  return recipient;
 }
 
 export interface RouteEndpoint {
@@ -92,9 +108,9 @@ export type SendRoute =
   | { readonly status: "held" | "nonhost" }
   | {
       readonly status: "active";
-      /** Transport of the monitor, independently of each target's transport. */
+      /** Transport of the recipient, independently of each target's transport. */
       readonly harness: Harness;
-      readonly monitor: RouteEndpoint;
+      readonly recipient: RouteEndpoint;
       readonly targets: readonly RouteEndpoint[];
     };
 
@@ -103,15 +119,20 @@ export function roleConversation(registry: Registry, role: string): string | nul
   try {
     return resolveConversation(registry, role);
   } catch (error) {
-    if (error instanceof UnknownRole || error instanceof AmbiguousRole) {
+    if (error instanceof UnknownRole) {
       return null;
     }
     throw error;
   }
 }
 
-/** The route for `game`'s runner, resolved through `registry` at send time. */
-export function sendRoute(registry: Registry, route: RoleRoute, game: string): SendRoute {
+/** The route for `game`'s runner and its `recipient` role, resolved through `registry` at send time. */
+export function sendRoute(
+  registry: Registry,
+  recipient: string,
+  route: RoleRoute,
+  game: string,
+): SendRoute {
   if (route.host !== game) {
     return { status: "nonhost" };
   }
@@ -125,31 +146,32 @@ export function sendRoute(registry: Registry, route: RoleRoute, game: string): S
       : registry.harness,
     role,
   });
-  const monitor = endpoint(route.monitor);
+  const resolved = endpoint(recipient);
   return {
-    harness: monitor.harness,
-    monitor,
+    harness: resolved.harness,
+    recipient: resolved,
     status: "active",
     targets: route.targets.map(endpoint),
   };
 }
 
-/** The distinct resolved target conversations other than the monitor's. */
+/** The distinct resolved target conversations other than the recipient's. */
 function peerConversations(route: Extract<SendRoute, { status: "active" }>): string[] {
-  const monitor = route.monitor.conversation;
+  const recipient = route.recipient.conversation;
   const peers = route.targets
     .map((target) => target.conversation)
-    .filter((id): id is string => id !== null && id !== monitor);
+    .filter((id): id is string => id !== null && id !== recipient);
   return [...new Set(peers)];
 }
 
 export interface ActiveScope {
   readonly status: "active";
   readonly harness?: Harness;
-  /** Includes the monitor and every resolved recipient; absent in older fixtures. */
+  /** Includes the recipient and every resolved target; absent in older fixtures. */
   readonly harnesses?: Readonly<Record<string, Harness>>;
-  readonly coordinator: string;
-  readonly monitorName: string;
+  /** The recipient's conversation. */
+  readonly recipient: string;
+  readonly recipientRole: string;
   readonly peers: readonly string[];
   readonly targets: readonly {
     readonly sessionId: string;
@@ -159,16 +181,16 @@ export interface ActiveScope {
 }
 
 /**
- * The resolved conversations of an active route: the monitor's as coordinator and each target
- * with a conversation for this harness. Null when the monitor itself has none.
+ * The resolved conversations of an active route: the recipient's and each target with a
+ * conversation for this harness. Null when the recipient itself has none.
  */
 export function activeScope(route: Extract<SendRoute, { status: "active" }>): ActiveScope | null {
-  const coordinator = route.monitor.conversation;
-  if (coordinator === null) {
+  const recipient = route.recipient.conversation;
+  if (recipient === null) {
     return null;
   }
   const harnesses = new Map<string, Harness>();
-  for (const endpoint of [route.monitor, ...route.targets]) {
+  for (const endpoint of [route.recipient, ...route.targets]) {
     if (endpoint.conversation !== null) {
       const existing = harnesses.get(endpoint.conversation);
       if (existing !== undefined && existing !== endpoint.harness) {
@@ -178,14 +200,14 @@ export function activeScope(route: Extract<SendRoute, { status: "active" }>): Ac
     }
   }
   return {
-    coordinator,
     harness: route.harness,
     harnesses: Object.fromEntries(harnesses),
-    monitorName: route.monitor.role,
     peers: peerConversations(route),
+    recipient,
+    recipientRole: route.recipient.role,
     status: "active",
     targets: route.targets
-      .filter((target) => target.conversation !== null && target.conversation !== coordinator)
+      .filter((target) => target.conversation !== null && target.conversation !== recipient)
       .map((target) => ({
         harness: target.harness,
         name: target.role,
@@ -195,7 +217,11 @@ export function activeScope(route: Extract<SendRoute, { status: "active" }>): Ac
 }
 
 /** The route's scope regardless of host, for commands run from any game's checkout. */
-export function routeScope(registry: Registry, route: RoleRoute): ActiveScope | null {
-  const send = sendRoute(registry, route, route.host);
+export function routeScope(
+  registry: Registry,
+  recipient: string,
+  route: RoleRoute,
+): ActiveScope | null {
+  const send = sendRoute(registry, recipient, route, route.host);
   return send.status === "active" ? activeScope(send) : null;
 }

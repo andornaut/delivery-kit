@@ -15,7 +15,7 @@ import type {
   Inventory,
   InventoryEntry,
 } from "../types.ts";
-import { listingOrNull, monitorAvailability } from "./agents.ts";
+import { listingOrNull, recipientAvailability } from "./agents.ts";
 import { deliveredDir, type Json, readEntry, spoolEvent } from "./spool.ts";
 
 const STATUSES: readonly DeliveryStatus[] = [
@@ -116,7 +116,7 @@ export function claudeAdapter(env: NodeJS.ProcessEnv, game: GameLayout): Harness
       }
       if (disposition === "retained") {
         return Promise.resolve({
-          reason: "retention is recorded by the monitor",
+          reason: "retention is recorded by inbox ack",
           requestId: queueId,
           status: "unchanged",
         });
@@ -168,7 +168,7 @@ export function claudeAdapter(env: NodeJS.ProcessEnv, game: GameLayout): Harness
           status: "unavailable",
         });
       }
-      const availability = monitorAvailability(listing, conversationId);
+      const availability = recipientAvailability(listing, conversationId);
       if (availability.status !== null) {
         return Promise.resolve({ status: availability.status === "idle" ? "available" : "busy" });
       }
@@ -186,9 +186,9 @@ export function claudeAdapter(env: NodeJS.ProcessEnv, game: GameLayout): Harness
 export {
   agentsListing,
   listingOrNull,
-  monitorAvailability,
+  recipientAvailability,
   roleDiagnostics,
   sessionStatus,
 } from "./agents.ts";
 export { channelNotification, initializeResult } from "./protocol.ts";
-export { DELIVERED, pendingEntries, SPOOL, spoolEvent, spoolMonitorBrief } from "./spool.ts";
+export { DELIVERED, pendingEntries, SPOOL, spoolEvent, spoolReviewBrief } from "./spool.ts";

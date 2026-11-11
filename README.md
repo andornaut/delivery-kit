@@ -18,36 +18,36 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v2.2.1/delivery-kit-2.2.1.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v3.0.0/delivery-kit-3.0.0.tgz"
 }
 ```
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
 runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
-`claude channel`, the readiness probes and the monitor commands.
+`claude channel`, the readiness probes and the inbox commands.
 
 ## Commands
 
-Top-level verbs are game operations; `monitor`, `harness`, `claude` and `codex` are noun groups that take a
+Top-level verbs are game operations; `inbox`, `harness`, `claude` and `codex` are noun groups that take a
 verb. Every command resolves game-dev from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
 directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
 explicit; it is never inferred from the working directory.
 
-| Command                                                                                                                                                    | Purpose                                                                                                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run --game ID`                                                                                                                                            | Game operation: the resident runner for one game.                                                                                                          |
-| `status --game ID [--resources]`                                                                                                                           | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information. |
-| `control --game ID --state enabled\|paused --reason TEXT --requester ROLE`                                                                                 | Game operation: persist desired delivery control with its reason and requesting role.                                                                      |
-| `check-config [--game ID]`                                                                                                                                 | Game operation: validate `config.json`, `var/registry.json` and each `delivery-kit.json` together, with no Git, network or container activity.             |
-| `request --game ID --id SAFE_ID`                                                                                                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                  |
-| `monitor snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Monitor (game-dev): capture the monitor review snapshot.                                                                                                   |
-| `monitor ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Monitor (game-dev): acknowledge queue items from that snapshot. `retained` requires a reason.                                                              |
-| `claude ready`, `codex ready`                                                                                                                              | Harness: the handoff readiness probe (see [Readiness probe](#readiness-probe)).                                                                            |
-| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                              | Harness: probe the requested target adapter and conversations for an explicit subset.                                                                      |
-| `harness ready [--game ID]... [--role ROLE]...`                                                                                                            | Harness: read-only readiness using each selected role's effective harness.                                                                                 |
-| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                    | Harness: atomic selection for at least one explicit game or role, without activation.                                                                      |
-| `claude channel [--game ID]... [--monitor UUID] [--state-dir DIR]... [--poll-seconds N]`                                                                   | Harness: the stdio MCP server the Claude monitor session starts.                                                                                           |
-| `help`, `--help`, `--version`                                                                                                                              | Usage and version.                                                                                                                                         |
+| Command                                                                                                                                                  | Purpose                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run --game ID`                                                                                                                                          | Game operation: the resident runner for one game.                                                                                                                |
+| `status --game ID [--resources]`                                                                                                                         | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information.       |
+| `control --game ID --state enabled\|paused --reason TEXT --requester ROLE`                                                                               | Game operation: persist desired delivery control with its reason and requesting role.                                                                            |
+| `check-config [--game ID]`                                                                                                                               | Game operation: validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
+| `request --game ID --id SAFE_ID`                                                                                                                         | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
+| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Inbox (recipient): capture the recipient's inbox snapshot.                                                                                                       |
+| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Inbox (recipient): acknowledge queue items from that snapshot. `retained` requires a reason.                                                                     |
+| `claude ready`, `codex ready`                                                                                                                            | Harness: the handoff readiness probe (see [Readiness probe](#readiness-probe)).                                                                                  |
+| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | Harness: probe the requested target adapter and conversations for an explicit subset.                                                                            |
+| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Harness: read-only readiness using each selected role's effective harness.                                                                                       |
+| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Harness: atomic selection for at least one explicit game or role, without activation.                                                                            |
+| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | Harness: the stdio MCP server the Claude recipient session starts.                                                                                               |
+| `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                                                                                               |
 
 - `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
 - `control`: game-dev writes desired control; Tech owns runner adoption. The command changes
@@ -60,23 +60,25 @@ explicit; it is never inferred from the working directory.
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
-- `claude channel`: by default it drains every game's spool (or each `--game`) for the registry's
-  `monitor` conversation and requires that role's effective harness to be `claude`. `--monitor UUID` and repeated
-  absolute `--state-dir STATE/unblock` paths select the monitor and spools explicitly;
-  `--state-dir` excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory
-  and drains only spools that already exist, so it can start before any game state. Without
-  `--monitor`, an absent registry stops it with exit 1.
-- `monitor snapshot` and `monitor ack`: `--recipient` defaults to the `monitor` duty. `--recipient`
-  and `--parent` take a role name, or a canonical conversation UUID registered for the active
-  harness. With Claude the recipient must be the active route's monitor and every parent a route
-  member; with Codex every parent must belong to the active route. `--history-cursor` applies to
+- `claude channel`: by default it drains every game's spool (or each `--game`) for the
+  conversation of the `reports.recipient` those games name, and requires that role's effective
+  harness to be `claude`. Games that name different recipients stop it with exit 1; select games
+  with one recipient or pass `--conversation`. `--conversation UUID` and repeated absolute
+  `--state-dir STATE/unblock` paths select the conversation and spools explicitly; `--state-dir`
+  excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory and drains only
+  spools that already exist, so it can start before any game state. Without `--conversation`, an
+  absent registry stops it with exit 1.
+- `inbox snapshot` and `inbox ack`: `--recipient` defaults to the game's `reports.recipient`.
+  `--recipient` and `--parent` take a role name, or a canonical conversation UUID registered for
+  the active harness. With Claude the recipient must be the active route's recipient and every
+  parent a route member; with Codex every parent must belong to the active route. `--history-cursor` applies to
   Codex. An unreadable Claude channel spool is reported under the snapshot's `errors`, with
   `complete` false and exit 1; only a missing spool counts as empty.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
 read or a refused runner start, and 2 for a usage error or an unexpected failure. `run` exits 130
 on `SIGINT` and 143 on `SIGTERM`. Errors, a refused runner start and a refused request go to
-stderr prefixed `delivery-kit:`. `monitor snapshot` and `monitor ack` keep their JSON result on
+stderr prefixed `delivery-kit:`. `inbox snapshot` and `inbox ack` keep their JSON result on
 stdout and also name the error on stderr. `--help` is generated from each command's parser
 options, so it lists every flag a command accepts.
 
@@ -89,8 +91,8 @@ credential references.
 
 Committed in game-dev, schema 1. Every path is relative to game-dev. See `examples/config.json`.
 
-- `timezone` and `wakeMinutes` (integers 0 to 59): the monitor wake schedule. An empty
-  `wakeMinutes` schedules no wake.
+- `timezone` and `wakeMinutes` (integers 0 to 59): the scheduled review minutes. An empty
+  `wakeMinutes` schedules no review.
 - `games.<id>`: `name` (the report name, for example `Archie`), `path` to the game checkout and
   `roles`.
 - `kits.<id>.path` and `sharedRoles`.
@@ -122,7 +124,8 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   over the paths changed in the pushed range (the previous remote `main` to the pushed SHA). A push
   whose every changed path matches it skips deployment.
 - `reports`: `project` (must equal the game's `name` in `config.json`), `scheduledTicks`, and
-  `recipient` and `workerParents`, each a role key or duty name resolved through the registry.
+  `recipient` and `workerParents`, each a registered role key. `recipient` receives the game's
+  events and, when the game hosts the route, its scheduled reviews.
 
 ## Registry
 
@@ -130,19 +133,18 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
 ownership and the conversation ID of each role per harness. It never proves activation on its
 own: `transfers` carries the hold, acceptance and activation markers.
 
-| Field                             | Content                                                                                                                                                                                                    |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                               |
-| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                                    |
-| `host`                            | `nativeProjectId` and `root` (relative to game-dev).                                                                                                                                                       |
-| `roles.<key>`                     | `ownership`, `worktree` (relative to game-dev), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`) and `duties`. |
-| `operations.<game>`               | `busOwner` (a role key or duty), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                                     |
-| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                               |
+| Field                             | Content                                                                                                                                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                  |
+| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                       |
+| `host`                            | `nativeProjectId` and `root` (relative to game-dev).                                                                                                                                          |
+| `roles.<key>`                     | `ownership`, `worktree` (relative to game-dev), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`). |
+| `operations.<game>`               | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                                |
+| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                  |
 
 - Every role key must be a role key in `config.json`, and every `operations` key a game.
-- A duty (for example `monitor`) is a name held by exactly one role. A role name resolves to
-  itself; a duty name resolves to the role that holds it, and a duty held by more than one role is
-  an error. A duty must not equal a role key.
+- Every role reference (`busOwner`, `reports.recipient`, `reports.workerParents`, `--requester`,
+  `--role`, `--recipient`, `--parent`) is a registered role key; there are no aliases.
 - Every writer holds `var/registry.lock`, rejects a changed `revision`, validates the result,
   writes durably and increments `revision`.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
@@ -176,7 +178,7 @@ delivery-kit harness select \
 ```
 
 Each `--game` selects every configured role for that game. Repeat `--role` to select additional
-registered role names or duties; the union is changed once. Missing, invalid or ambiguous roles,
+registered role names; the union is changed once. Missing or invalid roles,
 an unknown game, an unavailable selected conversation ID, or a changed revision refuse the entire mutation. At least one scope is
 required, so this command never implicitly switches the global default. `--harness default`
 removes only the selected overrides. Unselected games, shared roles, conversation IDs, worktrees,
@@ -186,7 +188,7 @@ started and no runner is restarted by selection.
 ### Send-time resolution
 
 Route, configuration, briefs and events name roles, never conversation IDs. Each wake, event
-delivery, monitor snapshot, acknowledgement and readiness probe reads `var/registry.json` when it
+delivery, inbox snapshot, acknowledgement and readiness probe reads `var/registry.json` when it
 sends: the role's optional `harness` override, otherwise the registry default, selects the adapter;
 `roles.<role>.conversations.<effective harness>` gives the ID.
 Nothing is cached across sends. A missing or null ID is reported `unavailable` for that role,
@@ -206,8 +208,8 @@ only reads them, and a missing or invalid record is never clearance.
 
 - Claude: `claude agents --json` returns a listing.
 - Codex: `CODEX_CONTROL_SOCKET` names an absolute socket path that accepts a connection.
-- The route's monitor and every target, or the `monitor` duty when there is no route, have a
-  conversation ID for that harness. An invalid route is never ready.
+- The route's recipient and every target, or every game's `reports.recipient` when there is no
+  route, have a conversation ID for that harness. An invalid route is never ready.
 
 Output is one JSON line:
 
@@ -215,7 +217,7 @@ Output is one JSON line:
 {
   "harness": "codex",
   "adapter": { "status": "available", "reason": null },
-  "roles": [{ "role": "game-dev", "conversation": "<uuid>", "status": "resolved" }],
+  "roles": [{ "role": "dev-manager", "conversation": "<uuid>", "status": "resolved" }],
   "ready": true
 }
 ```
@@ -226,7 +228,7 @@ add `current_harness` and `probed_harness` to each role row. Unselected games an
 conversation ID for that target. Scopes never create or modify a registry entry.
 
 `harness ready` probes the current effective harness for each selected role. Without a scope it
-uses the monitor and route targets, or the monitor duty without a route. Its output contains
+uses the route recipient and targets, or every game's recipient without a route. Its output contains
 `harness: "mixed"`, an `adapters` object keyed by each required harness, the role rows with
 `current_harness` and `probed_harness`, and `ready`. Each distinct adapter is probed once. Missing
 IDs or unavailable adapter capabilities make the result not ready; an invalid selection fails
@@ -236,34 +238,35 @@ checks are clear.
 Readiness exits 0 when ready and 1 when not, including when the registry is missing or the layout
 cannot be read. Malformed command options exit 2. It sends nothing and activates nothing.
 
-## Monitor route
+## Review route
 
-`var/route.json` (schema 1) names the monitor and its targets by role:
+`var/route.json` (schema 2) names the scheduled review's host game and its targets by role:
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "state": "active",
   "host": "archies-dog-walks",
-  "monitor": "game-dev",
   "targets": ["archies-dog-walks/tech", "chibis-way-home/tech", "art-kit"]
 }
 ```
 
-- `state` is `active` or `held`. A held route, or no route, delivers no scheduled wake.
-- `host` is the game whose runner dispatches the scheduled wake at the `config.json`
-  `wakeMinutes`.
-- `monitor` and every target must be role keys in `config.json`. Targets are distinct, and an
-  active route needs at least one target other than the monitor.
-- The file has exactly these five keys.
+- `state` is `active` or `held`. A held route, or no route, delivers no scheduled review, and a
+  held route also defers events addressed to its recipient.
+- `host` is the game whose runner dispatches the scheduled review at the `config.json`
+  `wakeMinutes`. The review goes to the host's `reports.recipient`, which must be a role key in
+  `config.json`.
+- Every target must be a role key in `config.json`. Targets are distinct, an active route needs at
+  least one target, and an active route's targets exclude its recipient.
+- The file has exactly these four keys. A schema 1 route is refused with the edit it needs.
 
 ## Harness adapters
 
 - **Claude:** briefs and events are spooled under the bus's `unblock/` directory with a `sending`
   receipt written first. `delivery-kit claude channel` claims each entry, delivers it once to the
-  monitor session, records the delivery, marks the receipt `accepted`, then removes the entry. A
+  recipient session, records the delivery, marks the receipt `accepted`, then removes the entry. A
   `sending` receipt with no spool entry becomes `ambiguous` and is never resent. The channel server
-  is configured in the monitor session's MCP settings; see `examples/claude-channel.mcp.json`.
+  is configured in the recipient session's MCP settings; see `examples/claude-channel.mcp.json`.
 - **Codex:** turns are steered through the control socket at `CODEX_CONTROL_SOCKET`, which must be
   set to an absolute path, with the same receipt rules. Without it Codex delivery is deferred.
 
@@ -271,9 +274,9 @@ Claude session listings do not provide native history, queue contents or authori
 state. Unavailable capabilities remain explicitly unknown. A Claude conversation ID is never
 queried through Codex, and unavailable native data is never presented as an empty queue or as
 permission to acknowledge work. Mixed selection preserves exact payload guards, ambiguous-delivery
-handling and the existing same-slot monitor acknowledgements.
+handling and the existing same-slot review deduplication.
 
-Mixed monitor snapshots expose `harnesses` (the provider per conversation), `native_queues`
+Mixed inbox snapshots expose `harnesses` (the provider per conversation), `native_queues`
 (native queue availability), `channel_queues` (delivered local-channel entries) and `queue_sources`
 (inventory origin). `complete` means the requested available inventories were collected without
 actual collection errors, preserving the legacy exit-0 success semantics. It proves neither
@@ -303,9 +306,9 @@ refusal stops a flush and the next flush resumes there.
 All mutable state lives in game-dev's ignored `var/`:
 
 - `registry.json` and `registry.lock`.
-- `route.json`: the monitor route.
+- `route.json`: the review route.
 - `handoffs/<scope>/`: checkpoints the registry references.
-- `game-dev/`: monitor review snapshots, health history, acknowledgements and retentions.
+- `game-dev/`: review and inbox snapshots, health history, acknowledgements and retentions.
 - `games/<g>/bus/`: the bus. It holds `runner.lock`, `loop.lock`, `departure.lock`,
   `active-departure`, `gate-failed/`, the detached `gate-<sha>` worktree kept for a pending
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
@@ -371,9 +374,9 @@ states. An older installed CLI does not implement `control`:
 
 ```bash
 delivery-kit control --game archies-dog-walks --state paused \
-  --reason 'Approved initial Archie pause' --requester game-dev
+  --reason 'Approved initial Archie pause' --requester dev-manager
 delivery-kit control --game chibis-way-home --state enabled \
-  --reason 'Approved initial Chibi enablement' --requester game-dev
+  --reason 'Approved initial Chibi enablement' --requester dev-manager
 ```
 
 These are explicit adoption operations, not built-in defaults. Preserve an existing upgraded
@@ -392,12 +395,12 @@ cd /absolute/path/to/game \
 ```
 
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
-and runs the scheduled and requested departure loop, the 60 s observer (monitor wakes,
+and runs the scheduled and requested departure loop, the 60 s observer (scheduled reviews,
 scheduled-slot reports and event flushes), the 1800 s resource sampler and the CI watches
 in-process. No timer outlives it, and no systemd unit, cron entry or other timer is involved. A
 missed scheduled slot is never replayed.
 
-Each distinct scheduled monitor slot attempts a guarded review, including when queues are empty,
+Each distinct scheduled review slot attempts a guarded review, including when queues are empty,
 unchanged since an accepted review, or explicitly retained. Accepted inventory signatures are
 health diagnostics, not permission to suppress later scheduled reviews. Repeated observations
 of the same slot use its persisted receipt without another send; an interrupted send becomes
@@ -532,38 +535,56 @@ subject last.
   `ValidationError` and leaves the file unchanged. Pass `options.held` when the caller already
   holds the lock.
 - `resolveRole(registry, role)` and `resolveConversation(registry, role)`, which throw
-  `UnknownRole` or `AmbiguousRole`.
+  `UnknownRole` for a name that is not a registered role key.
 - `resolveHarness(registry, role)` returns a registered role's override or the registry default.
   `selectHarness(layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
   entire explicit selection and changes only those overrides under `registry.lock`.
 - `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.
 
-## 2.0.0 changes
+## Upgrading to 3.0
 
-2.0.0 reshapes the CLI. An old form exits 2 with a one-line hint naming its replacement; there are
-no aliases.
+3.0.0 removes duties and the route's `monitor` field. A game's scheduled review goes to the role
+its `delivery-kit.json` names as `reports.recipient`, the same role that receives its events.
+A 2.x reader cannot use a schema 2 route or resolve a duty after the edits, so every pin (each
+game and game-dev) moves to 3.0.0 in the same idle replacement window.
 
-| 1.x form                                 | 2.0.0 form                           |
-| ---------------------------------------- | ------------------------------------ |
-| `channel ...`                            | `claude channel ...`                 |
-| `monitor-snapshot ...`                   | `monitor snapshot ...`               |
-| `monitor-ack ...`                        | `monitor ack ...`                    |
-| `resource-report --game ID`              | `status --game ID --resources`       |
-| `status --harness claude`                | `claude ready`                       |
-| `status --harness codex`                 | `codex ready`                        |
-| `request --game ID --request-id ID`      | `request --game ID --id ID`          |
-| `migrate ...`, `migrate --remove-legacy` | removed; upgrade 0.9.x through 1.0.3 |
+- `var/registry.json`: remove `duties` from every role, and replace each duty name with the role
+  key that held it, in `operations.<game>.busOwner` and anywhere else a role is named. A role that
+  still has `duties` fails validation with this edit. The registry schema stays 1.
+- `var/route.json`: remove `monitor` and set `schema` to 2. The host game's `reports.recipient`
+  receives the review. A schema 1 route defers every review and is reported by `check-config`.
+- Each `delivery-kit.json`: `reports.recipient` and `reports.workerParents` name registered role
+  keys (for example `dev-manager`), never a duty.
+- Channel MCP configuration: replace `--monitor UUID` with `--conversation UUID`, or omit it to
+  serve the selected games' `reports.recipient`. The example server key is `delivery-kit-channel`.
+- Scripts and instructions: `inbox snapshot` and `inbox ack` replace `monitor snapshot` and
+  `monitor ack`, with the same options. Role arguments (`--requester`, `--role`, `--recipient`,
+  `--parent`) take role keys, not duties.
+- Output: runner lines read `bus: scheduled review SLOT:` and `bus: review deferred:`; slot and
+  health fields are `review_status`, `review_reason` and `recipient_session_status`, slot receipts
+  carry `recipient`, and the health event kind is `review-stuck`. Claude review briefs are spooled
+  with kind `review`; an entry a 2.x runner spooled is still delivered. Inbox state changes
+  serialize on `unblock/inbox.lock`.
+- Registry module: `AmbiguousRole` is removed, `resolveRole` accepts only registered role keys, and
+  `Layout.monitorDir` is `Layout.reviewDir`.
 
-Callers change:
+### Removed command forms
 
-- game-dev's channel MCP configuration: the server command ends in `claude channel` instead of
-  `channel` (see `examples/claude-channel.mcp.json`);
-- the monitor instructions: `monitor snapshot` and `monitor ack` replace `monitor-snapshot` and
-  `monitor-ack`, with the same options;
-- adoption and handoff checks: `claude ready` or `codex ready` replaces `status --harness claude`
-  or `status --harness codex`, with the same JSON output and exit codes;
-- request scripts: `--id` replaces `--request-id`; reporting scripts: `status --resources`
-  replaces `resource-report`.
+A removed form exits 2 with a one-line hint naming its replacement; there are no aliases.
+
+| Removed form                             | Removed in | Current form                         |
+| ---------------------------------------- | ---------- | ------------------------------------ |
+| `channel ...`                            | 2.0.0      | `claude channel ...`                 |
+| `monitor-snapshot ...`                   | 2.0.0      | `inbox snapshot ...`                 |
+| `monitor-ack ...`                        | 2.0.0      | `inbox ack ...`                      |
+| `resource-report --game ID`              | 2.0.0      | `status --game ID --resources`       |
+| `status --harness claude`                | 2.0.0      | `claude ready`                       |
+| `status --harness codex`                 | 2.0.0      | `codex ready`                        |
+| `request --game ID --request-id ID`      | 2.0.0      | `request --game ID --id ID`          |
+| `migrate ...`, `migrate --remove-legacy` | 2.0.0      | removed; upgrade 0.9.x through 1.0.3 |
+| `monitor snapshot ...`                   | 3.0.0      | `inbox snapshot ...`                 |
+| `monitor ack ...`                        | 3.0.0      | `inbox ack ...`                      |
+| `claude channel --monitor UUID`          | 3.0.0      | `claude channel --conversation UUID` |
 
 ## Development
 

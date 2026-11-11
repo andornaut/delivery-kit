@@ -1,4 +1,4 @@
-// Scripted Codex native state for monitor and event delivery cases: per-thread status, latest
+// Scripted Codex native state for review and event delivery cases: per-thread status, latest
 // turn, item history, queue pages, child inventories and ordered steer/start outcomes.
 import type { CodexSocket, Reply, RpcCall } from "./codex-socket.ts";
 

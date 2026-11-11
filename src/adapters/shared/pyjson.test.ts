@@ -4,7 +4,7 @@ import { digest, dumpsJson, pyFloat, pyJsonDumps, unicodeDumps } from "./pyjson.
 
 // Expected strings are Python 3.12 json.dumps output for the same values.
 describe("dumpsJson", () => {
-  it("writes the sorted-key record encoding of bus and monitor state", () => {
+  it("writes the sorted-key record encoding of bus and inbox state", () => {
     expect(
       dumpsJson({ state: "pending", id: "a", entries: [["bus/x", "f".repeat(4)]], none: null }),
     ).toBe('{"entries": [["bus/x", "ffff"]], "id": "a", "none": null, "state": "pending"}');

@@ -19,8 +19,8 @@ import {
 } from "./events.ts";
 import { type GameLayout, gameLayout, loadLayout } from "./layout.ts";
 import { holdLock } from "./lock.ts";
-import { claudeFixture, MONITOR } from "./monitor/fixtures.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "./registry/index.ts";
+import { claudeFixture, RECIPIENT } from "./review/fixtures.ts";
 import { CLAUDE_GAME_DEV, makeFixture, registryInput } from "./testFixtures.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -127,7 +127,7 @@ describe("flushEventsWith", () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {
       draft.roles["game-dev"]!.harness = "codex";
-      draft.roles["game-dev"]!.conversations.codex = MONITOR;
+      draft.roles["game-dev"]!.conversations.codex = RECIPIENT;
     });
     const control = await startFakeControl(fixture.base, (method, params) => {
       if (method === "thread/read") {
@@ -301,11 +301,11 @@ describe("flushEventsWith", () => {
   it("resolves role selection again between deliveries in one flush", async () => {
     const game = setup();
     const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
-    const codexMonitor = "00000000-0000-4000-8000-000000000004";
+    const codexRecipient = "00000000-0000-4000-8000-000000000004";
     updateRegistry(layout, 1, (draft) => {
       draft.harness = "codex";
       draft.roles["game-dev"]!.harness = "claude";
-      draft.roles["game-dev"]!.conversations.codex = codexMonitor;
+      draft.roles["game-dev"]!.conversations.codex = codexRecipient;
     });
     const claude = mockAdapter([]);
     const codex = mockAdapter([]);
@@ -322,7 +322,7 @@ describe("flushEventsWith", () => {
       [CLAUDE_GAME_DEV, expect.stringContaining("first")],
     ]);
     expect(codex.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
-      [codexMonitor, expect.stringContaining("second")],
+      [codexRecipient, expect.stringContaining("second")],
     ]);
     expect(events(game).every((event) => event.sent)).toBe(true);
     expect(readRegistry(layout).harness).toBe("codex");
@@ -424,16 +424,15 @@ describe("flushEventsWith", () => {
     const game = setup();
     const root = resolve(game.stateDir, "..", "..", "..");
     const layout = loadLayout(root);
-    const codexMonitor = "00000000-0000-4000-8000-000000000004";
+    const codexRecipient = "00000000-0000-4000-8000-000000000004";
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.conversations.codex = codexMonitor;
+      draft.roles["game-dev"]!.conversations.codex = codexRecipient;
     });
     writeFileSync(
       layout.routeFile,
       JSON.stringify({
         host: "archies-dog-walks",
-        monitor: "game-dev",
-        schema: 1,
+        schema: 2,
         state: "active",
         targets: ["archies-dog-walks/tech"],
       }),
@@ -452,7 +451,7 @@ describe("flushEventsWith", () => {
       [CLAUDE_GAME_DEV, expect.stringContaining("first")],
     ]);
     expect(codex.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
-      [codexMonitor, expect.stringContaining("second")],
+      [codexRecipient, expect.stringContaining("second")],
     ]);
   });
 });

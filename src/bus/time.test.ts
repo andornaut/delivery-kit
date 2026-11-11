@@ -20,7 +20,7 @@ describe("schedule arithmetic", () => {
     expect(latestScheduledSlot(TZ, ["00", "30"], TEN_PM + 45 * 60)).toBe(TEN_PM + 30 * 60);
   });
 
-  it("selects whole-minute slots and never replays a missed monitor minute", () => {
+  it("selects whole-minute slots and never replays a missed review minute", () => {
     expect(minuteSlots(TZ, [0, 1], TEN_PM - 1, TEN_PM + 90)).toEqual([TEN_PM, TEN_PM + 60]);
     expect(currentMinuteSlot(TZ, [20], TEN_PM, TEN_PM + 20 * 60 + 5)).toBe(TEN_PM + 20 * 60);
     expect(currentMinuteSlot(TZ, [20], TEN_PM + 20 * 60, TEN_PM + 20 * 60 + 30)).toBeUndefined();

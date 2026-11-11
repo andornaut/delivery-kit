@@ -22,7 +22,7 @@
   "reports": {
     "project": "Archie",
     "scheduledTicks": true,
-    "recipient": "monitor",
-    "workerParents": ["monitor"]
+    "recipient": "dev-manager",
+    "workerParents": ["dev-manager"]
   }
 }

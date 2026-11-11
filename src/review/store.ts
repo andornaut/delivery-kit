@@ -1,4 +1,4 @@
-// Monitor state shared by snapshots and acknowledgements, under a game's bus `unblock/`
+// Inbox state shared by snapshots and acknowledgements, under a game's bus `unblock/`
 // directory. File names and record keys are persisted game state.
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -135,8 +135,8 @@ export function retentionStatus(
   }
 }
 
-/** Serialize monitor state changes on `<unblock>/monitor.lock`. */
+/** Serialize inbox state changes on `<unblock>/inbox.lock`. */
 export function locked<T>(unblock: string, fn: () => T): T {
   mkdirSync(unblock, { recursive: true });
-  return withLock(join(unblock, "monitor.lock"), fn);
+  return withLock(join(unblock, "inbox.lock"), fn);
 }

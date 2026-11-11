@@ -44,7 +44,7 @@ export interface CollectRequest {
   readonly slot: number | null;
   readonly historyCursor: string | null;
   /**
-   * The active monitor route's coordinator and peers, or null when no active route declares
+   * The active review route's recipient and peers, or null when no active route declares
    * them. Question and process collection never reaches outside it.
    */
   readonly routeMembers?: readonly string[] | null;

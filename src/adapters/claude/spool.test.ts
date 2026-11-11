@@ -9,14 +9,14 @@ import {
   type ClaudeFixture,
   claudeFixture,
   idle,
-  MONITOR,
+  RECIPIENT,
   SLOT,
   TECH,
-} from "../../monitor/fixtures.ts";
+} from "../../review/fixtures.ts";
 import { eventRequestId, slotRequestId } from "../shared/ids.ts";
 import type { ActiveScope } from "../shared/route.ts";
 import { deliverPending } from "./channel.ts";
-import { spoolDir, spoolEvent, spoolMonitorBrief } from "./spool.ts";
+import { spoolDir, spoolEvent, spoolReviewBrief } from "./spool.ts";
 
 type Active = ActiveScope;
 
@@ -39,7 +39,7 @@ function brief(
   slot = SLOT,
   parents: string[] = [],
 ): Record<string, unknown> {
-  return spoolMonitorBrief(
+  return spoolReviewBrief(
     fixture.env,
     fixture.game.busDir,
     active(fixture),
@@ -55,21 +55,21 @@ function claimAll(fixture: ClaudeFixture): void {
   }
 }
 
-describe("spoolMonitorBrief", () => {
+describe("spoolReviewBrief", () => {
   it("reports Codex peer and parent metadata as unsupported without using Claude session status", () => {
     const fixture = claudeFixture();
     const codex = "00000000-0000-4000-8000-000000000022";
     fixture.agents([idle(), idle(TECH), { sessionId: codex, status: "blocked" }]);
     const route: ActiveScope = {
       ...active(fixture),
-      harnesses: { [MONITOR]: "claude", [TECH]: "claude", [codex]: "codex" },
+      harnesses: { [RECIPIENT]: "claude", [TECH]: "claude", [codex]: "codex" },
       peers: [TECH, codex],
       targets: [
         { name: "archies-dog-walks/tech", sessionId: TECH },
         { name: "chibis-way-home/tech", sessionId: codex },
       ],
     };
-    const state = spoolMonitorBrief(fixture.env, fixture.game.busDir, route, SLOT, [TECH, codex]);
+    const state = spoolReviewBrief(fixture.env, fixture.game.busDir, route, SLOT, [TECH, codex]);
     expect(state.status).toBe("sending");
     expect(state.diagnostics).toContainEqual({
       harness: "codex",
@@ -97,8 +97,8 @@ describe("spoolMonitorBrief", () => {
 
   it("fails closed when an explicit endpoint harness map is incomplete", () => {
     const fixture = claudeFixture();
-    const route = { ...active(fixture), harnesses: { [MONITOR]: "claude" as const } };
-    const state = spoolMonitorBrief(fixture.env, fixture.game.busDir, route, SLOT);
+    const route = { ...active(fixture), harnesses: { [RECIPIENT]: "claude" as const } };
+    const state = spoolReviewBrief(fixture.env, fixture.game.busDir, route, SLOT);
     expect(state.status).toBe("deferred");
     expect(state.reason).toContain("harness missing or invalid");
     expect(spooled(fixture)).toEqual([]);
@@ -108,34 +108,34 @@ describe("spoolMonitorBrief", () => {
     const fixture = claudeFixture();
     const scope = active(fixture);
     const legacy: ActiveScope = {
-      coordinator: scope.coordinator,
-      monitorName: scope.monitorName,
       peers: scope.peers,
+      recipient: scope.recipient,
+      recipientRole: scope.recipientRole,
       status: "active",
       targets: scope.targets,
     };
-    const first = spoolMonitorBrief(fixture.env, fixture.game.busDir, legacy, SLOT, [TECH]);
+    const first = spoolReviewBrief(fixture.env, fixture.game.busDir, legacy, SLOT, [TECH]);
     const firstEntry = JSON.parse(
       readFileSync(
-        join(spoolDir(fixture.game.busDir), `${slotRequestId(MONITOR, SLOT)}.json`),
+        join(spoolDir(fixture.game.busDir), `${slotRequestId(RECIPIENT, SLOT)}.json`),
         "utf8",
       ),
     ) as Record<string, unknown>;
     const other = claudeFixture();
-    const second = spoolMonitorBrief(
+    const second = spoolReviewBrief(
       other.env,
       other.game.busDir,
       {
         ...legacy,
         harness: "claude",
-        harnesses: { [MONITOR]: "claude", [TECH]: "claude" },
+        harnesses: { [RECIPIENT]: "claude", [TECH]: "claude" },
       },
       SLOT,
       [TECH],
     );
     const secondEntry = JSON.parse(
       readFileSync(
-        join(spoolDir(other.game.busDir), `${slotRequestId(MONITOR, SLOT)}.json`),
+        join(spoolDir(other.game.busDir), `${slotRequestId(RECIPIENT, SLOT)}.json`),
         "utf8",
       ),
     ) as Record<string, unknown>;
@@ -145,21 +145,21 @@ describe("spoolMonitorBrief", () => {
 
   it("writes the sending receipt and one spool entry keyed by the slot request ID", () => {
     const fixture = claudeFixture();
-    fixture.agents([{ kind: "interactive", sessionId: MONITOR, status: "busy" }, idle(TECH)]);
+    fixture.agents([{ kind: "interactive", sessionId: RECIPIENT, status: "busy" }, idle(TECH)]);
     const state = brief(fixture);
     expect(state).toMatchObject({
       method: "claude-channel",
-      monitor_session_status: "busy",
+      recipient_session_status: "busy",
       status: "sending",
     });
-    const requestId = slotRequestId(MONITOR, SLOT);
-    expect(receipt(fixture, `${MONITOR}-${SLOT}.json`).requestId).toBe(requestId);
+    const requestId = slotRequestId(RECIPIENT, SLOT);
+    expect(receipt(fixture, `${RECIPIENT}-${SLOT}.json`).requestId).toBe(requestId);
     const entry = JSON.parse(
       readFileSync(join(spoolDir(fixture.game.busDir), `${requestId}.json`), "utf8"),
     ) as Record<string, unknown>;
     expect(entry).toMatchObject({
-      kind: "monitor",
-      receipt: `unblock/${MONITOR}-${SLOT}.json`,
+      kind: "review",
+      receipt: `unblock/${RECIPIENT}-${SLOT}.json`,
       slot: SLOT,
     });
     expect(entry.text).toContain(`archies-dog-walks/tech: ${TECH}`);
@@ -176,12 +176,12 @@ describe("spoolMonitorBrief", () => {
     expect(spooled(fixture)).toHaveLength(1);
   });
 
-  it("defers a missing, blocked, unknown or unlisted monitor without spooling", () => {
+  it("defers a missing, blocked, unknown or unlisted recipient without spooling", () => {
     const fixture = claudeFixture();
     const cases: [number, Parameters<ClaudeFixture["agents"]>[0], string][] = [
       [SLOT, [], "missing"],
-      [SLOT + 1, [{ kind: "background", sessionId: MONITOR, state: "blocked" }], "blocked"],
-      [SLOT + 2, [{ sessionId: MONITOR, status: "waiting" }], "unknown"],
+      [SLOT + 1, [{ kind: "background", sessionId: RECIPIENT, state: "blocked" }], "blocked"],
+      [SLOT + 2, [{ sessionId: RECIPIENT, status: "waiting" }], "unknown"],
       [SLOT + 3, "fail", "listing unavailable"],
     ];
     for (const [slot, rows, reason] of cases) {
@@ -189,7 +189,7 @@ describe("spoolMonitorBrief", () => {
       const state = brief(fixture, slot);
       expect(state.status).toBe("deferred");
       expect(state.reason).toContain(reason);
-      expect(receipt(fixture, `${MONITOR}-${slot}.json`).status).toBe("deferred");
+      expect(receipt(fixture, `${RECIPIENT}-${slot}.json`).status).toBe("deferred");
       fixture.agents([idle()]);
       expect(brief(fixture, slot).status).toBe("deduplicated");
     }
@@ -219,7 +219,7 @@ describe("spoolMonitorBrief", () => {
     brief(fixture);
     unlinkSync(join(spoolDir(fixture.game.busDir), spooled(fixture)[0] as string));
     expect(brief(fixture)).toMatchObject({ previousStatus: "ambiguous", status: "deduplicated" });
-    expect(receipt(fixture, `${MONITOR}-${SLOT}.json`).status).toBe("ambiguous");
+    expect(receipt(fixture, `${RECIPIENT}-${SLOT}.json`).status).toBe("ambiguous");
     expect(spooled(fixture)).toEqual([]);
   });
 
@@ -227,10 +227,10 @@ describe("spoolMonitorBrief", () => {
     const fixture = claudeFixture();
     expect(brief(fixture).status).toBe("sending");
     for (let slot = SLOT + 1800; slot < SLOT + 1800 * 4; slot += 1800) {
-      expect(brief(fixture, slot).reason).toContain("earlier monitor brief");
+      expect(brief(fixture, slot).reason).toContain("earlier review brief");
     }
     expect(spooled(fixture)).toHaveLength(1);
-    await deliverPending(() => undefined, fixture.game.busDir, MONITOR);
+    await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
     expect(brief(fixture, SLOT + 1800 * 5).status).toBe("sending");
     claimAll(fixture);
   });
@@ -243,7 +243,7 @@ describe("spoolMonitorBrief", () => {
     } finally {
       lock.release();
     }
-    expect(existsSync(join(fixture.unblock, `${MONITOR}-${SLOT}.json`))).toBe(false);
+    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
   });
 });
 
@@ -251,7 +251,7 @@ describe("spoolEvent", () => {
   const EVENT = "e".repeat(64);
 
   function receiptPath(fixture: ClaudeFixture): string {
-    return join(fixture.game.busDir, "events", "native", `${EVENT}-${MONITOR}.json`);
+    return join(fixture.game.busDir, "events", "native", `${EVENT}-${RECIPIENT}.json`);
   }
 
   function send(fixture: ClaudeFixture): boolean {
@@ -259,7 +259,7 @@ describe("spoolEvent", () => {
       fixture.env,
       fixture.game.busDir,
       receiptPath(fixture),
-      MONITOR,
+      RECIPIENT,
       EVENT,
       "PRIVATE_EVENT",
     );
@@ -274,7 +274,7 @@ describe("spoolEvent", () => {
     expect(send(fixture)).toBe(false);
     expect(eventReceipt(fixture)).toMatchObject({
       attempts: [{ method: "claude-channel", status: "sending" }],
-      clientUserMessageId: eventRequestId(EVENT, MONITOR),
+      clientUserMessageId: eventRequestId(EVENT, RECIPIENT),
       status: "sending",
     });
     expect(readFileSync(receiptPath(fixture), "utf8")).not.toContain("PRIVATE_EVENT");
@@ -282,7 +282,7 @@ describe("spoolEvent", () => {
     expect(spooled(fixture)).toHaveLength(1);
     const lines: string[] = [];
     expect(
-      await deliverPending((line) => void lines.push(line), fixture.game.busDir, MONITOR),
+      await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT),
     ).toBe(true);
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0] as string)).toMatchObject({
@@ -309,7 +309,7 @@ describe("spoolEvent", () => {
     expect(spooled(fixture)).toEqual([]);
   });
 
-  it("defers without clearance or an available monitor", () => {
+  it("defers without clearance or an available recipient", () => {
     const fixture = claudeFixture();
     fixture.agents([]);
     expect(send(fixture)).toBe(false);
