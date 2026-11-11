@@ -60,8 +60,8 @@ export interface ProjectConfig {
   };
 }
 
-/** The resource ceiling every gate observes: at most four CPUs, start below load 24. */
-const RESOURCE_LIMITS = { cpus: 4, loadLimit: 24 } as const;
+/** Configuration ceilings: at most four CPUs and a loadLimit of at most 30. */
+const RESOURCE_LIMITS = { cpus: 4, loadLimit: 30 } as const;
 
 const BRANCH_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,128}$/;
 const GITHUB_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;

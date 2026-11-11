@@ -29,7 +29,7 @@ describe("validateProjectConfig", () => {
     expect(validateProjectConfig(projectConfig("Archie")).gate.install).toBe("npm ci");
   });
 
-  it("accepts no install step, no gate steps, a load limit of 0 and no timezone", () => {
+  it("accepts no install step, no gate steps, load limits of 0 and 30 and no timezone", () => {
     expect(
       issuesFor((config) => {
         Object.assign(section(config, "gate"), { install: "", steps: [] });
@@ -37,6 +37,7 @@ describe("validateProjectConfig", () => {
         delete section(config, "schedule").timezone;
       }),
     ).toEqual([]);
+    expect(issuesFor((config) => (section(config, "resources").loadLimit = 30))).toEqual([]);
     expect(issuesFor((config) => (section(config, "ci").pollSeconds = 0))[0]).toMatch(
       /^\/ci\/pollSeconds:/,
     );
@@ -80,8 +81,8 @@ describe("validateProjectConfig", () => {
       ],
       ["more than four CPUs", (c: Json) => (section(c, "resources").cpus = 5), "/resources/cpus"],
       [
-        "a load limit above 24",
-        (c: Json) => (section(c, "resources").loadLimit = 25),
+        "a load limit above 30",
+        (c: Json) => (section(c, "resources").loadLimit = 31),
         "/resources/loadLimit",
       ],
       [

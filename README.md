@@ -116,7 +116,7 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   the gate. No step name has special meaning. The
   canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
   `art`), so every game lists the shared steps the same way and opts into extras by adding them.
-- `resources`: `cpus` (1 to 4) and `loadLimit` (0 to 24). A departure starts only below
+- `resources`: `cpus` (1 to 4) and `loadLimit` (0 to 30). A departure starts only below
   `loadLimit`, so 0 holds every departure.
 - `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
   pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400).
