@@ -612,10 +612,9 @@ The thin wrappers `scripts/check.sh` and `tests/contract/run.sh` invoke native N
 The separately invoked `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the
 explicit host release-controller exception: it archives the requested commit and starts
 its own offline release container with the pinned Node image and the read-only
-`delivery-kit-npm-check` cache volume (`DELIVERY_KIT_NPM_VOLUME` names another). `CONTAINER_IMAGE`
-instead selects a prepared cache image containing `/opt/check/npm-cache`; an unavailable image
-or dependency fails without fallback. The controller retains the source epoch and copies the
-exact revision's `SOURCE_COMMIT` and `SHA256SUMS` out with the archive. CI fills the cache
+`delivery-kit-npm-check` cache volume (`DELIVERY_KIT_NPM_VOLUME` names another); a missing
+volume or dependency fails without fallback. The controller retains the source epoch and copies
+the exact revision's `SOURCE_COMMIT` and `SHA256SUMS` out with the archive. CI fills the cache
 volume from the lockfile, then invokes this controller after the checks.
 
 ## Compatibility and releases

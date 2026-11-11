@@ -1,7 +1,7 @@
 // Build the npm release asset from an exact committed revision, offline, in a container running
 // as uid 19001. The host writes the committed tree with git archive to a group-readable file
 // outside the checkout, bound read-only (--group-add its group); the npm cache comes read-only
-// from a prepared check image or the legacy volume; the host user copies artifacts with docker cp.
+// from a Docker volume; the host user copies artifacts with docker cp.
 // Output: delivery-kit-VERSION.tgz, SOURCE_COMMIT and SHA256SUMS.
 // Usage: pack.ts EXACT_COMMIT_SHA NEW_ABSOLUTE_DIRECTORY
 import { spawnSync } from "node:child_process";
@@ -61,37 +61,13 @@ function main(args: string[]): number {
     return 2;
   }
   const volume = process.env.DELIVERY_KIT_NPM_VOLUME ?? DEFAULT_VOLUME;
-  const prepared = process.env.CONTAINER_IMAGE;
-  let image: string;
-  let cacheMount: string[];
-  let cachePath: string;
-  if (prepared !== undefined) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/.test(prepared)) {
-      console.error("delivery-kit: CONTAINER_IMAGE must identify a prepared check image");
-      return 2;
-    }
-    const inspected = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", prepared], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    image = inspected.stdout?.trim() ?? "";
-    if (inspected.status !== 0 || !/^sha256:[0-9a-f]{64}$/.test(image)) {
-      console.error("delivery-kit: prepared CONTAINER_IMAGE unavailable");
-      return 2;
-    }
-    cacheMount = [];
-    cachePath = "/opt/check/npm-cache";
-  } else {
-    if (quiet("docker", ["volume", "inspect", volume]) !== 0) {
-      console.error(
-        `delivery-kit: prepare cache volume ${volume} or use a prepared CONTAINER_IMAGE`,
-      );
-      return 2;
-    }
-    image = checkImage(root);
-    cacheMount = ["--mount", `type=volume,src=${volume},dst=/var/tmp,readonly`];
-    cachePath = "/var/tmp/npm";
+  if (quiet("docker", ["volume", "inspect", volume]) !== 0) {
+    console.error(`delivery-kit: prepare cache volume ${volume}`);
+    return 2;
   }
+  const image = checkImage(root);
+  const cacheMount = ["--mount", `type=volume,src=${volume},dst=/var/tmp,readonly`];
+  const cachePath = "/var/tmp/npm";
 
   // Deterministic per revision, so a leftover container from an interrupted pack is replaced.
   const name = `delivery-kit-pack-${sha.slice(0, 12)}`;

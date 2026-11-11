@@ -54,11 +54,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.PACK_TEST_CALLS, JSON.stringify(args) + '\\n');
-if (args[0] === 'image') {
+if (args[0] === 'volume') {
   if (process.env.PACK_TEST_MISSING === '1') process.exit(1);
-  console.log('sha256:' + 'a'.repeat(64));
-} else if (args[0] === 'volume') {
-  if (process.env.CONTAINER_IMAGE !== undefined) process.exit(17);
 } else if (args[0] === 'start' && process.env.PACK_TEST_OFFLINE_FAILURE === '1') {
   process.exit(31);
 } else if (args[0] === 'cp') {
@@ -80,7 +77,7 @@ if (args[0] === 'image') {
 
 function run(fixture: ReturnType<typeof setup>, env: Readonly<Record<string, string>> = {}) {
   const inherited = { ...process.env };
-  delete inherited.CONTAINER_IMAGE;
+  delete inherited.DELIVERY_KIT_NPM_VOLUME;
   const result = spawnSync(
     process.execPath,
     [join(fixture.root, "scripts/pack.ts"), fixture.sha, fixture.output],
@@ -103,31 +100,16 @@ function run(fixture: ReturnType<typeof setup>, env: Readonly<Record<string, str
   return { ...result, calls };
 }
 
-describe("offline pack dependency sources", () => {
-  it("uses the legacy volume and pinned Node image when CONTAINER_IMAGE is absent", () => {
+describe("offline pack", () => {
+  it("builds from the cache volume and pinned Node image with exact archive provenance and copy-out", () => {
     const fixture = setup();
     const result = run(fixture);
     expect(result.status, result.stderr).toBe(0);
-    expect(result.calls.some((call) => call[0] === "volume" && call[1] === "inspect")).toBe(true);
-    expect(result.calls.some((call) => call[0] === "image")).toBe(false);
+    expect(result.calls[0]?.slice(0, 3)).toEqual(["volume", "inspect", "delivery-kit-npm-check"]);
     const create = result.calls.find((call) => call[0] === "create")!;
     expect(create).toContain("node:24.21.0");
     expect(create).toContain("PACK_NPM_CACHE=/var/tmp/npm");
-    expect(create.some((arg) => arg.startsWith("type=volume,") && arg.endsWith(",readonly"))).toBe(
-      true,
-    );
-  });
-
-  it("pins the prepared image ID, omits the volume and preserves exact archive provenance and copy-out", () => {
-    const fixture = setup();
-    const result = run(fixture, { CONTAINER_IMAGE: "local-check:prepared" });
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.calls.some((call) => call[0] === "volume")).toBe(false);
-    const create = result.calls.find((call) => call[0] === "create")!;
-    expect(create).toContain(`sha256:${"a".repeat(64)}`);
-    expect(create).not.toContain("local-check:prepared");
-    expect(create.some((arg) => arg.startsWith("type=volume,"))).toBe(false);
-    expect(create).toContain("PACK_NPM_CACHE=/opt/check/npm-cache");
+    expect(create).toContain("type=volume,src=delivery-kit-npm-check,dst=/var/tmp,readonly");
     expect(create).toContain(`SOURCE_REVISION=${fixture.sha}`);
     expect(create.some((arg) => /^SOURCE_DATE_EPOCH=\d+$/.test(arg))).toBe(true);
     expect(create[create.indexOf("--network") + 1]).toBe("none");
@@ -146,24 +128,20 @@ describe("offline pack dependency sources", () => {
     );
   });
 
-  it("rejects a missing prepared image without a volume lookup, container or fallback", () => {
+  it("rejects a missing cache volume without a container", () => {
     const fixture = setup();
-    const result = run(fixture, { CONTAINER_IMAGE: "local-check:missing", PACK_TEST_MISSING: "1" });
+    const result = run(fixture, { PACK_TEST_MISSING: "1" });
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("prepared CONTAINER_IMAGE unavailable");
+    expect(result.stderr).toContain("prepare cache volume delivery-kit-npm-check");
     expect(result.calls).toHaveLength(1);
-    expect(result.calls[0]?.slice(0, 2)).toEqual(["image", "inspect"]);
     expect(existsSync(fixture.output)).toBe(false);
   });
 
   it("keeps an offline install failure terminal and copies no artifact", () => {
     const fixture = setup();
-    const result = run(fixture, {
-      CONTAINER_IMAGE: "local-check:prepared",
-      PACK_TEST_OFFLINE_FAILURE: "1",
-    });
+    const result = run(fixture, { PACK_TEST_OFFLINE_FAILURE: "1" });
     expect(result.status).toBe(31);
-    expect(result.calls.some((call) => call[0] === "cp" || call[0] === "volume")).toBe(false);
+    expect(result.calls.some((call) => call[0] === "cp")).toBe(false);
     expect(existsSync(fixture.output)).toBe(false);
   });
 });
