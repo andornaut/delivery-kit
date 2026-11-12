@@ -48,8 +48,8 @@ function blockedDeparture(ws: Workspace): void {
   // A zero limit against the real host load forces a load block.
   ws.hostLoad = "real";
   ws.config.resources = { cpus: 4, loadLimit: 0 };
-  // Keep review slots out of the event window.
-  ws.updateGameDevConfig({ wakeMinutes: [45] });
+  // No review wakes, so only bus events reach the spool.
+  ws.updateGameDevConfig({ wakeMinutes: [] });
   impl.offer(ws, ["bus/queued"]);
   ws.setClock(at(-1, 50));
 }
