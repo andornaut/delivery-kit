@@ -55,13 +55,15 @@ function blockedDeparture(ws: Workspace): void {
 }
 
 /**
- * Step the virtual clock past the load wait once the departure has reported its attempt, then
- * wait for its blocked-load event.
+ * Step the virtual clock past the load wait once the departure has reported its attempt, unless
+ * the virtual clock already passed it, then wait for its blocked-load event.
  */
 async function loadWaitOver(ws: Workspace, runner: Resident): Promise<void> {
   await runner.until(() => events(ws).length >= 1);
-  ws.advanceClock(LOAD_WAIT_SECONDS);
-  await runner.until(() => events(ws).length === 2);
+  if (events(ws).length === 1) {
+    ws.advanceClock(LOAD_WAIT_SECONDS);
+  }
+  await runner.until(() => events(ws).length >= 2);
 }
 
 /** Wait for two further notifier flushes (one virtual minute each). */
