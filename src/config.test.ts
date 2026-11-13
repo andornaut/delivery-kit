@@ -45,23 +45,11 @@ describe("validateProjectConfig", () => {
 
   it("requires explicit integer memory in MiB from 6 through 8192", () => {
     for (const memoryMiB of [6, 8192]) {
-      expect(
-        issuesFor((config) => (section(config, "resources").memoryMiB = memoryMiB)),
-      ).toEqual([]);
+      expect(issuesFor((config) => (section(config, "resources").memoryMiB = memoryMiB))).toEqual(
+        [],
+      );
     }
-    for (const memoryMiB of [
-      undefined,
-      0,
-      -1,
-      1,
-      5,
-      1.5,
-      8193,
-      "4096",
-      null,
-      NaN,
-      Infinity,
-    ]) {
+    for (const memoryMiB of [undefined, 0, -1, 1, 5, 1.5, 8193, "4096", null, NaN, Infinity]) {
       const issues = issuesFor((config) => {
         const resources = section(config, "resources");
         if (memoryMiB === undefined) delete resources.memoryMiB;
