@@ -54,8 +54,12 @@ suite("claude channel consumer", () => {
       expect(receipt(ws, slot).status).toBe("accepted");
       expect(receipt(ws, slot).acceptedAt).toMatch(ACCEPTED_AT);
     }
-    expect((await tick(ws, SLOT)).review[0]!.result.previousStatus).toBe("accepted");
+    // Stop the consumer's polling before the duplicate tick takes the shared unblock lock.
     expect((await channel.close()).code).toBe(0);
+    expect((await tick(ws, SLOT)).review[0]!.result).toMatchObject({
+      previousStatus: "accepted",
+      status: "deduplicated",
+    });
     const restarted = Channel.open(ws, [ws.path("unblock")]);
     restarted.initialize();
     restarted.initialized();
