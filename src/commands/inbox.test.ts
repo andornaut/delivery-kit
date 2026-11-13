@@ -139,7 +139,7 @@ describe("inbox effective harness selection", () => {
     const { fixture } = await delivered();
     select(fixture, (registry) => {
       registry.harness = "codex";
-      registry.roles["game-dev"]!.harness = "claude";
+      registry.roles["game-coordinator"]!.harness = "claude";
       registry.roles["archies-dog-walks/tech"]!.harness = "claude";
     });
     const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
@@ -179,7 +179,7 @@ describe("inbox effective harness selection", () => {
   it("refuses an ambiguous active UUID before choosing either adapter", async () => {
     const fixture = claudeFixture();
     select(fixture, (registry) => {
-      registry.roles["game-dev"]!.conversations = { claude: TECH };
+      registry.roles["game-coordinator"]!.conversations = { claude: TECH };
     });
     const result = await run(fixture, "inbox", "snapshot", "--game", GAME, "--recipient", TECH);
     expect(result.code).toBe(EXIT_USAGE);
@@ -190,8 +190,8 @@ describe("inbox effective harness selection", () => {
     const { fixture, requestId } = await delivered();
     const captured = await snapshot(fixture);
     select(fixture, (registry) => {
-      registry.roles["game-dev"]!.harness = "codex";
-      registry.roles["game-dev"]!.conversations = { claude: RECIPIENT, codex: RECIPIENT };
+      registry.roles["game-coordinator"]!.harness = "codex";
+      registry.roles["game-coordinator"]!.conversations = { claude: RECIPIENT, codex: RECIPIENT };
     });
     const result = await ack(fixture, requestId, "handled")(captured.snapshot_id as string);
     expect(result.code).toBe(EXIT_INVALID);

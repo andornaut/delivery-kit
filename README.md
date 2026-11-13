@@ -3,10 +3,10 @@
 Local scheduled trunk-based Git delivery. Each departure gates the game's local `main` HEAD in an
 isolated container, pushes that exact commit, watches its CI and deploys the already-gated build
 on a pass. The kit owns the mechanisms. Each game owns its repository, `delivery-kit.json`,
-credentials and schedule; `dev-manager` owns `config.json`, the registry and all mutable state under
+credentials and schedule; `game-coordinator` owns `config.json`, the registry and all mutable state under
 `var/`.
 
-The `dev-manager` role coordinates from the `game-dev` repository.
+The `game-coordinator` role coordinates from the `game-coordinator` repository.
 
 The package is `@andornaut/delivery-kit`. Its one runtime entry point is the `delivery-kit` CLI,
 bundled into `dist/cli.js`. The bundle imports only `node:` builtins, has no dynamic `import()`,
@@ -16,7 +16,7 @@ from disk after startup except configuration and state. Its child processes are 
 
 ## Install and pin
 
-Games and game-dev pin the release asset as a devDependency and commit the lockfile integrity:
+Games and game-coordinator pin the release asset as a devDependency and commit the lockfile integrity:
 
 ```json
 "devDependencies": {
@@ -25,13 +25,13 @@ Games and game-dev pin the release asset as a devDependency and commit the lockf
 ```
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
-runner runs from that game's own `node_modules`; game-dev's copy runs `check-config`, `status`,
+runner runs from that game's own `node_modules`; game-coordinator's copy runs `check-config`, `status`,
 `claude channel`, the readiness probes and the inbox commands.
 
 ## Commands
 
 Top-level verbs are game operations; `inbox`, `harness`, `claude` and `codex` are noun groups that take a
-verb. Every command resolves game-dev from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
+verb. Every command resolves game-coordinator from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
 directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
 explicit; it is never inferred from the working directory.
 
@@ -52,7 +52,7 @@ explicit; it is never inferred from the working directory.
 | `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                                                                                               |
 
 - `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
-- `control`: `dev-manager` writes desired control; Tech owns runner adoption. The command changes
+- `control`: `game-coordinator` writes desired control; Tech owns runner adoption. The command changes
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
@@ -120,9 +120,9 @@ registry update, runner replacement or scheduling action.
 Configuration never holds secret values. Use the operator's existing authentication and
 credential references.
 
-### game-dev `config.json`
+### game-coordinator `config.json`
 
-Committed in game-dev, schema 1. Every path is relative to game-dev. See `examples/config.json`.
+Committed in game-coordinator, schema 1. Every path is relative to game-coordinator. See `examples/config.json`.
 
 - `timezone` and `wakeMinutes` (integers 0 to 59): the scheduled review minutes. An empty
   `wakeMinutes` schedules no review.
@@ -180,14 +180,14 @@ reports and departure cadence during adoption.
 ownership and the conversation ID of each role per harness. It never proves activation on its
 own: `transfers` carries the hold, acceptance and activation markers.
 
-| Field                             | Content                                                                                                                                                                                       |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                  |
-| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                       |
-| `host`                            | `nativeProjectId` and `root` (relative to game-dev).                                                                                                                                          |
-| `roles.<key>`                     | `ownership`, `worktree` (relative to game-dev), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`). |
-| `operations.<game>`               | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                                |
-| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                  |
+| Field                             | Content                                                                                                                                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`, `revision`, `updatedAt` | `1`, a non-negative integer incremented on every write, and a UTC timestamp.                                                                                                                          |
+| `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                               |
+| `host`                            | `nativeProjectId` and `root` (relative to game-coordinator).                                                                                                                                          |
+| `roles.<key>`                     | `ownership`, `worktree` (relative to game-coordinator), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`). |
+| `operations.<game>`               | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                                        |
+| `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                          |
 
 - Every role key must be a role key in `config.json`, and every `operations` key a game.
 - Every role reference (`busOwner`, `reports.recipient`, `reports.workerParents`, `--requester`,
@@ -264,7 +264,7 @@ Output is one JSON line:
 {
   "harness": "codex",
   "adapter": { "status": "available", "reason": null },
-  "roles": [{ "role": "dev-manager", "conversation": "<uuid>", "status": "resolved" }],
+  "roles": [{ "role": "game-coordinator", "conversation": "<uuid>", "status": "resolved" }],
   "ready": true
 }
 ```
@@ -350,12 +350,13 @@ accepts them; the first refusal stops a flush and the next flush resumes there.
 
 ## State
 
-All mutable state lives in game-dev's ignored `var/`:
+All mutable state lives in game-coordinator's ignored `var/`:
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
 - `handoffs/<scope>/`: checkpoints the registry references.
 - `game-dev/`: review and inbox snapshots, health history, acknowledgements and retentions.
+  This persisted directory remains `var/game-dev/` for the coordinator rename.
 - `games/<g>/bus/`: the bus. It holds `runner.lock`, `loop.lock`, `departure.lock`,
   `active-departure`, `gate-failed/`, the detached `gate-<sha>` worktree kept for a pending
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
@@ -416,14 +417,14 @@ locks are free and its runner token matches the identity and lock token.
 ### Adopt persistent control
 
 Tech installs the upgraded package and replaces its runner only while idle. Before starting
-the new runner, `dev-manager` uses the upgraded CLI to explicitly initialize the approved desired
+the new runner, `game-coordinator` uses the upgraded CLI to explicitly initialize the approved desired
 states. An older installed CLI does not implement `control`:
 
 ```bash
 delivery-kit control --game archies-dog-walks --state paused \
-  --reason 'Approved initial Archie pause' --requester dev-manager
+  --reason 'Approved initial Archie pause' --requester game-coordinator
 delivery-kit control --game chibis-way-home --state enabled \
-  --reason 'Approved initial Chibi enablement' --requester dev-manager
+  --reason 'Approved initial Chibi enablement' --requester game-coordinator
 ```
 
 These are explicit adoption operations, not built-in defaults. Preserve an existing upgraded
@@ -438,7 +439,7 @@ resolves the game's own `node_modules`:
 
 ```bash
 cd /absolute/path/to/game \
-  && DELIVERY_KIT_ROOT=/absolute/path/to/game-dev setsid npx delivery-kit run --game GAME_ID
+  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator setsid npx delivery-kit run --game GAME_ID
 ```
 
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
@@ -578,8 +579,13 @@ Two environment variables are test-only overrides for the contract harness, neve
 and `flock(1)`; `dist/cli.js` embeds the same source. Context parameters come first and the
 subject last.
 
-- `loadLayout(gameDevRoot)` and `gameLayout(layout, game)`: `config.json` and the `var/` paths.
-  `roleKeys(config)` and `validateGameDevConfig`.
+The canonical source names `GameCoordinatorConfig` and `validateGameCoordinatorConfig` are
+unreleased additions. Published 4.0.0 exposes `GameDevConfig` and `validateGameDevConfig`;
+this source retains those names as identical compatibility aliases. Existing 4.0.0 readers do not
+use the new names, and the coordinator rename requires no kit publication or adoption.
+
+- `loadLayout(coordinatorRoot)` and `gameLayout(layout, game)`: `config.json` and the `var/` paths.
+  `roleKeys(config)` and `validateGameCoordinatorConfig(value)` use `GameCoordinatorConfig`.
 - `readRegistry(layout)`: a validated snapshot carrying its `revision`; `RegistryMissing` when
   absent.
 - `updateRegistry(layout, expectedRevision, mutate, options)` and
@@ -600,7 +606,7 @@ subject last.
 3.0.0 removes duties and the route's `monitor` field. A game's scheduled review goes to the role
 its `delivery-kit.json` names as `reports.recipient`, the same role that receives its events.
 A 2.x reader cannot use a schema 2 route or resolve a duty after the edits, so every pin (each
-game and game-dev) moves to 3.0.0 in the same idle replacement window.
+game and game-coordinator) moves to 3.0.0 in the same idle replacement window.
 
 - `var/registry.json`: remove `duties` from every role, and replace each duty name with the role
   key that held it, in `operations.<game>.busOwner` and anywhere else a role is named. A role that
@@ -608,7 +614,7 @@ game and game-dev) moves to 3.0.0 in the same idle replacement window.
 - `var/route.json`: remove `monitor` and set `schema` to 2. The host game's `reports.recipient`
   receives the review. A schema 1 route defers every review and is reported by `check-config`.
 - Each `delivery-kit.json`: `reports.recipient` and `reports.workerParents` name registered role
-  keys (for example `dev-manager`), never a duty.
+  keys (for example `game-coordinator`), never a duty.
 - Channel MCP configuration: replace `--monitor UUID` with `--conversation UUID`, or omit it to
   serve the selected games' `reports.recipient`. The example server key is `delivery-kit-channel`.
 - Scripts and instructions: `inbox snapshot` and `inbox ack` replace `monitor snapshot` and

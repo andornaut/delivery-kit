@@ -1,4 +1,4 @@
-// Test scaffolding for the Claude adapter and the review: a scratch game-dev with a registry, a
+// Test scaffolding for the Claude adapter and the review: a scratch game-coordinator with a registry, a
 // version 2 route, recipient clearance and a fake `claude` executable. Used only by tests.
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,9 +11,9 @@ import {
 } from "../adapters/shared/route.ts";
 import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
-import { CLAUDE_GAME_DEV, CLAUDE_TECH, makeFixture, registryInput } from "../testFixtures.ts";
+import { CLAUDE_COORDINATOR, CLAUDE_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 
-export const RECIPIENT = CLAUDE_GAME_DEV;
+export const RECIPIENT = CLAUDE_COORDINATOR;
 export const TECH = CLAUDE_TECH;
 export const HELD = "00000000-0000-4000-8000-000000000009";
 export const GAME = "archies-dog-walks";

@@ -26,7 +26,7 @@ export class ReviewSchedule {
     this.realtime = options.realtime ?? false;
     this.now = this.realtime ? Math.floor(Date.now() / 1000) : (options.start ?? at(0, 30));
     // Every minute is a wake minute; the only departure minute is never reached by a case.
-    ws.updateGameDevConfig({ wakeMinutes: Array.from({ length: 60 }, (_, minute) => minute) });
+    ws.updateCoordinatorConfig({ wakeMinutes: Array.from({ length: 60 }, (_, minute) => minute) });
     ws.config.schedule = { departures: ["59"], timezone: "America/Toronto" };
     ws.updateControl((control) => (control.maxRealSleep = 0.15));
   }

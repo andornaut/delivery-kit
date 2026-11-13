@@ -15,7 +15,7 @@ const ADA = "ada-the-navigator";
 function configure(ws: Workspace): void {
   const roles: Record<string, RoleRecord> = {
     "art-kit": { conversations: { codex: uuid(90) } },
-    "game-dev": { conversations: { codex: uuid(91) } },
+    "game-coordinator": { conversations: { codex: uuid(91) } },
   };
   const games: Record<string, unknown> = {};
   let index = 1;
@@ -31,7 +31,7 @@ function configure(ws: Workspace): void {
       };
     }
   }
-  ws.updateGameDevConfig({ games });
+  ws.updateCoordinatorConfig({ games });
   ws.writeRegistry({ schema: 1, revision: 1, harness: "codex", roles });
 }
 
@@ -72,7 +72,7 @@ suite("mixed harness CLI", () => {
       expect(selected.code, selected.stderr).toBe(0);
       expect(JSON.parse(selected.stdout)).toEqual(ws.registry());
       expect(ws.registry().harness).toBe("codex");
-      for (const key of [`${ADA}/tech`, "game-dev", "art-kit"]) {
+      for (const key of [`${ADA}/tech`, "game-coordinator", "art-kit"]) {
         expect(ws.registry().roles[key]).toEqual(before.roles[key]);
       }
       for (const game of [ARCHIE, CHIBI]) {
@@ -109,7 +109,7 @@ suite("mixed harness CLI", () => {
     const socket = await new CodexSocket(ws).listen();
     ws.env.CODEX_CONTROL_SOCKET = socket.path;
     try {
-      const before = readFileSync(join(ws.gameDev, "var", "registry.json"), "utf8");
+      const before = readFileSync(join(ws.coordinator, "var", "registry.json"), "utf8");
       const result = await execute(
         impl.bare(ws, [
           "harness",
@@ -119,7 +119,7 @@ suite("mixed harness CLI", () => {
           "--game",
           CHIBI,
           "--role",
-          "game-dev",
+          "game-coordinator",
         ]),
       );
       expect(result.code, result.stderr).toBe(0);
@@ -130,7 +130,7 @@ suite("mixed harness CLI", () => {
       });
       expect(JSON.parse(result.stdout).roles).toHaveLength(7);
       expect(socket.methods()).toEqual(["initialize", "initialized"]);
-      expect(readFileSync(join(ws.gameDev, "var", "registry.json"), "utf8")).toBe(before);
+      expect(readFileSync(join(ws.coordinator, "var", "registry.json"), "utf8")).toBe(before);
       const unavailable = await execute(impl.bare(ws, ["claude", "ready", "--game", ADA]));
       expect(unavailable.code).toBe(1);
       expect(

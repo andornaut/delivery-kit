@@ -17,7 +17,7 @@ suite("harness", () => {
       schema: 1,
       revision: 1,
       harness: "codex",
-      roles: { "dev-manager": { conversations: { codex: RECIPIENT } } },
+      roles: { "game-coordinator": { conversations: { codex: RECIPIENT } } },
     });
     const socket = await new CodexSocket(ws).listen();
     try {

@@ -1,4 +1,4 @@
-// Scratch workspace shared by both implementation adapters: a game-dev root, one or more
+// Scratch workspace shared by both implementation adapters: a game-coordinator root, one or more
 // game checkouts, scratch HOME and XDG state, and fake external tools on PATH.
 import { execFileSync } from "node:child_process";
 import {
@@ -60,7 +60,7 @@ export interface Registry {
 }
 
 export interface GameOptions {
-  /** Key in game-dev `config.json`; the checkout is created beside game-dev. */
+  /** Key in game-coordinator `config.json`; the checkout is created beside game-coordinator. */
   game?: string;
   config?: GameConfig;
   /** Use a real Git repository instead of the scripted fake. */
@@ -126,7 +126,7 @@ export class Workspace {
   readonly root: string;
   readonly home: string;
   readonly xdgState: string;
-  readonly gameDev: string;
+  readonly coordinator: string;
   readonly fakeDir: string;
   readonly fakeBin: string;
   readonly game: string;
@@ -148,12 +148,12 @@ export class Workspace {
     this.root = mkdtempSync(join(tmpdir(), "dk-"));
     this.home = join(this.root, "home");
     this.xdgState = join(this.home, ".local", "state");
-    this.gameDev = join(this.root, "game-dev");
+    this.coordinator = join(this.root, "game-coordinator");
     this.fakeDir = join(this.root, "fakes");
     this.fakeBin = join(this.fakeDir, "bin");
     this.game = options.game ?? "fixture-game";
     this.repo = join(this.root, this.game);
-    this.state = join(this.gameDev, "var", "games", this.game, "bus");
+    this.state = join(this.coordinator, "var", "games", this.game, "bus");
     this.config = options.config ?? defaultConfig();
     this.realGit = options.realGit ?? false;
     this.hostLoad = options.hostLoad ?? "ignore";
@@ -166,7 +166,7 @@ export class Workspace {
     // watches CI before deploying.
     const gh = { default: [{ conclusion: "success", id: 1, name: "Test", status: "completed" }] };
     this.setControl(this.realGit ? { gh, git: { real: true } } : { gh });
-    this.writeGameDev();
+    this.writeCoordinator();
     if (options.deliveryState !== null)
       this.adoptDeliveryControl(options.deliveryState ?? "enabled");
     if (this.realGit) this.initRealGit();
@@ -182,8 +182,8 @@ export class Workspace {
     }
   }
 
-  private writeGameDev(): void {
-    writeJson(join(this.gameDev, "config.json"), {
+  private writeCoordinator(): void {
+    writeJson(join(this.coordinator, "config.json"), {
       schema: 1,
       timezone: "America/Toronto",
       wakeMinutes: [20, 50],
@@ -195,19 +195,19 @@ export class Workspace {
         },
       },
       kits: {},
-      sharedRoles: ["game-dev", "art-kit", "delivery-kit", "game-kit"],
+      sharedRoles: ["game-coordinator", "art-kit", "delivery-kit", "game-kit"],
     });
     this.writeRegistry({ schema: 1, revision: 1, harness: "claude", roles: {} });
   }
 
-  /** Update game-dev `config.json` fields (for example `wakeMinutes`). */
-  updateGameDevConfig(change: Record<string, unknown>): void {
-    const path = join(this.gameDev, "config.json");
+  /** Update game-coordinator `config.json` fields (for example `wakeMinutes`). */
+  updateCoordinatorConfig(change: Record<string, unknown>): void {
+    const path = join(this.coordinator, "config.json");
     writeJson(path, { ...JSON.parse(readFileSync(path, "utf8")), ...change });
   }
 
-  gameDevConfig(): Record<string, unknown> {
-    return JSON.parse(readFileSync(join(this.gameDev, "config.json"), "utf8"));
+  coordinatorConfig(): Record<string, unknown> {
+    return JSON.parse(readFileSync(join(this.coordinator, "config.json"), "utf8"));
   }
 
   /**
@@ -229,19 +229,19 @@ export class Workspace {
       ...registry,
       roles,
     };
-    writeJson(join(this.gameDev, "var", "registry.json"), complete);
-    const config = this.gameDevConfig();
+    writeJson(join(this.coordinator, "var", "registry.json"), complete);
+    const config = this.coordinatorConfig();
     const shared = new Set(config.sharedRoles as string[]);
     for (const key of Object.keys(roles)) if (!key.includes("/")) shared.add(key);
-    writeJson(join(this.gameDev, "config.json"), { ...config, sharedRoles: [...shared] });
+    writeJson(join(this.coordinator, "config.json"), { ...config, sharedRoles: [...shared] });
   }
 
   registry(): Registry {
-    return JSON.parse(readFileSync(join(this.gameDev, "var", "registry.json"), "utf8"));
+    return JSON.parse(readFileSync(join(this.coordinator, "var", "registry.json"), "utf8"));
   }
 
   get routeFile(): string {
-    return join(this.gameDev, "var", "route.json");
+    return join(this.coordinator, "var", "route.json");
   }
 
   /** Write var/route.json: a schema 1 role-name route, or raw text for a malformed one. */
@@ -264,7 +264,7 @@ export class Workspace {
         desired: {
           state,
           reason: "fixture adoption",
-          requester: "game-dev",
+          requester: "game-coordinator",
           updatedAt,
           revision: 1,
         },

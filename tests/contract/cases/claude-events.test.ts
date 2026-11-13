@@ -49,7 +49,7 @@ function blockedDeparture(ws: Workspace): void {
   ws.hostLoad = "real";
   ws.config.resources = { cpus: 4, loadLimit: 0, memoryMiB: 4096 };
   // No review wakes, so only bus events reach the spool.
-  ws.updateGameDevConfig({ wakeMinutes: [] });
+  ws.updateCoordinatorConfig({ wakeMinutes: [] });
   impl.offer(ws, ["bus/queued"]);
   ws.setClock(at(-1, 50));
 }
@@ -250,7 +250,7 @@ suite("claude bus events", () => {
         schema: 1,
         revision: 1,
         harness: "claude",
-        roles: { "dev-manager": { conversations: { claude: value } } },
+        roles: { "game-coordinator": { conversations: { claude: value } } },
       });
       const result = await execute(impl.checkConfig(ws));
       expect(result.code, `${value} ${result.stderr}`).toBe(expected);

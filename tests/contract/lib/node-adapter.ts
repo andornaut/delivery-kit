@@ -1,4 +1,4 @@
-// Node 1.0 adapter shape: `node dist/cli.js <command> --game <g>` with game-dev as the working
+// Node 1.0 adapter shape: `node dist/cli.js <command> --game <g>` with game-coordinator as the working
 // directory. The CLI resolves config.json, the game's delivery-kit.json and var/ itself.
 // Cases are skipped until dist/cli.js exists.
 //
@@ -36,7 +36,7 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
   fill("reports", {
     project: "Fixture",
     scheduledTicks: false,
-    recipient: "dev-manager",
+    recipient: "game-coordinator",
     workerParents: [],
   });
   // Cases spell "no exclusions" as an empty pattern; the configuration omits the field.
@@ -74,24 +74,24 @@ function installPackage(ws: Workspace): void {
 }
 
 function env(ws: Workspace): Record<string, string> {
-  const base: Record<string, string> = { ...ws.baseEnv(), DELIVERY_KIT_ROOT: ws.gameDev };
+  const base: Record<string, string> = { ...ws.baseEnv(), DELIVERY_KIT_ROOT: ws.coordinator };
   if (ws.hostLoad === "ignore") base.DELIVERY_KIT_TEST_LOADAVG = "0";
   return base;
 }
 
 /**
  * A report recipient must resolve through the registry. A case that names none gets the default
- * "dev-manager" role with a fixture conversation.
+ * "game-coordinator" role with a fixture conversation.
  */
 function ensureRecipient(ws: Workspace): void {
   if (ws.config.reports?.recipient !== undefined) return;
   const registry = ws.registry();
-  if (registry.roles["dev-manager"]) return;
+  if (registry.roles["game-coordinator"]) return;
   ws.writeRegistry({
     ...registry,
     roles: {
       ...registry.roles,
-      "dev-manager": {
+      "game-coordinator": {
         conversations: { [registry.harness]: "00000000-0000-4000-8000-0000000000ff" },
       },
     },
@@ -181,7 +181,7 @@ function command(ws: Workspace, words: string[]): Command {
   const rest = words.slice(width);
   return {
     argv: [process.execPath, CLI, ...verb, "--game", ws.game, ...rest],
-    cwd: ws.gameDev,
+    cwd: ws.coordinator,
     env: env(ws),
   };
 }
@@ -189,11 +189,15 @@ function command(ws: Workspace, words: string[]): Command {
 export const nodeImplementation: Implementation = {
   name: "node",
   available: existsSync(CLI) ? true : "dist/cli.js is not built; Node cases are pending",
-  help: (ws, word) => ({ argv: [process.execPath, CLI, word], cwd: ws.gameDev, env: ws.baseEnv() }),
+  help: (ws, word) => ({
+    argv: [process.execPath, CLI, word],
+    cwd: ws.coordinator,
+    env: ws.baseEnv(),
+  }),
   command,
   bare: (ws, words) => ({
     argv: [process.execPath, CLI, ...words],
-    cwd: ws.gameDev,
+    cwd: ws.coordinator,
     env: ws.baseEnv(),
   }),
   offer: (ws, branches) =>
@@ -207,7 +211,7 @@ export const nodeImplementation: Implementation = {
   run: (ws) => ({ ...command(ws, ["run"]), logFile: join(ws.state, "runner.log") }),
   channel: (ws, args) => ({
     argv: [process.execPath, CLI, "claude", "channel", ...args],
-    cwd: ws.gameDev,
+    cwd: ws.coordinator,
     env: env(ws),
   }),
 };

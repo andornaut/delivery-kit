@@ -37,7 +37,7 @@ vi.mock("./requests.ts", async (original) => {
 afterEach(() => vi.clearAllMocks());
 
 function desired(dir: string, state: "enabled" | "paused"): void {
-  setDesiredDelivery({ dir }, { reason: "operator test", requester: "game-dev", state });
+  setDesiredDelivery({ dir }, { reason: "operator test", requester: "game-coordinator", state });
 }
 
 async function until(condition: () => boolean): Promise<void> {

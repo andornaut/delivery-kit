@@ -32,7 +32,7 @@ async function nativeGame(ws: Workspace, sockets: CodexSocket[]): Promise<CodexS
       tech: { conversations: { codex: TECH } },
       art: { conversations: { codex: ART } },
       gameplay: { conversations: { codex: GAMEPLAY } },
-      "dev-manager": { conversations: { codex: RECIPIENT } },
+      "game-coordinator": { conversations: { codex: RECIPIENT } },
     },
   });
   ws.config.git = { main: "main", remote: "origin", github: "" };

@@ -1,4 +1,4 @@
-// Test fixtures for the bus: a scratch game-dev tree whose game is a real Git checkout with a
+// Test fixtures for the bus: a scratch game-coordinator tree whose game is a real Git checkout with a
 // bare origin, fake docker, gh and Wrangler children, recorded events and a manual clock.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
@@ -215,7 +215,7 @@ export function makeGame(
     { dir: game.busDir },
     {
       reason: "explicit test fixture adoption",
-      requester: "game-dev",
+      requester: "game-coordinator",
       state: "enabled",
     },
   );

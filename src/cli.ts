@@ -1,5 +1,5 @@
 // delivery-kit command dispatcher. Top-level verbs are game operations; the inbox, harness,
-// claude and codex groups take a verb. Every command resolves game-dev from --root (in any position, once),
+// claude and codex groups take a verb. Every command resolves game-coordinator from --root (in any position, once),
 // DELIVERY_KIT_ROOT or the working directory, in that order.
 import { parseArgs } from "node:util";
 
@@ -46,7 +46,7 @@ const GROUP_ORDER = ["game", "inbox", "harness"] as const;
 
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
-  "usage: delivery-kit COMMAND [options] [--root GAME_DEV_ROOT]",
+  "usage: delivery-kit COMMAND [options] [--root COORDINATOR_ROOT]",
   ...GROUP_ORDER.flatMap((group) => [
     "",
     `${GROUPS[group][0]?.toUpperCase() ?? ""}${GROUPS[group].slice(1)}:`,
@@ -62,7 +62,7 @@ export const USAGE = [
   "  help, --help    print this text",
   "  --version       print the version",
   "",
-  "game-dev is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
+  "game-coordinator is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
   "",
 ].join("\n");
 

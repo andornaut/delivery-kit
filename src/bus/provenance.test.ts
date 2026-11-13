@@ -134,7 +134,11 @@ describe("status provenance", () => {
     const test = fixture();
     const store = { dir: test.bus.dir };
     try {
-      setDesiredDelivery(store, { state: "enabled", reason: "fixture", requester: "game-dev" });
+      setDesiredDelivery(store, {
+        state: "enabled",
+        reason: "fixture",
+        requester: "game-coordinator",
+      });
       const token = test.identity.token as string;
       claimDeliveryRunner(store, token);
       beginDeliveryActivity(store, token, { id: "batch", state: "checking", sha: SOURCE });
@@ -175,7 +179,11 @@ describe("status provenance", () => {
     const test = fixture();
     try {
       const store = { dir: test.bus.dir };
-      setDesiredDelivery(store, { state: "enabled", reason: "fixture", requester: "game-dev" });
+      setDesiredDelivery(store, {
+        state: "enabled",
+        reason: "fixture",
+        requester: "game-coordinator",
+      });
       const token = test.identity.token as string;
       claimDeliveryRunner(store, token);
       setObservedDelivery(store, token, { state: "stopped", sha: null });

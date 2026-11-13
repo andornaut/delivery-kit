@@ -21,7 +21,7 @@ import { type GameLayout, gameLayout, loadLayout } from "./layout.ts";
 import { holdLock } from "./lock.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "./registry/index.ts";
 import { claudeFixture, RECIPIENT } from "./review/fixtures.ts";
-import { CLAUDE_GAME_DEV, makeFixture, registryInput } from "./testFixtures.ts";
+import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "./testFixtures.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const OPTIONS = { project: "Archie" };
@@ -126,8 +126,8 @@ describe("flushEventsWith", () => {
   it("honours a new recipient decision guard between native event sends", async () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
-      draft.roles["game-dev"]!.conversations.codex = RECIPIENT;
+      draft.roles["game-coordinator"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.conversations.codex = RECIPIENT;
     });
     const control = await startFakeControl(fixture.base, (method, params) => {
       if (method === "thread/read") {
@@ -182,18 +182,19 @@ describe("flushEventsWith", () => {
       const id = eventId("push", "one");
       const directory = join(eventsDir(game), "native");
       mkdirSync(directory);
-      const path = join(directory, `${id}-${CLAUDE_GAME_DEV}.json`);
+      const path = join(directory, `${id}-${CLAUDE_COORDINATOR}.json`);
       const receipt = JSON.stringify({
         attempts: [{ method: "claude-channel", status: attemptStatus }],
-        clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
+        clientUserMessageId: eventRequestId(id, CLAUDE_COORDINATOR),
         event_id: id,
-        recipient: CLAUDE_GAME_DEV,
+        recipient: CLAUDE_COORDINATOR,
         status,
       });
       writeFileSync(path, receipt);
       updateRegistry(layout, 1, (draft) => {
-        draft.roles["game-dev"]!.harness = "codex";
-        draft.roles["game-dev"]!.conversations.codex = "00000000-0000-4000-8000-000000000004";
+        draft.roles["game-coordinator"]!.harness = "codex";
+        draft.roles["game-coordinator"]!.conversations.codex =
+          "00000000-0000-4000-8000-000000000004";
       });
       const adapter = mockAdapter([]);
       const diagnostic = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -221,18 +222,18 @@ describe("flushEventsWith", () => {
     const id = eventId("push", "one");
     const directory = join(eventsDir(game), "native");
     mkdirSync(directory);
-    const path = join(directory, `${id}-${CLAUDE_GAME_DEV}.json`);
+    const path = join(directory, `${id}-${CLAUDE_COORDINATOR}.json`);
     const receipt = JSON.stringify({
       attempts: [attempt],
-      clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
+      clientUserMessageId: eventRequestId(id, CLAUDE_COORDINATOR),
       event_id: id,
-      recipient: CLAUDE_GAME_DEV,
+      recipient: CLAUDE_COORDINATOR,
       status: "deferred",
     });
     writeFileSync(path, receipt);
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
-      draft.roles["game-dev"]!.conversations.codex = CLAUDE_GAME_DEV;
+      draft.roles["game-coordinator"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.conversations.codex = CLAUDE_COORDINATOR;
     });
     const adapter = mockAdapter([]);
     const diagnostic = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -257,18 +258,18 @@ describe("flushEventsWith", () => {
     const directory = join(eventsDir(game), "native");
     mkdirSync(directory);
     writeFileSync(
-      join(directory, `${id}-${CLAUDE_GAME_DEV}.json`),
+      join(directory, `${id}-${CLAUDE_COORDINATOR}.json`),
       JSON.stringify({
         attempts: [{ method: "claude-channel", status: "accepted" }],
-        clientUserMessageId: eventRequestId(id, CLAUDE_GAME_DEV),
+        clientUserMessageId: eventRequestId(id, CLAUDE_COORDINATOR),
         event_id: id,
-        recipient: CLAUDE_GAME_DEV,
+        recipient: CLAUDE_COORDINATOR,
         status: "accepted",
       }),
     );
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
-      draft.roles["game-dev"]!.conversations.codex = "00000000-0000-4000-8000-000000000004";
+      draft.roles["game-coordinator"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.conversations.codex = "00000000-0000-4000-8000-000000000004";
     });
     const adapter = mockAdapter([]);
     await flushEventsWith({ codex: () => adapter }, game);
@@ -281,7 +282,7 @@ describe("flushEventsWith", () => {
     const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
     updateRegistry(layout, 1, (draft) => {
       draft.harness = "codex";
-      draft.roles["game-dev"]!.harness = "claude";
+      draft.roles["game-coordinator"]!.harness = "claude";
     });
     const claude = mockAdapter([]);
     const codex = mockAdapter([]);
@@ -290,7 +291,7 @@ describe("flushEventsWith", () => {
     expect(claude.deliver).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),
-      CLAUDE_GAME_DEV,
+      CLAUDE_COORDINATOR,
       expect.any(String),
       { event_id: eventId("push", "one") },
     );
@@ -304,14 +305,14 @@ describe("flushEventsWith", () => {
     const codexRecipient = "00000000-0000-4000-8000-000000000004";
     updateRegistry(layout, 1, (draft) => {
       draft.harness = "codex";
-      draft.roles["game-dev"]!.harness = "claude";
-      draft.roles["game-dev"]!.conversations.codex = codexRecipient;
+      draft.roles["game-coordinator"]!.harness = "claude";
+      draft.roles["game-coordinator"]!.conversations.codex = codexRecipient;
     });
     const claude = mockAdapter([]);
     const codex = mockAdapter([]);
     claude.deliver.mockImplementationOnce((_path: string, requestId: string) => {
       updateRegistry(layout, 2, (draft) => {
-        draft.roles["game-dev"]!.harness = "codex";
+        draft.roles["game-coordinator"]!.harness = "codex";
       });
       return Promise.resolve({ requestId, status: "accepted" });
     });
@@ -319,7 +320,7 @@ describe("flushEventsWith", () => {
     emitEvent(game, OPTIONS, "push", "two", "second");
     await flushEventsWith({ claude: () => claude, codex: () => codex }, game);
     expect(claude.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
-      [CLAUDE_GAME_DEV, expect.stringContaining("first")],
+      [CLAUDE_COORDINATOR, expect.stringContaining("first")],
     ]);
     expect(codex.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
       [codexRecipient, expect.stringContaining("second")],
@@ -332,7 +333,7 @@ describe("flushEventsWith", () => {
     const game = setup();
     const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.harness = "codex";
     });
     const adapter = mockAdapter([]);
     emitEvent(game, OPTIONS, "push", "one", "first");
@@ -352,9 +353,9 @@ describe("flushEventsWith", () => {
     const first = eventId("push", "one");
     expect(adapter.deliver).toHaveBeenNthCalledWith(
       1,
-      join(eventsDir(game), "native", `${first}-${CLAUDE_GAME_DEV}.json`),
-      eventRequestId(first, CLAUDE_GAME_DEV),
-      CLAUDE_GAME_DEV,
+      join(eventsDir(game), "native", `${first}-${CLAUDE_COORDINATOR}.json`),
+      eventRequestId(first, CLAUDE_COORDINATOR),
+      CLAUDE_COORDINATOR,
       `Archie bus: first [bus event ${first.slice(0, 12)}]`,
       { event_id: first },
     );
@@ -426,7 +427,7 @@ describe("flushEventsWith", () => {
     const layout = loadLayout(root);
     const codexRecipient = "00000000-0000-4000-8000-000000000004";
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.conversations.codex = codexRecipient;
+      draft.roles["game-coordinator"]!.conversations.codex = codexRecipient;
     });
     writeFileSync(
       layout.routeFile,
@@ -448,7 +449,7 @@ describe("flushEventsWith", () => {
     emitEvent(game, OPTIONS, "push", "two", "second");
     await flushEventsWith(adapters, game);
     expect(claude.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
-      [CLAUDE_GAME_DEV, expect.stringContaining("first")],
+      [CLAUDE_COORDINATOR, expect.stringContaining("first")],
     ]);
     expect(codex.deliver.mock.calls.map((call) => [call[2], call[3]])).toEqual([
       [codexRecipient, expect.stringContaining("second")],

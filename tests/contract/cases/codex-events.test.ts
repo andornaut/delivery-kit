@@ -60,9 +60,9 @@ suite("codex events", () => {
     open.push(m);
     if (options.route === null) rmSync(ws.routeFile);
     else if (options.route !== undefined) ws.writeRoute(options.route(ws));
-    ws.config.reports = { project: "Fixture", recipient: options.recipient ?? "dev-manager" };
+    ws.config.reports = { project: "Fixture", recipient: options.recipient ?? "game-coordinator" };
     // Only observer event flushes run: no review wakes or departure slots are crossed.
-    ws.updateGameDevConfig({ wakeMinutes: [] });
+    ws.updateCoordinatorConfig({ wakeMinutes: [] });
     const flock = join(ws.fakeBin, "flock");
     copyFileSync(new URL("../lib/event-flock.mjs", import.meta.url), flock);
     chmodSync(flock, 0o755);

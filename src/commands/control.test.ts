@@ -7,7 +7,7 @@ import { readDeliveryControl } from "../bus/control.ts";
 import { main } from "../cli.ts";
 import { gameLayout, loadLayout } from "../layout.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
-import { CLAUDE_GAME_DEV, makeFixture, registryInput } from "../testFixtures.ts";
+import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
 
 const GAME = "archies-dog-walks";
 
@@ -29,7 +29,7 @@ function fixture() {
   return { file: join(store.dir, "delivery-control.json"), root, store };
 }
 
-function args(state = "paused", requester = "game-dev"): string[] {
+function args(state = "paused", requester = "game-coordinator"): string[] {
   return [
     "control",
     "--game",
@@ -53,7 +53,7 @@ describe("control command", () => {
     expect(JSON.parse(result.out)).toEqual(record.desired);
     expect(record.desired).toMatchObject({
       state: "paused",
-      requester: "game-dev",
+      requester: "game-coordinator",
       reason: "operator request",
     });
     expect(record.observed).toBeNull();
@@ -85,7 +85,7 @@ describe("control command", () => {
 
   it("requires a registered requester role and rejects conversation identifiers", async () => {
     const test = fixture();
-    for (const requester of ["missing-role", "monitor", CLAUDE_GAME_DEV]) {
+    for (const requester of ["missing-role", "monitor", CLAUDE_COORDINATOR]) {
       // eslint-disable-next-line no-await-in-loop
       const result = await run(test.root, ...args("paused", requester));
       expect(result).toMatchObject({ code: 1, out: "" });
@@ -102,7 +102,7 @@ describe("control command", () => {
     const test = fixture();
     await run(test.root, ...args());
     const paused = readDeliveryControl(test.store);
-    const enabled = await run(test.root, ...args("enabled", "game-dev"));
+    const enabled = await run(test.root, ...args("enabled", "game-coordinator"));
     expect(enabled.code).toBe(0);
     expect(JSON.parse(enabled.out)).toMatchObject({
       state: "enabled",

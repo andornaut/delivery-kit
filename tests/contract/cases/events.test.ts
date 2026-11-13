@@ -18,9 +18,9 @@ function bus(ws: Workspace, options: { github?: string } = {}): void {
     schema: 1,
     revision: 1,
     harness: "codex",
-    roles: { "dev-manager": { conversations: { codex: RECIPIENT } } },
+    roles: { "game-coordinator": { conversations: { codex: RECIPIENT } } },
   });
-  ws.config.reports = { project: "Fixture", recipient: "dev-manager" };
+  ws.config.reports = { project: "Fixture", recipient: "game-coordinator" };
 }
 
 function kinds(ws: Workspace): string[] {

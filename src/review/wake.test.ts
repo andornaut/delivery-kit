@@ -27,7 +27,7 @@ describe("deliverScheduledWake (claude)", () => {
     useEnv(fixture);
     updateRegistry(fixture.layout, 1, (draft) => {
       draft.harness = "codex";
-      draft.roles["game-dev"]!.harness = "claude";
+      draft.roles["game-coordinator"]!.harness = "claude";
       draft.roles["archies-dog-walks/tech"]!.harness = "claude";
     });
     const result = JSON.parse(
@@ -94,7 +94,7 @@ describe("deliverScheduledWake (claude)", () => {
   it("defers a schema 1 route with its exact migration edit", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
-    fixture.route({ monitor: "game-dev", schema: 1 });
+    fixture.route({ monitor: "game-coordinator", schema: 1 });
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
       `${DEFERRED_PREFIX}${ROUTE_SCHEMA_1}`,
     );
@@ -104,7 +104,7 @@ describe("deliverScheduledWake (claude)", () => {
   it("defers an active route that targets its recipient", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
-    fixture.route({ targets: ["game-dev", "archies-dog-walks/tech"] });
+    fixture.route({ targets: ["game-coordinator", "archies-dog-walks/tech"] });
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
       `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
         "its owner must verify identities and ownership",
@@ -127,9 +127,9 @@ describe("deliverScheduledWake (codex)", () => {
     const registry = readRegistry(fixture.layout);
     updateRegistry(fixture.layout, registry.revision, (draft) => {
       draft.harness = "codex";
-      const gameDev = draft.roles["game-dev"];
-      if (gameDev !== undefined) {
-        gameDev.conversations.codex = RECIPIENT;
+      const coordinator = draft.roles["game-coordinator"];
+      if (coordinator !== undefined) {
+        coordinator.conversations.codex = RECIPIENT;
       }
       const tech = draft.roles["archies-dog-walks/tech"];
       if (tech !== undefined) {
@@ -183,7 +183,7 @@ describe("deliverScheduledWake (codex)", () => {
     const chibiTech = "00000000-0000-4000-8000-000000000012";
     const registry = readRegistry(fixture.layout);
     updateRegistry(fixture.layout, registry.revision, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.harness = "codex";
       draft.roles["archies-dog-walks/tech"]!.harness = "claude";
       draft.roles["archies-dog-walks/tech"]!.conversations.claude = claudeTech;
       draft.roles["chibis-way-home/tech"] = {
@@ -202,7 +202,11 @@ describe("deliverScheduledWake (codex)", () => {
     const config = JSON.parse(readFileSync(game.configFile, "utf8")) as {
       reports: { workerParents: string[] };
     };
-    config.reports.workerParents = ["game-dev", "archies-dog-walks/tech", "chibis-way-home/tech"];
+    config.reports.workerParents = [
+      "game-coordinator",
+      "archies-dog-walks/tech",
+      "chibis-way-home/tech",
+    ];
     writeFileSync(game.configFile, JSON.stringify(config));
     const steers: Record<string, unknown>[] = [];
     const control = await startFakeControl(fixture.base, handler(steers));

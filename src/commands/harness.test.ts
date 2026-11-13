@@ -14,7 +14,7 @@ import {
   type RoleRecord,
 } from "../registry/index.ts";
 import {
-  gameDevConfig,
+  coordinatorConfig,
   makeFixture,
   projectConfig,
   registryInput,
@@ -32,7 +32,7 @@ afterEach(async () => {
 
 function setup() {
   const { base, root } = makeFixture();
-  const config = gameDevConfig();
+  const config = coordinatorConfig();
   (config.games as Record<string, unknown>)[ADA] = {
     name: "Ada the Navigator",
     path: `../${ADA}`,
@@ -45,8 +45,8 @@ function setup() {
   const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
   const roles: Record<string, RoleRecord> = {
     "art-kit": { conversations: { codex: uuid(90) }, ownership: "active", worktree: "../art-kit" },
-    "game-dev": {
-      ...input.roles["game-dev"]!,
+    "game-coordinator": {
+      ...input.roles["game-coordinator"]!,
       conversations: { codex: uuid(91) },
     },
   };
@@ -144,10 +144,10 @@ describe("harness select", () => {
       "--expected-revision",
       "3",
       "--role",
-      "game-dev",
+      "game-coordinator",
     );
     expect(shared.code).toBe(0);
-    expect(readRegistry(test.layout).roles["game-dev"]!.harness).toBe("codex");
+    expect(readRegistry(test.layout).roles["game-coordinator"]!.harness).toBe("codex");
   });
 
   it("rejects malformed or absent authority scope and revision without changing the registry", async () => {
@@ -199,7 +199,7 @@ describe("scoped and mixed readiness", () => {
     expect(result.code).toBe(1);
     expect(result.out).toBe(
       '{"harness": "claude", "adapter": {"status": "available", "reason": null}, ' +
-        '"roles": [{"role": "game-dev", "conversation": null, "status": "unavailable"}], "ready": false}\n',
+        '"roles": [{"role": "game-coordinator", "conversation": null, "status": "unavailable"}], "ready": false}\n',
     );
   });
 
@@ -237,7 +237,7 @@ describe("scoped and mixed readiness", () => {
       "--game",
       CHIBI,
       "--role",
-      "game-dev",
+      "game-coordinator",
     );
     expect(result).toMatchObject({ code: 0, err: "" });
     const report = JSON.parse(result.out);
@@ -247,7 +247,9 @@ describe("scoped and mixed readiness", () => {
       adapters: { claude: { status: "available" }, codex: { status: "available" } },
     });
     expect(report.roles).toHaveLength(7);
-    expect(report.roles.find((row: { role: string }) => row.role === "game-dev")).toMatchObject({
+    expect(
+      report.roles.find((row: { role: string }) => row.role === "game-coordinator"),
+    ).toMatchObject({
       current_harness: "codex",
       probed_harness: "codex",
     });

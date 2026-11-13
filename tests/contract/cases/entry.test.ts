@@ -63,7 +63,7 @@ suite("entry", () => {
       schema: 1,
       revision: 1,
       harness: "claude",
-      roles: { "game-dev": { conversations: {} } },
+      roles: { "game-coordinator": { conversations: {} } },
     });
     const result = await cli(ws, [
       "control",
@@ -72,12 +72,12 @@ suite("entry", () => {
       "--reason",
       "operator pause",
       "--requester",
-      "game-dev",
+      "game-coordinator",
     ]);
     expect(result.code, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       state: "paused",
-      requester: "game-dev",
+      requester: "game-coordinator",
       reason: "operator pause",
       revision: 1,
     });
@@ -97,7 +97,7 @@ suite("entry", () => {
     async () => {
       const ws = workspace({ deliveryState: null });
       minimal(ws);
-      roles(ws, { "game-dev": FIRST });
+      roles(ws, { "game-coordinator": FIRST });
       const valid = [
         "control",
         "--state",
@@ -105,7 +105,7 @@ suite("entry", () => {
         "--reason",
         "operator enable",
         "--requester",
-        "game-dev",
+        "game-coordinator",
       ];
       for (const flag of ["--state", "--reason", "--requester"]) {
         const words = [...valid];

@@ -1,6 +1,6 @@
 // @andornaut/delivery-kit/registry: the typed public registry module.
 export {
-  type GameDevConfig,
+  type GameCoordinatorConfig,
   type GameEntry,
   type GameLayout,
   gameLayout,
@@ -9,7 +9,12 @@ export {
   loadLayout,
   roleKeys,
   UnknownGame,
-  validateGameDevConfig,
+  validateGameCoordinatorConfig,
+} from "../layout.ts";
+// CLEANUP (added 2026-11-13): Retain old public symbols until registry readers use the canonical names.
+export {
+  type GameCoordinatorConfig as GameDevConfig,
+  validateGameCoordinatorConfig as validateGameDevConfig,
 } from "../layout.ts";
 export { LockBusy, LockError } from "../lock.ts";
 export { ValidationError } from "../validate.ts";

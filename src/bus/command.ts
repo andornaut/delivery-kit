@@ -1,4 +1,4 @@
-// Shared `--game` resolution for the bus commands: game-dev config.json, then the game's
+// Shared `--game` resolution for the bus commands: game-coordinator config.json, then the game's
 // committed delivery-kit.json. Every bus write goes under var/games/<g>/bus/.
 import { parseArgs, type ParseArgsConfig } from "node:util";
 

@@ -242,8 +242,8 @@ function tryLock(path: string): LockHandle | null {
   }
 }
 
-/** var/games/<g>/ is three levels below the game-dev root. */
-function gameDevRoot(game: GameLayout): string {
+/** var/games/<g>/ is three levels below the game-coordinator root. */
+function coordinatorRoot(game: GameLayout): string {
   return resolve(game.stateDir, "..", "..", "..");
 }
 
@@ -274,7 +274,7 @@ interface Destination {
 
 function destination(adapters: AdapterFactories, game: GameLayout): Destination | null {
   try {
-    const layout = loadLayout(gameDevRoot(game));
+    const layout = loadLayout(coordinatorRoot(game));
     const registry = readRegistry(layout);
     const role = loadProjectConfig(game.configFile).reports.recipient;
     const recipient = resolveConversation(registry, role);

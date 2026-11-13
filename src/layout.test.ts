@@ -4,13 +4,28 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { gameLayout, loadLayout, roleKeys, UnknownGame } from "./layout.ts";
-import { gameDevConfig, makeFixture, writeFixtureJson } from "./testFixtures.ts";
+import {
+  type GameCoordinatorConfig,
+  type GameDevConfig,
+  validateGameCoordinatorConfig,
+  validateGameDevConfig,
+} from "./registry/index.ts";
+import { coordinatorConfig, makeFixture, writeFixtureJson } from "./testFixtures.ts";
 import { ValidationError } from "./validate.ts";
 
 describe("loadLayout", () => {
-  it("resolves var/ and per-game paths relative to game-dev", () => {
+  it("exports canonical coordinator configuration with identical legacy public aliases", () => {
+    const canonical: GameCoordinatorConfig = validateGameCoordinatorConfig(coordinatorConfig());
+    const legacy: GameDevConfig = canonical;
+    expect(validateGameDevConfig).toBe(validateGameCoordinatorConfig);
+    expect(validateGameDevConfig(legacy)).toBe(canonical);
+    expect(roleKeys(canonical)).toContain("game-coordinator");
+  });
+
+  it("resolves var/ and per-game paths relative to game-coordinator", () => {
     const { base, root } = makeFixture();
     const layout = loadLayout(root);
+    expect(layout.reviewDir).toBe(join(root, "var/game-dev"));
     expect(layout.registryFile).toBe(join(root, "var/registry.json"));
     expect(layout.registryLock).toBe(join(root, "var/registry.lock"));
     expect(layout.routeFile).toBe(join(root, "var/route.json"));
@@ -20,18 +35,18 @@ describe("loadLayout", () => {
     expect(game.busDir).toBe(join(root, "var/games/archies-dog-walks/bus"));
     expect(() => gameLayout(layout, "unknown")).toThrow(UnknownGame);
     expect(roleKeys(layout.config)).toContain("chibis-way-home/tech");
-    expect(roleKeys(layout.config)).toContain("game-dev");
+    expect(roleKeys(layout.config)).toContain("game-coordinator");
   });
 
   it("accepts an empty wake minute list, which schedules no review", () => {
     const { root } = makeFixture();
-    writeFixtureJson(join(root, "config.json"), { ...gameDevConfig(), wakeMinutes: [] });
+    writeFixtureJson(join(root, "config.json"), { ...coordinatorConfig(), wakeMinutes: [] });
     expect(loadLayout(root).config.wakeMinutes).toEqual([]);
   });
 
   it("rejects absolute paths, invalid IDs and unknown keys", () => {
     const { root } = makeFixture();
-    const config = gameDevConfig();
+    const config = coordinatorConfig();
     (config.games as Record<string, Record<string, unknown>>).Bad_ID = {
       name: "Bad",
       path: "/abs",

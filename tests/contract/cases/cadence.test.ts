@@ -105,8 +105,8 @@ suite("review cadence", () => {
       );
       ws.config.reports = {
         project: "Fixture",
-        recipient: "dev-manager",
-        workerParents: ["dev-manager", "target", ...extra.map(role)],
+        recipient: "game-coordinator",
+        workerParents: ["game-coordinator", "target", ...extra.map(role)],
       };
       const result = await tick(ws, at(20));
       expect(result.review.map((row) => row.slot)).toEqual([at(20)]);
@@ -124,8 +124,8 @@ suite("review cadence", () => {
     const socket = await game(ws);
     ws.config.reports = {
       project: "Fixture",
-      recipient: "dev-manager",
-      workerParents: ["dev-manager", "target"],
+      recipient: "game-coordinator",
+      workerParents: ["game-coordinator", "target"],
     };
     ws.writeRoute(cadenceRoute(ws, { host: otherGame(ws) }));
     const result = await tick(ws, at(20));
@@ -143,8 +143,8 @@ suite("review cadence", () => {
       for (const parent of ["held", "tech", role(unrelated)]) {
         ws.config.reports = {
           project: "Fixture",
-          recipient: "dev-manager",
-          workerParents: ["dev-manager", parent],
+          recipient: "game-coordinator",
+          workerParents: ["game-coordinator", parent],
         };
         const result = await tick(ws, at(20), {
           done: ({ stderr }) => stderr.includes(WORKER_PARENTS_ROUTE_MESSAGE),
@@ -163,8 +163,8 @@ suite("review cadence", () => {
       const socket = await game(ws);
       ws.config.reports = {
         project: "Fixture",
-        recipient: "dev-manager",
-        workerParents: ["dev-manager"],
+        recipient: "game-coordinator",
+        workerParents: ["game-coordinator"],
       };
       for (const content of [
         "",
@@ -186,7 +186,11 @@ suite("review cadence", () => {
     async () => {
       const ws = workspace();
       const socket = await game(ws);
-      ws.config.reports = { project: "Fixture", recipient: "dev-manager", scheduledTicks: false };
+      ws.config.reports = {
+        project: "Fixture",
+        recipient: "game-coordinator",
+        scheduledTicks: false,
+      };
       await tick(ws, at(20));
       expect(socket.connections).toHaveLength(1);
       const updates: Array<Record<string, unknown>> = [
@@ -214,9 +218,13 @@ suite("review cadence", () => {
       for (const host of [true, false]) {
         const ws = workspace();
         const socket = await game(ws);
-        ws.config.reports = { project: "Fixture", recipient: "dev-manager", scheduledTicks: true };
+        ws.config.reports = {
+          project: "Fixture",
+          recipient: "game-coordinator",
+          scheduledTicks: true,
+        };
         ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
-        ws.updateGameDevConfig({ wakeMinutes: [1] });
+        ws.updateCoordinatorConfig({ wakeMinutes: [1] });
         ws.writeRoute(cadenceRoute(ws, { host: host ? ws.game : otherGame(ws) }));
         const checked = await cli(ws, ["check-config"]);
         expect(checked.code, checked.stderr).toBe(0);
@@ -273,12 +281,12 @@ suite("review cadence", () => {
       const socket = await game(ws);
       // 1.0: an empty list is valid and schedules no wake; other invalid values are rejected
       // when the configuration loads, naming /wakeMinutes.
-      ws.updateGameDevConfig({ wakeMinutes: [] });
+      ws.updateCoordinatorConfig({ wakeMinutes: [] });
       const none = await tick(ws, at(20));
       expect(none.review).toEqual([]);
       expect(socket.connections).toHaveLength(0);
       for (const value of [[60], ["20+1"]]) {
-        ws.updateGameDevConfig({ wakeMinutes: value });
+        ws.updateCoordinatorConfig({ wakeMinutes: value });
         ws.setClock(at(19, 30), 60);
         const result = await execute(impl.run(ws), { timeoutMs: 15_000 });
         expect(result.code, JSON.stringify(value)).not.toBe(0);
@@ -290,7 +298,7 @@ suite("review cadence", () => {
         expect(socket.connections).toHaveLength(0);
       }
 
-      ws.updateGameDevConfig({ wakeMinutes: [10] });
+      ws.updateCoordinatorConfig({ wakeMinutes: [10] });
       const ten = await tick(ws, at(10));
       expect(ten.review.map((row) => row.slot)).toEqual([at(10)]);
       // 1.0 delivers health events natively to the recipient on their own connections.

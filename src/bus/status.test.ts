@@ -27,7 +27,7 @@ function controlledRunner() {
   setDesiredDelivery(store, {
     state: "enabled",
     reason: "fixture adoption",
-    requester: "game-dev",
+    requester: "game-coordinator",
   });
   const runner = holdLock(bus.runnerLock);
   const loop = holdLock(bus.loopLock);
@@ -130,7 +130,7 @@ describe("status report", () => {
         setDesiredDelivery(test.store, {
           state: "paused",
           reason: "operator pause",
-          requester: "game-dev",
+          requester: "game-coordinator",
         });
         expect(statusReport(test.bus)).toMatchObject({
           control: {
@@ -155,7 +155,7 @@ describe("status report", () => {
       setDesiredDelivery(test.store, {
         state: "paused",
         reason: "operator pause",
-        requester: "game-dev",
+        requester: "game-coordinator",
       });
       expect(statusReport(test.bus)).toMatchObject({
         control: {
@@ -264,7 +264,7 @@ describe("status report", () => {
       control: {
         desired: {
           reason: "explicit test fixture adoption",
-          requester: "game-dev",
+          requester: "game-coordinator",
           revision: 1,
           state: "enabled",
           updatedAt: expect.any(String),

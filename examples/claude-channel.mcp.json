@@ -6,7 +6,7 @@
         "--no-install",
         "delivery-kit",
         "--root",
-        "/absolute/path/to/game-dev",
+        "/absolute/path/to/game-coordinator",
         "claude",
         "channel"
       ]

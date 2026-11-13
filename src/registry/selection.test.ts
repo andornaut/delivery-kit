@@ -64,9 +64,9 @@ describe("resolveSelectedRoles", () => {
     expect(
       resolveSelectedRoles(layout, readRegistry(layout), {
         games: [ARCHIE],
-        roles: ["game-dev", `${ARCHIE}/tech`],
+        roles: ["game-coordinator", `${ARCHIE}/tech`],
       }),
-    ).toEqual([`${ARCHIE}/art`, `${ARCHIE}/gameplay`, `${ARCHIE}/tech`, "game-dev"]);
+    ).toEqual([`${ARCHIE}/art`, `${ARCHIE}/gameplay`, `${ARCHIE}/tech`, "game-coordinator"]);
   });
 
   it("rejects missing, empty, malformed and unknown selectors", () => {
@@ -76,7 +76,7 @@ describe("resolveSelectedRoles", () => {
       { games: [] },
       { roles: [] },
       { games: ["absent"] },
-      { roles: ["game-dev", "game-dev"] },
+      { roles: ["game-coordinator", "game-coordinator"] },
       { roles: [null] },
       { all: true },
       null,
@@ -114,7 +114,7 @@ describe("selectHarness", () => {
     expect(resolveHarness(next, `${ARCHIE}/tech`)).toBe("claude");
     expect(resolveHarness(next, "chibis-way-home/tech")).toBe("codex");
     expect(resolveHarness(next, "ada/tech")).toBe("codex");
-    expect(resolveHarness(next, "game-dev")).toBe("codex");
+    expect(resolveHarness(next, "game-coordinator")).toBe("codex");
     expect(next.roles[`${ARCHIE}/tech`]!.phase).toBe("source-held");
   });
 
@@ -134,11 +134,13 @@ describe("selectHarness", () => {
   it("selects a shared role and retains both providers' conversation IDs", () => {
     const layout = setup();
     const before = readRegistry(layout);
-    const next = selectHarness(layout, 1, { harness: "claude", roles: ["game-dev"] });
-    expect(resolveHarness(next, "game-dev")).toBe("claude");
-    expect(next.roles["game-dev"]!.conversations).toEqual(before.roles["game-dev"]!.conversations);
-    expect(resolveConversation(next, "game-dev")).toBe(
-      before.roles["game-dev"]!.conversations.claude,
+    const next = selectHarness(layout, 1, { harness: "claude", roles: ["game-coordinator"] });
+    expect(resolveHarness(next, "game-coordinator")).toBe("claude");
+    expect(next.roles["game-coordinator"]!.conversations).toEqual(
+      before.roles["game-coordinator"]!.conversations,
+    );
+    expect(resolveConversation(next, "game-coordinator")).toBe(
+      before.roles["game-coordinator"]!.conversations.claude,
     );
   });
 
@@ -167,10 +169,10 @@ describe("selectHarness", () => {
     const layout = setup();
     const before = readFileSync(layout.registryFile);
     for (const selection of [
-      { harness: "other", roles: ["game-dev"] },
+      { harness: "other", roles: ["game-coordinator"] },
       { harness: "claude" },
       { harness: "claude", roles: [] },
-      { harness: "claude", roles: ["game-dev"], activation: true },
+      { harness: "claude", roles: ["game-coordinator"], activation: true },
       null,
     ]) {
       expect(() => selectHarness(layout, 1, selection as HarnessSelection)).toThrow(
@@ -201,11 +203,17 @@ describe("selectHarness", () => {
     const before = readFileSync(layout.registryFile);
     try {
       expect(() =>
-        selectHarness(layout, 1, { harness: "claude", roles: ["game-dev"] }, { timeoutSeconds: 0 }),
+        selectHarness(
+          layout,
+          1,
+          { harness: "claude", roles: ["game-coordinator"] },
+          { timeoutSeconds: 0 },
+        ),
       ).toThrow(LockBusy);
       expect(readFileSync(layout.registryFile)).toEqual(before);
       expect(
-        selectHarness(layout, 1, { harness: "claude", roles: ["game-dev"] }, { held }).revision,
+        selectHarness(layout, 1, { harness: "claude", roles: ["game-coordinator"] }, { held })
+          .revision,
       ).toBe(2);
     } finally {
       held.release();

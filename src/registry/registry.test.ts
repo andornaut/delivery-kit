@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { type Layout, loadLayout } from "../layout.ts";
 import { holdLock, LockBusy, LockError, lockIsFree } from "../lock.ts";
 import {
-  CLAUDE_GAME_DEV,
+  CLAUDE_COORDINATOR,
   CLAUDE_TECH,
   CODEX_TECH,
   makeFixture,
@@ -124,7 +124,7 @@ describe("updateRegistry", () => {
     const before = readFileSync(layout.registryFile);
     expect(() =>
       updateRegistry(layout, 1, (draft) => {
-        draft.roles["game-dev"]!.worktree = "/absolute";
+        draft.roles["game-coordinator"]!.worktree = "/absolute";
       }),
     ).toThrow(ValidationError);
     expect(readFileSync(layout.registryFile)).toEqual(before);
@@ -135,10 +135,13 @@ describe("updateRegistry", () => {
     const layout = setup();
     expect(() =>
       updateRegistry(layout, 1, (draft) => {
-        draft.roles["game-dev"]!.conversations.claude = "ABCDEF00-0000-4000-8000-000000000003";
+        draft.roles["game-coordinator"]!.conversations.claude =
+          "ABCDEF00-0000-4000-8000-000000000003";
       }),
     ).toThrow(ValidationError);
-    expect(readRegistry(layout).roles["game-dev"]?.conversations.claude).toBe(CLAUDE_GAME_DEV);
+    expect(readRegistry(layout).roles["game-coordinator"]?.conversations.claude).toBe(
+      CLAUDE_COORDINATOR,
+    );
   });
 
   it("serializes concurrent writers in separate processes without losing an update", async () => {
@@ -154,7 +157,7 @@ for (let round = 0; round < Number(rounds); round += 1) {
     try {
       registry.updateRegistry(layout, current.revision, (draft) => {
         draft.transfers.push({ checkpoint: "var/handoffs/x.json", from: "codex", marker: \`w\${id}-\${round}\`,
-          phase: "source-held", roles: ["game-dev"], to: "claude" });
+          phase: "source-held", roles: ["game-coordinator"], to: "claude" });
       });
       break;
     } catch (error) {
@@ -263,12 +266,12 @@ describe("resolveConversation", () => {
     const layout = setup();
     const claude = readRegistry(layout);
     expect(resolveConversation(claude, "archies-dog-walks/tech")).toBe(CLAUDE_TECH);
-    expect(resolveConversation(claude, "game-dev")).toBe(CLAUDE_GAME_DEV);
+    expect(resolveConversation(claude, "game-coordinator")).toBe(CLAUDE_COORDINATOR);
     const codex = updateRegistry(layout, claude.revision, (draft) => {
       draft.harness = "codex";
     });
     expect(resolveConversation(codex, "archies-dog-walks/tech")).toBe(CODEX_TECH);
-    expect(resolveConversation(codex, "game-dev")).toBeNull();
+    expect(resolveConversation(codex, "game-coordinator")).toBeNull();
     expect(codex.roles["archies-dog-walks/tech"]?.conversations.claude).toBe(CLAUDE_TECH);
   });
 
@@ -276,7 +279,7 @@ describe("resolveConversation", () => {
     const registry = readRegistry(setup());
     expect(() => resolveRole(registry, "nobody")).toThrow(UnknownRole);
     expect(() => resolveRole(registry, "nobody")).toThrow("no registered role named nobody");
-    expect(resolveRole(registry, "game-dev")).toBe("game-dev");
+    expect(resolveRole(registry, "game-coordinator")).toBe("game-coordinator");
   });
 
   it("names the exact edit for a role that still has duties", () => {
@@ -284,13 +287,13 @@ describe("resolveConversation", () => {
     const value = structuredClone(readRegistry(layout)) as unknown as {
       roles: Record<string, Record<string, unknown>>;
     };
-    value.roles["game-dev"]!.duties = ["review"];
+    value.roles["game-coordinator"]!.duties = ["review"];
     try {
       RegistrySchema.validate(layout.config, value);
       expect.unreachable();
     } catch (error) {
       expect((error as ValidationError).issues).toEqual([
-        "/roles/game-dev/duties: duties were removed in 3.0.0; remove this field and name roles " +
+        "/roles/game-coordinator/duties: duties were removed in 3.0.0; remove this field and name roles " +
           "explicitly (scheduled reviews go to each game's reports.recipient)",
       ]);
     }
@@ -304,7 +307,7 @@ describe("role harness overrides", () => {
       draft.roles["archies-dog-walks/tech"]!.harness = "codex";
     });
     expect(resolveHarness(registry, "archies-dog-walks/tech")).toBe("codex");
-    expect(resolveHarness(registry, "game-dev")).toBe("claude");
+    expect(resolveHarness(registry, "game-coordinator")).toBe("claude");
     expect(resolveConversation(registry, "archies-dog-walks/tech")).toBe(CODEX_TECH);
     expect(registry.harness).toBe("claude");
   });
@@ -312,17 +315,17 @@ describe("role harness overrides", () => {
   it("returns null instead of an inactive provider's ID when the selected ID is missing", () => {
     const layout = setup();
     const registry = updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.harness = "codex";
     });
-    expect(resolveConversation(registry, "game-dev")).toBeNull();
-    expect(registry.roles["game-dev"]!.conversations.claude).toBe(CLAUDE_GAME_DEV);
+    expect(resolveConversation(registry, "game-coordinator")).toBeNull();
+    expect(registry.roles["game-coordinator"]!.conversations.claude).toBe(CLAUDE_COORDINATOR);
   });
 
   it("validates overrides and still rejects unknown role fields", () => {
     const layout = setup();
     for (const fields of [{ harness: "other" }, { harness: null }, { provider: "codex" }]) {
       const value = structuredClone(readRegistry(layout));
-      Object.assign(value.roles["game-dev"]!, fields);
+      Object.assign(value.roles["game-coordinator"]!, fields);
       expect(() => RegistrySchema.validate(layout.config, value)).toThrow(ValidationError);
     }
   });

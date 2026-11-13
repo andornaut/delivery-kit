@@ -111,7 +111,7 @@ export async function scheduled(
   }
   prepare(slot);
   const wake = Math.floor(slot / 60) % 60;
-  ws.updateGameDevConfig({ wakeMinutes: [wake] });
+  ws.updateCoordinatorConfig({ wakeMinutes: [wake] });
   ws.config.schedule = {
     departures: [String((wake + 30) % 60).padStart(2, "0")],
     timezone: "America/Toronto",

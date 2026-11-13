@@ -1,5 +1,5 @@
-// game-dev's committed config.json and the ignored var/ state paths derived from it.
-// Every path in config.json is relative to the game-dev root.
+// game-coordinator's committed config.json and the ignored var/ state paths derived from it.
+// Every path in config.json is relative to the game-coordinator root.
 import { resolve } from "node:path";
 
 import { readJson } from "./durable.ts";
@@ -19,7 +19,7 @@ import {
 export interface GameEntry {
   /** Display name used in reports, for example "Archie". */
   readonly name: string;
-  /** Repository path relative to game-dev. */
+  /** Repository path relative to game-coordinator. */
   readonly path: string;
   readonly roles: readonly string[];
 }
@@ -28,7 +28,7 @@ export interface KitEntry {
   readonly path: string;
 }
 
-export interface GameDevConfig {
+export interface GameCoordinatorConfig {
   readonly schema: 1;
   readonly timezone: string;
   readonly wakeMinutes: readonly number[];
@@ -38,9 +38,9 @@ export interface GameDevConfig {
 }
 
 export interface Layout {
-  /** Absolute game-dev root. */
+  /** Absolute game-coordinator root. */
   readonly root: string;
-  readonly config: GameDevConfig;
+  readonly config: GameCoordinatorConfig;
   readonly configFile: string;
   readonly varDir: string;
   readonly registryFile: string;
@@ -105,7 +105,7 @@ function checkKits(issues: Issues, value: unknown): void {
   }
 }
 
-export function validateGameDevConfig(value: unknown): GameDevConfig {
+export function validateGameCoordinatorConfig(value: unknown): GameCoordinatorConfig {
   const issues = new Issues();
   const shape = { required: ["schema", "timezone", "wakeMinutes", "games", "kits", "sharedRoles"] };
   if (checkObject(issues, "", shape, value)) {
@@ -129,13 +129,13 @@ export function validateGameDevConfig(value: unknown): GameDevConfig {
     }
   }
   issues.throwIfAny(CONFIG_FILE);
-  return value as unknown as GameDevConfig;
+  return value as unknown as GameCoordinatorConfig;
 }
 
-export function loadLayout(gameDevRoot: string): Layout {
-  const root = resolve(gameDevRoot);
+export function loadLayout(coordinatorRoot: string): Layout {
+  const root = resolve(coordinatorRoot);
   const configFile = resolve(root, CONFIG_FILE);
-  const config = validateGameDevConfig(readJson(configFile));
+  const config = validateGameCoordinatorConfig(readJson(configFile));
   const varDir = resolve(root, "var");
   return {
     config,
@@ -143,6 +143,7 @@ export function loadLayout(gameDevRoot: string): Layout {
     handoffsDir: resolve(varDir, "handoffs"),
     registryFile: resolve(varDir, "registry.json"),
     registryLock: resolve(varDir, "registry.lock"),
+    // CLEANUP (added 2026-11-13): Retain persisted review/inbox state until an approved state migration.
     reviewDir: resolve(varDir, "game-dev"),
     root,
     routeFile: resolve(varDir, "route.json"),
@@ -179,7 +180,7 @@ export function gameLayout(layout: Layout, game: string): GameLayout {
 }
 
 /** Every valid registry role key: `<game>/<role>` for each game role, then each shared role. */
-export function roleKeys(config: GameDevConfig): string[] {
+export function roleKeys(config: GameCoordinatorConfig): string[] {
   const keys = Object.entries(config.games).flatMap(([game, entry]) =>
     entry.roles.map((role) => `${game}/${role}`),
   );

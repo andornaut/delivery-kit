@@ -1,5 +1,5 @@
 // `delivery-kit claude channel`: the Claude channel consumer, a stdio MCP server that the recipient
-// session launches from game-dev's node_modules. By default it drains every game's spool (or each
+// session launches from game-coordinator's node_modules. By default it drains every game's spool (or each
 // `--game`) for the conversation of those games' reports.recipient. `--conversation UUID` and
 // repeatable `--state-dir STATE/unblock` select them explicitly. It creates no state directory:
 // only spools that already exist are drained, so a channel started before any game state exists

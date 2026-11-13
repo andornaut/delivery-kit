@@ -22,7 +22,7 @@ describe("claude channel options", () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {
       draft.harness = "codex";
-      draft.roles["game-dev"]!.harness = "claude";
+      draft.roles["game-coordinator"]!.harness = "claude";
     });
     const input = new PassThrough();
     const lines: string[] = [];
@@ -43,8 +43,8 @@ describe("claude channel options", () => {
   it("refuses a Codex recipient even while the global default is Claude", async () => {
     const fixture = claudeFixture();
     updateRegistry(fixture.layout, 1, (draft) => {
-      draft.roles["game-dev"]!.harness = "codex";
-      draft.roles["game-dev"]!.conversations.codex = RECIPIENT;
+      draft.roles["game-coordinator"]!.harness = "codex";
+      draft.roles["game-coordinator"]!.conversations.codex = RECIPIENT;
     });
     const errors = io();
     expect(
@@ -55,7 +55,7 @@ describe("claude channel options", () => {
         [],
       ),
     ).toBe(EXIT_INVALID);
-    expect(errors.errors.join("")).toContain("claude harness for the recipient game-dev");
+    expect(errors.errors.join("")).toContain("claude harness for the recipient game-coordinator");
   });
 
   it("rejects a repeated state directory, a relative one and a noncanonical conversation", async () => {

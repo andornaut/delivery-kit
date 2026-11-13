@@ -22,7 +22,7 @@ export function cadenceRoute(
 export function codexRoles(ws: Workspace, extra: string[] = []): void {
   const roles: Record<string, { conversations: { codex: string } }> = {
     tech: { conversations: { codex: TECH } },
-    "dev-manager": { conversations: { codex: RECIPIENT } },
+    "game-coordinator": { conversations: { codex: RECIPIENT } },
     target: { conversations: { codex: TARGET } },
     held: { conversations: { codex: HELD } },
   };
@@ -50,7 +50,7 @@ export async function codexGame(
   ws.config.git = { main: "main", remote: "origin", github: "" };
   ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
-  ws.config.reports = { project: "Fixture", recipient: "dev-manager", scheduledTicks: true };
+  ws.config.reports = { project: "Fixture", recipient: "game-coordinator", scheduledTicks: true };
   ws.writeRoute(cadenceRoute(ws));
   clearRecipient(ws);
   const socket = await codexWorld(new CodexSocket(ws), queues).listen();

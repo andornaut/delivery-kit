@@ -1,13 +1,13 @@
-// Scratch game-dev trees for tests. Every fixture lives under a fresh temporary directory.
+// Scratch game-coordinator trees for tests. Every fixture lives under a fresh temporary directory.
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const CLAUDE_TECH = "00000000-0000-4000-8000-000000000001";
 export const CODEX_TECH = "00000000-0000-4000-8000-000000000002";
-export const CLAUDE_GAME_DEV = "00000000-0000-4000-8000-000000000003";
+export const CLAUDE_COORDINATOR = "00000000-0000-4000-8000-000000000003";
 
-export function gameDevConfig(): Record<string, unknown> {
+export function coordinatorConfig(): Record<string, unknown> {
   return {
     games: {
       "archies-dog-walks": {
@@ -23,7 +23,7 @@ export function gameDevConfig(): Record<string, unknown> {
     },
     kits: { "art-kit": { path: "../art-kit" }, "delivery-kit": { path: "../delivery-kit" } },
     schema: 1,
-    sharedRoles: ["game-dev", "art-kit", "delivery-kit", "game-kit"],
+    sharedRoles: ["game-coordinator", "art-kit", "delivery-kit", "game-kit"],
     timezone: "America/Toronto",
     wakeMinutes: [20, 50],
   };
@@ -42,7 +42,12 @@ export function projectConfig(project: string): Record<string, unknown> {
       ],
     },
     git: { github: "owner/game", main: "main", remote: "origin" },
-    reports: { project, recipient: "game-dev", scheduledTicks: true, workerParents: ["game-dev"] },
+    reports: {
+      project,
+      recipient: "game-coordinator",
+      scheduledTicks: true,
+      workerParents: ["game-coordinator"],
+    },
     resources: { cpus: 4, loadLimit: 24, memoryMiB: 4096 },
     schedule: { departures: ["00"], timezone: "America/Toronto" },
     schema: 1,
@@ -54,7 +59,7 @@ export function registryInput(): Record<string, unknown> {
     harness: "claude",
     host: { nativeProjectId: "project-1", root: "." },
     operations: {
-      "archies-dog-walks": { activation: { marker: "adopt-1" }, busOwner: "game-dev" },
+      "archies-dog-walks": { activation: { marker: "adopt-1" }, busOwner: "game-coordinator" },
     },
     roles: {
       "archies-dog-walks/tech": {
@@ -65,8 +70,8 @@ export function registryInput(): Record<string, unknown> {
         phase: "active",
         worktree: "../archies-dog-walks/.worktrees/tech",
       },
-      "game-dev": {
-        conversations: { claude: CLAUDE_GAME_DEV },
+      "game-coordinator": {
+        conversations: { claude: CLAUDE_COORDINATOR },
         ownership: "active",
         worktree: ".",
       },
@@ -77,7 +82,7 @@ export function registryInput(): Record<string, unknown> {
 }
 
 export interface Fixture {
-  /** The game-dev root. */
+  /** The game-coordinator root. */
   readonly root: string;
   readonly base: string;
 }
@@ -86,12 +91,12 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-/** A scratch tree: base/game-dev with config.json and base/<game>/delivery-kit.json per game. */
+/** A scratch tree: base/game-coordinator with config.json and base/<game>/delivery-kit.json per game. */
 export function makeFixture(): Fixture {
   const base = mkdtempSync(join(tmpdir(), "delivery-kit-"));
-  const root = join(base, "game-dev");
+  const root = join(base, "game-coordinator");
   mkdirSync(root);
-  writeJson(join(root, "config.json"), gameDevConfig());
+  writeJson(join(root, "config.json"), coordinatorConfig());
   for (const [game, project] of [
     ["archies-dog-walks", "Archie"],
     ["chibis-way-home", "Chibi"],

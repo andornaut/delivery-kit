@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 
 import { loadProjectConfig } from "../../config.ts";
 import { readJson } from "../../durable.ts";
-import { type GameDevConfig, gameLayout, type Layout, roleKeys } from "../../layout.ts";
+import { type GameCoordinatorConfig, gameLayout, type Layout, roleKeys } from "../../layout.ts";
 import { resolveConversation, resolveHarness, UnknownRole } from "../../registry/resolve.ts";
 import type { Harness, Registry } from "../../registry/schema.ts";
 import { isRecord } from "./pyjson.ts";
@@ -33,7 +33,7 @@ export const ROUTE_SCHEMA_1 =
   "scheduled reviews go to the host game's reports.recipient";
 
 /** Validate a schema 2 route against config.json; throws RouteError when it is not one. */
-export function validateRoleRoute(config: GameDevConfig, value: unknown): RoleRoute {
+export function validateRoleRoute(config: GameCoordinatorConfig, value: unknown): RoleRoute {
   if (isRecord(value) && (value.schema === 1 || Object.hasOwn(value, "monitor"))) {
     throw new RouteError(ROUTE_SCHEMA_1);
   }

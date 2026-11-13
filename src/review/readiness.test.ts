@@ -10,7 +10,7 @@ import { createRegistry, readRegistry, type Registry, updateRegistry } from "../
 import { CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 import { effectiveReadiness, harnessReadiness } from "./readiness.ts";
 
-const CODEX_GAME_DEV = "00000000-0000-4000-8000-000000000004";
+const CODEX_COORDINATOR = "00000000-0000-4000-8000-000000000004";
 const controls: FakeControl[] = [];
 
 afterEach(async () => {
@@ -90,12 +90,12 @@ describe("harnessReadiness", () => {
       harness: "codex",
       ready: false,
       roles: [
-        { conversation: null, role: "game-dev", status: "unavailable" },
+        { conversation: null, role: "game-coordinator", status: "unavailable" },
         { conversation: CODEX_TECH, role: "archies-dog-walks/tech", status: "resolved" },
       ],
     });
     updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-dev"]!.conversations.codex = CODEX_GAME_DEV;
+      draft.roles["game-coordinator"]!.conversations.codex = CODEX_COORDINATOR;
     });
     const after = await harnessReadiness(env, layout, readRegistry(layout), "codex");
     expect(after.ready).toBe(true);

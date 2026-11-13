@@ -8,7 +8,7 @@ import { SPECS } from "./commands/spec.ts";
 import { loadLayout } from "./layout.ts";
 import { createRegistry, type Registry } from "./registry/index.ts";
 import {
-  CLAUDE_GAME_DEV,
+  CLAUDE_COORDINATOR,
   makeFixture,
   projectConfig,
   registryInput,
@@ -49,7 +49,7 @@ describe("check-config", () => {
     expect((await run(root, "check-config")).out).toContain("registry revision 1");
     const config = projectConfig("Chibi");
     (config.reports as Record<string, unknown>).workerParents = [
-      "game-dev",
+      "game-coordinator",
       "chibis-way-home/tech",
     ];
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
@@ -62,7 +62,7 @@ describe("check-config", () => {
     const { root } = makeFixture();
     const layout = loadLayout(root);
     const input = registryInput() as { roles: Record<string, Record<string, unknown>> };
-    input.roles["game-dev"]!.duties = ["monitor"];
+    input.roles["game-coordinator"]!.duties = ["monitor"];
     mkdirSync(layout.varDir, { recursive: true });
     writeFixtureJson(layout.registryFile, {
       ...input,
@@ -72,7 +72,7 @@ describe("check-config", () => {
     const result = await run(root, "check-config");
     expect(result.code).toBe(EXIT_INVALID);
     expect(result.err).toContain(
-      "/roles/game-dev/duties: duties were removed in 3.0.0; remove this field",
+      "/roles/game-coordinator/duties: duties were removed in 3.0.0; remove this field",
     );
   });
 
@@ -88,15 +88,15 @@ describe("check-config", () => {
     };
     writeFixtureJson(layout.routeFile, { ...route, schema: 2 });
     expect((await run(root, "check-config")).code).toBe(EXIT_OK);
-    writeFixtureJson(layout.routeFile, { ...route, monitor: "game-dev", schema: 1 });
+    writeFixtureJson(layout.routeFile, { ...route, monitor: "game-coordinator", schema: 1 });
     const legacy = await run(root, "check-config");
     expect(legacy.code).toBe(EXIT_INVALID);
     expect(legacy.err).toContain(
       'var/route.json schema 1 is not supported: remove "monitor" and set "schema" to 2',
     );
-    writeFixtureJson(layout.routeFile, { ...route, schema: 2, targets: ["game-dev"] });
+    writeFixtureJson(layout.routeFile, { ...route, schema: 2, targets: ["game-coordinator"] });
     expect((await run(root, "check-config")).err).toContain(
-      "active route targets must not include the recipient game-dev",
+      "active route targets must not include the recipient game-coordinator",
     );
   });
 
@@ -104,18 +104,18 @@ describe("check-config", () => {
     const { base, root } = makeFixture();
     const input = registryInput() as { roles: Record<string, unknown> };
     input.roles["art-kit"] = {
-      conversations: { claude: CLAUDE_GAME_DEV },
+      conversations: { claude: CLAUDE_COORDINATOR },
       ownership: "active",
       worktree: ".",
     };
     createRegistry(loadLayout(root), input as unknown as Omit<Registry, "revision" | "updatedAt">);
     const config = projectConfig("Chibi");
-    (config.reports as Record<string, unknown>).workerParents = ["art-kit", "game-dev"];
+    (config.reports as Record<string, unknown>).workerParents = ["art-kit", "game-coordinator"];
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
     const result = await run(root, "check-config");
     expect(result.code).toBe(EXIT_INVALID);
     expect(result.err).toContain(
-      "/reports/workerParents/1: game-dev resolves to the same conversation as workerParents/0",
+      "/reports/workerParents/1: game-coordinator resolves to the same conversation as workerParents/0",
     );
   });
 
@@ -231,7 +231,7 @@ describe("claude ready and codex ready", () => {
     expect(absent.code).toBe(EXIT_INVALID);
     expect(absent.out).toBe("");
     expect(absent.err).toMatch(/^delivery-kit: /);
-    const missing = await run(join(base, "no-game-dev"), "claude", "ready");
+    const missing = await run(join(base, "no-game-coordinator"), "claude", "ready");
     expect(missing.code).toBe(EXIT_INVALID);
     expect(missing.err).toMatch(/^delivery-kit: /);
     expect((await run(root, "claude", "ready", "--extra")).code).toBe(EXIT_USAGE);

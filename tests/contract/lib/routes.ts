@@ -10,10 +10,10 @@ const OTHER_GAME = "fixture-other";
 
 /** A second game in config.json, with a valid delivery-kit.json, to host a route elsewhere. */
 export function otherGame(ws: Workspace): string {
-  const config = ws.gameDevConfig() as { games: Record<string, unknown> };
+  const config = ws.coordinatorConfig() as { games: Record<string, unknown> };
   if (!config.games[OTHER_GAME]) {
     writeJson(join(ws.root, OTHER_GAME, "delivery-kit.json"), nodeConfig(ws));
-    ws.updateGameDevConfig({
+    ws.updateCoordinatorConfig({
       games: {
         ...config.games,
         [OTHER_GAME]: { name: "Other", path: `../${OTHER_GAME}`, roles: ["tech"] },

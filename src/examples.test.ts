@@ -7,18 +7,18 @@ import { describe, expect, it } from "vitest";
 
 import { validateRoleRoute } from "./adapters/shared/route.ts";
 import { addressedRoles, loadProjectConfig } from "./config.ts";
-import { validateGameDevConfig } from "./layout.ts";
+import { validateGameCoordinatorConfig } from "./layout.ts";
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "examples");
 
 describe("examples", () => {
-  it("delivery-kit.json is a valid project configuration addressing the dev-manager role", () => {
+  it("delivery-kit.json is a valid project configuration addressing the game-coordinator role", () => {
     const config = loadProjectConfig(join(examples, "delivery-kit.json"));
-    expect(addressedRoles(config)).toEqual(["dev-manager"]);
+    expect(addressedRoles(config)).toEqual(["game-coordinator"]);
   });
 
-  it("config.json is a valid game-dev configuration naming each report project", () => {
-    const config = validateGameDevConfig(
+  it("config.json is a valid game-coordinator configuration naming each report project", () => {
+    const config = validateGameCoordinatorConfig(
       JSON.parse(readFileSync(join(examples, "config.json"), "utf8")),
     );
     const project = loadProjectConfig(join(examples, "delivery-kit.json")).reports.project;
@@ -29,7 +29,7 @@ describe("examples", () => {
   });
 
   it("route.json is a valid schema 2 role-name route for config.json", () => {
-    const config = validateGameDevConfig(
+    const config = validateGameCoordinatorConfig(
       JSON.parse(readFileSync(join(examples, "config.json"), "utf8")),
     );
     const route = validateRoleRoute(

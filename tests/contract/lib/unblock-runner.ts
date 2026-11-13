@@ -40,7 +40,7 @@ function codexRegistry(ws: Workspace): void {
     revision: 1,
     harness: "codex",
     roles: {
-      "dev-manager": { conversations: { codex: TECH } },
+      "game-coordinator": { conversations: { codex: TECH } },
       art: { conversations: { codex: ART } },
       gameplay: { conversations: { codex: GAMEPLAY } },
     },

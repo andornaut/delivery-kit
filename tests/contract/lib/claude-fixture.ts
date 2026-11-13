@@ -98,7 +98,7 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
     revision: 1,
     harness: "claude",
     roles: {
-      "dev-manager": { conversations: { claude: RECIPIENT } },
+      "game-coordinator": { conversations: { claude: RECIPIENT } },
       "archie-tech": { conversations: { claude: ARCHIE } },
       "chibi-tech": { conversations: { claude: CHIBI } },
     },
@@ -106,7 +106,7 @@ export function claudeGame(ws: Workspace, options: { recipient?: boolean } = {})
   ws.config.schedule = { departures: ["05"], timezone: "America/Toronto" };
   ws.config.reports = {
     project: "Fixture",
-    ...(options.recipient ? { recipient: "dev-manager" } : {}),
+    ...(options.recipient ? { recipient: "game-coordinator" } : {}),
   };
   ws.writeRoute(claudeRoute(ws));
   clear(ws);

@@ -2,7 +2,7 @@
 
 Every case under `cases/` runs against the built bundle.
 
-Fixture defaults: the fake `gh` reports the default required check (`Test`) completed and successful unless a case scripts it, because a departure deploys only after CI passes. A case that names no report recipient gets a registered `dev-manager` role with a fixture conversation, because a recipient must resolve through the registry. A route fixture sets its host game's `reports.recipient`, because the review recipient is that field. The adapter installs the built bundle as the game's pinned package and replays `runner.log` as resident output. A gate worktree gets the fake `node_modules/wrangler/bin/wrangler.js` only from the `docker cp` of `node_modules/` out of a passing gate.
+Fixture defaults: the fake `gh` reports the default required check (`Test`) completed and successful unless a case scripts it, because a departure deploys only after CI passes. A case that names no report recipient gets a registered `game-coordinator` role with a fixture conversation, because a recipient must resolve through the registry. A route fixture sets its host game's `reports.recipient`, because the review recipient is that field. The adapter installs the built bundle as the game's pinned package and replays `runner.log` as resident output. A gate worktree gets the fake `node_modules/wrangler/bin/wrangler.js` only from the `docker cp` of `node_modules/` out of a passing gate.
 
 Decisions the cases assert:
 

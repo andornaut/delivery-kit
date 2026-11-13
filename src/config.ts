@@ -27,7 +27,7 @@ export interface ProjectConfig {
   readonly git: { readonly main: string; readonly remote: string; readonly github: string };
   readonly schedule: {
     readonly departures: readonly string[];
-    /** Defaults to the game-dev config.json timezone when omitted. */
+    /** Defaults to the game-coordinator config.json timezone when omitted. */
     readonly timezone?: string;
   };
   /**
@@ -56,7 +56,7 @@ export interface ProjectConfig {
     /** The game's display name, matching config.json. */
     readonly project: string;
     readonly scheduledTicks: boolean;
-    /** A registered role key, for example "dev-manager". */
+    /** A registered role key, for example "game-coordinator". */
     readonly recipient: string;
     readonly workerParents: readonly string[];
   };

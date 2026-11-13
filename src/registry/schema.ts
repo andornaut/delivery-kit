@@ -1,7 +1,7 @@
 // var/registry.json schema version 1, shared by delivery-kit and the game-sessions skills.
 // The skills own every field except operations.*.lastAdoption, a reserved field nothing writes.
 // Registry state records ownership; it never proves activation on its own.
-import { type GameDevConfig, roleKeys } from "../layout.ts";
+import { type GameCoordinatorConfig, roleKeys } from "../layout.ts";
 import {
   checkArray,
   checkEnum,
@@ -23,7 +23,7 @@ export type TransferPhase = (typeof TRANSFER_PHASES)[number];
 
 export interface Activation {
   readonly marker: string;
-  /** Path relative to game-dev, for example var/handoffs/<file>. */
+  /** Path relative to game-coordinator, for example var/handoffs/<file>. */
   readonly checkpoint?: string;
 }
 
@@ -31,7 +31,7 @@ export interface RoleRecord {
   /** Transport override only; activation is recorded separately. */
   readonly harness?: Harness;
   readonly ownership: string;
-  /** Worktree relative to game-dev. */
+  /** Worktree relative to game-coordinator. */
   readonly worktree: string;
   readonly branch?: string;
   /** Conversation ID per harness. A harness flip keeps the other harness's IDs. */
@@ -249,7 +249,11 @@ function checkStructure(issues: Issues, value: unknown): value is Registry {
 }
 
 /** Keys and names must agree with config.json: role keys, games and role references. */
-function checkAgainstConfig(issues: Issues, config: GameDevConfig, registry: Registry): void {
+function checkAgainstConfig(
+  issues: Issues,
+  config: GameCoordinatorConfig,
+  registry: Registry,
+): void {
   const keys = new Set(roleKeys(config));
   for (const key of Object.keys(registry.roles)) {
     if (!keys.has(key)) {
@@ -274,7 +278,10 @@ function checkAgainstConfig(issues: Issues, config: GameDevConfig, registry: Reg
 }
 
 /** Validate a version 1 registry; with `config`, also check its keys against config.json. */
-export function validateRegistry(config: GameDevConfig | undefined, value: unknown): Registry {
+export function validateRegistry(
+  config: GameCoordinatorConfig | undefined,
+  value: unknown,
+): Registry {
   const issues = new Issues();
   if (checkStructure(issues, value) && config !== undefined) {
     checkAgainstConfig(issues, config, value);
