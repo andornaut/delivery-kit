@@ -28,6 +28,6 @@ export const status: Handler = async (io, root, args) => {
     io.out(await resourceReport(context));
     return EXIT_OK;
   }
-  io.out(`${dumpsJson(statusReport(busPaths(game.busDir)))}\n`);
+  io.out(`${dumpsJson(statusReport(busPaths(game.busDir), game.repo))}\n`);
   return EXIT_OK;
 };

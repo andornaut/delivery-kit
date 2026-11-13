@@ -22,7 +22,7 @@ import { depart, reportScheduledTick, requestStore, slotDetail } from "./departu
 import { loadedIdentity, pinGuard, recordPin } from "./pin.ts";
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
-import { ensureDir, readTrimmed, truncate, writeLines } from "./state.ts";
+import { ensureDir, truncate, writeLines } from "./state.ts";
 import { recordIdentity } from "./status.ts";
 import { currentMinuteSlot, minuteSlots, untilNext } from "./time.ts";
 
@@ -271,10 +271,6 @@ function holdSingleton(context: BusContext): LockHandle[] {
   return held;
 }
 
-function sourceCommit(toolRoot: string): string | null {
-  return readTrimmed(join(toolRoot, "SOURCE_COMMIT")) ?? null;
-}
-
 /** Hold the singleton locks, record identity and pin, then run until aborted. */
 export async function runRunner(
   options: RunnerOptions,
@@ -290,12 +286,14 @@ export async function runRunner(
   try {
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));
+    const loaded = loadedIdentity(LOADED_VERSION, cliPath, context.game.repo);
     let runnerToken: string | undefined;
     try {
       const identity = recordIdentity(context.paths, {
+        cliSha256: loaded.cliSha256,
         config: context.game.configFile,
         pid: process.pid,
-        sourceCommit: sourceCommit(toolRoot),
+        sourceCommit: loaded.sourceCommit,
         toolRoot,
         version: LOADED_VERSION,
       });
@@ -306,7 +304,6 @@ export async function runRunner(
       );
     }
     bindDeliveryRunner(context, runnerToken);
-    const loaded = loadedIdentity(LOADED_VERSION, cliPath, context.game.repo);
     recordPin(context, loaded, cliPath);
     const guard = pinGuard(context, loaded);
     for (const sha of unfinishedCi(context)) {

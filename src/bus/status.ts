@@ -17,9 +17,11 @@ import { join } from "node:path";
 import { writeDurable } from "../durable.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { lockHeld } from "./locks.ts";
+import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
 import { type BusPaths, ciStatusFile, readText, readTrimmed, sortKeys } from "./state.ts";
 
 export interface IdentityInput {
+  readonly cliSha256?: string | null;
   readonly pid: number;
   readonly version: string;
   readonly sourceCommit: string | null;
@@ -48,6 +50,7 @@ export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<st
   const token = `${input.pid}:${started}:${randomUUID()}`;
   const startedAt = new Date(Number(started / 1_000_000n)).toISOString().replace(/\.\d{3}Z$/, "Z");
   const identity = {
+    cli_sha256: input.cliSha256 ?? null,
     config: input.config,
     config_sha256: fileSha256(input.config),
     pid: input.pid,
@@ -135,6 +138,7 @@ function configStatus(identity: Record<string, unknown>): "changed" | "loaded" |
 }
 
 export interface StatusReport {
+  readonly provenance: ProvenanceReport;
   readonly [key: string]: unknown;
 }
 
@@ -243,7 +247,7 @@ function controlReport(
 }
 
 /** The status report. The last push needs a CI record, because every 1.x game watches CI. */
-export function statusReport(paths: BusPaths): StatusReport {
+export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
@@ -344,6 +348,7 @@ export function statusReport(paths: BusPaths): StatusReport {
     idle: blockers.length === 0,
     idle_blockers: blockers,
     loop_lock_held: loopHeld,
+    provenance: provenanceReport({ identity, identityStatus, loopHeld }, repo),
     reporter_blockers: reporters,
     runner_lock_held: running,
     status: running ? "running" : "not running",

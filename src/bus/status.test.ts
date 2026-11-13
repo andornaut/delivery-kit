@@ -284,6 +284,7 @@ describe("status report", () => {
       idle: true,
       idle_blockers: [],
       loop_lock_held: false,
+      provenance: expect.objectContaining({ resident_status: "unknown" }),
       gate_failed: [],
       reporter_blockers: [],
       runner_lock_held: false,

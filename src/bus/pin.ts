@@ -4,16 +4,18 @@
 // deduplicated pin-mismatch event and finishes on the loaded code.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { writeJsonDurable } from "../durable.ts";
 import type { BusContext } from "./context.ts";
+import { readTrimmed } from "./state.ts";
 
 export const PACKAGE = "@andornaut/delivery-kit";
 
 export interface PinIdentity {
   readonly version: string | null;
   readonly integrity: string | null;
+  readonly sourceCommit: string | null;
   readonly cliSha256: string | null;
 }
 
@@ -28,10 +30,23 @@ function sha256(path: string): string | null {
 function jsonField(path: string, pick: (value: Record<string, unknown>) => unknown): string | null {
   try {
     const value = pick(JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>);
-    return typeof value === "string" ? value : null;
+    return typeof value === "string" && value.trim() !== "" ? value : null;
   } catch {
     return null;
   }
+}
+
+/** Source metadata is a claim, not independent archive verification. */
+function sourceCommit(toolRoot: string): string | null {
+  const value = readTrimmed(join(toolRoot, "SOURCE_COMMIT"));
+  return value !== undefined && /^[a-f0-9]{40}$/.test(value) ? value : null;
+}
+
+function lockIntegrity(repo: string): string | null {
+  return jsonField(join(repo, "package-lock.json"), (lock) => {
+    const packages = lock.packages as Record<string, Record<string, unknown>> | undefined;
+    return packages?.[`node_modules/${PACKAGE}`]?.integrity;
+  });
 }
 
 /** The package the game's node_modules and package-lock.json currently provide. */
@@ -39,17 +54,22 @@ export function installedIdentity(repo: string): PinIdentity {
   const installed = join(repo, "node_modules", PACKAGE);
   return {
     cliSha256: sha256(join(installed, "dist", "cli.js")),
-    integrity: jsonField(join(repo, "package-lock.json"), (lock) => {
-      const packages = lock.packages as Record<string, Record<string, unknown>> | undefined;
-      return packages?.[`node_modules/${PACKAGE}`]?.integrity;
-    }),
-    version: jsonField(join(installed, "package.json"), (manifest) => manifest.version),
+    integrity: lockIntegrity(repo),
+    sourceCommit: sourceCommit(installed),
+    version: jsonField(join(installed, "package.json"), (manifest) =>
+      manifest.name === undefined || manifest.name === PACKAGE ? manifest.version : null,
+    ),
   };
 }
 
-/** The running code: its embedded version, the loaded bundle digest and the startup lockfile. */
+/** The running code: its embedded version, startup bundle digest and metadata. */
 export function loadedIdentity(version: string, cliPath: string, repo: string): PinIdentity {
-  return { cliSha256: sha256(cliPath), integrity: installedIdentity(repo).integrity, version };
+  return {
+    cliSha256: sha256(cliPath),
+    integrity: lockIntegrity(repo),
+    sourceCommit: sourceCommit(dirname(dirname(cliPath))),
+    version,
+  };
 }
 
 export function recordPin(context: BusContext, loaded: PinIdentity, cliPath: string): void {

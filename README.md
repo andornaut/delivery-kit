@@ -82,6 +82,37 @@ stderr prefixed `delivery-kit:`. `inbox snapshot` and `inbox ack` keep their JSO
 stdout and also name the error on stderr. `--help` is generated from each command's parser
 options, so it lists every flag a command accepts.
 
+## Status provenance
+
+`status --game ID` includes `provenance` in its existing JSON report:
+
+```json
+{
+  "archive": { "reason": "no_independent_verification", "status": "unknown" },
+  "comparison": { "cli_sha256": "unknown", "source_commit": "unknown", "version": "unknown" },
+  "installed": { "cli_sha256": null, "source_commit": null, "version": null },
+  "resident": { "cli_sha256": null, "source_commit": null, "version": null },
+  "resident_status": "unknown"
+}
+```
+
+- `installed` reads the selected game's `node_modules/@andornaut/delivery-kit`, independently of
+  the package running the status command. Missing, unreadable or invalid evidence is null.
+- `resident` uses the startup pin capture bound into `runner.identity.json`, including its
+  `cli_sha256`. It is `attested` only with the current identity token, both singleton locks held
+  and a valid startup digest. Otherwise its fields are null and `resident_status` is `unknown`.
+  Older identities without that digest stay unknown; `runner.json` is not an attestation source.
+- Each comparison is `match`, `different` or `unknown` when either value is unavailable.
+  Version and source are metadata claims. The digest compares the startup CLI bytes with the
+  current installed CLI; hashing today's installed file cannot reconstruct the startup digest.
+- `archive.status` stays `unknown`: neither package metadata, lockfile integrity nor matching
+  installed/resident digests independently verifies a published archive. No archive verifier or
+  adoption-record attestation is consumed by this report.
+
+A provenance match does not establish readiness or authorise replacement. Inspect the existing
+configuration, control, lock, idle and reporter/drain fields separately. Status performs no repair,
+registry update, runner replacement or scheduling action.
+
 ## Configuration
 
 Configuration never holds secret values. Use the operator's existing authentication and
