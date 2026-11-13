@@ -32,7 +32,7 @@ export interface GameConfig {
   schedule?: { departures?: unknown; timezone?: unknown };
   gate?: { image?: unknown; install?: unknown; steps?: unknown };
   /** `maxWorkers` is a removed key that check-config rejects as unknown. */
-  resources?: { cpus?: unknown; maxWorkers?: unknown; loadLimit?: unknown };
+  resources?: { cpus?: unknown; maxWorkers?: unknown; loadLimit?: unknown; memoryMiB?: unknown };
   ci?: { requiredNames?: unknown; pollSeconds?: unknown; timeoutSeconds?: unknown };
   deploy?: { mode?: unknown; skipPattern?: unknown };
   reports?: {
@@ -86,7 +86,7 @@ function defaultConfig(): GameConfig {
         { name: "build", run: "build" },
       ],
     },
-    resources: { cpus: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24, memoryMiB: 4096 },
     ci: { requiredNames: ["Test"] },
     deploy: { mode: "wrangler", skipPattern: "(\\.md$|^art/|^gameplay/)" },
     reports: {},

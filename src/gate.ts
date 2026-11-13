@@ -111,6 +111,8 @@ function createArgs(context: BusContext, name: string, input: GateInput): string
     `${GATE_LABEL}=${game.id}`,
     "--cpus",
     String(config.resources.cpus),
+    "--memory",
+    `${config.resources.memoryMiB}m`,
     ...userArgs(),
     ...checkoutMount(input.work, GATE_SOURCE),
     "-e",

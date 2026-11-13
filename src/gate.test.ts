@@ -44,8 +44,10 @@ describe("gateScript", () => {
 });
 
 describe("runGate", () => {
-  function setup(fake: Parameters<typeof gateDocker>[0], leftovers = "") {
-    const test = makeGame();
+  function setup(fake: Parameters<typeof gateDocker>[0], leftovers = "", memoryMiB = 4096) {
+    const test = makeGame((config) => {
+      config.resources!.memoryMiB = memoryMiB;
+    });
     const exec = fakeExec((spec) =>
       spec.args[0] === "ps" ? ok(leftovers) : gateDocker(fake)(spec),
     );
@@ -64,7 +66,7 @@ describe("runGate", () => {
     exec.calls.map((call) => call.args[0]);
 
   it("copies the exact commit in, logs, dist/ and node_modules/ out, and removes the container", async () => {
-    const { context, exec, input, logs, test } = setup({});
+    const { context, exec, input, logs, test } = setup({}, "", 2305);
     expect(await runGate(context, input)).toEqual({ ok: true, output: "lint ok\ntest ok\n" });
     expect(readFileSync(join(logs, "01-lint.log"), "utf8")).toBe("linted\n");
     expect(readFileSync(join(test.repo, "dist", "index.js"), "utf8")).toBe("built\n");
@@ -83,6 +85,8 @@ describe("runGate", () => {
         `type=bind,src=${test.repo},dst=/src,readonly`,
       ]),
     );
+    expect(create[create.indexOf("--memory") + 1]).toBe("2305m");
+    expect(create[create.indexOf("--cpus") + 1]).toBe("4");
     const tree = gitSync(test.repo, "rev-parse", "HEAD^{tree}");
     const copy = exec.calls.find((call) => call.args.includes(`EXPECTED_TREE=${tree}`))?.args ?? [];
     expect(copy.at(-1)).toContain('test "$actual" = "$EXPECTED_TREE"');

@@ -12,7 +12,7 @@
       { "name": "build", "run": "npm run build" }
     ]
   },
-  "resources": { "cpus": 4, "loadLimit": 24 },
+  "resources": { "cpus": 4, "loadLimit": 24, "memoryMiB": 4096 },
   "ci": {
     "requiredNames": ["AI attributions", "Lint", "Test"],
     "pollSeconds": 60,

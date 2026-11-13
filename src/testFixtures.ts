@@ -43,7 +43,7 @@ export function projectConfig(project: string): Record<string, unknown> {
     },
     git: { github: "owner/game", main: "main", remote: "origin" },
     reports: { project, recipient: "game-dev", scheduledTicks: true, workerParents: ["game-dev"] },
-    resources: { cpus: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24, memoryMiB: 4096 },
     schedule: { departures: ["00"], timezone: "America/Toronto" },
     schema: 1,
   };

@@ -41,6 +41,8 @@ export interface ProjectConfig {
   };
   readonly resources: {
     readonly cpus: number;
+    /** Required gate memory limit in MiB, from 1 through 8192. */
+    readonly memoryMiB: number;
     /** Departures start only below this one-minute load; 0 holds every departure. */
     readonly loadLimit: number;
   };
@@ -60,8 +62,8 @@ export interface ProjectConfig {
   };
 }
 
-/** Configuration ceilings: at most four CPUs and a loadLimit of at most 30. */
-const RESOURCE_LIMITS = { cpus: 4, loadLimit: 30 } as const;
+/** Configuration ceilings for gate execution and one-minute load admission. */
+const RESOURCE_LIMITS = { cpus: 4, loadLimit: 30, memoryMiB: 8192 } as const;
 
 const BRANCH_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,128}$/;
 const GITHUB_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -137,10 +139,16 @@ function checkGate(issues: Issues, value: unknown): void {
 }
 
 function checkResources(issues: Issues, value: unknown): void {
-  if (!checkObject(issues, "/resources", { required: ["cpus", "loadLimit"] }, value)) {
+  if (!checkObject(issues, "/resources", { required: ["cpus", "loadLimit", "memoryMiB"] }, value)) {
     return;
   }
   checkInteger(issues, "/resources/cpus", { max: RESOURCE_LIMITS.cpus, min: 1 }, value.cpus);
+  checkInteger(
+    issues,
+    "/resources/memoryMiB",
+    { max: RESOURCE_LIMITS.memoryMiB, min: 1 },
+    value.memoryMiB,
+  );
   const load = value.loadLimit;
   if (
     typeof load !== "number" ||

@@ -19,7 +19,7 @@ function setup(
     git: { main: "main", remote: options.remote ?? "", github: "" },
     schedule: { departures: ["00"], timezone: "UTC" },
     gate: { image: "unused", install: "", steps: [{ name: "test", run: "true" }] },
-    resources: { cpus: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24, memoryMiB: 4096 },
     deploy: { mode: options.mode ?? "none", skipPattern: "" },
     reports: {},
   };

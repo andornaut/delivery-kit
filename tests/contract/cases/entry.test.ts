@@ -36,7 +36,7 @@ function minimal(ws: Workspace): void {
     git: { main: "main", remote: "origin", github: "" },
     schedule: { departures: ["00"] },
     gate: { image: "unused", install: "", steps: [] },
-    resources: { cpus: 4, loadLimit: 24 },
+    resources: { cpus: 4, loadLimit: 24, memoryMiB: 4096 },
     deploy: { mode: "none", skipPattern: "" },
     reports: {},
   };
@@ -222,15 +222,27 @@ suite("entry", () => {
     minimal(ws);
     const before = ws.list();
     for (const value of [0, -1, 5, 1.5, "invalid", "2+2", "", "04"]) {
-      ws.config.resources = { cpus: value, loadLimit: 24 };
+      ws.config.resources = { cpus: value, loadLimit: 24, memoryMiB: 4096 };
       const result = await execute(impl.checkConfig(ws));
       expect(result.code, `cpus=${value} ${result.stderr}`).toBe(EXIT_INVALID);
     }
     for (const value of [1, 4]) {
-      ws.config.resources = { cpus: value, loadLimit: 24 };
+      ws.config.resources = { cpus: value, loadLimit: 24, memoryMiB: 4096 };
       const result = await execute(impl.checkConfig(ws));
       expect(result.code, `cpus=${value} ${result.stderr}`).toBe(0);
     }
+    expect(ws.list()).toEqual(before);
+    expect(ws.calls()).toEqual([]);
+  });
+
+  contract("missing memoryMiB rejects runner startup before any container activity", async () => {
+    const ws = workspace();
+    minimal(ws);
+    delete ws.config.resources!.memoryMiB;
+    const before = ws.list();
+    const result = await execute(impl.run(ws));
+    expect(result.code, result.stderr).toBe(EXIT_INVALID);
+    expect(result.stderr).toContain("/resources/memoryMiB: is required");
     expect(ws.list()).toEqual(before);
     expect(ws.calls()).toEqual([]);
   });
@@ -239,7 +251,7 @@ suite("entry", () => {
     const ws = workspace();
     minimal(ws);
     const before = ws.list();
-    ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24 };
+    ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24, memoryMiB: 4096 };
     const result = await execute(impl.checkConfig(ws));
     expect(result.code, result.stderr).toBe(EXIT_INVALID);
     expect(`${result.stdout}${result.stderr}`).toContain("/resources/maxWorkers: unknown key");
