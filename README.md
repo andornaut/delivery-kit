@@ -147,7 +147,7 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   the gate. No step name has special meaning. The
   canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
   `art`), so every game lists the shared steps the same way and opts into extras by adding them.
-- `resources`: `cpus` (integer 1 to 4), required `memoryMiB` (integer 1 to 8192) and
+- `resources`: `cpus` (integer 1 to 4), required `memoryMiB` (integer 6 to 8192) and
   `loadLimit` (0 to 30). Gate containers receive `--memory <memoryMiB>m`, in MiB. CPU and memory
   limits cap execution; only the one-minute load controls admission. A departure starts only below
   `loadLimit`. At or above it, the departure re-checks the one-minute load every 60 seconds and
@@ -164,9 +164,13 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   events and, when the game hosts the route, its scheduled reviews.
 
 Version 4.0 requires an explicit `resources.memoryMiB` in every game configuration, including
-configurations created with 3.x. Tech must select and commit an integer from 1 through 8192
-before adopting 4.0. Missing or invalid values fail configuration validation before a gate
-container starts. There is no default or automatic configuration rewrite.
+configurations created with 3.x. The value must be an integer from 6 through 8192 because
+[Docker requires at least 6 MiB](https://docs.docker.com/engine/containers/resource_constraints/#limit-a-containers-access-to-memory).
+Missing or invalid values fail configuration validation before a gate container starts.
+There is no default or automatic configuration rewrite. The 3.x validators reject the new field,
+so the owning Tech must coordinate the configuration and package pin changes in a controlled
+idle adoption. Do not edit the live configuration early. Preserve delivery controls, locks,
+reports and departure cadence during adoption.
 
 ## Registry
 
@@ -533,7 +537,8 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
 `delivery-kit-gate=<game>`:
 
 - runs `gate.image` as `--user 19001:19001` with `HOME=/tmp`, `--group-add` of the worktree's
-  group and `--cpus` from `resources.cpus`;
+  group, `--cpus` from `resources.cpus` and `--memory <memoryMiB>m` from
+  `resources.memoryMiB` (MiB);
 - binds the worktree read-only at `/src` (`--mount type=bind,...,readonly`) and the npm cache
   volume at `/var/tmp` (`npm_config_cache=/var/tmp/npm`), and sets `WORKERS_CI_COMMIT_SHA`;
 - checks that the image has `git`, `tar`, `ls` and `tail`, then copies `/src` without `.git`

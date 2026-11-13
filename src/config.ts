@@ -41,7 +41,7 @@ export interface ProjectConfig {
   };
   readonly resources: {
     readonly cpus: number;
-    /** Required gate memory limit in MiB, from 1 through 8192. */
+    /** Required gate memory limit in MiB, from 6 through 8192. */
     readonly memoryMiB: number;
     /** Departures start only below this one-minute load; 0 holds every departure. */
     readonly loadLimit: number;
@@ -146,7 +146,7 @@ function checkResources(issues: Issues, value: unknown): void {
   checkInteger(
     issues,
     "/resources/memoryMiB",
-    { max: RESOURCE_LIMITS.memoryMiB, min: 1 },
+    { max: RESOURCE_LIMITS.memoryMiB, min: 6 },
     value.memoryMiB,
   );
   const load = value.loadLimit;
