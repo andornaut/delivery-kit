@@ -52,8 +52,11 @@ describe("validateProjectConfig", () => {
     for (const memoryMiB of [undefined, 0, -1, 1, 5, 1.5, 8193, "4096", null, NaN, Infinity]) {
       const issues = issuesFor((config) => {
         const resources = section(config, "resources");
-        if (memoryMiB === undefined) delete resources.memoryMiB;
-        else resources.memoryMiB = memoryMiB;
+        if (memoryMiB === undefined) {
+          delete resources.memoryMiB;
+        } else {
+          resources.memoryMiB = memoryMiB;
+        }
       });
       expect(
         issues.some((issue) => issue.startsWith("/resources/memoryMiB:")),
