@@ -3,8 +3,10 @@
 Local scheduled trunk-based Git delivery. Each departure gates the game's local `main` HEAD in an
 isolated container, pushes that exact commit, watches its CI and deploys the already-gated build
 on a pass. The kit owns the mechanisms. Each game owns its repository, `delivery-kit.json`,
-credentials and schedule; game-dev owns `config.json`, the registry and all mutable state under
+credentials and schedule; `dev-manager` owns `config.json`, the registry and all mutable state under
 `var/`.
+
+The `dev-manager` role coordinates from the `game-dev` repository.
 
 The package is `@andornaut/delivery-kit`. Its one runtime entry point is the `delivery-kit` CLI,
 bundled into `dist/cli.js`. The bundle imports only `node:` builtins, has no dynamic `import()`,
@@ -50,7 +52,7 @@ explicit; it is never inferred from the working directory.
 | `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                                                                                               |
 
 - `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
-- `control`: game-dev writes desired control; Tech owns runner adoption. The command changes
+- `control`: `dev-manager` writes desired control; Tech owns runner adoption. The command changes
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
@@ -414,7 +416,7 @@ locks are free and its runner token matches the identity and lock token.
 ### Adopt persistent control
 
 Tech installs the upgraded package and replaces its runner only while idle. Before starting
-the new runner, game-dev uses the upgraded CLI to explicitly initialize the approved desired
+the new runner, `dev-manager` uses the upgraded CLI to explicitly initialize the approved desired
 states. An older installed CLI does not implement `control`:
 
 ```bash
