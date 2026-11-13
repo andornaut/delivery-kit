@@ -49,7 +49,19 @@ describe("validateProjectConfig", () => {
         issuesFor((config) => (section(config, "resources").memoryMiB = memoryMiB)),
       ).toEqual([]);
     }
-    for (const memoryMiB of [undefined, 0, -1, 1, 5, 1.5, 8193, "4096", null, NaN, Infinity]) {
+    for (const memoryMiB of [
+      undefined,
+      0,
+      -1,
+      1,
+      5,
+      1.5,
+      8193,
+      "4096",
+      null,
+      NaN,
+      Infinity,
+    ]) {
       const issues = issuesFor((config) => {
         const resources = section(config, "resources");
         if (memoryMiB === undefined) delete resources.memoryMiB;
