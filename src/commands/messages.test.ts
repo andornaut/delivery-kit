@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -91,6 +91,32 @@ describe("common message command handlers", () => {
     });
     const pulled = await run(test, messageStatus, "--id", ID, "--include-body");
     expect(JSON.parse(pulled.out)[0].body).toBe(BODY);
+  });
+
+  it("rejects malformed UTF-8 and preserves valid BOM, U+FFFD and trailing newlines", async () => {
+    const test = setup();
+    writeFileSync(
+      test.bodyFile,
+      Buffer.concat([Buffer.from("PRIVATE_PREFIX"), Buffer.from([0xc3, 0x28])]),
+    );
+    expect(await run(test, messageSend, ...sendArgs())).toEqual({
+      code: 1,
+      out: "",
+      err: "delivery-kit: invalid-body-encoding\n",
+    });
+    expect(existsSync(join(test.layout.reviewDir, "messages"))).toBe(false);
+    const empty = await run(test, messageStatus, "--recipient", ROLE, "--include-body");
+    expect(empty).toEqual({ code: 0, out: "[]\n", err: "" });
+    const valid = Buffer.from("\ufeff  Valid replacement \ufffd.\n\n", "utf8");
+    writeFileSync(test.bodyFile, valid);
+    const sent = await run(test, messageSend, ...sendArgs());
+    expect(sent).toMatchObject({ code: 0, err: "" });
+    expect(JSON.parse(sent.out)).not.toHaveProperty("body");
+    const pulled = await run(test, messageStatus, "--id", ID, "--include-body");
+    expect(pulled).toMatchObject({ code: 0, err: "" });
+    const body = JSON.parse(pulled.out)[0].body as string;
+    expect(body).toBe(valid.toString("utf8"));
+    expect(Buffer.from(body, "utf8")).toEqual(valid);
   });
 
   it("stores explicit worker and intent options locally without treating the parent as the child", async () => {

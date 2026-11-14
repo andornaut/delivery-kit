@@ -1,4 +1,5 @@
 // Parsing delegates ownership, admission and evidence checks to the durable message service.
+import { isUtf8 } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
@@ -111,7 +112,11 @@ export const messageSend: Handler = (io, root, args) => {
     return usage(io, "message send");
   }
   return operate(io, root, async (service) => {
-    const body = readFileSync(resolve(io.cwd, file), "utf8");
+    const bytes = readFileSync(resolve(io.cwd, file));
+    if (!isUtf8(bytes)) {
+      throw new MessageError("invalid-body-encoding");
+    }
+    const body = bytes.toString("utf8");
     return service.view(await service.send({ ...input, body }));
   });
 };
