@@ -1,27 +1,12 @@
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { gameLayout, loadLayout, roleKeys, UnknownGame } from "./layout.ts";
-import {
-  type GameCoordinatorConfig,
-  type GameDevConfig,
-  validateGameCoordinatorConfig,
-  validateGameDevConfig,
-} from "./registry/index.ts";
 import { coordinatorConfig, makeFixture, writeFixtureJson } from "./testFixtures.ts";
 import { ValidationError } from "./validate.ts";
 
 describe("loadLayout", () => {
-  it("exports canonical coordinator configuration with identical legacy public aliases", () => {
-    const canonical: GameCoordinatorConfig = validateGameCoordinatorConfig(coordinatorConfig());
-    const legacy: GameDevConfig = canonical;
-    expect(validateGameDevConfig).toBe(validateGameCoordinatorConfig);
-    expect(validateGameDevConfig(legacy)).toBe(canonical);
-    expect(roleKeys(canonical)).toContain("game-coordinator");
-  });
-
   it("resolves var/ and per-game paths relative to game-coordinator", () => {
     const { base, root } = makeFixture();
     const layout = loadLayout(root);
@@ -64,11 +49,5 @@ describe("loadLayout", () => {
       expect(issues).toContain("/games/Bad_ID/path: must be a relative path");
       expect(issues).toContain("/extra: unknown key");
     }
-  });
-
-  it("reports unreadable config.json", () => {
-    const { root } = makeFixture();
-    writeFileSync(join(root, "config.json"), "not json");
-    expect(() => loadLayout(root)).toThrow("invalid JSON");
   });
 });

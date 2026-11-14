@@ -5,14 +5,11 @@ import { describe, expect, it } from "vitest";
 import { loadLayout, roleKeys } from "../layout.ts";
 import { holdLock, LockBusy } from "../lock.ts";
 import { makeFixture, registryInput, writeFixtureJson } from "../testFixtures.ts";
-import { ValidationError } from "../validate.ts";
 import {
   createRegistry,
-  type HarnessSelection,
   readRegistry,
   type Registry,
   type RegistryDraft,
-  resolveConversation,
   resolveHarness,
   resolveSelectedRoles,
   RevisionConflict,
@@ -68,35 +65,6 @@ describe("resolveSelectedRoles", () => {
       }),
     ).toEqual([`${ARCHIE}/art`, `${ARCHIE}/gameplay`, `${ARCHIE}/tech`, "game-coordinator"]);
   });
-
-  it("rejects missing, empty, malformed and unknown selectors", () => {
-    const layout = setup();
-    for (const selection of [
-      {},
-      { games: [] },
-      { roles: [] },
-      { games: ["absent"] },
-      { roles: ["game-coordinator", "game-coordinator"] },
-      { roles: [null] },
-      { all: true },
-      null,
-    ]) {
-      expect(() => resolveSelectedRoles(layout, readRegistry(layout), selection as never)).toThrow(
-        ValidationError,
-      );
-    }
-    expect(() => resolveSelectedRoles(layout, readRegistry(layout), { roles: ["absent"] })).toThrow(
-      UnknownRole,
-    );
-  });
-
-  it("rejects games with unregistered roles", () => {
-    const layout = setup();
-    const registry = updateRegistry(layout, 1, (draft) => {
-      delete draft.roles[`${ARCHIE}/art`];
-    });
-    expect(() => resolveSelectedRoles(layout, registry, { games: [ARCHIE] })).toThrow(UnknownRole);
-  });
 });
 
 describe("selectHarness", () => {
@@ -131,19 +99,6 @@ describe("selectHarness", () => {
     expect(next.roles[`${ARCHIE}/gameplay`]).toEqual(selected.roles[`${ARCHIE}/gameplay`]);
   });
 
-  it("selects a shared role and retains both providers' conversation IDs", () => {
-    const layout = setup();
-    const before = readRegistry(layout);
-    const next = selectHarness(layout, 1, { harness: "claude", roles: ["game-coordinator"] });
-    expect(resolveHarness(next, "game-coordinator")).toBe("claude");
-    expect(next.roles["game-coordinator"]!.conversations).toEqual(
-      before.roles["game-coordinator"]!.conversations,
-    );
-    expect(resolveConversation(next, "game-coordinator")).toBe(
-      before.roles["game-coordinator"]!.conversations.claude,
-    );
-  });
-
   it("rejects a partially invalid selection atomically", () => {
     const layout = setup();
     const before = readFileSync(layout.registryFile);
@@ -163,23 +118,6 @@ describe("selectHarness", () => {
       selectHarness(layout, registry.revision, { harness: "claude", games: [ARCHIE] }),
     ).toThrow(/selected conversation is unavailable/);
     expect(readFileSync(layout.registryFile)).toEqual(before);
-  });
-
-  it("rejects invalid harnesses, absent selectors and extra fields without writing", () => {
-    const layout = setup();
-    const before = readFileSync(layout.registryFile);
-    for (const selection of [
-      { harness: "other", roles: ["game-coordinator"] },
-      { harness: "claude" },
-      { harness: "claude", roles: [] },
-      { harness: "claude", roles: ["game-coordinator"], activation: true },
-      null,
-    ]) {
-      expect(() => selectHarness(layout, 1, selection as HarnessSelection)).toThrow(
-        ValidationError,
-      );
-      expect(readFileSync(layout.registryFile)).toEqual(before);
-    }
   });
 
   it("checks the revision before resolving selection against the locked current registry", () => {

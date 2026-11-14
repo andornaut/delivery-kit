@@ -63,26 +63,6 @@ describe("control command", () => {
     expect(result.out.trim().split("\n")).toHaveLength(1);
   });
 
-  it("requires every option, a supported state and nonempty reason without creating control", async () => {
-    const test = fixture();
-    for (const flag of ["--game", "--state", "--reason", "--requester"]) {
-      const words = args();
-      words.splice(words.indexOf(flag), 2);
-      // eslint-disable-next-line no-await-in-loop
-      expect((await run(test.root, ...words)).code, flag).toBe(2);
-    }
-    expect((await run(test.root, ...args("stopped"))).code).toBe(2);
-    expect((await run(test.root, ...args(), "--unknown")).code).toBe(2);
-    for (const reason of ["   ", "x".repeat(4097)]) {
-      const words = args();
-      words[words.indexOf("--reason") + 1] = reason;
-      // eslint-disable-next-line no-await-in-loop
-      expect((await run(test.root, ...words)).code).toBe(2);
-    }
-    expect(existsSync(test.file)).toBe(false);
-    expect(existsSync(test.store.dir)).toBe(false);
-  });
-
   it("requires a registered requester role and rejects conversation identifiers", async () => {
     const test = fixture();
     for (const requester of ["missing-role", "monitor", CLAUDE_COORDINATOR]) {

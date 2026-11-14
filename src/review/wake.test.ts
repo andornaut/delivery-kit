@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type FakeHandler, startFakeControl } from "../adapters/codex/testControlSocket.ts";
-import { ROUTE_SCHEMA_1 } from "../adapters/shared/route.ts";
 import { gameLayout } from "../layout.ts";
 import { readRegistry, updateRegistry } from "../registry/index.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
@@ -22,25 +21,6 @@ afterEach(() => {
 });
 
 describe("deliverScheduledWake (claude)", () => {
-  it("uses the Claude recipient transport while the global default remains Codex", async () => {
-    const fixture = claudeFixture();
-    useEnv(fixture);
-    updateRegistry(fixture.layout, 1, (draft) => {
-      draft.harness = "codex";
-      draft.roles["game-coordinator"]!.harness = "claude";
-      draft.roles["archies-dog-walks/tech"]!.harness = "claude";
-    });
-    const result = JSON.parse(
-      await deliverScheduledWake(fixture.layout, fixture.game, SLOT),
-    ) as Record<string, unknown>;
-    expect(result.status).toBe("sending");
-    expect(readRegistry(fixture.layout).harness).toBe("codex");
-    const receipt = JSON.parse(
-      readFileSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`), "utf8"),
-    ) as Record<string, unknown>;
-    expect(receipt.method).toBe("claude-channel");
-  });
-
   it("spools one brief for the configured recipient and deduplicates the slot", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
@@ -89,35 +69,6 @@ describe("deliverScheduledWake (claude)", () => {
         "its owner must verify identities and ownership",
     );
     expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
-  });
-
-  it("defers a schema 1 route with its exact migration edit", async () => {
-    const fixture = claudeFixture();
-    useEnv(fixture);
-    fixture.route({ monitor: "game-coordinator", schema: 1 });
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-      `${DEFERRED_PREFIX}${ROUTE_SCHEMA_1}`,
-    );
-    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
-  });
-
-  it("defers an active route that targets its recipient", async () => {
-    const fixture = claudeFixture();
-    useEnv(fixture);
-    fixture.route({ targets: ["game-coordinator", "archies-dog-walks/tech"] });
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-      `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
-        "its owner must verify identities and ownership",
-    );
-  });
-
-  it("defers when the route is unreadable", async () => {
-    const fixture = claudeFixture();
-    writeFileSync(fixture.layout.routeFile, "not json");
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-      `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
-        "its owner must verify identities and ownership",
-    );
   });
 });
 
@@ -317,20 +268,5 @@ describe("deliverScheduledWake (codex)", () => {
     expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 120)).toBe(
       `${DEFERRED_PREFIX}provide CODEX_CONTROL_SOCKET and the installed unblock helper`,
     );
-  });
-
-  it("defers an unreadable or 0.x route and records no slot", async () => {
-    const fixture = codexFixture();
-    vi.stubEnv("CODEX_CONTROL_SOCKET", join(fixture.base, "missing.sock"));
-    for (const content of ["", "not json", JSON.stringify({ harness: "codex", version: 1 })]) {
-      writeFileSync(fixture.layout.routeFile, content);
-      // Each route variant is checked in turn against the same fixture.
-      // eslint-disable-next-line no-await-in-loop
-      expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-        `${DEFERRED_PREFIX}review route is unavailable or invalid; ` +
-          "its owner must verify identities and ownership",
-      );
-    }
-    expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
   });
 });

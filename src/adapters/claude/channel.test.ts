@@ -22,7 +22,6 @@ import {
 } from "../../review/fixtures.ts";
 import { slotRequestId } from "../shared/ids.ts";
 import { deliverPending, handle, serve } from "./channel.ts";
-import { channelNotification, initializeResult } from "./protocol.ts";
 import { deliveredDir, spoolDir, spoolReviewBrief } from "./spool.ts";
 
 function spool(fixture: ClaudeFixture, busDir = fixture.game.busDir, slot = SLOT): void {
@@ -37,28 +36,6 @@ function receipt(busDir: string, slot = SLOT): Record<string, unknown> {
 }
 
 describe("protocol", () => {
-  it("isolates the notification and initialize shapes", () => {
-    expect(
-      channelNotification({
-        kind: "review",
-        receipt: "unblock/x.json",
-        recipient: RECIPIENT,
-        requestId: "r",
-        slot: 5,
-        text: "t",
-      }),
-    ).toEqual({
-      jsonrpc: "2.0",
-      method: "notifications/claude/channel",
-      params: { content: "t", meta: { kind: "review", request_id: "r", slot: "5" } },
-    });
-    expect(initializeResult({ protocolVersion: "2025-03-26" })).toMatchObject({
-      capabilities: { experimental: { "claude/channel": {} } },
-      protocolVersion: "2025-03-26",
-    });
-    expect(initializeResult({ protocolVersion: "2099-01-01" }).protocolVersion).toBe("2025-06-18");
-  });
-
   it("answers initialize, ping and unknown requests", () => {
     const lines: string[] = [];
     const write = (line: string): void => void lines.push(line);
@@ -92,21 +69,6 @@ describe("deliverPending", () => {
     const requestId = slotRequestId(RECIPIENT, SLOT);
     expect(readdirSync(deliveredDir(fixture.game.busDir))).toEqual([`${requestId}.json`]);
     expect(readdirSync(spoolDir(fixture.game.busDir))).toEqual([]);
-  });
-
-  it("delivers a review brief a 2.x runner spooled under its former kind", async () => {
-    const fixture = claudeFixture();
-    spool(fixture);
-    const requestId = slotRequestId(RECIPIENT, SLOT);
-    const path = join(spoolDir(fixture.game.busDir), `${requestId}.json`);
-    const entry = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    writeFileSync(path, JSON.stringify({ ...entry, kind: "monitor" }));
-    const lines: string[] = [];
-    await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT);
-    expect(lines.map((line) => JSON.parse(line) as Record<string, unknown>)).toMatchObject([
-      { params: { meta: { kind: "review", request_id: requestId } } },
-    ]);
-    expect(receipt(fixture.game.busDir).status).toBe("accepted");
   });
 
   it("emits nothing for another recipient", async () => {

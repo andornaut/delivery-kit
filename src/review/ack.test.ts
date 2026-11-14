@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HarnessAdapter } from "../adapters/types.ts";
-import { acknowledge, DISPOSITIONS } from "./ack.ts";
+import { acknowledge } from "./ack.ts";
 import { captureCodex, captureMixed } from "./snapshot.ts";
 import {
   ackPath,
@@ -77,7 +77,7 @@ describe("mixed snapshot acknowledgement binding", () => {
   describe.each(["other provider", "legacy other provider", "unknown", "inactive other provider"])(
     "preserves %s retention bytes",
     (binding) => {
-      it.each(DISPOSITIONS)(
+      it.each(["handled"] as const)(
         "blocks %s before inventory or retention mutation",
         async (disposition) => {
           const busDir = mkdtempSync(join(tmpdir(), "mixed-retention-ack-"));

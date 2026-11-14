@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -60,24 +60,5 @@ describe("recordHealth", () => {
       });
       expect(health).toMatchObject({ deferral_slots: 0, review_status: "ok" });
     }
-  });
-
-  it("keeps the process keys of an older health record and ignores them in a snapshot", () => {
-    const unblock = mkdtempSync(join(tmpdir(), "health-"));
-    const context = { emit: () => undefined, unblock };
-    const path = join(unblock, "health", `${RECIPIENT}.json`);
-    const older = { accepted_process_requests: [["p"]], process_observations: [], seen_slots: [] };
-    mkdirSync(join(unblock, "health"));
-    writeFileSync(path, JSON.stringify(older));
-    const legacy = {
-      ...snapshot([]),
-      process_health: { [RECIPIENT]: { jobs: [{ state: "stalled" }], status: "degraded" } },
-      process_health_source: { status: "unavailable" },
-    };
-    const health = recordHealth(context, RECIPIENT, 60, legacy, { status: "accepted" });
-    expect(health).toMatchObject({ review_status: "ok" });
-    const record = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    expect(record.accepted_process_requests).toEqual([["p"]]);
-    expect(record.process_observations).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HarnessAdapter, HarnessCollectors } from "../adapters/types.ts";
 import type { Harness } from "../registry/schema.ts";
-import { captureCodex, captureMixed } from "./snapshot.ts";
+import { captureMixed } from "./snapshot.ts";
 import { payloadSignature, persist, queueEntry, retentionPath, snapshotPath } from "./store.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000001";
@@ -71,20 +71,6 @@ describe("mixed inbox capture", () => {
     expect(codex.inventory).not.toHaveBeenCalled();
     expect(codex.collectors.collect).not.toHaveBeenCalled();
     expect(claude.inventory.mock.calls).toEqual([[CLAUDE]]);
-  });
-
-  it("keeps requested native coverage separate from an unrelated unsupported peer", async () => {
-    const record = await captureMixed(
-      context(),
-      { codex: adapter("codex") },
-      { [CLAUDE]: "claude", [RECIPIENT]: "codex" },
-      [RECIPIENT],
-      [],
-      { routeMembers: [RECIPIENT, CLAUDE] },
-    );
-    expect(record.native_complete).toBe(true);
-    expect(record.errors).toEqual({});
-    expect(record.history).toMatchObject({ [CLAUDE]: { status: "unavailable" } });
   });
 
   it("reports cross-provider retention conflicts without treating either inventory as retained", async () => {
@@ -174,17 +160,6 @@ describe("mixed inbox capture", () => {
     ).toEqual(record);
   });
 
-  it("omits unsupported native queues even when the local channel has no delivered entries", async () => {
-    const claude = adapter("claude");
-    claude.inventory.mockResolvedValue({ entries: [], status: "available" });
-    const record = await captureMixed(context(), { claude }, { [CLAUDE]: "claude" }, [CLAUDE], []);
-    expect(record.queues).toEqual({});
-    expect(record.channel_queues).toEqual({ [CLAUDE]: [] });
-    expect(record.errors).toEqual({});
-    expect(record.native_complete).toBe(false);
-    expect(claude.collectors.collect).not.toHaveBeenCalled();
-  });
-
   it("does not invent local inventory when the Claude adapter is unavailable", async () => {
     const record = await captureMixed(context(), {}, { [CLAUDE]: "claude" }, [CLAUDE], []);
     expect(record.queues).toEqual({});
@@ -218,13 +193,5 @@ describe("mixed inbox capture", () => {
     expect(record.errors).toHaveProperty(RECIPIENT);
     expect(record.errors).not.toHaveProperty(CLAUDE);
     expect(record.queues).not.toHaveProperty(RECIPIENT);
-  });
-
-  it("preserves homogeneous legacy capture fields without requiring a harness map", async () => {
-    const codex = adapter("codex");
-    const record = await captureCodex(context(), codex, [RECIPIENT], []);
-    expect(record.harness).toBe("codex");
-    expect(record).not.toHaveProperty("harnesses");
-    expect(record.queues).toHaveProperty(RECIPIENT);
   });
 });

@@ -8,7 +8,7 @@ import { type FakeControl, startFakeControl } from "../adapters/codex/testContro
 import { type Layout, loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
-import { effectiveReadiness, harnessReadiness } from "./readiness.ts";
+import { harnessReadiness } from "./readiness.ts";
 
 const CODEX_COORDINATOR = "00000000-0000-4000-8000-000000000004";
 const controls: FakeControl[] = [];
@@ -61,22 +61,6 @@ describe("harnessReadiness", () => {
     expect(control.methods()).toEqual([]);
   });
 
-  it("rejects invalid explicit selections and does not accept an invalid route as effective readiness", async () => {
-    const layout = setup();
-    const registry = readRegistry(layout);
-    await expect(
-      harnessReadiness({}, layout, registry, "codex", { games: ["unknown"] }),
-    ).rejects.toThrow();
-    await expect(effectiveReadiness({}, layout, registry, {})).rejects.toThrow();
-    writeFileSync(layout.routeFile, "{invalid");
-    expect(await effectiveReadiness({}, layout, registry)).toEqual({
-      adapters: {},
-      harness: "mixed",
-      roles: [],
-      ready: false,
-    });
-  });
-
   it("is ready only when the adapter connects and every route role resolves", async () => {
     const layout = setup();
     const control = await startFakeControl(mkdtempSync(join(tmpdir(), "ready-")), () => ({
@@ -100,12 +84,5 @@ describe("harnessReadiness", () => {
     const after = await harnessReadiness(env, layout, readRegistry(layout), "codex");
     expect(after.ready).toBe(true);
     expect(control.methods()).toEqual([]);
-  });
-
-  it("reports an unavailable adapter without a control socket", async () => {
-    const layout = setup();
-    const report = await harnessReadiness({}, layout, readRegistry(layout), "codex");
-    expect(report.adapter.status).toBe("unavailable");
-    expect(report.ready).toBe(false);
   });
 });

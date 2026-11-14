@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { currentMinuteSlot, latestScheduledSlot, minuteSlots, stamp, untilNext } from "./time.ts";
+import { currentMinuteSlot, latestScheduledSlot, minuteSlots, untilNext } from "./time.ts";
 
 const TZ = "America/Toronto";
 // 2026-11-04 03:00:00 UTC is 22:00:00 EST on 2026-11-03.
@@ -25,9 +25,5 @@ describe("schedule arithmetic", () => {
     expect(currentMinuteSlot(TZ, [20], TEN_PM, TEN_PM + 20 * 60 + 5)).toBe(TEN_PM + 20 * 60);
     expect(currentMinuteSlot(TZ, [20], TEN_PM + 20 * 60, TEN_PM + 20 * 60 + 30)).toBeUndefined();
     expect(currentMinuteSlot(TZ, [19], TEN_PM, TEN_PM + 20 * 60 + 5)).toBeUndefined();
-  });
-
-  it("stamps reports with the zone abbreviation", () => {
-    expect(stamp(TZ, TEN_PM)).toBe("2026-11-03 22:00 EST");
   });
 });

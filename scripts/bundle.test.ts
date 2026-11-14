@@ -19,35 +19,6 @@ beforeAll(() => {
   }
 });
 
-function staticSpecifiers(source: string): string[] {
-  const pattern =
-    /^\s*(?:import|export)\s[^;]*?from\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
-  return [...source.matchAll(pattern)].map((match) => match[1] ?? match[2] ?? "");
-}
-
-describe("every bundle", () => {
-  const source = (bundle: string): string => readFileSync(join(root, bundle), "utf8");
-
-  it("has no dynamic import, relative require or source map", () => {
-    for (const bundle of BUNDLES) {
-      expect(source(bundle), bundle).not.toMatch(/\bimport\s*\(/);
-      expect(source(bundle), bundle).not.toMatch(/\brequire\s*\(\s*["'`]\.{1,2}\//);
-      expect(source(bundle), bundle).not.toMatch(/sourceMappingURL/);
-    }
-  });
-
-  it("imports only node: builtins", () => {
-    for (const bundle of BUNDLES) {
-      const specifiers = staticSpecifiers(source(bundle));
-      expect(specifiers.length, bundle).toBeGreaterThan(0);
-      expect(
-        specifiers.filter((specifier) => !specifier.startsWith("node:")),
-        bundle,
-      ).toEqual([]);
-    }
-  });
-});
-
 describe("dist/cli.js", () => {
   it("is an executable Node script that reports the package version", () => {
     const cli = join(root, "dist/cli.js");

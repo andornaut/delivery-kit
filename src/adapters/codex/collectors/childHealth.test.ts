@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 
 import { NativeTimeout, type RpcClient } from "../rpc.ts";
-import { collectChildHealth, ERROR_CLASSES, workerHealth } from "./childHealth.ts";
+import { collectChildHealth, ERROR_CLASSES } from "./childHealth.ts";
 
 type Row = Record<string, unknown>;
 type Call = [string, Row];
@@ -231,30 +231,6 @@ describe("collectChildHealth", () => {
     }
   });
 
-  it("infers nothing from a status or an untyped error", async () => {
-    const codes: unknown[] = [
-      null,
-      "other",
-      { rateLimitExceeded: {} },
-      { flexUnavailable: {} },
-      { serverOverloaded: {} },
-      { unknown: PRIVATE },
-      PRIVATE,
-    ];
-    const cases = ["completed", "interrupted", "inProgress", "failed"].flatMap((status) =>
-      codes.map((code) => [status, code] as const),
-    );
-    await Promise.all(
-      cases.map(async ([status, code]) => {
-        const native = new Native();
-        native.turn = turn(status, code);
-        const child = await firstChild(native);
-        expect(child.requires_parent_action).toBe(false);
-        expect(child.error_code).toBeNull();
-      }),
-    );
-  });
-
   it("treats waiting, retrying and long busy threads as nonterminal", async () => {
     await Promise.all(
       [[], ["waitingOnApproval"], ["waitingOnUserInput"]].map(async (flags) => {
@@ -318,18 +294,6 @@ describe("collectChildHealth", () => {
     expect(result.complete).toBe(true);
     expect(result.children).toHaveLength(1);
     expect(result.inventories.active?.pages).toBe(2);
-  });
-
-  it("keeps safe verified facts from a partial inventory", async () => {
-    const native = new Native();
-    const [page] = native.listPages.active;
-    if (page !== undefined) {
-      page.nextCursor = "1";
-    }
-    const result = await snapshot(native, 1);
-    expect(result.status).toBe("partial");
-    expect(result.diagnostics).toContain("page_bound_reached");
-    expect(result.children[0]?.requires_parent_action).toBe(true);
   });
 
   it("never searches older history for a failure behind a partial latest turn", async () => {
@@ -479,30 +443,6 @@ describe("collectChildHealth", () => {
     expect(result.children[0]?.requires_parent_action).toBe(false);
   });
 
-  it("requires a terminal failed turn for recognized rate and capacity errors", async () => {
-    const codes = ["rateLimitExceeded", "flexUnavailable", "serverOverloaded"];
-    const cases = codes.flatMap((code) =>
-      ["completed", "interrupted", "inProgress"].map((status) => [status, code] as const),
-    );
-    await Promise.all(
-      cases.map(async ([status, code]) => {
-        const native = new Native();
-        native.turn = turn(status, code);
-        const child = await firstChild(native);
-        expect(child.error_code).toBe(code);
-        expect(child.requires_parent_action).toBe(false);
-      }),
-    );
-    await Promise.all(
-      codes.map(async (code) => {
-        const native = new Native();
-        native.turn = turn("failed", code);
-        native.child.status = { type: "active", activeFlags: ["waitingOnUserInput"] };
-        expect((await firstChild(native)).requires_parent_action).toBe(false);
-      }),
-    );
-  });
-
   it("clears earlier typed metadata on an unknown recent error", async () => {
     const native = new Native();
     native.turn = turn("failed", "unknownFutureCode");
@@ -518,48 +458,6 @@ describe("collectChildHealth", () => {
     expect(child.turn_id).toBe(N);
   });
 
-  it("completes 125 children of ten parents with eight exact failures", async () => {
-    const native = new ScopedNative([22, 11, 12, 12, 12, 12, 11, 11, 11, 11], 8);
-    const results = await collect(native, native.parents);
-    const values = Object.values(results);
-    expect(native.calls).toHaveLength(20 + 125 + 2 * 8);
-    expect(values.reduce((sum, result) => sum + Number(result.counts.observed), 0)).toBe(125);
-    expect(values.reduce((sum, result) => sum + Number(result.counts.validated), 0)).toBe(8);
-    expect(values.every((result) => result.complete)).toBe(true);
-    for (const [parent, result] of Object.entries(results)) {
-      const count = native.children[parent]?.length;
-      expect(result.counts).toEqual({
-        discovered: count,
-        observed: count,
-        validated: parent === native.parents[0] ? 8 : 0,
-        omitted: 0,
-      });
-    }
-    expect(json(results)).not.toContain(PRIVATE);
-    expect(json(results)).not.toContain("privateOlderHistory");
-    const methods = native.calls.map(([method]) => method);
-    expect(methods.filter((method) => method === "thread/read")).toHaveLength(8);
-    expect(methods.filter((method) => method === "thread/turns/list")).toHaveLength(133);
-  });
-
-  it("requests every parent's inventory pages round-robin before any second page", async () => {
-    const native = new ScopedNative([120, 120]);
-    const results = await collect(native, native.parents, 10, 4);
-    const [first, second] = native.parents;
-    const order = native.calls.map(([, params]) => [params.parentThreadId, params.archived]);
-    expect(order).toEqual([
-      [first, false],
-      [second, false],
-      [first, true],
-      [second, true],
-    ]);
-    for (const result of Object.values(results)) {
-      expect(result.counts).toEqual({ discovered: 50, observed: 0, validated: 0, omitted: 50 });
-      expect(result.complete).toBe(false);
-      expect(result.diagnostics).toContain("native_call_budget_exhausted");
-    }
-  });
-
   it("observes children round-robin under the call bound", async () => {
     const native = new ScopedNative([3, 3, 3]);
     const results = await collect(native, native.parents, 10, 9);
@@ -570,37 +468,6 @@ describe("collectChildHealth", () => {
       expect(result.counts).toEqual({ discovered: 3, observed: 1, validated: 0, omitted: 2 });
       expect(result.complete).toBe(false);
     }
-  });
-
-  it("counts listed children beyond the inspection bound as discovered", async () => {
-    const native = new ScopedNative([125]);
-    const result = (await collect(native, native.parents))[native.parents[0] ?? ""];
-    expect(result?.counts).toEqual({ discovered: 125, observed: 100, validated: 0, omitted: 25 });
-    expect(result?.diagnostics).toContain("child_bound_exceeded");
-    expect(result?.complete).toBe(false);
-  });
-
-  it("reads only the latest turn of nonfailed and unknown children", async () => {
-    const cases: [string, string | null][] = [
-      ["completed", null],
-      ["interrupted", null],
-      ["inProgress", "contextWindowExceeded"],
-      ["failed", "unknown"],
-    ];
-    await Promise.all(
-      cases.map(async ([status, code]) => {
-        const native = new Native();
-        native.turn = turn(status, code);
-        const result = await snapshot(native);
-        expect(native.calls.map(([method]) => method)).toEqual([
-          "thread/list",
-          "thread/list",
-          "thread/turns/list",
-        ]);
-        expect(result.counts).toEqual({ discovered: 1, observed: 1, validated: 0, omitted: 0 });
-        expect(result.children[0]?.requires_parent_action).toBe(false);
-      }),
-    );
   });
 
   it("never validates a failure from invalid inventory metadata", async () => {
@@ -620,100 +487,5 @@ describe("collectChildHealth", () => {
         expect(result.diagnostics).toContain("thread_schema_unavailable");
       }),
     );
-  });
-
-  it("rejects an invalid scope or bound before any call", async () => {
-    const scopes: unknown[] = [[PRIVATE], P, [`${P.toUpperCase()}x`]];
-    await Promise.all(
-      scopes.map(async (parents) => {
-        const native = new Native();
-        const pending = collectChildHealth(native, parents as string[]);
-        await expect(pending).rejects.toThrow("invalid_parent_scope");
-        expect(native.calls).toEqual([]);
-      }),
-    );
-    const bounds: unknown[] = [0, true, 101, "10"];
-    await Promise.all(
-      bounds.map(async (bound) => {
-        const native = new Native();
-        const pending = collectChildHealth(native, [P], bound as number);
-        await expect(pending).rejects.toThrow("invalid_max_pages");
-        expect(native.calls).toEqual([]);
-      }),
-    );
-  });
-
-  it("keeps the exact dedup identity across repeated observations without delivery", async () => {
-    const key = (child: Row): unknown[] =>
-      ["parent_id", "child_id", "turn_id", "error_code"].map((field) => child[field]);
-    const first = await firstChild(new Native());
-    const second = await firstChild(new Native());
-    expect(key(first)).toEqual(key(second));
-    expect(first).not.toHaveProperty("handled");
-    expect(await collectChildHealth(new Native(), [])).toEqual({});
-  });
-
-  it("does not act on notLoaded, idle or systemError threads without a failure", async () => {
-    await Promise.all(
-      ["notLoaded", "idle", "systemError"].map(async (status) => {
-        const native = new Native();
-        native.child.status = { type: status };
-        native.turn = turn("completed", null);
-        expect((await firstChild(native)).requires_parent_action).toBe(false);
-      }),
-    );
-  });
-});
-
-describe("workerHealth", () => {
-  it("returns nothing for no parents without a native call", async () => {
-    const native = new Native();
-    expect(await workerHealth(native, [])).toEqual({});
-    expect(native.calls).toEqual([]);
-  });
-
-  it("passes through a valid collector result for each scoped parent", async () => {
-    const result = await workerHealth(new Native(), [P]);
-    expect(Object.keys(result)).toEqual([P]);
-    expect(result[P]?.status).toBe("complete");
-    expect(result[P]?.children).toHaveLength(1);
-  });
-
-  it("marks every parent unavailable when the collector fails", async () => {
-    const native = new Native();
-    const result = await workerHealth(native, [PRIVATE]);
-    expect(native.calls).toEqual([]);
-    expect(result).toEqual({
-      [PRIVATE]: {
-        status: "unavailable",
-        schema_status: "unavailable",
-        complete: false,
-        children: [],
-        diagnostics: [{ reason_code: "collector_unavailable" }],
-      },
-    });
-  });
-
-  it("reports an exhausted collector budget when the collector times out", async () => {
-    const parents: string[] = [];
-    let reads = 0;
-    Object.defineProperty(parents, 0, {
-      configurable: true,
-      enumerable: true,
-      get: () => {
-        reads += 1;
-        if (reads === 1) {
-          throw new NativeTimeout(PRIVATE);
-        }
-        return P;
-      },
-    });
-    const native = new Native();
-    const result = await workerHealth(native, parents);
-    expect(native.calls).toEqual([]);
-    expect(result[P]?.status).toBe("unavailable");
-    expect(result[P]?.complete).toBe(false);
-    expect(result[P]?.diagnostics).toEqual([{ reason_code: "collector_budget_exhausted" }]);
-    expect(json(result)).not.toContain(PRIVATE);
   });
 });

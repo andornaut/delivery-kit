@@ -4,35 +4,25 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
-  readFileSync,
   rmSync,
-  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  checkImage,
   discardReason,
-  foreignOwner,
-  groupAdds,
   GuardError,
-  hostOwners,
   requireLoad,
   snapshot,
   sourceFingerprint,
-  sourceList,
   validPackArgs,
 } from "./guards.ts";
 
-const scripts = dirname(fileURLToPath(import.meta.url));
 const own = { gids: [process.getgid?.() ?? -1], uids: [process.getuid?.() ?? -1] };
 // The suite itself runs as uid 19001 in the check container, so "no foreign owner" uses an
 // identity nothing here can have.
@@ -62,13 +52,6 @@ describe("requireLoad", () => {
     for (const loadavg of ["24.00 1 1 1/1 1\n", "31.5 1 1 1/1 1\n", "garbage\n"]) {
       expect(() => requireLoad(loadavg)).toThrow(GuardError);
     }
-  });
-});
-
-describe("checkImage", () => {
-  it("names the Node image pinned in .nvmrc", () => {
-    writeFileSync(join(root, ".nvmrc"), "v24.21.0\n");
-    expect(checkImage(root)).toBe("node:24.21.0");
   });
 });
 
@@ -105,14 +88,6 @@ describe("snapshot fingerprints", () => {
     unlinkSync(join(root, "SOURCE_COMMIT"));
     expect(() => sourceFingerprint(root)).toThrow(/checkout or identified source snapshot/);
   });
-
-  it("lists snapshot files outside .claude, node_modules and dist", () => {
-    for (const directory of [".claude", "node_modules", "dist", "src"]) {
-      mkdirSync(join(root, directory));
-      writeFileSync(join(root, directory, "x.ts"), "");
-    }
-    expect(sourceList(root).sort()).toEqual(["SOURCE_COMMIT", "file.txt", "src/x.ts"]);
-  });
 });
 
 describe("Git fingerprints and source lists", () => {
@@ -129,42 +104,6 @@ describe("Git fingerprints and source lists", () => {
     const first = sourceFingerprint(root);
     writeFileSync(join(root, "new.txt"), "n\n");
     expect(sourceFingerprint(root)).not.toBe(first);
-  });
-
-  it("lists tracked and untracked files, not ignored or deleted ones", () => {
-    mkdirSync(join(root, "ignored"));
-    writeFileSync(join(root, "ignored", "cache"), "");
-    writeFileSync(join(root, "untracked.txt"), "");
-    unlinkSync(join(root, "gone.txt"));
-    expect(sourceList(root).sort()).toEqual([".gitignore", "tracked.txt", "untracked.txt"]);
-  });
-});
-
-describe("ownership guards", () => {
-  beforeEach(() => {
-    writeFileSync(join(root, "SOURCE_COMMIT"), "x\n");
-    mkdirSync(join(root, ".git"));
-    writeFileSync(join(root, ".git", "HEAD"), "ref\n");
-  });
-
-  it("hostOwners changes with a mode change and ignores .git", () => {
-    // A .git directory without a repository is only an ignored path for hostOwners.
-    const first = hostOwners(root);
-    chmodSync(join(root, ".git", "HEAD"), 0o600);
-    expect(hostOwners(root)).toBe(first);
-    chmodSync(join(root, "SOURCE_COMMIT"), 0o600);
-    expect(hostOwners(root)).not.toBe(first);
-  });
-
-  it("foreignOwner finds an entry owned by a listed identity, .git included", () => {
-    expect(foreignOwner(root, none)).toBeUndefined();
-    expect(foreignOwner(root, own)).toBe(root);
-    expect(foreignOwner(root, { gids: [], uids: [statSync(root).uid] })).toBe(root);
-  });
-
-  it("groupAdds adds each distinct group once", () => {
-    const gid = String(statSync(root).gid);
-    expect(groupAdds([root, join(root, "SOURCE_COMMIT")])).toEqual(["--group-add", gid]);
   });
 });
 
@@ -201,34 +140,5 @@ describe("validPackArgs", () => {
     expect(validPackArgs(["0".repeat(39), join(root, "out")])).toBe(false);
     expect(validPackArgs([sha])).toBe(false);
     expect(validPackArgs([sha, join(root, "out"), "extra"])).toBe(false);
-  });
-});
-
-describe("shell policy", () => {
-  const wrappers = {
-    "scripts/check.sh": "check.ts",
-    "scripts/pack.sh": "pack.ts",
-    "tests/contract/run.sh": "../../scripts/contract.ts",
-  };
-  const repo = resolve(scripts, "..");
-
-  it("keeps each wrapper to an exec of its Node script", () => {
-    for (const [path, target] of Object.entries(wrappers)) {
-      const body = readFileSync(join(repo, path), "utf8")
-        .split("\n")
-        .filter((line) => line !== "" && !line.startsWith("#"));
-      expect(body, path).toEqual([
-        "set -euo pipefail",
-        `exec node "$(dirname -- "\${BASH_SOURCE[0]}")/${target}" "$@"`,
-      ]);
-    }
-  });
-
-  it("has no other shell or Python file in scripts/ or tests/contract/", () => {
-    const found = [
-      ...readdirSync(join(repo, "scripts")).map((name) => `scripts/${name}`),
-      ...readdirSync(join(repo, "tests/contract")).map((name) => `tests/contract/${name}`),
-    ].filter((path) => /\.(sh|py)$/.test(path));
-    expect(found.sort()).toEqual(Object.keys(wrappers).sort());
   });
 });

@@ -1,15 +1,13 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
-import { loadLayout } from "../layout.ts";
-import type { Registry } from "../registry/schema.ts";
-import { createRegistry, updateRegistry } from "../registry/store.ts";
+import { updateRegistry } from "../registry/store.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
-import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "../testFixtures.ts";
+import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
 
 function io(): Io & { errors: string[] } {
@@ -75,57 +73,6 @@ describe("claude channel options", () => {
         EXIT_USAGE,
       );
     }
-  });
-
-  it("serves explicit state directories for an explicit conversation until input ends", async () => {
-    const fixture = claudeFixture();
-    const dir = join(fixture.game.busDir, "unblock");
-    const input = new PassThrough();
-    const lines: string[] = [];
-    const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
-      io(),
-      fixture.layout.root,
-      ["--conversation", RECIPIENT, "--poll-seconds", "0.05", "--state-dir", dir],
-    );
-    input.write(`${JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" })}\n`);
-    input.end();
-    expect(await done).toBe(EXIT_OK);
-    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
-      { id: 1, jsonrpc: "2.0", result: {} },
-    ]);
-  });
-
-  it("exits non-zero without a registry and creates nothing", async () => {
-    const fixture = makeFixture();
-    const errors = io();
-    const status = await runChannel(
-      { input: new PassThrough(), write: () => undefined },
-      errors,
-      fixture.root,
-      [],
-    );
-    expect(status).toBe(EXIT_INVALID);
-    expect(errors.errors.join("")).toContain("create the registry first");
-    expect(existsSync(join(fixture.root, "var"))).toBe(false);
-  });
-
-  it("serves before any game state exists without creating a bus directory", async () => {
-    const fixture = makeFixture();
-    const layout = loadLayout(fixture.root);
-    createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">);
-    const input = new PassThrough();
-    const done = runChannel({ input, write: () => undefined }, io(), fixture.root, [
-      "--poll-seconds",
-      "0.05",
-    ]);
-    input.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 200);
-    });
-    input.end();
-    expect(await done).toBe(EXIT_OK);
-    expect(existsSync(join(layout.varDir, "games"))).toBe(false);
   });
 
   it("requires one reports.recipient across the selected games without --conversation", async () => {

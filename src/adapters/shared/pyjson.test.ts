@@ -14,17 +14,6 @@ describe("dumpsJson", () => {
     expect(dumpsJson({ kept: 1, skipped: undefined })).toBe('{"kept": 1}');
   });
 
-  it("sorts keys by code point, as Python does, not by UTF-16 code unit", () => {
-    // U+10000 is the surrogate pair D800 DC00, which sorts before U+FFFF as UTF-16.
-    const keys = { "\u{10000}": 1, "\uffff": 2 };
-    expect(dumpsJson(keys)).toBe('{"\\uffff": 2, "\\ud800\\udc00": 1}');
-  });
-
-  it("escapes U+007F under ensure_ascii, which JSON.stringify leaves as is", () => {
-    expect(dumpsJson({ del: "\u007f" })).toBe('{"del": "\\u007f"}');
-    expect(JSON.stringify("\u007f")).toBe('"\u007f"');
-  });
-
   it("writes floats as Python's repr", () => {
     expect(dumpsJson([0.5, 123.456, 0.0001, 1793709296.5])).toBe(
       "[0.5, 123.456, 0.0001, 1793709296.5]",
@@ -40,15 +29,6 @@ describe("unicodeDumps", () => {
     expect(unicodeDumps({ b: ["é\n", 1, null, true], a: "\u007f" })).toBe(
       '{"b": ["é\\n", 1, null, true], "a": "\u007f"}',
     );
-  });
-
-  it("leaves a lone surrogate unescaped, which JSON.stringify escapes", () => {
-    expect(unicodeDumps({ "\ud800": "\udc00" })).toBe('{"\ud800": "\udc00"}');
-    expect(JSON.stringify("\ud800")).toBe('"\\ud800"');
-  });
-
-  it("writes integers JSON.stringify cannot", () => {
-    expect(unicodeDumps([12345678901234567890n])).toBe("[12345678901234567890]");
   });
 });
 

@@ -17,18 +17,6 @@ async function run(root: string, ...argv: string[]) {
 }
 
 describe("bus commands", () => {
-  it("status prints the read-only report as one JSON line", async () => {
-    const test = makeGame();
-    const result = await run(test.layout.root, "status", "--game", GAME);
-    expect(result.code).toBe(0);
-    expect(JSON.parse(result.out)).toMatchObject({ idle: true, status: "not running" });
-    expect(result.out.trim().split("\n")).toHaveLength(1);
-    expect(JSON.parse(result.out)).toMatchObject({
-      control: { desired_state: "enabled", desired_status: "valid", migration_required: false },
-      drained: true,
-    });
-  });
-
   it("request captures the main HEAD and requires a game and an ID", async () => {
     const test = makeGame();
     mergeFastForward(test, "feature");
@@ -39,12 +27,5 @@ describe("bus commands", () => {
     expect((await run(test.layout.root, "request", "--game", GAME, "--id", "!")).code).toBe(1);
     expect((await run(test.layout.root, "status", "--game", "unknown")).code).toBe(2);
     expect((await run(test.layout.root, "status")).code).toBe(2);
-  });
-
-  it("status --resources prints the clock and load lines", async () => {
-    const test = makeGame();
-    const result = await run(test.layout.root, "status", "--game", GAME, "--resources");
-    expect(result.code).toBe(0);
-    expect(result.out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+\nup .*load average: /);
   });
 });

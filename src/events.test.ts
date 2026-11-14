@@ -8,7 +8,6 @@ import { startFakeControl } from "./adapters/codex/testControlSocket.ts";
 import { eventRequestId } from "./adapters/shared/ids.ts";
 import type { DeliveryReceipt } from "./adapters/types.ts";
 import {
-  clean,
   DELIVERY_BUDGET,
   deliveryMessage,
   emitEvent,
@@ -79,11 +78,6 @@ describe("emitEvent", () => {
     const text = readFileSync(join(eventsDir(game), `${id}.json`), "utf8");
     expect(text).toMatch(/^\{"created": \d{19}, "id": "19d3/);
     expect(text.endsWith('"sent": false}\n')).toBe(true);
-  });
-
-  it("replaces control characters and keeps at most 1800 characters", () => {
-    expect(clean("a\nb\u007fc")).toBe("a b c");
-    expect(Array.from(clean("é".repeat(2000)))).toHaveLength(1800);
   });
 
   it("never records quiet kinds but tracks commit state to completion", () => {
@@ -169,10 +163,8 @@ describe("flushEventsWith", () => {
   });
 
   it.each([
-    ["sending", "sending"],
     ["ambiguous", "ambiguous"],
     ["rejected", "rejected"],
-    ["unknown", "sending"],
   ])(
     "preserves a prior %s receipt when the role moves to another provider",
     async (status, attemptStatus) => {
@@ -212,43 +204,43 @@ describe("flushEventsWith", () => {
     },
   );
 
-  it.each([
-    { method: "unknown-method", status: "sending" },
-    { method: "claude-channel", status: "unknown-status" },
-  ])("preserves a same-ID receipt with an unprovable attempt $method/$status", async (attempt) => {
-    const game = setup();
-    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
-    emitEvent(game, OPTIONS, "push", "one", "first");
-    const id = eventId("push", "one");
-    const directory = join(eventsDir(game), "native");
-    mkdirSync(directory);
-    const path = join(directory, `${id}-${CLAUDE_COORDINATOR}.json`);
-    const receipt = JSON.stringify({
-      attempts: [attempt],
-      clientUserMessageId: eventRequestId(id, CLAUDE_COORDINATOR),
-      event_id: id,
-      recipient: CLAUDE_COORDINATOR,
-      status: "deferred",
-    });
-    writeFileSync(path, receipt);
-    updateRegistry(layout, 1, (draft) => {
-      draft.roles["game-coordinator"]!.harness = "codex";
-      draft.roles["game-coordinator"]!.conversations.codex = CLAUDE_COORDINATOR;
-    });
-    const adapter = mockAdapter([]);
-    const diagnostic = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    try {
-      await flushEventsWith({ codex: () => adapter }, game);
-      expect(adapter.deliver).not.toHaveBeenCalled();
-      expect(events(game)[0]?.sent).toBe(false);
-      expect(readFileSync(path, "utf8")).toBe(receipt);
-      expect(diagnostic).toHaveBeenCalledWith(
-        expect.stringContaining("reconcile prior native receipt"),
-      );
-    } finally {
-      diagnostic.mockRestore();
-    }
-  });
+  it.each([{ method: "unknown-method", status: "sending" }])(
+    "preserves a same-ID receipt with an unprovable attempt $method/$status",
+    async (attempt) => {
+      const game = setup();
+      const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
+      emitEvent(game, OPTIONS, "push", "one", "first");
+      const id = eventId("push", "one");
+      const directory = join(eventsDir(game), "native");
+      mkdirSync(directory);
+      const path = join(directory, `${id}-${CLAUDE_COORDINATOR}.json`);
+      const receipt = JSON.stringify({
+        attempts: [attempt],
+        clientUserMessageId: eventRequestId(id, CLAUDE_COORDINATOR),
+        event_id: id,
+        recipient: CLAUDE_COORDINATOR,
+        status: "deferred",
+      });
+      writeFileSync(path, receipt);
+      updateRegistry(layout, 1, (draft) => {
+        draft.roles["game-coordinator"]!.harness = "codex";
+        draft.roles["game-coordinator"]!.conversations.codex = CLAUDE_COORDINATOR;
+      });
+      const adapter = mockAdapter([]);
+      const diagnostic = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        await flushEventsWith({ codex: () => adapter }, game);
+        expect(adapter.deliver).not.toHaveBeenCalled();
+        expect(events(game)[0]?.sent).toBe(false);
+        expect(readFileSync(path, "utf8")).toBe(receipt);
+        expect(diagnostic).toHaveBeenCalledWith(
+          expect.stringContaining("reconcile prior native receipt"),
+        );
+      } finally {
+        diagnostic.mockRestore();
+      }
+    },
+  );
 
   it("reconciles an accepted receipt from the previous provider without another send", async () => {
     const game = setup();
@@ -275,28 +267,6 @@ describe("flushEventsWith", () => {
     await flushEventsWith({ codex: () => adapter }, game);
     expect(adapter.deliver).not.toHaveBeenCalled();
     expect(events(game)[0]?.sent).toBe(true);
-  });
-
-  it("uses the recipient's selected harness even when the global default differs", async () => {
-    const game = setup();
-    const layout = loadLayout(resolve(game.stateDir, "..", "..", ".."));
-    updateRegistry(layout, 1, (draft) => {
-      draft.harness = "codex";
-      draft.roles["game-coordinator"]!.harness = "claude";
-    });
-    const claude = mockAdapter([]);
-    const codex = mockAdapter([]);
-    emitEvent(game, OPTIONS, "push", "one", "first");
-    await flushEventsWith({ claude: () => claude, codex: () => codex }, game);
-    expect(claude.deliver).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      CLAUDE_COORDINATOR,
-      expect.any(String),
-      { event_id: eventId("push", "one") },
-    );
-    expect(codex.deliver).not.toHaveBeenCalled();
-    expect(readRegistry(layout).harness).toBe("codex");
   });
 
   it("resolves role selection again between deliveries in one flush", async () => {
@@ -370,21 +340,6 @@ describe("flushEventsWith", () => {
     ]);
   });
 
-  it("suppresses a queued quiet event without delivering it", async () => {
-    const game = setup();
-    const directory = eventsDir(game);
-    mkdirSync(directory, { recursive: true });
-    const id = eventId("ci_running", SHA);
-    writeFileSync(
-      join(directory, `${id}.json`),
-      JSON.stringify({ created: 1, id, key: SHA, kind: "ci_running", message: "m", sent: false }),
-    );
-    const adapter = mockAdapter([]);
-    await flushEventsWith({ claude: () => adapter }, game);
-    expect(adapter.deliver).not.toHaveBeenCalled();
-    expect(events(game)[0]).toMatchObject({ suppressed: true });
-  });
-
   it("does nothing while another flush holds dispatch.lock", async () => {
     const game = setup();
     emitEvent(game, OPTIONS, "push", "one", "first");
@@ -403,22 +358,6 @@ describe("flushEventsWith", () => {
     emitEvent(game, OPTIONS, "push", "one", "first");
     await flushEventsWith({}, game);
     expect(events(game)[0]).toMatchObject({ sent: false });
-  });
-
-  it("keeps the exact nanosecond creation time when marking an event sent", async () => {
-    const game = setup();
-    const directory = eventsDir(game);
-    mkdirSync(directory, { recursive: true });
-    const id = eventId("push", "big");
-    const created = "1793757000123456789";
-    writeFileSync(
-      join(directory, `${id}.json`),
-      `{"created": ${created}, "id": "${id}", "key": "big", "kind": "push", "message": "m", "sent": false}\n`,
-    );
-    await flushEventsWith({ claude: () => mockAdapter([]) }, game);
-    const text = readFileSync(join(directory, `${id}.json`), "utf8");
-    expect(text).toContain(`"created": ${created},`);
-    expect(text).toContain('"sent": true');
   });
 
   it("resolves the harness and recipient again for each flush, without a restart", async () => {

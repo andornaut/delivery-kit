@@ -27,10 +27,6 @@ function registry() {
 }
 
 describe("worker parent effective transports", () => {
-  it("preserves global-only role resolution", () => {
-    expect(problems(registry(), ["game-coordinator", "archies-dog-walks/tech"])).toEqual([]);
-  });
-
   it("validates each parent's selected ID independently of the global harness", () => {
     const raw = registry();
     raw.roles["archies-dog-walks/tech"]!.harness = "codex";
@@ -47,10 +43,6 @@ describe("worker parent effective transports", () => {
           "conversation UUID in registry.json",
       ]);
     }
-  });
-
-  it("rejects unknown roles, including a removed duty name", () => {
-    expect(problems(registry(), ["monitor", "absent"])).toHaveLength(2);
   });
 
   it("detects duplicate active IDs including cross-provider collisions", () => {

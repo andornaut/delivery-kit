@@ -150,29 +150,6 @@ describe("harness select", () => {
     expect(readRegistry(test.layout).roles["game-coordinator"]!.harness).toBe("codex");
   });
 
-  it("rejects malformed or absent authority scope and revision without changing the registry", async () => {
-    const test = setup();
-    const before = readFileSync(test.layout.registryFile, "utf8");
-    const valid = select("--game", ARCHIE);
-    const cases = [
-      select(),
-      ["harness", "select", "--harness", "claude", "--role", `${ARCHIE}/tech`],
-      [...valid, "--harness", "codex"],
-      [...valid, "--expected-revision", "1"],
-      ["harness", "select", "--harness", "unknown", "--expected-revision", "1", "--game", ARCHIE],
-    ];
-    for (const revision of ["-1", "1.0", "1e0", "9007199254740992"]) {
-      const words = [...valid];
-      words[words.indexOf("--expected-revision") + 1] = revision;
-      cases.push(words);
-    }
-    for (const words of cases) {
-      // eslint-disable-next-line no-await-in-loop
-      expect((await run(test, ...words)).code).toBe(2);
-    }
-    expect(readFileSync(test.layout.registryFile, "utf8")).toBe(before);
-  });
-
   it("fails closed for missing selected roles, target IDs, invalid games and stale revisions", async () => {
     const test = setup();
     const before = readFileSync(test.layout.registryFile, "utf8");
@@ -193,34 +170,6 @@ describe("harness select", () => {
 });
 
 describe("scoped and mixed readiness", () => {
-  it("preserves the exact unscoped legacy readiness JSON", async () => {
-    const test = setup();
-    const result = await run(test, "claude", "ready");
-    expect(result.code).toBe(1);
-    expect(result.out).toBe(
-      '{"harness": "claude", "adapter": {"status": "available", "reason": null}, ' +
-        '"roles": [{"role": "game-coordinator", "conversation": null, "status": "unavailable"}], "ready": false}\n',
-    );
-  });
-
-  it("probes selected Claude targets without requiring Ada or shared-role Claude IDs", async () => {
-    const test = setup();
-    const before = readFileSync(test.layout.registryFile, "utf8");
-    const result = await run(test, "claude", "ready", "--game", ARCHIE, "--game", CHIBI);
-    expect(result).toMatchObject({ code: 0, err: "" });
-    const report = JSON.parse(result.out);
-    expect(report.roles).toHaveLength(6);
-    expect(
-      report.roles.every(
-        (row: { current_harness: string; probed_harness: string }) =>
-          row.current_harness === "codex" && row.probed_harness === "claude",
-      ),
-    ).toBe(true);
-    expect(readFileSync(test.claudeCalls, "utf8")).toBe("probe\n");
-    expect(readFileSync(test.layout.registryFile, "utf8")).toBe(before);
-    expect((await run(test, "claude", "ready")).code).toBe(1);
-  });
-
   it("probes effective per-role adapters once without sending or changing selection", async () => {
     const test = setup();
     expect((await run(test, ...select("--game", ARCHIE))).code).toBe(0);

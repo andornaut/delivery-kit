@@ -104,45 +104,6 @@ describe("spoolReviewBrief", () => {
     expect(spooled(fixture)).toEqual([]);
   });
 
-  it("keeps homogeneous legacy diagnostics and brief text unchanged with explicit selection", () => {
-    const fixture = claudeFixture();
-    const scope = active(fixture);
-    const legacy: ActiveScope = {
-      peers: scope.peers,
-      recipient: scope.recipient,
-      recipientRole: scope.recipientRole,
-      status: "active",
-      targets: scope.targets,
-    };
-    const first = spoolReviewBrief(fixture.env, fixture.game.busDir, legacy, SLOT, [TECH]);
-    const firstEntry = JSON.parse(
-      readFileSync(
-        join(spoolDir(fixture.game.busDir), `${slotRequestId(RECIPIENT, SLOT)}.json`),
-        "utf8",
-      ),
-    ) as Record<string, unknown>;
-    const other = claudeFixture();
-    const second = spoolReviewBrief(
-      other.env,
-      other.game.busDir,
-      {
-        ...legacy,
-        harness: "claude",
-        harnesses: { [RECIPIENT]: "claude", [TECH]: "claude" },
-      },
-      SLOT,
-      [TECH],
-    );
-    const secondEntry = JSON.parse(
-      readFileSync(
-        join(spoolDir(other.game.busDir), `${slotRequestId(RECIPIENT, SLOT)}.json`),
-        "utf8",
-      ),
-    ) as Record<string, unknown>;
-    expect(second.diagnostics).toEqual(first.diagnostics);
-    expect(secondEntry.text).toBe(firstEntry.text);
-  });
-
   it("writes the sending receipt and one spool entry keyed by the slot request ID", () => {
     const fixture = claudeFixture();
     fixture.agents([{ kind: "interactive", sessionId: RECIPIENT, status: "busy" }, idle(TECH)]);

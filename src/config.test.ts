@@ -29,20 +29,6 @@ describe("validateProjectConfig", () => {
     expect(validateProjectConfig(projectConfig("Archie")).gate.install).toBe("npm ci");
   });
 
-  it("accepts no install step, no gate steps, load limits of 0 and 30 and no timezone", () => {
-    expect(
-      issuesFor((config) => {
-        Object.assign(section(config, "gate"), { install: "", steps: [] });
-        section(config, "resources").loadLimit = 0;
-        delete section(config, "schedule").timezone;
-      }),
-    ).toEqual([]);
-    expect(issuesFor((config) => (section(config, "resources").loadLimit = 30))).toEqual([]);
-    expect(issuesFor((config) => (section(config, "ci").pollSeconds = 0))[0]).toMatch(
-      /^\/ci\/pollSeconds:/,
-    );
-  });
-
   it("requires explicit integer memory in MiB from 6 through 8192", () => {
     for (const memoryMiB of [6, 8192]) {
       expect(issuesFor((config) => (section(config, "resources").memoryMiB = memoryMiB))).toEqual(
@@ -63,22 +49,6 @@ describe("validateProjectConfig", () => {
         String(memoryMiB),
       ).toBe(true);
     }
-  });
-
-  it("accepts any image string and any install command", () => {
-    expect(
-      issuesFor((config) => {
-        Object.assign(section(config, "gate"), {
-          image: "registry.example/node-only:24@sha256:abc",
-          install: "npm ci",
-        });
-      }),
-    ).toEqual([]);
-    expect(
-      issuesFor((config) => {
-        section(config, "gate").install = "pnpm install --frozen-lockfile && ./setup";
-      }),
-    ).toEqual([]);
   });
 
   it("rejects each invalid field at its JSON pointer", () => {

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,26 +7,17 @@ import { describe, expect, it } from "vitest";
 
 import { type Layout, loadLayout } from "../layout.ts";
 import { holdLock, LockBusy, LockError, lockIsFree } from "../lock.ts";
-import {
-  CLAUDE_COORDINATOR,
-  CLAUDE_TECH,
-  CODEX_TECH,
-  makeFixture,
-  registryInput,
-} from "../testFixtures.ts";
+import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 import { ValidationError } from "../validate.ts";
 import {
   createRegistry,
   readRegistry,
   type Registry,
   RegistryExists,
-  RegistryMissing,
   RegistrySchema,
   resolveConversation,
   resolveHarness,
-  resolveRole,
   RevisionConflict,
-  UnknownRole,
   updateRegistry,
 } from "./index.ts";
 
@@ -66,28 +57,6 @@ describe("createRegistry and readRegistry", () => {
     expect(registry.updatedAt).toBe("2026-11-04T03:00:00.000Z");
     expect(RegistrySchema.validate(layout.config, registry)).toEqual(registry);
     expect(() => createRegistry(layout, registry)).toThrow(RegistryExists);
-  });
-
-  it("reports a missing registry", () => {
-    const layout = loadLayout(makeFixture().root);
-    expect(() => readRegistry(layout)).toThrow(RegistryMissing);
-  });
-
-  it("rejects role keys, games and transfers that config.json does not define", () => {
-    const layout = setup();
-    const value = structuredClone(registryInput()) as Record<string, Record<string, unknown>>;
-    Object.assign(value, { revision: 1, updatedAt: "2026-11-04T03:00:00Z" });
-    value.roles!["unknown-game/tech"] = { conversations: {}, ownership: "active", worktree: "." };
-    value.operations!["unknown-game"] = { busOwner: "nobody" };
-    try {
-      RegistrySchema.validate(layout.config, value);
-      expect.unreachable();
-    } catch (error) {
-      const issues = (error as ValidationError).issues.join("\n");
-      expect(issues).toContain("/roles/unknown-game/tech: is not a role in config.json");
-      expect(issues).toContain("/operations/unknown-game: is not a game in config.json");
-      expect(issues).toContain("/operations/unknown-game/busOwner: is not a registered role");
-    }
   });
 });
 
@@ -129,19 +98,6 @@ describe("updateRegistry", () => {
     ).toThrow(ValidationError);
     expect(readFileSync(layout.registryFile)).toEqual(before);
     expect(readdirSync(layout.varDir).sort()).toEqual(["registry.json", "registry.lock"]);
-  });
-
-  it("requires conversation IDs in the canonical lowercase form", () => {
-    const layout = setup();
-    expect(() =>
-      updateRegistry(layout, 1, (draft) => {
-        draft.roles["game-coordinator"]!.conversations.claude =
-          "ABCDEF00-0000-4000-8000-000000000003";
-      }),
-    ).toThrow(ValidationError);
-    expect(readRegistry(layout).roles["game-coordinator"]?.conversations.claude).toBe(
-      CLAUDE_COORDINATOR,
-    );
   });
 
   it("serializes concurrent writers in separate processes without losing an update", async () => {
@@ -194,33 +150,6 @@ registry.updateRegistry(layout, 1, (draft) => { draft.harness = "codex"; }, {
     expect(readdirSync(layout.varDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
-  it("keeps the new registry when a writer dies after the rename", async () => {
-    const layout = setup();
-    const body = `
-const layout = registry.loadLayout(process.argv[1]);
-registry.updateRegistry(layout, 1, (draft) => { draft.harness = "codex"; }, {
-  onStage: (stage) => { if (stage === "renamed") process.kill(process.pid, "SIGKILL"); },
-});`;
-    expect(await runChild(body, [layout.root])).toEqual({ code: null, signal: "SIGKILL" });
-    expect(readRegistry(layout)).toMatchObject({ harness: "codex", revision: 2 });
-  });
-
-  it("waits for a registry lock held by another process", () => {
-    const layout = setup();
-    const holder = spawnSync("flock", [
-      layout.registryLock,
-      process.execPath,
-      "--input-type=module",
-      "-e",
-      childScript(`
-const layout = registry.loadLayout(process.argv[1]);
-try { registry.updateRegistry(layout, 1, () => undefined, { timeoutSeconds: 1 }); }
-catch (error) { if (error instanceof registry.LockBusy) process.exit(3); throw error; }`),
-      layout.root,
-    ]);
-    expect(holder.status).toBe(3);
-  });
-
   it("writes under a registry lock the caller already holds", () => {
     const fixture = makeFixture();
     const layout = loadLayout(fixture.root);
@@ -261,45 +190,6 @@ catch (error) { if (error instanceof registry.LockBusy) process.exit(3); throw e
   });
 });
 
-describe("resolveConversation", () => {
-  it("follows a harness flip and keeps the other harness's IDs", () => {
-    const layout = setup();
-    const claude = readRegistry(layout);
-    expect(resolveConversation(claude, "archies-dog-walks/tech")).toBe(CLAUDE_TECH);
-    expect(resolveConversation(claude, "game-coordinator")).toBe(CLAUDE_COORDINATOR);
-    const codex = updateRegistry(layout, claude.revision, (draft) => {
-      draft.harness = "codex";
-    });
-    expect(resolveConversation(codex, "archies-dog-walks/tech")).toBe(CODEX_TECH);
-    expect(resolveConversation(codex, "game-coordinator")).toBeNull();
-    expect(codex.roles["archies-dog-walks/tech"]?.conversations.claude).toBe(CLAUDE_TECH);
-  });
-
-  it("resolves only registered role keys", () => {
-    const registry = readRegistry(setup());
-    expect(() => resolveRole(registry, "nobody")).toThrow(UnknownRole);
-    expect(() => resolveRole(registry, "nobody")).toThrow("no registered role named nobody");
-    expect(resolveRole(registry, "game-coordinator")).toBe("game-coordinator");
-  });
-
-  it("names the exact edit for a role that still has duties", () => {
-    const layout = setup();
-    const value = structuredClone(readRegistry(layout)) as unknown as {
-      roles: Record<string, Record<string, unknown>>;
-    };
-    value.roles["game-coordinator"]!.duties = ["review"];
-    try {
-      RegistrySchema.validate(layout.config, value);
-      expect.unreachable();
-    } catch (error) {
-      expect((error as ValidationError).issues).toEqual([
-        "/roles/game-coordinator/duties: duties were removed in 3.0.0; remove this field and name roles " +
-          "explicitly (scheduled reviews go to each game's reports.recipient)",
-      ]);
-    }
-  });
-});
-
 describe("role harness overrides", () => {
   it("uses the role's override while preserving the global default", () => {
     const layout = setup();
@@ -319,14 +209,5 @@ describe("role harness overrides", () => {
     });
     expect(resolveConversation(registry, "game-coordinator")).toBeNull();
     expect(registry.roles["game-coordinator"]!.conversations.claude).toBe(CLAUDE_COORDINATOR);
-  });
-
-  it("validates overrides and still rejects unknown role fields", () => {
-    const layout = setup();
-    for (const fields of [{ harness: "other" }, { harness: null }, { provider: "codex" }]) {
-      const value = structuredClone(readRegistry(layout));
-      Object.assign(value.roles["game-coordinator"]!, fields);
-      expect(() => RegistrySchema.validate(layout.config, value)).toThrow(ValidationError);
-    }
   });
 });

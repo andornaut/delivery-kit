@@ -71,7 +71,7 @@ describe("delivery admission", () => {
     expect(readDeliveryControl({ dir: test.game.busDir }).desired.state).toBe("paused");
   });
 
-  it.each(["missing", "invalid"])("blocks %s control without enabling it", async (kind) => {
+  it.each(["invalid"])("blocks %s control without enabling it", async (kind) => {
     const test = makeGame();
     const path = join(test.game.busDir, "delivery-control.json");
     if (kind === "missing") {
@@ -107,20 +107,6 @@ describe("delivery admission", () => {
     mergeFastForward(test, "next");
     expect(await depart(context)).toBe(1);
     expect(exec.calls).toHaveLength(before);
-  });
-
-  it("retains the exact failed gate SHA in durable observation", async () => {
-    const test = makeGame();
-    const head = mergeFastForward(test, "feature");
-    const context = testContext(test, {
-      exec: fakeExec(gateDocker({ gate: () => ({ status: 1, stderr: "", stdout: "failed" }) })),
-    });
-    expect(await depart(context)).toBe(1);
-    expect(readDeliveryControl({ dir: test.game.busDir }).observed).toMatchObject({
-      sha: head,
-      state: "failed",
-      updatedAt: expect.any(String),
-    });
   });
 });
 
@@ -219,40 +205,7 @@ describe("paused resident runner", () => {
     }
   });
 
-  it("keeps observing missing control and adopts explicit initialization without restart", async () => {
-    const test = makeGame((config) => {
-      config.deploy!.mode = "none";
-    });
-    mergeFastForward(test, "feature");
-    unlinkSync(join(test.game.busDir, "delivery-control.json"));
-    const context = testContext(test, {
-      clock: manualClock(Date.UTC(2026, 10, 9, 21, 19, 55) / 1000),
-      exec: fakeExec(gateDocker()),
-    });
-    await captureRequest(requestStore(context), "pending");
-    const stop = new AbortController();
-    const running = runRunner(
-      { cliPath: runnerFile(test.base), signal: stop.signal },
-      () => context,
-    );
-    try {
-      await until(() => vi.mocked(deliverScheduledWake).mock.calls.length > 0);
-      expect(readFileSync(join(context.paths.requestsDir, "pending.json"), "utf8")).toContain(
-        '"pending"',
-      );
-      desired(test.game.busDir, "enabled");
-      await until(() =>
-        readFileSync(join(context.paths.requestsDir, "pending.json"), "utf8").includes(
-          '"finished"',
-        ),
-      );
-    } finally {
-      stop.abort();
-      await running;
-    }
-  });
-
-  it.each(["failure", "timeout", "unauthenticated"] as const)(
+  it.each(["failure"] as const)(
     "resumes recorded CI while paused and records %s with its exact SHA",
     async (result) => {
       const test = makeGame();

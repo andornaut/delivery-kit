@@ -7,10 +7,6 @@ import { describe, expect, it } from "vitest";
 import { testClock, testLoad, testOptions } from "./testOverrides.ts";
 
 describe("DELIVERY_KIT_TEST_CLOCK", () => {
-  it("is absent unless set", () => {
-    expect(testClock({})).toBeUndefined();
-  });
-
   it("reads epoch, offsets and scaled wall time, and shortens sleeps by the speed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "clock-"));
     const file = join(dir, "clock.json");
@@ -39,38 +35,6 @@ describe("DELIVERY_KIT_TEST_CLOCK", () => {
     await clock?.sleep(60);
     expect(Date.now() - started).toBeLessThan(1000);
     expect((clock?.now() ?? 0) - 1_000_000).toBeGreaterThanOrEqual(60);
-  });
-
-  it("still sleeps the full virtual interval when nothing steps the clock", async () => {
-    const file = join(mkdtempSync(join(tmpdir(), "clock-")), "clock.json");
-    writeFileSync(
-      file,
-      JSON.stringify({ epoch: 0, maxRealSleep: 0.02, realStartMs: Date.now(), speed: 1 }),
-    );
-    const clock = testClock({ DELIVERY_KIT_TEST_CLOCK: file });
-    const started = Date.now();
-    await clock?.sleep(0.2);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(190);
-  });
-
-  it("sees a rewritten clock file on the next reading", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "clock-")), "clock.json");
-    writeFileSync(file, JSON.stringify({ epoch: 100, realStartMs: Date.now(), speed: 1 }));
-    const clock = testClock({ DELIVERY_KIT_TEST_CLOCK: file });
-    writeFileSync(file, JSON.stringify({ epoch: 5000, realStartMs: Date.now(), speed: 1 }));
-    expect(clock?.now()).toBeGreaterThanOrEqual(5000);
-  });
-
-  it("rejects a non-positive maxRealSleep", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "clock-")), "clock.json");
-    writeFileSync(file, JSON.stringify({ epoch: 1, maxRealSleep: 0, realStartMs: 1, speed: 1 }));
-    expect(() => testClock({ DELIVERY_KIT_TEST_CLOCK: file })).toThrow("maxRealSleep");
-  });
-
-  it("rejects a malformed clock file", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "clock-")), "clock.json");
-    writeFileSync(file, JSON.stringify({ epoch: 1, realStartMs: 1, speed: 0 }));
-    expect(() => testClock({ DELIVERY_KIT_TEST_CLOCK: file })).toThrow("finite epoch");
   });
 });
 

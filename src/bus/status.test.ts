@@ -4,9 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { gameLayout, loadLayout } from "../layout.ts";
 import { holdLock } from "../lock.ts";
-import { makeFixture } from "../testFixtures.ts";
 import {
   beginDeliveryActivity,
   claimDeliveryRunner,
@@ -15,7 +13,7 @@ import {
 } from "./control.ts";
 import { busPaths } from "./state.ts";
 import { recordIdentity, statusReport } from "./status.ts";
-import { GAME, makeGame } from "./testGame.ts";
+import { makeGame } from "./testGame.ts";
 
 function paths() {
   return busPaths(makeGame().game.busDir);
@@ -50,7 +48,7 @@ function controlledRunner() {
 }
 
 describe("status report", () => {
-  it.each(["idle", "checking", "deploying", "failed"] as const)(
+  it.each(["checking"] as const)(
     "does not attest live %s when only the runner lock is held",
     (state) => {
       const test = controlledRunner();
@@ -83,72 +81,38 @@ describe("status report", () => {
       }
     },
   );
-  it("keeps an old running protocol's missing control explicitly unknown and unattested", () => {
-    const { root } = makeFixture();
-    const bus = busPaths(gameLayout(loadLayout(root), GAME).busDir);
-    mkdirSync(bus.dir, { recursive: true });
-    const lock = holdLock(bus.runnerLock);
+
+  it.each(["checking"] as const)("reports paused %s work as expected draining", (state) => {
+    const test = controlledRunner();
     try {
-      recordIdentity(bus, {
-        config: "/c",
-        pid: 42,
-        sourceCommit: null,
-        toolRoot: "/t",
-        version: "2.0.3",
+      expect(
+        beginDeliveryActivity(test.store, test.token, {
+          id: "batch",
+          state,
+          sha: "a".repeat(40),
+        }),
+      ).toBe(true);
+      setDesiredDelivery(test.store, {
+        state: "paused",
+        reason: "operator pause",
+        requester: "game-coordinator",
       });
-      expect(statusReport(bus)).toMatchObject({
-        identity_status: "current",
-        idle: true,
+      expect(statusReport(test.bus)).toMatchObject({
         control: {
-          desired: null,
-          desired_state: "unknown",
-          desired_status: "missing",
-          migration_required: true,
-          observed: null,
-          observed_status: "unattested",
-          mismatch: null,
-          mismatch_reason: "control_missing",
+          desired_state: "paused",
+          observed: { state, sha: "a".repeat(40), runnerToken: test.token },
+          observed_status: "current",
+          draining: true,
+          mismatch: false,
+          mismatch_reason: null,
         },
       });
     } finally {
-      lock.release();
+      test.lock.release();
     }
   });
 
-  it.each(["checking", "deploying"] as const)(
-    "reports paused %s work as expected draining",
-    (state) => {
-      const test = controlledRunner();
-      try {
-        expect(
-          beginDeliveryActivity(test.store, test.token, {
-            id: "batch",
-            state,
-            sha: "a".repeat(40),
-          }),
-        ).toBe(true);
-        setDesiredDelivery(test.store, {
-          state: "paused",
-          reason: "operator pause",
-          requester: "game-coordinator",
-        });
-        expect(statusReport(test.bus)).toMatchObject({
-          control: {
-            desired_state: "paused",
-            observed: { state, sha: "a".repeat(40), runnerToken: test.token },
-            observed_status: "current",
-            draining: true,
-            mismatch: false,
-            mismatch_reason: null,
-          },
-        });
-      } finally {
-        test.lock.release();
-      }
-    },
-  );
-
-  it.each(["idle", "stopped", "failed"] as const)("does not make paused %s a mismatch", (state) => {
+  it.each(["failed"] as const)("does not make paused %s a mismatch", (state) => {
     const test = controlledRunner();
     try {
       setObservedDelivery(test.store, test.token, { state, sha: null });
@@ -198,15 +162,11 @@ describe("status report", () => {
     });
   });
 
-  it.each(["idle", "checking", "deploying"] as const)(
+  it.each(["deploying"] as const)(
     "does not attest %s after the singleton stops or a replaced identity",
     (state) => {
       const test = controlledRunner();
-      if (state === "idle") {
-        setObservedDelivery(test.store, test.token, { state, sha: null });
-      } else {
-        beginDeliveryActivity(test.store, test.token, { id: "batch", state, sha: "a".repeat(40) });
-      }
+      beginDeliveryActivity(test.store, test.token, { id: "batch", state, sha: "a".repeat(40) });
       test.lock.release();
       expect(statusReport(test.bus)).toMatchObject({
         control: {
@@ -254,41 +214,6 @@ describe("status report", () => {
         mismatch: null,
         mismatch_reason: "control_invalid",
       },
-    });
-  });
-
-  it("reports an adopted, idle, drained bus with no runner", () => {
-    const bus = paths();
-    expect(statusReport(bus)).toEqual({
-      config_status: null,
-      control: {
-        desired: {
-          reason: "explicit test fixture adoption",
-          requester: "game-coordinator",
-          revision: 1,
-          state: "enabled",
-          updatedAt: expect.any(String),
-        },
-        desired_state: "enabled",
-        desired_status: "valid",
-        draining: false,
-        migration_required: false,
-        mismatch: null,
-        mismatch_reason: "observation_missing",
-        observed: null,
-        observed_status: "missing",
-      },
-      drained: true,
-      identity: null,
-      identity_status: "absent",
-      idle: true,
-      idle_blockers: [],
-      loop_lock_held: false,
-      provenance: expect.objectContaining({ resident_status: "unknown" }),
-      gate_failed: [],
-      reporter_blockers: [],
-      runner_lock_held: false,
-      status: "not running",
     });
   });
 

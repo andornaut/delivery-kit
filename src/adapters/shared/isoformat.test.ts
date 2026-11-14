@@ -44,8 +44,4 @@ describe("utcStamp", () => {
       expect(utcStamp(value), value).toBeNull();
     }
   });
-
-  it("refuses a value that is not a string", () => {
-    expect(utcStamp(1793709296)).toBeNull();
-  });
 });

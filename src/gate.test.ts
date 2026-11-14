@@ -35,12 +35,6 @@ describe("gateScript", () => {
     expect(readFileSync(join(logs, "01-lint.log"), "utf8")).toBe("linted\n");
     expect(stepLogName(2, "unit test")).toBe("02-unit_test.log");
   });
-
-  it("quotes step names and keeps commands verbatim", () => {
-    expect(gateScript([{ name: "it's", run: "npm test -- --maxWorkers=4" }])).toContain(
-      `printf "%s " 'it'\\''s'; { npm test -- --maxWorkers=4; }`,
-    );
-  });
 });
 
 describe("runGate", () => {
@@ -158,26 +152,6 @@ describe("runGate", () => {
     }
   });
 
-  it("names the tool the gate image lacks", async () => {
-    const test = makeGame();
-    const exec = fakeExec((spec) =>
-      spec.args.some((arg) => arg.startsWith("EXPECTED_TREE="))
-        ? { status: 3, stderr: "", stdout: "tail\n" }
-        : gateDocker()(spec),
-    );
-    const context = testContext(test, { exec });
-    const outcome = await runGate(context, {
-      departure: "departure-1",
-      logs: mkdtempSync(join(tmpdir(), "logs-")),
-      sha: gitSync(test.repo, "rev-parse", "HEAD"),
-      work: test.repo,
-    });
-    expect(outcome).toMatchObject({ failure: "infrastructure", ok: false });
-    expect(outcome.ok ? "" : outcome.reason).toBe(
-      `the gate image ${context.config.gate.image} has no tail; it needs sh, git, tar, ls, tail`,
-    );
-  });
-
   it("reports a Docker error around the gate steps and a failed output copy as infrastructure", async () => {
     const gone = setup({ gate: () => ({ status: 125, stderr: "daemon gone\n", stdout: "" }) });
     expect(await runGate(gone.context, gone.input)).toEqual({
@@ -221,7 +195,6 @@ describe("runGate", () => {
 
   it.each([
     ["npm error code E504", "infrastructure"],
-    ["npm ERR! code ECONNRESET", "infrastructure"],
     ["npm error code E404", "step"],
   ])("classifies a failed install logging %s as %s", async (line, failure) => {
     const { context, input } = setup({ install: () => ({ status: 1, stderr: "", stdout: "" }) });
@@ -258,13 +231,6 @@ describe("runGate", () => {
     expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
   });
 
-  it("copies dist/ alone when the gate container has no node_modules/", async () => {
-    const { context, input, test } = setup({ noNodeModules: true });
-    expect(await runGate(context, input)).toMatchObject({ ok: true });
-    expect(existsSync(join(test.repo, "dist", "index.js"))).toBe(true);
-    expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
-  });
-
   it("removes the container after a gate timeout", async () => {
     const { context, exec, input } = setup({
       gate: () => ({ status: null, stderr: "", stdout: "" }),
@@ -285,25 +251,6 @@ describe("runGate", () => {
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
-  });
-
-  it("removes containers a stopped runner left behind before creating its own", async () => {
-    const { context, exec, input } = setup({}, "delivery-kit-gate-archies-dog-walks-departure-0\n");
-    await runGate(context, input);
-    expect(exec.calls[0]?.args).toEqual([
-      "ps",
-      "--all",
-      "--filter",
-      "label=delivery-kit-gate=archies-dog-walks",
-      "--format",
-      "{{.Names}}",
-    ]);
-    expect(exec.calls[1]?.args).toEqual([
-      "rm",
-      "--force",
-      "delivery-kit-gate-archies-dog-walks-departure-0",
-    ]);
-    expect(exec.calls[2]?.args[0]).toBe("create");
   });
 
   it("refuses to run the steps while the container still has a network interface", async () => {

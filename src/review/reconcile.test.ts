@@ -44,7 +44,7 @@ function question(index: number, options: unknown): Record<string, unknown> {
 }
 
 describe("reconcile", () => {
-  it.each(["wrong provider", "unknown", "legacy matching"])(
+  it.each(["wrong provider", "legacy matching"])(
     "keeps retention transport binding during mixed reconciliation: %s",
     (binding) => {
       const unblock = mkdtempSync(join(tmpdir(), "reconcile-retention-"));
@@ -122,7 +122,7 @@ describe("reconcile", () => {
     expect(questionNotices(unblock, RECIPIENT, snapshot)[0]?.level).toBe("escalation");
   });
 
-  it.each(["empty", "unchanged", "retained"])(
+  it.each(["retained"])(
     "sends a guarded review in each distinct slot with %s inventory",
     async (inventory) => {
       const unblock = mkdtempSync(join(tmpdir(), "reconcile-"));

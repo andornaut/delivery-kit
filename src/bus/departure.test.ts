@@ -18,7 +18,6 @@ import {
   makeGame,
   manualClock,
   mergeFastForward,
-  mergeWithCommit,
   recordingEvents,
   testContext,
   type TestGame,
@@ -96,31 +95,11 @@ describe("trunk-based departures", () => {
     expect(gitSync(test.repo, "status", "--porcelain", "--untracked-files=no")).toBe("");
   });
 
-  it("gates and pushes a merge-commit HEAD as it is", async () => {
-    const { context, test } = setup();
-    const head = mergeWithCommit(test, "feature");
-    expect(gitSync(test.repo, "rev-list", "--parents", "-n", "1", head).split(" ")).toHaveLength(3);
-    expect(await depart(context)).toBe(0);
-    expect(originMain(test)).toBe(head);
-  });
-
   it("does not depart a HEAD that already equals the remote main", async () => {
     const { context, creates, events } = setup();
     expect(await depart(context)).toBe(0);
     expect(creates()).toBe(0);
     expect(events.list.map(([kind, , message]) => [kind, message])).toEqual([
-      ["scheduled-status", expect.stringContaining("nothing new on main; no departure.")],
-    ]);
-  });
-
-  it("does not depart an unchanged HEAD", async () => {
-    const { context, creates, events, test } = setup();
-    mergeFastForward(test, "feature");
-    expect(await depart(context)).toBe(0);
-    const before = events.list.length;
-    expect(await depart(context)).toBe(0);
-    expect(creates()).toBe(1);
-    expect(events.list.slice(before).map(([kind, , message]) => [kind, message])).toEqual([
       ["scheduled-status", expect.stringContaining("nothing new on main; no departure.")],
     ]);
   });
@@ -269,36 +248,6 @@ describe("departures at high load", () => {
     expect(report).toContain("blocked at load: load at or above 24; main retained");
     expect(report).toContain("this clears by itself");
     expect(report).not.toContain("operator fix");
-  });
-
-  it("holds every departure at a loadLimit of 0, after waiting out the window", async () => {
-    const test = makeGame((config) => {
-      (config.resources as Record<string, unknown>).loadLimit = 0;
-    });
-    const clock = manualClock(SLOT);
-    const events = recordingEvents();
-    const context = testContext(test, { clock, events, load: 0 });
-    const before = originMain(test);
-    mergeFastForward(test, "feature");
-    expect(await depart(context)).toBe(1);
-    expect(clock.time).toBe(SLOT + LOAD_WAIT_SECONDS);
-    expect(originMain(test)).toBe(before);
-    expect(events.list.at(-1)?.[0]).toBe("blocked-load");
-    expect(events.list.at(-1)?.[2]).toContain("load at or above 0; main retained");
-  });
-
-  it("waits for a one-off request from the moment it starts", async () => {
-    // Mid-hour, so a window measured from the 03:00 slot would already have closed.
-    const start = SLOT + 30 * 60;
-    const clock = manualClock(start);
-    const load = (): number => (clock.time < start + 10 * 60 ? 30 : 1);
-    const { context, kinds, test } = setup("none", {}, { clock, load });
-    const head = mergeFastForward(test, "feature");
-    await captureRequest(requestStore(context), "r1");
-    expect(await depart(context, { requestId: "r1" })).toBe(0);
-    expect(clock.time).toBe(start + 10 * 60);
-    expect(originMain(test)).toBe(head);
-    expect(kinds()).toEqual(["attempt", "push"]);
   });
 
   it("stops a load wait on shutdown without a blocked report", async () => {

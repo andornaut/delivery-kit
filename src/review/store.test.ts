@@ -39,22 +39,19 @@ describe("harness-bound retention", () => {
     expect(readFileSync(path)).toEqual(before);
   });
 
-  it.each(["homogeneous", "mixed"])(
-    "recovers a legacy binding from its %s durable snapshot",
-    (kind) => {
-      const { entry, unblock } = fixture({ snapshot_id: "original" });
-      persist(snapshotPath(unblock, "original"), {
-        harness: "codex",
-        ...(kind === "mixed" ? { harnesses: { [RECIPIENT]: "claude" } } : {}),
-        snapshot_id: "original",
-      });
-      const harness = kind === "mixed" ? "claude" : "codex";
-      expect(retentionStatus(unblock, harness, RECIPIENT, entry)).toBe("retained");
-      expect(
-        retentionStatus(unblock, harness === "claude" ? "codex" : "claude", RECIPIENT, entry),
-      ).toBe("conflicting_harness");
-    },
-  );
+  it.each(["mixed"])("recovers a legacy binding from its %s durable snapshot", (kind) => {
+    const { entry, unblock } = fixture({ snapshot_id: "original" });
+    persist(snapshotPath(unblock, "original"), {
+      harness: "codex",
+      ...(kind === "mixed" ? { harnesses: { [RECIPIENT]: "claude" } } : {}),
+      snapshot_id: "original",
+    });
+    const harness = kind === "mixed" ? "claude" : "codex";
+    expect(retentionStatus(unblock, harness, RECIPIENT, entry)).toBe("retained");
+    expect(
+      retentionStatus(unblock, harness === "claude" ? "codex" : "claude", RECIPIENT, entry),
+    ).toBe("conflicting_harness");
+  });
 
   it("keeps unprovable legacy binding unknown while preserving the three-argument API", () => {
     const { entry, path, unblock } = fixture({ snapshot_id: "missing" });

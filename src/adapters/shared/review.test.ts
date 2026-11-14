@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { reminder } from "../../review/reconcile.ts";
 import { brief } from "../claude/spool.ts";
+import { UNBLOCK_INSTRUCTIONS } from "./review.ts";
 import type { ActiveScope } from "./route.ts";
 
 const route: ActiveScope = {
@@ -80,21 +81,25 @@ const requirements = [
   ],
 ] as const;
 
-describe.each([
-  ["Codex", codex],
-  ["Claude", claude],
-])("%s rendered scheduled review", (_harness, text) => {
+describe("shared scheduled review policy", () => {
   it.each(requirements)("requires %s", (_requirement, ...clauses) => {
     for (const clause of clauses) {
-      expect(text).toContain(clause);
+      expect(UNBLOCK_INSTRUCTIONS).toContain(clause);
     }
   });
+});
 
-  it("never authorizes removal based on delivery alone", () => {
+it.each([
+  ["Codex", codex],
+  ["Claude", claude],
+])(
+  "%s renders the shared policy without authorizing removal on delivery alone",
+  (_harness, text) => {
+    expect(text).toContain(UNBLOCK_INSTRUCTIONS);
     expect(text).not.toMatch(/original only after confirmed delivery or reconciliation/i);
     expect(text).not.toMatch(/remove (?:an )?original after confirmed delivery/i);
-  });
-});
+  },
+);
 
 it("preserves Codex snapshot IDs and Claude route targets and capability diagnostics", () => {
   expect(codex).toContain("Full local inventory: /snapshot\ntech-session: ordinary-1,guarded-2");

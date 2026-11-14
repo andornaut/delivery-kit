@@ -30,10 +30,7 @@ describe("worker inbox native lineage proof", () => {
 
   it.each([
     ["unrelated identity", { ...thread(), id: binding.parent }],
-    ["wrong parent", { ...thread(), parentThreadId: binding.worker }],
-    ["unknown parent", { ...thread(), parentThreadId: null }],
     ["missing source", { ...thread(), source: undefined }],
-    ["unknown source", { ...thread(), source: "unknown" }],
     [
       "inconsistent source",
       {

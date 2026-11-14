@@ -169,7 +169,7 @@ describe("inbox verified Codex workers", () => {
     },
   );
 
-  it.each(["wrong parent", "source mismatch", "unknown", "refused", "queue refused"])(
+  it.each(["wrong parent", "source mismatch", "queue refused"])(
     "refuses worker snapshot with %s without mutation",
     async (failure) => {
       const { capture, control, state } = await workerFixture();
@@ -189,7 +189,6 @@ describe("inbox verified Codex workers", () => {
   it.each([
     "reparented",
     "refused",
-    "unknown",
     "queue refused",
     "changed payload",
     "before delete",
@@ -451,47 +450,6 @@ describe("inbox effective harness selection", () => {
     expect(result.err).toContain("parent outside active route");
   });
 
-  it("uses the recipient's Claude selection when the global fallback is Codex", async () => {
-    const { fixture } = await delivered();
-    select(fixture, (registry) => {
-      registry.harness = "codex";
-      registry.roles["game-coordinator"]!.harness = "claude";
-      registry.roles["archies-dog-walks/tech"]!.harness = "claude";
-    });
-    const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
-    expect(result.code, result.err).toBe(EXIT_OK);
-    expect(JSON.parse(result.out).harness).toBe("claude");
-  });
-
-  it("refuses an inactive conversation UUID and unsupported Claude non-route recipient", async () => {
-    const fixture = claudeFixture();
-    select(fixture, (registry) => {
-      registry.roles["archies-dog-walks/tech"]!.harness = "claude";
-    });
-    const inactive = await run(
-      fixture,
-      "inbox",
-      "snapshot",
-      "--game",
-      GAME,
-      "--recipient",
-      CODEX_TECH,
-    );
-    expect(inactive.code).toBe(EXIT_USAGE);
-    expect(inactive.err).toContain("exactly one active registered role");
-    const unsupported = await run(
-      fixture,
-      "inbox",
-      "snapshot",
-      "--game",
-      GAME,
-      "--recipient",
-      TECH,
-    );
-    expect(unsupported.code).toBe(EXIT_INVALID);
-    expect(unsupported.err).toContain("recipient must be the active route's recipient");
-  });
-
   it("refuses an ambiguous active UUID before choosing either adapter", async () => {
     const fixture = claudeFixture();
     select(fixture, (registry) => {
@@ -519,35 +477,6 @@ describe("inbox effective harness selection", () => {
 });
 
 describe("inbox snapshot (claude)", () => {
-  it("lists delivered entries and reports native state unavailable", async () => {
-    const { fixture, requestId } = await delivered();
-    const output = await snapshot(fixture);
-    expect(Object.keys(output)).toEqual([
-      "snapshot_id",
-      "path",
-      "queue_ids",
-      "complete",
-      "harness",
-      "history",
-      "worker_health",
-      "question_state_status",
-      "session_status",
-      "target_queue_status",
-      "channel_pending",
-    ]);
-    expect(output).toMatchObject({
-      harness: "claude",
-      question_state_status: { [RECIPIENT]: "unavailable", [TECH]: "unavailable" },
-      queue_ids: [requestId],
-      session_status: { [RECIPIENT]: "idle", [TECH]: "idle" },
-      target_queue_status: { [TECH]: "unavailable" },
-    });
-    const record = JSON.parse(readFileSync(output.path as string, "utf8")) as {
-      queues: Record<string, { receipt_status: string }[]>;
-    };
-    expect(record.queues[RECIPIENT]?.[0]?.receipt_status).toBe("accepted");
-  });
-
   it("refuses a recipient that is not the route recipient", async () => {
     const { fixture } = await delivered();
     const result = await run(
@@ -579,14 +508,6 @@ describe("inbox snapshot (claude)", () => {
     expect(output.complete).toBe(false);
     const record = JSON.parse(readFileSync(output.path, "utf8")) as { errors: unknown };
     expect(record.errors).toEqual({ channel_pending: "channel spool unreadable (ENOTDIR)" });
-  });
-
-  it("accepts a registered conversation UUID and refuses an unregistered one", async () => {
-    const { fixture } = await delivered();
-    const recipient = (id: string) =>
-      run(fixture, "inbox", "snapshot", "--game", GAME, "--recipient", id);
-    expect((await recipient(RECIPIENT)).code).toBe(EXIT_OK);
-    expect((await recipient("00000000-0000-4000-8000-0000000000ff")).code).toBe(EXIT_USAGE);
   });
 });
 

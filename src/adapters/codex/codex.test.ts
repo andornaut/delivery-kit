@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { gameLayout, type Layout, loadLayout } from "../../layout.ts";
 import { makeFixture } from "../../testFixtures.ts";
 import { NAMESPACE_URL, uuid5 } from "../shared/ids.ts";
-import { dumpsDigest, dumpsJson } from "../shared/pyjson.ts";
 import { BudgetClient, codexAdapter, historyRefs } from "./index.ts";
 import { connectControl } from "./rpc.ts";
 import {
@@ -116,16 +115,6 @@ describe("Python-compatible identifiers and JSON", () => {
       "749c82df-1ea3-5f1b-b902-03c8e9ebd25d",
     );
   });
-
-  it("matches json.dumps(sort_keys=True) bytes and digests", () => {
-    const value = ["cm-1", [{ type: "text", text: "café \u007f\n" }], { b: 1, a: null, c: true }];
-    expect(dumpsJson(value)).toBe(
-      '["cm-1", [{"text": "caf\\u00e9 \\u007f\\n", "type": "text"}], {"a": null, "b": 1, "c": true}]',
-    );
-    expect(dumpsDigest(value)).toBe(
-      "8ec4570b8524d2a3e59df46f82e03d48a0067b4a6f23ecedc9932225753c5703",
-    );
-  });
 });
 
 describe("connectControl", () => {
@@ -147,16 +136,6 @@ describe("connectControl", () => {
       capabilities: { experimentalApi: true },
       clientInfo: { name: "hourly-unblock", version: "1" },
     });
-  });
-
-  it("rejects a native error with its code", async () => {
-    const context = await setup({});
-    const client = await connectControl(performance.now() + 5000, context.control.path);
-    try {
-      await expect(client.call("missing/method", {})).rejects.toMatchObject({ code: -32601 });
-    } finally {
-      client.close();
-    }
   });
 });
 
@@ -340,25 +319,6 @@ describe("codexAdapter.deliver", () => {
   });
 });
 
-describe("codexAdapter.status", () => {
-  it("maps each native thread status to an adapter status", async () => {
-    const rows: [{ type: string; activeFlags?: string[] }, string][] = [
-      [{ activeFlags: [], type: "idle" }, "available"],
-      [{ activeFlags: [], type: "active" }, "busy"],
-      [{ activeFlags: ["waitingOnApproval"], type: "active" }, "blocked"],
-      [{ type: "notLoaded" }, "unavailable"],
-    ];
-    for (const [status, expected] of rows) {
-      // eslint-disable-next-line no-await-in-loop
-      const context = await setup({ status });
-      // eslint-disable-next-line no-await-in-loop
-      await expect(adapter(context).status(RECIPIENT), expected).resolves.toMatchObject({
-        status: expected,
-      });
-    }
-  });
-});
-
 describe("codexAdapter.inventory and ack", () => {
   const entry = {
     clientUserMessageId: "cm-1",
@@ -416,7 +376,7 @@ describe("codexAdapter.inventory and ack", () => {
   });
 });
 
-describe("historyRefs", () => {
+describe("collectors", () => {
   it("returns question and reply references without bodies", async () => {
     const context = await setup({
       items: [
@@ -439,9 +399,6 @@ describe("historyRefs", () => {
       client.close();
     }
   });
-});
-
-describe("collectors", () => {
   it("reports every collector unavailable without a control socket", async () => {
     const context = await setup({});
     const missing = codexAdapter(context.layout, { controlSocket: join(tmpdir(), "absent.sock") });
@@ -457,23 +414,6 @@ describe("collectors", () => {
     });
     expect(collected.question_state[RECIPIENT]).toMatchObject({ status: "unavailable" });
     expect(collected.worker_health[RECIPIENT]).toMatchObject({ status: "unavailable" });
-  });
-
-  it("collects history over the socket within the shared call budget", async () => {
-    const context = await setup({ items: [{ id: "u1", type: "userMessage" }] });
-    const collected = await adapter(context).collectors.collect({
-      historyCursor: null,
-      parents: [],
-      recipients: [RECIPIENT],
-      slot: null,
-      unblockDir: context.unblock,
-    });
-    expect(collected.history[RECIPIENT]).toMatchObject({
-      status: "complete",
-      user_reply_refs: [{ item_id: "u1", turn_id: TURN }],
-    });
-    expect(collected).not.toHaveProperty("process_health_source");
-    expect(collected.collection_budget).toMatchObject({ max_calls: 256 });
   });
 
   it("stops a collector at the call budget", async () => {

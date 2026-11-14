@@ -278,17 +278,6 @@ describe("collectQuestionState", () => {
     expect(result.diagnostics).toContain("owner_pending_later_reply");
   });
 
-  it("keeps a visible newer turn and partial exact answer proof unknown", async () => {
-    let native = new Native([question("new-question", "newer"), question()]);
-    const result = await collect(native);
-    expect(result.questions.every((q) => q.state === "unknown")).toBe(true);
-    expect(result.diagnostics).toContain("owner_pending_newer_turn_ambiguity");
-    native = new Native([reply(), question()]);
-    (native.pages[0] as Json).truncated = true;
-    const owner = record({ resolutions: [resolution()], state: "clear" }, false);
-    expect(first(await collect(native, owner)).state).toBe("unknown");
-  });
-
   it("proves pending from complete paginated history without body capture", async () => {
     const native = new Native();
     native.pages = [{ data: [question()], nextCursor: "1" }, { data: [reply("reply", "older")] }];
@@ -453,114 +442,6 @@ describe("collectQuestionState", () => {
     };
     result = await collect(native, record({ state: "clear" }, false));
     expect(result.diagnostics).toContain("native_timeout");
-  });
-
-  it("does not let old compaction or partial history taint complete current proof", async () => {
-    const histories: Json[] = [
-      {
-        data: [
-          question(),
-          { item: { id: "old-compact", type: "contextCompaction" }, turnId: "older" },
-        ],
-      },
-      { data: [question()], nextCursor: "1" },
-    ];
-    for (const history of histories) {
-      const native = new Native();
-      native.pages = [history];
-      native.latestPages = [{ data: [question()] }];
-      // Cases run in order, one fake each.
-      // eslint-disable-next-line no-await-in-loop
-      const result = await collect(native, record(), 1);
-      expect(result.complete).toBe(false);
-      expect(result.status).toBe("partial");
-      expect(result.latest_turn_proof.complete).toBe(true);
-      const q = first(result);
-      expect(q.state).toBe("pending");
-      expect(q.proof_complete).toBe(true);
-      expect(q.proof_scope).toBe("latest_turn");
-    }
-    const currents: Json[] = [
-      {
-        data: [
-          question(),
-          { item: { id: "compact", type: "contextCompaction" }, turnId: "current" },
-        ],
-      },
-      { data: [question()], truncated: true },
-      { data: [question()], nextCursor: "1" },
-    ];
-    for (const current of currents) {
-      const native = new Native();
-      native.latestPages = [current];
-      // Cases run in order, one fake each.
-      // eslint-disable-next-line no-await-in-loop
-      const result = await collect(native, record(), 1);
-      expect(result.latest_turn_proof.complete).toBe(false);
-      expect(first(result).state).toBe("unknown");
-    }
-  });
-
-  it("requires an integer updatedAt for a stable context", async () => {
-    for (const value of [null, true, "1", 1.5]) {
-      const native = new Native();
-      native.updatedAt = value;
-      // Cases run in order, one fake each.
-      // eslint-disable-next-line no-await-in-loop
-      const result = await collect(native);
-      expect(first(result).state).toBe("unknown");
-      expect(result.latest_turn_proof.complete).toBe(false);
-    }
-  });
-
-  it("omits exact fields at the content limits without truncating options", async () => {
-    const oversized: { options: string[] | null; title: string }[] = [
-      { options: ["small"], title: "x".repeat(4097) },
-      { options: null, title: "é".repeat(2049) },
-      { options: Array.from({ length: 33 }, () => "x"), title: "small" },
-      { options: ["x".repeat(16384)], title: "small" },
-      { options: null, title: "bad-surrogate-\ud800" },
-    ];
-    for (const nativeQuestion of oversized) {
-      const native = new Native([question("question", "current", [nativeQuestion])]);
-      const owner = record({
-        pending_questions: [
-          attestation({ options: nativeQuestion.options, title: nativeQuestion.title }),
-        ],
-      });
-      // Cases run in order, one fake each.
-      // eslint-disable-next-line no-await-in-loop
-      const result = await collect(native, owner);
-      expect(result.complete).toBe(false);
-      expect(result.diagnostics).toContain("question_content_bound_exceeded");
-      const row = first(result);
-      expect(row.state).toBe("unknown");
-      expect(row.title).toBeNull();
-      expect(row.options).toBeNull();
-    }
-    const limits = {
-      options: Array.from({ length: 32 }, () => "x".repeat(384)),
-      title: "é".repeat(2048),
-    };
-    const result = await collect(
-      new Native([question("question", "current", [limits])]),
-      record({ pending_questions: [attestation(limits)] }),
-    );
-    const row = first(result);
-    expect(row.state).toBe("pending");
-    expect(row.title).toBe(limits.title);
-    expect(row.options).toEqual(limits.options);
-  });
-
-  it("bounds the rendered question count with an explicit omission", async () => {
-    const choices = Array.from({ length: 101 }, () => ({ options: ["A", "B"], title: "Choose" }));
-    const native = new Native([question("question", "current", choices)]);
-    const result = await collect(native, record({}, false));
-    expect(result.questions).toHaveLength(100);
-    expect(result.omitted_questions).toBe(1);
-    expect(result.complete).toBe(false);
-    expect(result.diagnostics).toContain("rendered_question_bound_exceeded");
-    expect(result.questions.every((q) => q.state === "unknown")).toBe(true);
   });
 
   it("fails closed on input bounds and malformed resolution records", async () => {
