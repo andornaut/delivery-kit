@@ -72,10 +72,33 @@ explicit; it is never inferred from the working directory.
   absent registry stops it with exit 1.
 - `inbox snapshot` and `inbox ack`: `--recipient` defaults to the game's `reports.recipient`.
   `--recipient` and `--parent` take a role name, or a canonical conversation UUID registered for
-  the active harness. With Claude the recipient must be the active route's recipient and every
-  parent a route member; with Codex every parent must belong to the active route. `--history-cursor` applies to
-  Codex. An unreadable Claude channel spool is reported under the snapshot's `errors`, with
+  the active harness, with the worker recipient exception below. With Claude the recipient must
+  be the active route's recipient and every parent a route member; with Codex every parent must
+  belong to the active route. `--history-cursor` applies to Codex. An unreadable Claude channel
+  spool is reported under the snapshot's `errors`, with
   `complete` false and exit 1; only a missing spool counts as empty.
+
+Worker inbox reconciliation in the new source contract requires a reviewed package pin containing
+this support; public 4.0.0 lacks the supported worker path and rejects unregistered worker UUIDs.
+Use the existing inbox commands with a canonical worker UUID and exactly one registered parent
+role whose current Codex conversation belongs to the active review route:
+
+```bash
+delivery-kit inbox snapshot --game GAME_ID \
+  --recipient WORKER_UUID --parent REGISTERED_ROLE
+delivery-kit inbox ack --game GAME_ID \
+  --recipient WORKER_UUID --parent REGISTERED_ROLE \
+  --snapshot SNAPSHOT_UUID --queue-id QUEUE_ID --disposition handled
+```
+
+Snapshot capture verifies fresh native Codex lineage against that exact parent and persists the
+worker/parent binding. ACK requires the same binding and uses one connection to verify lineage on
+open, inspect the current queue and recheck lineage immediately before deletion. Wrong parents,
+reparenting or refused reads fail closed and preserve originals. Unchanged-payload and ambiguous
+acknowledgement guards remain in force. Use `handled` or `superseded` only with evidence; use
+`--disposition retained --reason TEXT` for retained work. This is explicit owner reconciliation, not automatic
+worker deletion; it never forces session loads or mutates native question state. Unavailable
+visibility remains unknown and must be reported, without bypassing refusals.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
 read or a refused runner start, and 2 for a usage error or an unexpected failure. `run` exits 130
@@ -190,8 +213,9 @@ own: `transfers` carries the hold, acceptance and activation markers.
 | `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                          |
 
 - Every role key must be a role key in `config.json`, and every `operations` key a game.
-- Every role reference (`busOwner`, `reports.recipient`, `reports.workerParents`, `--requester`,
-  `--role`, `--recipient`, `--parent`) is a registered role key; there are no aliases.
+- Role references (`busOwner`, `reports.recipient`, `reports.workerParents`, `--requester`,
+  `--role`, `--recipient`, `--parent`) use registered role keys; explicit inbox conversation UUID
+  selectors follow the inbox validation rules above. There are no role aliases.
 - Every writer holds `var/registry.lock`, rejects a changed `revision`, validates the result,
   writes durably and increments `revision`.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
@@ -466,9 +490,9 @@ The recipient's instruction contract for every existing :20/:50 review pass is:
   that one snapshot contains every role's payloads.
 - Report unavailable visibility explicitly, including unavailable Claude native target queues and
   worker visibility; never infer an empty backlog from unavailable data. Refused native historical
-  worker-queue access remains unknown. The installed `inbox ack` rejects unregistered worker UUIDs:
-  report the capability limit and require owner reconciliation without bypassing refusals or
-  forcing session loads.
+  worker-queue access remains unknown. Public 4.0.0 lacks the supported worker inbox path; adopt a
+  reviewed package pin containing the new source contract before using it. Report capability
+  limits and require owner reconciliation without bypassing refusals or forcing session loads.
 - Acknowledge only exact unchanged originals with evidence of actual handling or supersession.
   Native or channel acceptance proves delivery, not handling.
 - Retain guarded items and unanswered decisions with their owner, reason and next review boundary.
