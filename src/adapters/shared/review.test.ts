@@ -23,6 +23,11 @@ const claude = brief(1800, route, [
 
 const requirements = [
   [
+    "recent activity review and reciprocal wait resolution alongside the backlog",
+    "Review recent Art, Gameplay and Tech activity alongside the backlog.",
+    "Resolve reciprocal waits with the smallest owner question.",
+  ],
+  [
     "full backlog at each existing slot",
     "At every existing :20/:50 scheduled review, inventory ALL registered game, kit and " +
       "game-coordinator recipients and ready worker handoffs",
@@ -30,6 +35,14 @@ const requirements = [
     "Read the actual queued payloads and current handoff artifacts",
     "Classify EVERY original, including independent ordinary work, as handled, superseded or retained",
     "then process independent ordinary work within its approved scope",
+  ],
+  [
+    "verified worker queue inventory and owner reconciliation within capability limits",
+    "Inventory verified workers' queues as well as registered parents' queues and ready handoffs",
+    "require verified lineage, never arbitrary UUIDs",
+    "If historical worker queue reads are unavailable or installed inbox ACK refuses a nonregistered worker UUID",
+    "preserve the original, report the limit and route reconciliation to its owning parent",
+    "Never bypass that refusal, force-load a worker queue, auto-ACK or expand capabilities",
   ],
   [
     "handling evidence before exact acknowledgement",

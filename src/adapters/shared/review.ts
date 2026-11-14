@@ -1,8 +1,15 @@
 // Common backlog and decision policy carried by both harnesses' scheduled reviews.
 export const UNBLOCK_INSTRUCTIONS =
+  "Review recent Art, Gameplay and Tech activity alongside the backlog. " +
+  "Resolve reciprocal waits with the smallest owner question. " +
   "At every existing :20/:50 scheduled review, inventory ALL registered game, kit and " +
   "game-coordinator recipients and ready worker handoffs, including recipients outside the " +
   "active route targets, through available supported interfaces and owner cooperation. " +
+  "Inventory verified workers' queues as well as registered parents' queues and ready " +
+  "handoffs; require verified lineage, never arbitrary UUIDs. If historical worker queue " +
+  "reads are unavailable or installed inbox ACK refuses a nonregistered worker UUID, " +
+  "preserve the original, report the limit and route reconciliation to its owning parent. " +
+  "Never bypass that refusal, force-load a worker queue, auto-ACK or expand capabilities. " +
   "Read the actual queued payloads and current handoff artifacts. Report unavailable queue " +
   "or worker visibility explicitly; never infer empty or handled inventory or fabricate it. " +
   "A locally delivered channel queue does not establish visibility into native target queues " +
