@@ -8,17 +8,19 @@ import { realpathSync, statSync, writeSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
 
-import { type LineWriter, serve } from "../adapters/claude/channel.ts";
+import { type LineWriter, type MessageChannelGuard, serve } from "../adapters/claude/channel.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { messageChannelStateDir } from "../messages/paths.ts";
+import { messageConsumeGuard } from "../messages/service.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { SPECS } from "./spec.ts";
 
 export interface ChannelStreams {
+  readonly beforeMessage?: MessageChannelGuard;
   readonly input: NodeJS.ReadableStream;
   readonly write: LineWriter;
 }
@@ -132,7 +134,16 @@ export async function runChannel(
       ? EXIT_USAGE
       : EXIT_INVALID;
   }
-  return serve({ pollMs: pollSeconds * 1000 }, streams.input, streams.write, busDirs, conversation);
+  return serve(
+    {
+      beforeMessage: streams.beforeMessage ?? messageConsumeGuard(loadLayout(root), io.env),
+      pollMs: pollSeconds * 1000,
+    },
+    streams.input,
+    streams.write,
+    busDirs,
+    conversation,
+  );
 }
 
 const PAUSE = new Int32Array(new SharedArrayBuffer(4));

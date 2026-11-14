@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { spoolReviewBrief } from "../adapters/claude/spool.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
 import { messageChannelStateDir } from "../messages/paths.ts";
+import * as messageService from "../messages/service.ts";
+import { messageExpectation, MessageStore } from "../messages/store.ts";
 import { claudeMessageTransport } from "../messages/transports.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { activeRoute, claudeFixture, RECIPIENT, SLOT } from "../review/fixtures.ts";
@@ -28,7 +30,11 @@ describe("claude channel options", () => {
     const input = new PassThrough();
     const lines: string[] = [];
     const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
+      {
+        beforeMessage: async () => ({ status: "clear" }),
+        input,
+        write: (line) => void lines.push(line),
+      },
       io(),
       fixture.layout.root,
       [],
@@ -110,7 +116,11 @@ describe("Claude channel generic feeds", () => {
     const input = new PassThrough();
     const lines: string[] = [];
     const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
+      {
+        beforeMessage: async () => ({ status: "clear" }),
+        input,
+        write: (line) => void lines.push(line),
+      },
       io(),
       fixture.layout.root,
       ["--conversation", RECIPIENT],
@@ -118,11 +128,6 @@ describe("Claude channel generic feeds", () => {
     expect(existsSync(dirname(stateDir))).toBe(false);
     input.write('{"method":"notifications/initialized"}\n');
     await vi.waitFor(() => expect(lines).toHaveLength(1));
-    mkdirSync(join(stateDir, "decisions"), { recursive: true });
-    writeFixtureJson(join(stateDir, "decisions", `${RECIPIENT}.json`), {
-      state: "clear",
-      thread_id: RECIPIENT,
-    });
     const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
     expect(
       (
@@ -144,11 +149,6 @@ describe("Claude channel generic feeds", () => {
   it("keeps explicit state directories exclusive even with generic messages waiting", async () => {
     const fixture = claudeFixture();
     const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);
-    mkdirSync(join(stateDir, "decisions"), { recursive: true });
-    writeFixtureJson(join(stateDir, "decisions", `${RECIPIENT}.json`), {
-      state: "clear",
-      thread_id: RECIPIENT,
-    });
     const path = join(stateDir, "explicit-exclusion.json");
     const message = {
       requestId: "explicit-exclusion",
@@ -161,7 +161,11 @@ describe("Claude channel generic feeds", () => {
     const input = new PassThrough();
     const lines: string[] = [];
     const done = runChannel(
-      { input, write: (line) => void lines.push(line) },
+      {
+        beforeMessage: async () => ({ status: "clear" }),
+        input,
+        write: (line) => void lines.push(line),
+      },
       io(),
       fixture.layout.root,
       ["--conversation", RECIPIENT, "--state-dir", fixture.unblock],
@@ -172,5 +176,86 @@ describe("Claude channel generic feeds", () => {
     expect(await done).toBe(EXIT_OK);
     expect(JSON.parse(lines[0]!).params.meta.kind).toBe("review");
     expect((await transport.send(path, message)).status).toBe("queued");
+  });
+});
+
+describe("qualified generic consume guard", () => {
+  it("uses qualified service clearance to block a post-enqueue hold or reroute", async () => {
+    const fixture = claudeFixture();
+    const store = new MessageStore({
+      layout: fixture.layout,
+      resolveOwner: (_role, envelope) =>
+        messageService.currentMessageOwner(fixture.layout, envelope),
+    });
+    const record = await store.enqueue({
+      schema: 1,
+      id: "consume-race",
+      fromRole: "game-kit",
+      toRole: "game-coordinator",
+      intent: "queue",
+      body: "exact authoritative body",
+      created: "2026-11-14T20:00:00.000Z",
+    });
+    const lease = await store.beginAttempt(messageExpectation(record));
+    const source = lease.source;
+    lease.close();
+    const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);
+    const path = join(stateDir, `${source.requestId}.json`);
+    const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+    const message = {
+      requestId: source.requestId,
+      recipient: RECIPIENT,
+      text: record.envelope.body,
+    };
+    expect((await transport.send(path, message)).status).toBe("queued");
+    expect(existsSync(join(stateDir, "decisions"))).toBe(false);
+    updateRegistry(fixture.layout, 1, (draft) => {
+      draft.roles["game-coordinator"]!.phase = "held";
+    });
+    const outcomes: string[] = [];
+    const original = messageService.messageConsumeGuard;
+    const factory = vi
+      .spyOn(messageService, "messageConsumeGuard")
+      .mockImplementation((layout, env) => {
+        const guard = original(layout, env);
+        return async (entry) => {
+          const outcome = await guard(entry);
+          outcomes.push(outcome.status);
+          return outcome;
+        };
+      });
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      { ...io(), env: fixture.env },
+      fixture.layout.root,
+      ["--conversation", RECIPIENT],
+    );
+    try {
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(outcomes).toEqual(["blocked"]));
+      updateRegistry(fixture.layout, 2, (draft) => {
+        draft.roles["game-coordinator"]!.phase = "active";
+        draft.roles["game-coordinator"]!.conversations.claude =
+          "00000000-0000-4000-8000-000000000099";
+      });
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(outcomes).toEqual(["blocked", "blocked"]));
+      expect(lines).toEqual([]);
+      expect((await transport.send(path, message)).status).toBe("queued");
+      updateRegistry(fixture.layout, 3, (draft) => {
+        draft.roles["game-coordinator"]!.conversations.claude = RECIPIENT;
+      });
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(lines).toHaveLength(1));
+      expect(outcomes).toEqual(["blocked", "blocked", "clear"]);
+      expect((await transport.send(path, message)).status).toBe("accepted");
+      expect(JSON.parse(lines[0]!).params.content).toBe(record.envelope.body);
+    } finally {
+      input.end();
+      await done;
+      factory.mockRestore();
+    }
   });
 });

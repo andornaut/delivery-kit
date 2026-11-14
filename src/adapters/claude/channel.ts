@@ -6,7 +6,6 @@ import { join } from "node:path";
 
 import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import { holdLockAsync } from "../../lock.ts";
-import { decisionClear } from "../shared/decisions.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
 import {
   deliveredDir,
@@ -22,6 +21,19 @@ import {
 
 /** Writes one complete line synchronously; throws when the channel output is unusable. */
 export type LineWriter = (line: string) => void;
+
+export type MessageChannelGuard = (message: {
+  readonly requestId: string;
+  readonly recipient: string;
+  readonly text: string;
+}) =>
+  | { readonly status: "clear" | "blocked" | "unavailable" }
+  | Promise<{ readonly status: "clear" | "blocked" | "unavailable" }>;
+
+export interface MessageChannelOptions {
+  /** Fresh exact source/role/harness/native binding, HOLD and qualified question clearance. */
+  readonly beforeMessage?: MessageChannelGuard;
+}
 
 const RECEIPT = /^(?:unblock|events\/native)\/[A-Za-z0-9_-]+\.json$/;
 
@@ -103,7 +115,12 @@ function reconcileClaims(busDir: string): void {
   }
 }
 
-function deliverLocked(write: LineWriter, busDir: string, recipient: string): boolean {
+async function deliverLocked(
+  options: MessageChannelOptions,
+  write: LineWriter,
+  busDir: string,
+  recipient: string,
+): Promise<boolean> {
   reconcileClaims(busDir);
   const spool = spoolDir(busDir);
   for (const name of names(spool, ".json")) {
@@ -123,14 +140,40 @@ function deliverLocked(write: LineWriter, busDir: string, recipient: string): bo
       ) {
         continue;
       }
-      if (loaded.kind === "message" && !decisionClear(unblockDir(busDir), recipient)) {
-        continue;
-      }
       entry = loaded;
       path = receiptFor(busDir, entry);
-      const current = readReceipt(path);
+      let current = readReceipt(path);
       if (current === undefined || !matches(current, entry)) {
         continue;
+      }
+      if (entry.kind === "message") {
+        if (options.beforeMessage === undefined) {
+          continue;
+        }
+        // The service verifies exact durable source and fresh ownership/clearance under this claim lock.
+        // eslint-disable-next-line no-await-in-loop
+        const clearance = await options.beforeMessage({
+          recipient,
+          requestId: entry.requestId as string,
+          text: entry.text as string,
+        });
+        if (clearance.status !== "clear") {
+          continue;
+        }
+        // Awaiting service clearance permits concurrent edits. Recheck exact spool and receipt before claiming.
+        const latest = readEntry(pending);
+        current = readReceipt(path);
+        if (
+          latest?.kind !== "message" ||
+          latest.requestId !== entry.requestId ||
+          latest.recipient !== recipient ||
+          latest.text !== entry.text ||
+          latest.receipt !== entry.receipt ||
+          current === undefined ||
+          !matches(current, latest)
+        ) {
+          continue;
+        }
       }
       receipt = current;
       line = JSON.stringify(channelNotification(entry as unknown as SpoolEntry));
@@ -173,13 +216,14 @@ export async function deliverPending(
   write: LineWriter,
   busDir: string,
   recipient: string,
+  options: MessageChannelOptions = {},
 ): Promise<boolean> {
   if (!isDirectory(spoolDir(busDir))) {
     return true;
   }
   const lock = await holdLockAsync(join(unblockDir(busDir), LOCK_FILE));
   try {
-    return deliverLocked(write, busDir, recipient);
+    return await deliverLocked(options, write, busDir, recipient);
   } finally {
     lock.release();
   }
@@ -209,7 +253,7 @@ export function handle(write: LineWriter, message: Message): boolean {
   return false;
 }
 
-export interface ServeOptions {
+export interface ServeOptions extends MessageChannelOptions {
   readonly pollMs: number;
 }
 
@@ -249,7 +293,7 @@ export function serve(
         for (const busDir of busDirs) {
           // Projects are drained in order; a failed write stops the consumer.
           // eslint-disable-next-line no-await-in-loop
-          if (!(await deliverPending(write, busDir, recipient))) {
+          if (!(await deliverPending(write, busDir, recipient, options))) {
             finish(1);
             return;
           }

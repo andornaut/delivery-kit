@@ -434,13 +434,6 @@ export function spoolMessage(
       }
     }
     const state = { kind: "message", recipient, requestId, text };
-    if (!decisionClear(unblockDir(busDir), recipient)) {
-      persist(path, { ...state, status: "deferred" });
-      return outcome(
-        "deferred",
-        "recipient-bound user-decision clearance missing, invalid or pending",
-      );
-    }
     if (
       existsSync(join(spoolDir(busDir), `${requestId}.json`)) ||
       existsSync(join(spoolDir(busDir), `${requestId}.claimed`))

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
 import { spoolDir } from "../adapters/claude/spool.ts";
+import { decisionClear } from "../adapters/shared/decisions.ts";
 import type { HarnessAdapter } from "../adapters/types.ts";
 import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
 import { claudeMessageTransport, guardedMessageTransport } from "./transports.ts";
@@ -19,10 +20,18 @@ describe("generic message transports", () => {
     expect(JSON.parse(readFileSync(path, "utf8")).status).toBe("sending");
     f.clear("pending");
     const lines: string[] = [];
-    await deliverPending((line) => void lines.push(line), f.game.busDir, RECIPIENT);
+    await deliverPending((line) => void lines.push(line), f.game.busDir, RECIPIENT, {
+      beforeMessage: async () => ({
+        status: decisionClear(f.unblock, RECIPIENT) ? "clear" : "blocked",
+      }),
+    });
     expect(lines).toEqual([]);
     f.clear();
-    await deliverPending((line) => void lines.push(line), f.game.busDir, RECIPIENT);
+    await deliverPending((line) => void lines.push(line), f.game.busDir, RECIPIENT, {
+      beforeMessage: async () => ({
+        status: decisionClear(f.unblock, RECIPIENT) ? "clear" : "blocked",
+      }),
+    });
     expect(lines.map((line) => JSON.parse(line))).toEqual([
       {
         jsonrpc: "2.0",
@@ -47,6 +56,62 @@ describe("generic message transports", () => {
     await deliverPending((line) => void lines.push(line), f.game.busDir, RECIPIENT);
     expect(lines).toEqual([]);
     expect((await transport.send(path, message)).status).toBe("ambiguous");
+  });
+
+  it("keeps generic messages pending after an enqueue-time owner is held or rerouted", async () => {
+    const f = claudeFixture();
+    const message = { requestId: "owner-race", recipient: RECIPIENT, text: "exact race body" };
+    const path = join(f.unblock, "owner-race.json");
+    const transport = claudeMessageTransport({ messageChannelStateDir: f.unblock });
+    await transport.send(path, message);
+    const lines: string[] = [];
+    const write = (line: string) => void lines.push(line);
+    await deliverPending(write, f.game.busDir, RECIPIENT);
+    let held = true;
+    let owner = RECIPIENT;
+    const options = {
+      beforeMessage: async (actual: typeof message) => ({
+        status:
+          actual.requestId === message.requestId &&
+          actual.recipient === message.recipient &&
+          actual.text === message.text &&
+          !held &&
+          owner === RECIPIENT
+            ? ("clear" as const)
+            : ("blocked" as const),
+      }),
+    };
+    await deliverPending(write, f.game.busDir, RECIPIENT, options);
+    held = false;
+    owner = "00000000-0000-4000-8000-000000000099";
+    await deliverPending(write, f.game.busDir, RECIPIENT, options);
+    expect(lines).toEqual([]);
+    expect(JSON.parse(readFileSync(path, "utf8")).status).toBe("sending");
+    expect((await transport.send(path, message)).status).toBe("queued");
+    owner = RECIPIENT;
+    await deliverPending(write, f.game.busDir, RECIPIENT, options);
+    expect(lines).toHaveLength(1);
+    expect((await transport.send(path, message)).status).toBe("accepted");
+  });
+
+  it("rechecks the exact spool after awaiting consume clearance", async () => {
+    const f = claudeFixture();
+    const message = { requestId: "await-race", recipient: RECIPIENT, text: "original" };
+    const path = join(f.unblock, "await-race.json");
+    const transport = claudeMessageTransport({ messageChannelStateDir: f.unblock });
+    await transport.send(path, message);
+    const pending = join(spoolDir(f.game.busDir), "await-race.json");
+    const lines: string[] = [];
+    await deliverPending((line) => void lines.push(line), f.game.busDir, RECIPIENT, {
+      beforeMessage: async () => {
+        await Promise.resolve();
+        const entry = JSON.parse(readFileSync(pending, "utf8"));
+        writeFileSync(pending, JSON.stringify({ ...entry, text: "changed while awaiting" }));
+        return { status: "clear" };
+      },
+    });
+    expect(lines).toEqual([]);
+    expect(JSON.parse(readFileSync(path, "utf8")).status).toBe("sending");
   });
 
   it("delegates unblock to the existing adapter and preserves a deferred guard result", async () => {
