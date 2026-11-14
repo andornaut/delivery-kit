@@ -1,12 +1,15 @@
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { spoolReviewBrief } from "../adapters/claude/spool.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
+import { messageChannelStateDir } from "../messages/paths.ts";
+import { claudeMessageTransport } from "../messages/transports.ts";
 import { updateRegistry } from "../registry/store.ts";
-import { claudeFixture, RECIPIENT } from "../review/fixtures.ts";
+import { activeRoute, claudeFixture, RECIPIENT, SLOT } from "../review/fixtures.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
 
@@ -93,5 +96,81 @@ describe("claude channel options", () => {
     ]);
     input.end();
     expect(await done).toBe(EXIT_OK);
+  });
+});
+
+describe("Claude channel generic feeds", () => {
+  it("preserves game feeds and discovers a generic inbox created after startup", async () => {
+    const fixture = claudeFixture();
+    const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);
+    expect(existsSync(dirname(stateDir))).toBe(false);
+    expect(
+      spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT).status,
+    ).toBe("sending");
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      ["--conversation", RECIPIENT],
+    );
+    expect(existsSync(dirname(stateDir))).toBe(false);
+    input.write('{"method":"notifications/initialized"}\n');
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    mkdirSync(join(stateDir, "decisions"), { recursive: true });
+    writeFixtureJson(join(stateDir, "decisions", `${RECIPIENT}.json`), {
+      state: "clear",
+      thread_id: RECIPIENT,
+    });
+    const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+    expect(
+      (
+        await transport.send(join(stateDir, "late-message.json"), {
+          requestId: "late-message",
+          recipient: RECIPIENT,
+          text: "late exact text",
+        })
+      ).status,
+    ).toBe("queued");
+    input.write('{"method":"notifications/initialized"}\n');
+    await vi.waitFor(() => expect(lines).toHaveLength(2));
+    input.end();
+    expect(await done).toBe(EXIT_OK);
+    expect(lines.map((line) => JSON.parse(line).params.meta.kind)).toEqual(["review", "message"]);
+    expect(JSON.parse(lines[1]!).params.content).toBe("late exact text");
+  });
+
+  it("keeps explicit state directories exclusive even with generic messages waiting", async () => {
+    const fixture = claudeFixture();
+    const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);
+    mkdirSync(join(stateDir, "decisions"), { recursive: true });
+    writeFixtureJson(join(stateDir, "decisions", `${RECIPIENT}.json`), {
+      state: "clear",
+      thread_id: RECIPIENT,
+    });
+    const path = join(stateDir, "explicit-exclusion.json");
+    const message = {
+      requestId: "explicit-exclusion",
+      recipient: RECIPIENT,
+      text: "generic waiting",
+    };
+    const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+    await transport.send(path, message);
+    spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT);
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      ["--conversation", RECIPIENT, "--state-dir", fixture.unblock],
+    );
+    input.write('{"method":"notifications/initialized"}\n');
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    input.end();
+    expect(await done).toBe(EXIT_OK);
+    expect(JSON.parse(lines[0]!).params.meta.kind).toBe("review");
+    expect((await transport.send(path, message)).status).toBe("queued");
   });
 });

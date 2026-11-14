@@ -2,12 +2,13 @@
 // own channel consumer drains. The receipt is always written at `sending`
 // before its spool entry, so an interruption between the two is never resent.
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import { holdLock, LockBusy } from "../../lock.ts";
+import type { NativeMessage, TransportReceipt } from "../../messages/transports.ts";
 import { decisionClear } from "../shared/decisions.ts";
-import { eventRequestId, slotRequestId } from "../shared/ids.ts";
+import { eventRequestId, isCanonicalUuid, slotRequestId } from "../shared/ids.ts";
 import { pyJsonDumps } from "../shared/pyjson.ts";
 import { UNBLOCK_INSTRUCTIONS } from "../shared/review.ts";
 import type { ActiveScope } from "../shared/route.ts";
@@ -18,11 +19,12 @@ export const SPOOL = "claude-spool";
 export const DELIVERED = "claude-delivered";
 export const LOCK_FILE = "unblock.lock";
 
-export type EntryKind = "event" | "review";
+export type EntryKind = "event" | "review" | "message";
 
 /** The receipt field that carries the request ID, per entry kind. */
 export const RECEIPT_KEYS: Readonly<Record<EntryKind, string>> = {
   event: "clientUserMessageId",
+  message: "requestId",
   review: "requestId",
 };
 
@@ -32,7 +34,7 @@ const LEGACY_REVIEW_KIND = "monitor";
 
 /** A spool entry's kind, reading a 2.x review brief as `review`; undefined for anything else. */
 export function entryKind(value: unknown): EntryKind | undefined {
-  if (value === "event" || value === "review") {
+  if (value === "event" || value === "review" || value === "message") {
     return value;
   }
   return value === LEGACY_REVIEW_KIND ? "review" : undefined;
@@ -362,6 +364,92 @@ export function spoolEvent(
       text: message,
     });
     return false;
+  } finally {
+    lock.release();
+  }
+}
+
+/** Generic messages share channel claim and receipt semantics without an event envelope or CLI probe. */
+export function spoolMessage(
+  busDir: string,
+  path: string,
+  message: NativeMessage,
+): TransportReceipt {
+  const { recipient, requestId, text } = message;
+  const outcome = (status: TransportReceipt["status"], reason?: string): TransportReceipt => ({
+    requestId,
+    status,
+    ...(reason === undefined ? {} : { reason }),
+  });
+  const receipt = relative(busDir, path);
+  if (
+    !isCanonicalUuid(recipient) ||
+    !/^[A-Za-z0-9_-]+$/.test(requestId) ||
+    typeof text !== "string" ||
+    !/^unblock\/[A-Za-z0-9_-]+\.json$/.test(receipt)
+  ) {
+    return outcome("blocked", "invalid message binding or receipt path");
+  }
+  const lock = tryUnblockLock(busDir);
+  if (lock === null) {
+    return outcome("busy");
+  }
+  try {
+    const stored = readJsonIfExists(path);
+    const previous = record(stored);
+    if (stored !== undefined && previous === undefined) {
+      return outcome("blocked", "unknown receipt state");
+    }
+    if (previous !== undefined) {
+      if (
+        previous.kind !== "message" ||
+        previous.requestId !== requestId ||
+        previous.recipient !== recipient ||
+        previous.text !== text
+      ) {
+        return outcome("blocked", "receipt binding or payload mismatch");
+      }
+      if (previous.status === "accepted") {
+        return outcome("accepted");
+      }
+      if (previous.status === "ambiguous") {
+        return outcome("ambiguous", "previous send interrupted; do not resend");
+      }
+      if (previous.status === "sending") {
+        const entry = readEntry(join(spoolDir(busDir), `${requestId}.json`));
+        if (
+          entry?.kind === "message" &&
+          entry.requestId === requestId &&
+          entry.recipient === recipient &&
+          entry.text === text &&
+          entry.receipt === receipt
+        ) {
+          return outcome("queued");
+        }
+        persist(path, { ...previous, status: "ambiguous" });
+        return outcome("ambiguous", "spool absent or changed; do not resend");
+      }
+      if (previous.status !== "deferred") {
+        return outcome("blocked", "unknown receipt state");
+      }
+    }
+    const state = { kind: "message", recipient, requestId, text };
+    if (!decisionClear(unblockDir(busDir), recipient)) {
+      persist(path, { ...state, status: "deferred" });
+      return outcome(
+        "deferred",
+        "recipient-bound user-decision clearance missing, invalid or pending",
+      );
+    }
+    if (
+      existsSync(join(spoolDir(busDir), `${requestId}.json`)) ||
+      existsSync(join(spoolDir(busDir), `${requestId}.claimed`))
+    ) {
+      return outcome("blocked", "request ID already spooled");
+    }
+    persist(path, { ...state, status: "sending" });
+    writeSpoolEntry(busDir, { kind: "message", receipt, recipient, requestId, text });
+    return outcome("queued");
   } finally {
     lock.release();
   }

@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import { holdLockAsync } from "../../lock.ts";
+import { decisionClear } from "../shared/decisions.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
 import {
   deliveredDir,
@@ -39,7 +40,11 @@ function receiptFor(busDir: string, entry: Json): string {
 function matches(receipt: Json, entry: Json): boolean {
   return (
     receipt[RECEIPT_KEYS[entryKind(entry.kind) ?? "event"]] === entry.requestId &&
-    receipt.status === "sending"
+    receipt.status === "sending" &&
+    (entry.kind !== "message" ||
+      (receipt.kind === "message" &&
+        receipt.recipient === entry.recipient &&
+        receipt.text === entry.text))
   );
 }
 
@@ -116,6 +121,9 @@ function deliverLocked(write: LineWriter, busDir: string, recipient: string): bo
         name !== `${String(loaded.requestId)}.json` ||
         typeof loaded.text !== "string"
       ) {
+        continue;
+      }
+      if (loaded.kind === "message" && !decisionClear(unblockDir(busDir), recipient)) {
         continue;
       }
       entry = loaded;

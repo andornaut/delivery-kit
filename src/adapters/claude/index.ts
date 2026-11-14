@@ -61,10 +61,22 @@ export function deliveredEntries(busDir: string, recipient: string): Map<string,
     ) {
       continue;
     }
+    if (entry.kind === "message" && !/^unblock\/[A-Za-z0-9_-]+\.json$/.test(entry.receipt)) {
+      continue;
+    }
     let receipt: Json | undefined;
     try {
       receipt = readJsonIfExists(join(busDir, entry.receipt)) as Json | undefined;
     } catch {
+      continue;
+    }
+    if (
+      entry.kind === "message" &&
+      (receipt?.kind !== "message" ||
+        receipt.requestId !== entry.requestId ||
+        receipt.recipient !== recipient ||
+        receipt.text !== entry.text)
+    ) {
       continue;
     }
     if (receipt === undefined) {
@@ -191,4 +203,11 @@ export {
   sessionStatus,
 } from "./agents.ts";
 export { channelNotification, initializeResult } from "./protocol.ts";
-export { DELIVERED, pendingEntries, SPOOL, spoolEvent, spoolReviewBrief } from "./spool.ts";
+export {
+  DELIVERED,
+  pendingEntries,
+  SPOOL,
+  spoolEvent,
+  spoolMessage,
+  spoolReviewBrief,
+} from "./spool.ts";

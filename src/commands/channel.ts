@@ -1,6 +1,6 @@
 // `delivery-kit claude channel`: the Claude channel consumer, a stdio MCP server that the recipient
 // session launches from game-coordinator's node_modules. By default it drains every game's spool (or each
-// `--game`) for the conversation of those games' reports.recipient. `--conversation UUID` and
+// `--game`) plus the resolved conversation's generic message spool. `--conversation UUID` and
 // repeatable `--state-dir STATE/unblock` select them explicitly. It creates no state directory:
 // only spools that already exist are drained, so a channel started before any game state exists
 // leaves var/ untouched.
@@ -13,6 +13,7 @@ import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
+import { messageChannelStateDir } from "../messages/paths.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { SPECS } from "./spec.ts";
@@ -35,7 +36,12 @@ function isDirectory(path: string): boolean {
 }
 
 /** Bus directories from explicit STATE/unblock paths, or from every (or each named) game. */
-function busDirectories(root: string, stateDirs: string[], games: string[] | undefined): string[] {
+function busDirectories(
+  root: string,
+  stateDirs: string[],
+  games: string[] | undefined,
+  conversation: string,
+): string[] {
   if (stateDirs.length > 0) {
     if (games !== undefined) {
       throw new ChannelUsage("--state-dir and --game are exclusive");
@@ -55,7 +61,10 @@ function busDirectories(root: string, stateDirs: string[], games: string[] | und
   if (selected.length !== new Set(selected).size) {
     throw new ChannelUsage("each --game may appear once");
   }
-  return selected.map((game) => gameLayout(layout, game).busDir);
+  return [
+    ...selected.map((game) => gameLayout(layout, game).busDir),
+    dirname(messageChannelStateDir(layout, conversation)),
+  ];
 }
 
 /** The Claude conversation of the one reports.recipient the selected (or every) game names. */
@@ -113,8 +122,8 @@ export async function runChannel(
     if (values.conversation !== undefined && !isCanonicalUuid(values.conversation)) {
       throw new ChannelUsage("--conversation must be a canonical session UUID");
     }
-    busDirs = busDirectories(root, values["state-dir"] ?? [], values.game);
     conversation = values.conversation ?? recipientConversation(root, values.game);
+    busDirs = busDirectories(root, values["state-dir"] ?? [], values.game, conversation);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`delivery-kit: ${message}\n`);

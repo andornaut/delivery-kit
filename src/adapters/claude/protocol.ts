@@ -45,7 +45,7 @@ export function initializeResult(params: unknown): Record<string, unknown> {
   return {
     capabilities: { experimental: { "claude/channel": {} } },
     instructions:
-      "Scheduled delivery-kit review briefs arrive as channel events. " +
+      "Delivery-kit messages and review briefs arrive as channel events. " +
       "Delivery is not handling; record handling separately.",
     protocolVersion,
     serverInfo: { name: SERVER_NAME, version: "1" },
