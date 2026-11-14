@@ -250,7 +250,8 @@ export async function diagnoseHarness(
     const record = registry.roles[role]!;
     if (
       record.ownership !== "active" ||
-      (record.phase !== undefined && record.phase !== "active")
+      record.phase === "held" ||
+      record.phase === "source-held"
     ) {
       rows.push(row);
     } else if (row.native_id === null) {

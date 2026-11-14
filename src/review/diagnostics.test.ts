@@ -15,7 +15,7 @@ afterEach(async () => {
   await Promise.all(controls.splice(0).map((control) => control.close()));
 });
 
-function setup(harness: "codex" | "claude" = "codex", ownership = "active") {
+function setup(harness: "codex" | "claude" = "codex", ownership = "active", phase = "active") {
   const fixture = makeFixture();
   const layout = loadLayout(fixture.root);
   const input = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
@@ -24,7 +24,7 @@ function setup(harness: "codex" | "claude" = "codex", ownership = "active") {
     harness,
     roles: {
       ...input.roles,
-      [ROLE]: { ...input.roles[ROLE]!, ownership },
+      [ROLE]: { ...input.roles[ROLE]!, ownership, phase },
     },
   });
   return { ...fixture, layout, registry };
@@ -32,7 +32,7 @@ function setup(harness: "codex" | "claude" = "codex", ownership = "active") {
 
 describe("scoped harness diagnostics", () => {
   it("reads only the selected exact Codex thread and separates service from frontend and bridge", async () => {
-    const test = setup();
+    const test = setup("codex", "active", "prototype-approved");
     const before = readFileSync(test.layout.registryFile, "utf8");
     const control = await startFakeControl(test.base, (method, params) => {
       expect(method).toBe("thread/read");
@@ -83,19 +83,36 @@ describe("scoped harness diagnostics", () => {
 
   it("does not probe inactive bindings or convert registry holds into native HOLD proof", async () => {
     const test = setup("codex", "held");
+    const before = readFileSync(test.layout.registryFile, "utf8");
+    const control = await startFakeControl(test.base, () => ({ result: {} }));
+    controls.push(control);
+    const art = "archies-dog-walks/art";
+    const gameplay = "archies-dog-walks/gameplay";
+    const registry: Registry = {
+      ...test.registry,
+      roles: {
+        ...test.registry.roles,
+        [art]: { ...test.registry.roles[ROLE]!, ownership: "active", phase: "held" },
+        [gameplay]: { ...test.registry.roles[ROLE]!, ownership: "active", phase: "source-held" },
+      },
+    };
     const report = await diagnoseHarness(
-      { CODEX_CONTROL_SOCKET: "invalid", CLAUDE_BIN: "/never/run" },
+      { CODEX_CONTROL_SOCKET: control.path, CLAUDE_BIN: "/never/run" },
       test.layout,
-      test.registry,
-      { roles: [ROLE] },
+      registry,
+      { roles: [ROLE, art, gameplay] },
     );
-    expect(report.roles).toHaveLength(1);
-    expect(report.roles[0]).toMatchObject({
-      endpoint: { source: "skipped" },
-      native_hold: "unknown",
-      activation: "unknown",
-      layers: { adapter: { status: "unknown", code: "scope_not_active" } },
-    });
+    expect(report.roles.map((row) => row.role)).toEqual([art, gameplay, ROLE]);
+    for (const row of report.roles) {
+      expect(row).toMatchObject({
+        endpoint: { source: "skipped" },
+        native_hold: "unknown",
+        activation: "unknown",
+        layers: { adapter: { status: "unknown", code: "scope_not_active" } },
+      });
+    }
+    expect(control.calls).toEqual([]);
+    expect(readFileSync(test.layout.registryFile, "utf8")).toBe(before);
   });
 
   it("normalizes explicit endpoint and RPC failures without falling back or echoing errors", async () => {
@@ -128,7 +145,7 @@ describe("scoped harness diagnostics", () => {
   });
 
   it("uses only exact Claude session listings without inferring a connected channel", async () => {
-    const test = setup("claude");
+    const test = setup("claude", "active", "prototype-approved");
     const binary = join(test.base, "claude.mjs");
     const calls = join(test.base, "calls.json");
     writeFileSync(

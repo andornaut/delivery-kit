@@ -339,6 +339,10 @@ Recovery actions are reported, never executed. Unknown capabilities remain unkno
 layers are healthy or delivery is safe. Observed failures or invalid configuration exit 1;
 malformed options or missing scope exit 2.
 
+Read-only probe eligibility requires `ownership: "active"` and excludes phases `held` and
+`source-held`. Other phases, including `prototype-approved`, describe product scope and do not
+disable probes. Eligibility never proves native HOLD clearance or activation.
+
 Codex endpoint selection uses `resolveCodexControlSocket({env?, home?, controlSocket?})`:
 explicit option, then `CODEX_CONTROL_SOCKET`, then the managed socket under
 `~/.codex/app-server-control/app-server-control.sock`. The result is `{path, source}`, where
