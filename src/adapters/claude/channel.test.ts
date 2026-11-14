@@ -9,8 +9,9 @@ import {
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import * as durable from "../../durable.ts";
 import { gameLayout } from "../../layout.ts";
 import {
   activeRoute,
@@ -100,6 +101,54 @@ describe("deliverPending", () => {
     await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT);
     expect(lines).toEqual([]);
     expect(receipt(fixture.game.busDir, SLOT + 1).status).toBe("ambiguous");
+  });
+});
+
+describe("durable channel claims", () => {
+  it("syncs the renamed claim before output to prevent host-crash replay", async () => {
+    const fixture = claudeFixture();
+    spool(fixture);
+    const events: string[] = [];
+    const original = durable.fsyncDirectory;
+    const sync = vi.spyOn(durable, "fsyncDirectory").mockImplementation((directory) => {
+      expect(directory).toBe(spoolDir(fixture.game.busDir));
+      expect(readdirSync(directory).some((name) => name.endsWith(".claimed"))).toBe(true);
+      original(directory);
+      events.push("durable-claim");
+    });
+    try {
+      await deliverPending(
+        () => void events.push("external-write"),
+        fixture.game.busDir,
+        RECIPIENT,
+      );
+      expect(events).toEqual(["durable-claim", "external-write"]);
+    } finally {
+      sync.mockRestore();
+    }
+  });
+
+  it("does not emit after a claim sync failure and preserves ambiguous evidence without replay", async () => {
+    const fixture = claudeFixture();
+    spool(fixture);
+    const lines: string[] = [];
+    const sync = vi.spyOn(durable, "fsyncDirectory").mockImplementation(() => {
+      throw new Error("sync failed");
+    });
+    try {
+      expect(
+        await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT),
+      ).toBe(false);
+    } finally {
+      sync.mockRestore();
+    }
+    expect(lines).toEqual([]);
+    expect(receipt(fixture.game.busDir).status).toBe("ambiguous");
+    expect(
+      readdirSync(spoolDir(fixture.game.busDir)).some((name) => name.endsWith(".claimed")),
+    ).toBe(true);
+    await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT);
+    expect(lines).toEqual([]);
   });
 });
 

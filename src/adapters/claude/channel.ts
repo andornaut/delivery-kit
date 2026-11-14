@@ -4,7 +4,7 @@
 import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
-import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
+import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../../durable.ts";
 import { holdLockAsync } from "../../lock.ts";
 import { decisionClear } from "../shared/decisions.ts";
 import { channelNotification, initializeResult } from "./protocol.ts";
@@ -138,6 +138,14 @@ function deliverLocked(write: LineWriter, busDir: string, recipient: string): bo
       renameSync(pending, claimed);
     } catch {
       continue;
+    }
+    try {
+      // Persist the claim before output so a host crash cannot restore a pending entry and replay it.
+      fsyncDirectory(spool);
+    } catch {
+      mark(receipt, "ambiguous", { reason: "channel claim sync failed; do not resend" });
+      writeJsonDurable(path, receipt);
+      return false;
     }
     try {
       write(`${line}\n`);
