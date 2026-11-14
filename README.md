@@ -139,6 +139,16 @@ A provenance match does not establish readiness or authorise replacement. Inspec
 configuration, control, lock, idle and reporter/drain fields separately. Status performs no repair,
 registry update, runner replacement or scheduling action.
 
+Reporter drain is separate from recipient inbox health. Use `status --game ID` to read
+`reporter_blockers` and `drained`; an idle runner can still have unsent events. There is no
+public reporter-event list, reconciliation or flush command. The resident observer processes
+event receipts in order and marks an event sent only after accepted delivery. Recipient inbox
+acknowledgements and common-message reconciliation do not change reporter event state.
+Installing a newer CLI or adopting its generic inbox does not prove an older resident's
+reporters drained. Preserve event originals and ambiguous receipts for supported owner review.
+A persisted review snapshot proves collection, not reminder delivery. Adapter availability and
+local inbox health do not attest a resident reporter, native bridge or scheduled wake.
+
 ## Configuration
 
 Configuration never holds secret values. Use the operator's existing authentication and
@@ -403,6 +413,9 @@ There is no `not-delivered` reconciliation authority. Stale revisions fail close
 and retain ambiguous work until exact supported evidence establishes its outcome.
 
 The existing scheduled review includes message health and outbox references; it adds no timer.
+Every unresolved message observed in two distinct scheduled slots is reported with its ID,
+blocker, owner and next action, including retained, held and guarded work. Valid questions,
+holds and retention boundaries remain protected; a warning grants no retry, wake or ACK authority.
 Before rollout to all registered roles, gate the combined feature, then verify actual installed
 help and package behaviour for that exact artifact. These commands do not activate roles.
 

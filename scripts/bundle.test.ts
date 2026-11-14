@@ -33,7 +33,7 @@ describe("dist/cli.js", () => {
 });
 
 describe("dist/registry.js", () => {
-  it("exports the public registry API with declarations a NodeNext consumer can type-check", async () => {
+  it("exports registry and transport APIs with declarations a NodeNext consumer can type-check", async () => {
     const registry = (await import(join(root, "dist/registry.js"))) as Record<string, unknown>;
     for (const name of [
       "RegistrySchema",
@@ -44,18 +44,30 @@ describe("dist/registry.js", () => {
     ]) {
       expect(registry[name], name).toBeDefined();
     }
+    const transport = (await import(join(root, "dist/transport.js"))) as {
+      messageChannelStateDir: (layout: { reviewDir: string }, id: string) => string;
+    };
+    expect(
+      transport.messageChannelStateDir(
+        { reviewDir: "/review" },
+        "00000000-0000-4000-8000-000000000001",
+      ),
+    ).toBe("/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock");
     const consumer = join(mkdtempSync(join(tmpdir(), "registry-consumer-")), "consumer.mts");
     const target = JSON.stringify(join(root, "dist/registry.js"));
     writeFileSync(
       consumer,
       `import { readRegistry, type Registry, RevisionConflict, updateRegistry } from ${target};
 import {
-  resolveCodexControlSocket, type CodexControlSocketEndpoint,
+  messageChannelStateDir, resolveCodexControlSocket, type CodexControlSocketEndpoint,
 } from ${JSON.stringify(join(root, "dist/transport.js"))};
 const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
 // @ts-expect-error Endpoint sources are a finite union, not arbitrary strings.
 const source: "other" = endpoint.source;
-export { endpoint, source };
+const channel: string = messageChannelStateDir(
+  { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
+);
+export { endpoint, source, channel };
 const check: (registry: Registry) => number = (registry) => registry.revision;
 // @ts-expect-error A resolved Registry type rejects this; an unresolved one would be any.
 const wrong: (registry: Registry) => string = (registry) => registry.revision;

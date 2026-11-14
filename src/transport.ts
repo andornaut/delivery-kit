@@ -4,3 +4,4 @@ export {
   type CodexControlSocketOptions,
   resolveCodexControlSocket,
 } from "./adapters/shared/endpoints.ts";
+export { messageChannelStateDir } from "./messages/paths.ts";

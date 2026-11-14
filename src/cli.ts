@@ -7,8 +7,15 @@ import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
 import { workerParentProblems } from "./bus/parents.ts";
 import { channel } from "./commands/channel.ts";
 import { control } from "./commands/control.ts";
+import { harnessDoctor } from "./commands/doctor.ts";
 import { harnessSelect } from "./commands/harness.ts";
 import { inboxAck, inboxSnapshot } from "./commands/inbox.ts";
+import {
+  messageDispatch,
+  messageReconcile,
+  messageSend,
+  messageStatus,
+} from "./commands/messages.ts";
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
@@ -36,13 +43,18 @@ export const COMMANDS = [
   "inbox ack",
   "claude ready",
   "codex ready",
+  "harness doctor",
   "harness ready",
   "harness select",
   "claude channel",
+  "message send",
+  "message dispatch",
+  "message status",
+  "message reconcile",
 ] as const satisfies readonly Command[];
 export type { Command };
 
-const GROUP_ORDER = ["game", "inbox", "harness"] as const;
+const GROUP_ORDER = ["game", "inbox", "message", "harness"] as const;
 
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
@@ -205,10 +217,15 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "claude ready": claudeReady,
   "codex ready": codexReady,
   control,
+  "harness doctor": harnessDoctor,
   "harness ready": harnessReady,
   "harness select": harnessSelect,
   "inbox ack": inboxAck,
   "inbox snapshot": inboxSnapshot,
+  "message dispatch": messageDispatch,
+  "message reconcile": messageReconcile,
+  "message send": messageSend,
+  "message status": messageStatus,
   request,
   run,
   status,

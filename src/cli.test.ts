@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -87,9 +87,55 @@ describe("check-config", () => {
 describe("dispatcher", () => {
   it("prints usage for help and rejects unknown commands", async () => {
     const { root } = makeFixture();
-    expect(await run(root, "--help")).toMatchObject({ code: EXIT_OK });
+    const help = await run(root, "--help");
+    expect(help.code).toBe(EXIT_OK);
+    expect(help.out).toContain("message dispatch --id UUID");
+    expect(help.out).toContain("message reconcile --id UUID --receipt");
+    expect(help.out).toContain("harness doctor");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
     expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
+  });
+});
+
+describe("cross-directory common messages", () => {
+  it("stores and pulls the exact body with root in different argument positions without native admission", async () => {
+    const { base, root } = makeFixture();
+    withRegistry(root);
+    const body = "Exact original payload.\n\n";
+    writeFileSync(join(base, "message.txt"), body);
+    const id = "00000000-0000-4000-8000-000000000001";
+    let out = "";
+    let err = "";
+    const io = {
+      cwd: base,
+      env: {},
+      err: (text: string) => (err += text),
+      out: (text: string) => (out += text),
+    };
+    expect(
+      await main(io, [
+        "message",
+        "send",
+        "--from",
+        "game-coordinator",
+        "--recipient",
+        "archies-dog-walks/tech",
+        "--root",
+        root,
+        "--id",
+        id,
+        "--body-file",
+        "message.txt",
+      ]),
+    ).toBe(EXIT_OK);
+    expect(JSON.parse(out)).toMatchObject({ id, state: "queued" });
+    expect(JSON.parse(out)).not.toHaveProperty("body");
+    out = "";
+    expect(
+      await main(io, ["message", "status", "--id", id, "--include-body", "--root", root]),
+    ).toBe(EXIT_OK);
+    expect(JSON.parse(out)).toMatchObject([{ id, body, state: "queued", attempts: 0 }]);
+    expect(err).toBe("");
   });
 });
 

@@ -81,8 +81,10 @@ export function inspectPackage(
     throw new Error("package transport declarations missing");
   node(pkg, "--input-type=module", [
     "-e",
-    "import { resolveCodexControlSocket } from '@andornaut/delivery-kit/transport'; " +
+    "import { resolveCodexControlSocket, messageChannelStateDir } from '@andornaut/delivery-kit/transport'; " +
       "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
+      "const channel = messageChannelStateDir({ reviewDir: '/review' }, '00000000-0000-4000-8000-000000000001'); " +
+      "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
       "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
   ]);
   const result = {

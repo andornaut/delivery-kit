@@ -2,10 +2,19 @@
 // command accepts always appears in `delivery-kit --help`.
 import type { ParseArgsConfig } from "node:util";
 
+import { DOCTOR_OPTIONS } from "./doctor.ts";
+import {
+  MESSAGE_DISPATCH_OPTIONS,
+  MESSAGE_RECONCILE_OPTIONS,
+  MESSAGE_SEND_OPTIONS,
+  MESSAGE_STATUS_OPTIONS,
+} from "./messages.ts";
+
 export type Options = NonNullable<ParseArgsConfig["options"]>;
 
 export interface CommandSpec {
   readonly summary: string;
+  readonly values?: Readonly<Record<string, string>>;
   readonly options: Options;
   /**
    * The accepted forms. Each lists the options it takes in help order; a trailing `?` marks one
@@ -16,13 +25,19 @@ export interface CommandSpec {
 
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
+  "body-file": "FILE",
   conversation: "UUID",
   disposition: "handled|superseded|retained",
+  evidence: "REF",
   "expected-revision": "N",
+  from: "ROLE",
   game: "ID",
   harness: "claude|codex|default",
   "history-cursor": "CURSOR",
   id: "SAFE_ID",
+  intent: "queue|unblock",
+  "next-boundary": "TEXT",
+  "owner-role": "ROLE",
   parent: "ROLE|UUID",
   "poll-seconds": "SECONDS",
   "queue-id": "ID",
@@ -40,6 +55,7 @@ export const GROUPS = {
   game: "game operations",
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
+  message: "durable role messages",
 } as const;
 
 export interface GroupedSpec extends CommandSpec {
@@ -96,6 +112,12 @@ export const SPECS = {
     },
     summary: "persist the requested delivery state without starting a runner",
   },
+  "harness doctor": {
+    forms: [["game?", "role?"]],
+    group: "harness",
+    options: DOCTOR_OPTIONS,
+    summary: "diagnose explicitly selected roles without sending or activating",
+  },
   "harness ready": {
     forms: [["game?", "role?"]],
     group: "harness",
@@ -133,6 +155,48 @@ export const SPECS = {
     options: { ...INBOX, "history-cursor": { type: "string" } },
     summary: "capture the recipient's inbox snapshot",
   },
+  "message dispatch": {
+    forms: [["id"]],
+    group: "message",
+    options: MESSAGE_DISPATCH_OPTIONS,
+    summary: "explicitly attempt guarded delivery of a stored message",
+    values: { id: "UUID" },
+  },
+  "message reconcile": {
+    forms: [
+      ["id", "receipt"],
+      [
+        "id",
+        "expected-revision",
+        "disposition",
+        "evidence",
+        "reason?",
+        "owner-role?",
+        "next-boundary?",
+      ],
+    ],
+    group: "message",
+    options: MESSAGE_RECONCILE_OPTIONS,
+    summary: "reconcile exact receipt or explicit handling and retention evidence",
+    values: { disposition: "accepted|handled|superseded|retained", id: "UUID" },
+  },
+  "message send": {
+    forms: [["from", "recipient", "id", "body-file", "intent?", "parent?"]],
+    group: "message",
+    options: MESSAGE_SEND_OPTIONS,
+    summary: "store an exact message locally without waking a recipient",
+    values: { id: "UUID" },
+  },
+  "message status": {
+    forms: [
+      ["id", "include-body?"],
+      ["recipient", "include-body?"],
+    ],
+    group: "message",
+    options: MESSAGE_STATUS_OPTIONS,
+    summary: "read local message metadata or the exact original body",
+    values: { id: "UUID" },
+  },
   request: {
     forms: [["game", "id"]],
     group: "game",
@@ -163,7 +227,8 @@ function flag(spec: CommandSpec, token: string): string {
   if (option === undefined) {
     throw new Error(`help names an unknown option --${name}`);
   }
-  const value = option.type === "string" ? ` ${VALUES[name] ?? "VALUE"}` : "";
+  const value =
+    option.type === "string" ? ` ${spec.values?.[name] ?? VALUES[name] ?? "VALUE"}` : "";
   const text = `--${name}${value}${option.multiple === true ? " ..." : ""}`;
   return optional ? `[${text}]` : text;
 }
