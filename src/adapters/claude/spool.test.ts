@@ -56,6 +56,40 @@ function claimAll(fixture: ClaudeFixture): void {
 }
 
 describe("spoolReviewBrief", () => {
+  it("appends sanitized message metadata to the channel brief and preserves legacy diagnostics", async () => {
+    const legacy = claudeFixture();
+    const baseline = spoolReviewBrief(legacy.env, legacy.game.busDir, active(legacy), SLOT);
+    const fixture = claudeFixture();
+    const metadata = {
+      detail: "Local inbox: queued 1; accepted 0; handling remains unconfirmed.",
+      kind: "durable_messages",
+      snapshot_path: "/fixture/unblock/snapshots/current.json",
+      status: "available",
+    };
+    const state = spoolReviewBrief(
+      fixture.env,
+      fixture.game.busDir,
+      active(fixture),
+      SLOT,
+      [],
+      [metadata],
+    );
+    expect(state.status).toBe("sending");
+    expect(state.diagnostics).toEqual([...(baseline.diagnostics ?? []), metadata]);
+    expect(receipt(fixture, `${RECIPIENT}-${SLOT}.json`).diagnostics).toEqual(state.diagnostics);
+    const lines: string[] = [];
+    await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT);
+    expect(lines).toHaveLength(1);
+    const notification = JSON.parse(lines[0]!) as {
+      params: { content: string; meta: { kind: string } };
+    };
+    expect(notification.params.meta.kind).toBe("review");
+    const diagnosticText = notification.params.content.split(
+      "Capability diagnostics (unavailable is never clearance): ",
+    )[1];
+    expect(JSON.parse(diagnosticText!)).toEqual(state.diagnostics);
+  });
+
   it("reports Codex peer and parent metadata as unsupported without using Claude session status", () => {
     const fixture = claudeFixture();
     const codex = "00000000-0000-4000-8000-000000000022";

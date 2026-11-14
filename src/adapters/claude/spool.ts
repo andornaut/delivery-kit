@@ -198,13 +198,14 @@ function unavailableDiagnostics(
   ];
 }
 
-/** One brief per review slot. */
+/** One brief per review slot. Additional diagnostics contain only caller-sanitized metadata. */
 export function spoolReviewBrief(
   env: NodeJS.ProcessEnv,
   busDir: string,
   route: ActiveScope,
   slot: number,
   parents: readonly string[] = [],
+  additionalDiagnostics: readonly Diagnostic[] = [],
 ): SlotOutcome {
   const { recipient } = route;
   const unblock = unblockDir(busDir);
@@ -266,7 +267,10 @@ export function spoolReviewBrief(
     if (availability.status === null) {
       return defer(availability.reason);
     }
-    const diagnostics = unavailableDiagnostics(entries, route, parents);
+    const diagnostics = [
+      ...unavailableDiagnostics(entries, route, parents),
+      ...additionalDiagnostics,
+    ];
     const entry: SpoolEntry = {
       kind: "review",
       receipt: `${UNBLOCK}/${basename(path)}`,
