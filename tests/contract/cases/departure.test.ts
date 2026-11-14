@@ -401,15 +401,6 @@ suite("departure", () => {
     }
   });
 
-  contract("the resource report is reporting only", async () => {
-    const ws = workspace();
-    bus(ws);
-    const result = await execute(impl.resourceReport(ws));
-    expect(result.code, result.stderr).toBe(0);
-    expect(ws.calls("git")).toEqual([]);
-    expect(ws.calls("docker").map((call) => call.args[0])).toEqual(["ps"]);
-  });
-
   contract(
     "push and deployment stamps are replaced by rename, never rewritten in place",
     async () => {

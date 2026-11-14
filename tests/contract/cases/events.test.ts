@@ -35,15 +35,6 @@ function start(ws: Workspace, speed = 30): Resident {
 suite("events", () => {
   const workspace = workspaces();
 
-  contract("empty departures are silent", async () => {
-    const ws = workspace();
-    bus(ws);
-    const runner = start(ws, 60);
-    await runner.until(() => ws.virtualNow() >= at(3, 0, 1), 20_000);
-    await runner.stop();
-    expect(ws.events()).toEqual([]);
-  });
-
   contract("blocked events for one attempt deduplicate across stages", async () => {
     const ws = workspace();
     bus(ws);

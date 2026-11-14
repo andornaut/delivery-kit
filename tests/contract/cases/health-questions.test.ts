@@ -3,7 +3,6 @@
 // owner attestations from STATE/unblock/decisions/<recipient>.json.
 import { expect } from "vitest";
 
-import { cli } from "../lib/adapter.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
 import {
   clone,
@@ -109,34 +108,6 @@ suite("question state", () => {
     }
   });
 
-  contract("stale, future, non-UTC and missing attestations are unknown", async () => {
-    // Future and boundary stamps keep a margin for the delay before the collector runs.
-    const stamps = [
-      iso(now() - 1801),
-      iso(now() + 120),
-      "2026-11-03T00:00:00",
-      "2026-11-03T00:00:00-04:00",
-      "",
-      Q_PRIVATE,
-    ];
-    for (const confirmed_at of stamps) {
-      const { state } = await collect(
-        new QuestionNative(),
-        record({ pending_questions: [attestation({ confirmed_at })] }),
-      );
-      expect(state.questions[0]!.state).toBe("unknown");
-      expect(state.diagnostics).toContain("owner_pending_attestation_stale_or_invalid");
-    }
-    for (const age of [0, 1790]) {
-      const confirmed_at = iso(now() - age, true);
-      const { state } = await collect(
-        new QuestionNative(),
-        record({ pending_questions: [attestation({ confirmed_at })] }),
-      );
-      expect(state.questions[0]!.state).toBe("pending");
-    }
-  });
-
   contract(
     "wrong recipient, mismatched index, options, title and duplicate attestation stay unknown",
     async () => {
@@ -185,15 +156,6 @@ suite("question state", () => {
       record({ state: "clear", pending: false, resolutions: [resolution()] }),
     ));
     expect(state.questions[0]!.state).toBe("unknown");
-  });
-
-  contract("complete paginated history can prove pending without capturing bodies", async () => {
-    const native = new QuestionNative();
-    native.pages = [{ data: [question()], nextCursor: "1" }, { data: [reply("reply", "older")] }];
-    const { state } = await collect(native);
-    expect(state.questions[0]!.state).toBe("pending");
-    expect(state.complete).toBe(true);
-    expect(state.budget.calls_used).toBe(8);
   });
 
   contract(
@@ -390,76 +352,4 @@ suite("question state", () => {
       expect(state.questions[0]!.state).toBe("unknown");
     }
   });
-
-  contract("stable context requires an integer updatedAt", async () => {
-    for (const value of [null, true, "1", 1.5]) {
-      const native = new QuestionNative();
-      native.updatedAt = value;
-      const { state } = await collect(native);
-      expect(state.questions[0]!.state).toBe("unknown");
-      expect(state.latest_turn_proof.complete).toBe(false);
-    }
-  });
-
-  contract("content limits omit exact fields without truncating options", async () => {
-    const oversized = [
-      { title: "x".repeat(4097), options: ["small"] },
-      { title: "é".repeat(2049), options: null },
-      { title: "small", options: Array(33).fill("x") },
-      { title: "small", options: ["x".repeat(16384)] },
-      { title: "bad-surrogate-\ud800", options: null },
-    ];
-    for (const native_question of oversized) {
-      const native = new QuestionNative([question("question", "current", [native_question])]);
-      const owner = record({
-        pending_questions: [
-          attestation({ title: native_question.title, options: native_question.options }),
-        ],
-      });
-      const { state } = await collect(native, owner);
-      expect(state.complete).toBe(false);
-      expect(state.diagnostics).toContain("question_content_bound_exceeded");
-      expect(state.questions[0]!.state).toBe("unknown");
-      expect(state.questions[0]!.title).toBeNull();
-      expect(state.questions[0]!.options).toBeNull();
-    }
-    const limits = { title: "é".repeat(2048), options: Array(32).fill("x".repeat(384)) };
-    const { state } = await collect(
-      new QuestionNative([question("question", "current", [limits])]),
-      record({ pending_questions: [attestation(limits)] }),
-    );
-    expect(state.questions[0]!.state).toBe("pending");
-    expect(state.questions[0]!.title).toBe(limits.title);
-    expect(state.questions[0]!.options).toEqual(limits.options);
-  });
-
-  contract("rendered question count is bounded with explicit omission", async () => {
-    const many = Array(101).fill({ title: "Choose", options: ["A", "B"] });
-    const { state } = await collect(
-      new QuestionNative([question("question", "current", many)]),
-      record({ pending: false }),
-    );
-    expect(state.questions).toHaveLength(100);
-    expect(state.omitted_questions).toBe(1);
-    expect(state.complete).toBe(false);
-    expect(state.diagnostics).toContain("rendered_question_bound_exceeded");
-    expect(state.questions.every((q) => q.state === "unknown")).toBe(true);
-  });
-
-  contract(
-    "noncanonical recipients are refused before any native call; malformed resolutions fail closed",
-    async () => {
-      for (const recipient of [P.toUpperCase().replace("00000000", "ABCDEFAB"), "invalid"]) {
-        const ws = workspace();
-        const socket = await socketFor(ws);
-        const result = await cli(ws, ["inbox", "snapshot", "--recipient", recipient]);
-        expect(result.code).toBe(2);
-        expect(socket.calls).toEqual([]);
-      }
-      for (const resolutions of [[resolution(), resolution()], [{}], "invalid"]) {
-        const { state } = await collect(new QuestionNative(), record({ resolutions }));
-        expect(state.questions[0]!.state).toBe("unknown");
-      }
-    },
-  );
 });

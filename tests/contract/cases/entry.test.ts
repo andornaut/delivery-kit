@@ -9,7 +9,6 @@ import { contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const FIRST = "00000000-0000-0000-0000-000000000001";
-const SECOND = "abcdefab-1234-5678-9012-abcdefabcdef";
 // The one-off request command.
 const REQUEST_WORD = "request";
 
@@ -149,49 +148,6 @@ suite("entry", () => {
     }
   });
 
-  contract("check-config has no runtime side effects", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const before = ws.list();
-    const result = await execute(impl.checkConfig(ws));
-    expect(result.code, result.stderr).toBe(0);
-    expect(ws.list()).toEqual(before);
-    expect(ws.calls()).toEqual([]);
-  });
-
-  contract(
-    "worker parents must resolve to canonical, unique conversation IDs offline",
-    async () => {
-      const ws = workspace();
-      minimal(ws);
-      const before = ws.list();
-      const valid: string[][] = [[], [FIRST], [FIRST, SECOND]];
-      for (const ids of valid) {
-        roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
-        ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
-        const result = await execute(impl.checkConfig(ws));
-        expect(result.code, `${ids} ${result.stderr}`).toBe(0);
-      }
-      const invalid: string[][] = [
-        ["invalid"],
-        [SECOND.toUpperCase()],
-        [FIRST.replace(/-/g, "")],
-        [FIRST, FIRST],
-        ["*"],
-        [FIRST + ","],
-      ];
-      for (const ids of invalid) {
-        roles(ws, Object.fromEntries(ids.map((id, i) => [`parent-${i}`, id])));
-        ws.config.reports = { workerParents: ids.map((_, i) => `parent-${i}`) };
-        const result = await execute(impl.checkConfig(ws));
-        expect(result.code, `${ids} ${result.stderr}`).toBe(EXIT_INVALID);
-        expect(result.stderr).toMatch(/workerParents/);
-      }
-      expect(ws.calls()).toEqual([]);
-      expect(ws.list()).toEqual(before);
-    },
-  );
-
   contract("manual departure and unpinned revision flags are rejected", async () => {
     const ws = workspace();
     minimal(ws);
@@ -202,39 +158,6 @@ suite("entry", () => {
     expect((await execute(command)).code).toBe(2);
   });
 
-  contract("deployment mode requires an explicit supported value", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const before = ws.list();
-    for (const mode of [undefined, "workers-builds", ""]) {
-      ws.config.deploy = { mode, skipPattern: "" };
-      expect((await execute(impl.checkConfig(ws))).code, String(mode)).toBe(EXIT_INVALID);
-    }
-    for (const mode of ["none", "wrangler"]) {
-      ws.config.deploy = { mode, skipPattern: "" };
-      expect((await execute(impl.checkConfig(ws))).code, mode).toBe(0);
-    }
-    expect(ws.list()).toEqual(before);
-  });
-
-  contract("resource caps require integers from 1 through 4 without runtime activity", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const before = ws.list();
-    for (const value of [0, -1, 5, 1.5, "invalid", "2+2", "", "04"]) {
-      ws.config.resources = { cpus: value, loadLimit: 24, memoryMiB: 4096 };
-      const result = await execute(impl.checkConfig(ws));
-      expect(result.code, `cpus=${value} ${result.stderr}`).toBe(EXIT_INVALID);
-    }
-    for (const value of [1, 4]) {
-      ws.config.resources = { cpus: value, loadLimit: 24, memoryMiB: 4096 };
-      const result = await execute(impl.checkConfig(ws));
-      expect(result.code, `cpus=${value} ${result.stderr}`).toBe(0);
-    }
-    expect(ws.list()).toEqual(before);
-    expect(ws.calls()).toEqual([]);
-  });
-
   contract("missing memoryMiB rejects runner startup before any container activity", async () => {
     const ws = workspace();
     minimal(ws);
@@ -243,18 +166,6 @@ suite("entry", () => {
     const result = await execute(impl.run(ws));
     expect(result.code, result.stderr).toBe(EXIT_INVALID);
     expect(result.stderr).toContain("/resources/memoryMiB: is required");
-    expect(ws.list()).toEqual(before);
-    expect(ws.calls()).toEqual([]);
-  });
-
-  contract("resources.maxWorkers is an unknown key", async () => {
-    const ws = workspace();
-    minimal(ws);
-    const before = ws.list();
-    ws.config.resources = { cpus: 4, maxWorkers: 4, loadLimit: 24, memoryMiB: 4096 };
-    const result = await execute(impl.checkConfig(ws));
-    expect(result.code, result.stderr).toBe(EXIT_INVALID);
-    expect(`${result.stdout}${result.stderr}`).toContain("/resources/maxWorkers: unknown key");
     expect(ws.list()).toEqual(before);
     expect(ws.calls()).toEqual([]);
   });

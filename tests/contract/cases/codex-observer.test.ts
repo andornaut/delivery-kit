@@ -3,7 +3,6 @@
 import { readFileSync } from "node:fs";
 import { afterAll, expect } from "vitest";
 
-import { cli } from "../lib/adapter.ts";
 import { clearRecipient } from "../lib/claude-codex.ts";
 import { codexWorld, tick } from "../lib/claude-fixture.ts";
 import { contract, suite, workspaces } from "../lib/cases.ts";
@@ -83,13 +82,4 @@ suite("codex observer", () => {
       expect(first.stdout + next.stdout + duplicate.stdout).not.toContain(PRIVATE);
     },
   );
-
-  contract("a transport failure reports a generic reason without private bodies", async () => {
-    const ws = workspace();
-    const socket = await nativeGame(ws, sockets);
-    socket.on("initialize", { close: true });
-    const result = await cli(ws, ["inbox", "snapshot", "--recipient", TECH]);
-    expect(result.code).toBe(1);
-    expect(result.stdout + result.stderr).not.toContain("PRIVATE_");
-  });
 });

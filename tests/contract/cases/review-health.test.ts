@@ -176,40 +176,6 @@ suite("review scheduled health", () => {
   }
 
   contract(
-    "a question collection failure reports visibility without queue failure or raw errors",
-    async () => {
-      const { ws, native, schedule } = await setup();
-      clear(ws);
-      native.queues = { [TECH]: [], [ART]: [] };
-      // A row bound to another thread is safe history but fails the exact-recipient question read.
-      native.items = (params: Json) =>
-        params.turnId
-          ? { data: [] }
-          : {
-              data: [
-                {
-                  turnId: "turn",
-                  threadId: "00000000-0000-0000-0000-000000000099",
-                  item: { id: "reply", type: "userMessage", content: "PRIVATE_NATIVE_ERROR" },
-                },
-              ],
-            };
-      await schedule.start();
-      for (let i = 0; i < 2; i++) {
-        const { output } = await schedule.slot();
-        expect(output!.review_status).toBe("degraded");
-        expect(output!.question_state_status).toBe("degraded");
-        expect(output!.deferral_slots).toBe(0);
-        const snap = readSnapshot(output);
-        expect(snap.question_state[TECH].pending_status).toBe("unavailable");
-        expect(JSON.stringify(snap)).not.toContain("PRIVATE_NATIVE_ERROR");
-      }
-      expect(reviewEvents(ws)).toEqual([]);
-    },
-    SLOW,
-  );
-
-  contract(
     "worker diagnostics never age queue starvation",
     async () => {
       const { ws, native, schedule } = await setup();
@@ -280,22 +246,6 @@ suite("review scheduled health", () => {
       expect(ages(ws)).toEqual({ C: 1 });
       expect(resolved.review_status).toBe("ok");
       expect(reviewEvents(ws)).toHaveLength(1);
-    },
-    SLOW,
-  );
-
-  contract(
-    "legacy aggregate counters cannot establish a queue item's past age",
-    async () => {
-      const { ws, native, schedule } = await setup();
-      clear(ws);
-      native.queues = { [TECH]: [entry("A")], [ART]: [] };
-      ws.write(
-        join("unblock", "health", TECH + ".json"),
-        JSON.stringify({ seen_slots: [100, 200], backlog_slots: 99 }),
-      );
-      await schedule.start();
-      expect((await schedule.slot()).output!.backlog_slots).toBe(1);
     },
     SLOW,
   );

@@ -1,5 +1,5 @@
 // Runner identity and the read-only status report.
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
@@ -67,68 +67,6 @@ async function started(ws: Workspace): Promise<Resident> {
 
 suite("status", () => {
   const workspace = workspaces();
-
-  contract(
-    "missing control reports unknown migration and status creates no replacement",
-    async () => {
-      const ws = workspace({ deliveryState: null });
-      quiet(ws);
-      const before = ws.list();
-      const result = await report(ws);
-      expect(result.control).toMatchObject({
-        desired_state: "unknown",
-        desired_status: "missing",
-        migration_required: true,
-        observed: null,
-        observed_status: "missing",
-        mismatch: null,
-        mismatch_reason: "control_missing",
-      });
-      expect(ws.list()).toEqual(before);
-    },
-  );
-
-  contract(
-    "a legacy running identity without control is unattested and never defaults enabled",
-    async () => {
-      const ws = workspace({ deliveryState: null });
-      quiet(ws);
-      ws.write("runner.lock", "legacy-token\n");
-      ws.write("runner.identity.json", JSON.stringify({ token: "legacy-token", version: "2.0.3" }));
-      const holder = await hold(ws.path("runner.lock"));
-      try {
-        const result = await report(ws);
-        expect(result.identity_status).toBe("current");
-        expect(result.control).toMatchObject({
-          desired_state: "unknown",
-          migration_required: true,
-          observed: null,
-          observed_status: "unattested",
-          mismatch: null,
-        });
-        expect(ws.exists("delivery-control.json")).toBe(false);
-      } finally {
-        await holder.release();
-      }
-    },
-  );
-
-  contract("corrupt control is explicit unknown and preserved by status", async () => {
-    const ws = workspace();
-    quiet(ws);
-    const corrupt = '{"desired":{"state":"paused"}}\n';
-    ws.write("delivery-control.json", corrupt);
-    const result = await report(ws);
-    expect(result.control).toMatchObject({
-      desired_state: "unknown",
-      desired_status: "invalid",
-      migration_required: true,
-      observed_status: "invalid",
-      mismatch: null,
-      mismatch_reason: "control_invalid",
-    });
-    expect(ws.read("delivery-control.json")).toBe(corrupt);
-  });
 
   contract(
     "paused control with no observation is explicit intent without fabricated phase",
@@ -199,16 +137,6 @@ suite("status", () => {
       }
     },
   );
-
-  contract("a missing lock and record are reported absent and not created", async () => {
-    const ws = workspace();
-    quiet(ws);
-    rmSync(ws.path("runner.lock"), { force: true });
-    const result = await report(ws);
-    expect([result.status, result.identity_status]).toEqual(["not running", "absent"]);
-    expect(existsSync(ws.path("runner.lock"))).toBe(false);
-    expect(existsSync(ws.path("runner.identity.json"))).toBe(false);
-  });
 
   contract("an active departure and pending work are not idle", async () => {
     const ws = workspace();

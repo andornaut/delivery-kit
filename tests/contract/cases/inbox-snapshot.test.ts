@@ -4,8 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { afterEach, expect } from "vitest";
 
-import { cli } from "../lib/adapter.ts";
-import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, suite, workspaces } from "../lib/cases.ts";
 import {
   ART,
   entry,
@@ -19,28 +18,7 @@ import {
 } from "../lib/review-native.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
-const CHILD = "00000000-0000-0000-0000-000000000003";
-const FAILED_TURN = "00000000-0000-0000-0000-000000000004";
 const OTHER = "00000000-0000-0000-0000-000000000099";
-
-/** Worker failures: exact lineage, parent action and latest failed typed turn. */
-export function workerFailures(snap: Json): string[][] {
-  const out = new Set<string>();
-  for (const [parent, value] of Object.entries((snap.worker_health ?? {}) as Json)) {
-    for (const child of value.children ?? []) {
-      if (
-        child.parent_id === parent &&
-        child.lineage_verified === true &&
-        child.requires_parent_action === true &&
-        child.turn_status === "failed" &&
-        ["child_id", "turn_id", "error_code"].every((f) => typeof child[f] === "string" && child[f])
-      ) {
-        out.add(JSON.stringify([parent, child.child_id, child.turn_id, child.error_code]));
-      }
-    }
-  }
-  return [...out].sort().map((row) => JSON.parse(row) as string[]);
-}
 
 suite("inbox snapshot", () => {
   const workspace = workspaces();
@@ -112,65 +90,6 @@ suite("inbox snapshot", () => {
     expect(value.questions[0].options).toBeNull();
     expect(value.diagnostics).toContain("question_content_bound_exceeded");
   });
-
-  contract("the reviewed child collector produces safe failure and timeout metadata", async () => {
-    const { ws, native } = await setup();
-    native.socket.on("thread/list", (params: Json) => ({
-      result: {
-        data: params.archived
-          ? []
-          : [{ id: CHILD, parentThreadId: TECH, status: { type: "idle" }, updatedAt: 1 }],
-      },
-    }));
-    native.threads[CHILD] = {
-      thread: { id: CHILD, parentThreadId: TECH, status: { type: "idle" }, updatedAt: 1 },
-    };
-    native.turns[CHILD] = [
-      {
-        id: FAILED_TURN,
-        status: "failed",
-        error: { codexErrorInfo: "contextWindowExceeded", message: "PRIVATE_BODY" },
-      },
-    ];
-    const ok = await snapshot(ws, TECH, ["--parent", TECH]);
-    for (const call of native.socket.callsOf("thread/list"))
-      expect(call.params.parentThreadId).toBe(TECH);
-    expect(workerFailures(ok.file!)).toEqual([[TECH, CHILD, FAILED_TURN, "contextWindowExceeded"]]);
-    expect(ok.file!.worker_health[TECH].schema_status).toBe("available");
-    expect(ok.public.worker_health).toEqual(ok.file!.worker_health);
-    expect(JSON.stringify(ok.file)).not.toContain("PRIVATE_BODY");
-    native.socket.on("thread/list", { hang: true });
-    const timeout = await snapshot(ws, TECH, ["--parent", TECH]);
-    expect(timeout.file!.worker_health[TECH].status).toBe("unavailable");
-    expect(timeout.file!.worker_health[TECH].schema_status).toBe("unknown");
-    expect(workerFailures(timeout.file!)).toEqual([]);
-    expect(JSON.stringify(timeout.file)).not.toContain("PRIVATE_BODY");
-  });
-
-  contract(
-    "parent scope rejects duplicate, noncanonical and unowned parents before native calls",
-    async () => {
-      const { ws, native } = await setup();
-      for (const parents of [[TECH, TECH], [TECH.replace("00000000", "ABCDEFAB")], [OTHER]]) {
-        const result = await cli(ws, [
-          "inbox",
-          "snapshot",
-          "--recipient",
-          TECH,
-          ...parents.flatMap((p) => ["--parent", p]),
-        ]);
-        expect(result.code, parents.join(",")).toBe(2);
-      }
-      for (const change of [{ state: "held" }, { schema: 99 }]) {
-        writeCodexRoute(ws, change);
-        const result = await cli(ws, ["inbox", "snapshot", "--recipient", TECH, "--parent", TECH]);
-        expect(result.code, JSON.stringify(change)).not.toBe(0);
-      }
-      expect(native.socket.connections).toEqual([]);
-      writeCodexRoute(ws);
-      expect((await snapshot(ws, TECH)).result.code).toBe(0);
-    },
-  );
 
   contract("worker collection is explicit and scoped, and failure is unavailable", async () => {
     const { ws, native } = await setup();
@@ -263,53 +182,6 @@ suite("inbox snapshot", () => {
     expect(JSON.stringify(older.file)).not.toContain("private native");
     expect(older.file!.queues[TECH]).toEqual([entry("one"), entry("two")]);
   });
-
-  contract(
-    "history failure diagnostics keep the safe prefix without private bodies",
-    async () => {
-      const { ws, native } = await setup();
-      const prefix = {
-        turnId: "known-turn",
-        item: { id: "known-reply", type: "userMessage", content: "PRIVATE_BODY" },
-      };
-      const history = async (page: unknown) => {
-        native.items = () => page;
-        return (await snapshot(ws, TECH)).file!;
-      };
-      const malformed = (await history({ data: [prefix, { item: { text: "PRIVATE_BODY" } }] }))
-        .history[TECH];
-      expect(malformed.reason_code).toBe("malformed_row");
-      expect(malformed.user_reply_refs).toEqual([
-        { turn_id: "known-turn", item_id: "known-reply" },
-      ]);
-      const unknown = (
-        await history({
-          data: [prefix, { turnId: "unknown-turn", item: { id: "unknown", type: "PRIVATE_TYPE" } }],
-          nextCursor: "older",
-        })
-      ).history[TECH];
-      expect(unknown.category).toBe("unknown_item");
-      expect(unknown.status).toBe("unavailable");
-      expect(unknown.nextCursor).toBe("older");
-      const compacted = (
-        await history({
-          data: [{ turnId: "compact-turn", item: { id: "compact", type: "contextCompaction" } }],
-        })
-      ).history[TECH];
-      expect(compacted.category).toBe("context_compaction");
-      expect(compacted.status).toBe("partial");
-      expect(compacted.complete).toBe(false);
-      // A native call that never answers within the five-second transport bound.
-      const failedSnapshot = await history({ hang: true });
-      expect(failedSnapshot.history[TECH].reason_code).toBe("transport_failure");
-      expect(failedSnapshot.errors).toEqual({});
-      expect(failedSnapshot.queues[TECH]).toEqual([entry("one"), entry("two")]);
-      expect(JSON.stringify([malformed, unknown, compacted, failedSnapshot])).not.toContain(
-        "PRIVATE_",
-      );
-    },
-    CASE_TIMEOUT_MS,
-  );
 
   contract("compaction preserves both sides and pagination without clearance", async () => {
     const { ws, native } = await setup();

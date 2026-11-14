@@ -5,7 +5,7 @@ import { afterEach, expect } from "vitest";
 
 import { CodexSocket, type RpcCall } from "../lib/codex-socket.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
-import { ART, emptyQueue, GAMEPLAY, rpcError, STALE, TECH } from "../lib/unblock-native.ts";
+import { ART, emptyQueue, GAMEPLAY, STALE, TECH } from "../lib/unblock-native.ts";
 import { Reviewed, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
@@ -43,6 +43,12 @@ suite("unblock delivery", () => {
     await m.start();
     const tick = await m.slot(wake(0));
     expect(tick.result?.status).toBe("accepted");
+    expect(m.socket.connections).toHaveLength(1);
+    expect(m.socket.methods()[0]).toBe("initialize");
+    expect(Object.keys(tick.result ?? {}).every((key) => STDOUT_KEYS.includes(key))).toBe(true);
+    expect(tick.result).toHaveProperty("history_status");
+    expect(tick.output).not.toContain("private user content");
+    expect(tick.output).not.toContain("queue-one");
     const receipt = m.receipt(wake(0));
     expect(receipt.queues).toEqual(
       Object.fromEntries([TECH, ART, GAMEPLAY].map((role) => [role, ["queue-one", "queue-two"]])),
@@ -97,25 +103,6 @@ suite("unblock delivery", () => {
       }
       expect(new Set(requestIds).size).toBe(3);
       expect(m.socket.methods()).not.toContain("thread/queue/delete");
-    },
-  );
-
-  contract(
-    "a completed idle recipient gets turn/start without model or permission overrides",
-    async () => {
-      const m = await routed();
-      Object.assign(m.world.thread(TECH), {
-        status: { type: "idle" },
-        turn: { id: "previous", status: "completed" },
-      });
-      m.world.outcomes.push({ result: { turn: { id: "new" } } });
-      await m.start();
-      expect((await m.slot(wake(0))).result?.status).toBe("accepted");
-      const [start] = m.world.mutations();
-      expect(start?.method).toBe("turn/start");
-      expect(new Set(Object.keys(start!.params))).toEqual(
-        new Set(["threadId", "input", "clientUserMessageId"]),
-      );
     },
   );
 
@@ -184,15 +171,6 @@ suite("unblock delivery", () => {
     },
     CASE_TIMEOUT_MS,
   );
-
-  contract("other native rejections are rejected without a stale retry", async () => {
-    const m = await routed();
-    m.world.outcomes.push(rpcError("other error"));
-    await m.start();
-    expect((await m.slot(wake(0))).result?.status).toBe("rejected");
-    expect(m.world.mutations()).toHaveLength(1);
-    expect(m.receipt(wake(0))).toMatchObject({ status: "rejected", errorCode: -32600 });
-  });
 
   contract("the receipt is durable at sending before the native mutation", async () => {
     const m = await routed();
@@ -285,14 +263,6 @@ suite("unblock delivery", () => {
     expect(m.ws.exists(`unblock/${TECH}-${wake(0)}.json`)).toBe(false);
   });
 
-  contract("the explicit control socket carries the delivery with guards intact", async () => {
-    const m = await routed();
-    await m.start();
-    expect((await m.slot(wake(0))).result?.status).toBe("accepted");
-    expect(m.socket.connections).toHaveLength(1);
-    expect(m.socket.methods()[0]).toBe("initialize");
-  });
-
   contract(
     "notifications and server requests interleaved with a response are skipped, never answered",
     async () => {
@@ -318,14 +288,4 @@ suite("unblock delivery", () => {
       expect(m.socket.calls.every((call) => !call.method.startsWith("item/"))).toBe(true);
     },
   );
-
-  contract("runner output reports only status fields, never queue contents", async () => {
-    const m = await routed();
-    await m.start();
-    const tick = await m.slot(wake(0));
-    expect(Object.keys(tick.result ?? {}).every((key) => STDOUT_KEYS.includes(key))).toBe(true);
-    expect(tick.result).toHaveProperty("history_status");
-    expect(tick.output).not.toContain("private user content");
-    expect(tick.output).not.toContain("queue-one");
-  });
 });

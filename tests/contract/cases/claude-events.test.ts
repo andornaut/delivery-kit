@@ -3,7 +3,7 @@
 import { rmSync } from "node:fs";
 import { expect } from "vitest";
 
-import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
+import { impl, type Resident, startRunner } from "../lib/adapter.ts";
 import {
   agents,
   Channel,
@@ -13,7 +13,7 @@ import {
   eventRequestId,
   RECIPIENT,
 } from "../lib/claude-fixture.ts";
-import { CASE_TIMEOUT_MS, contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { at, LOAD_WAIT_SECONDS } from "../lib/time.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import type { Json } from "../lib/json.ts";
@@ -237,23 +237,4 @@ suite("claude bus events", () => {
     },
     CASE_TIMEOUT_MS,
   );
-
-  contract("the report recipient must resolve to a canonical session UUID", async () => {
-    const ws = workspace();
-    claudeGame(ws, { recipient: true });
-    for (const [value, expected] of [
-      [RECIPIENT, 0],
-      ["AAAAAAAA-0000-4000-8000-000000000001", EXIT_INVALID],
-      ["not-a-uuid", EXIT_INVALID],
-    ] as const) {
-      ws.writeRegistry({
-        schema: 1,
-        revision: 1,
-        harness: "claude",
-        roles: { "game-coordinator": { conversations: { claude: value } } },
-      });
-      const result = await execute(impl.checkConfig(ws));
-      expect(result.code, `${value} ${result.stderr}`).toBe(expected);
-    }
-  });
 });

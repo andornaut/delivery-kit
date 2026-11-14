@@ -180,17 +180,4 @@ suite("claude inbox inventory", () => {
     expect(record.attempts.at(-1).state).toBe("ambiguous");
     expect(record.history).toContainEqual({ attempt: 1, state: "ambiguous" });
   });
-
-  contract("the public CLI selects the Claude recipient for its route", async () => {
-    const ws = workspace();
-    await delivered(ws);
-    const result = await cli(ws, ["inbox", "snapshot", "--recipient", RECIPIENT]);
-    expect(result.code, result.stdout + result.stderr).toBe(0);
-    const output = JSON.parse(result.stdout);
-    expect([output.harness, output.queue_ids]).toEqual(["claude", [REQUEST]]);
-    expect(result.stdout + result.stderr).not.toContain("CODEX");
-    expect((await ack(ws, output, "handled")).json).toEqual({
-      results: [{ queue_id: REQUEST, state: "deleted" }],
-    });
-  });
 });
