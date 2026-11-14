@@ -36,6 +36,9 @@ export const UNBLOCK_INSTRUCTIONS =
   "Accepted local messages still require recipient handling; preserve retained, held and " +
   "guarded messages with their owner, reason and next boundary. Never auto retry an ambiguous " +
   "attempt or treat a message health warning as question clearance. " +
+  "Report every unhandled or repeatedly deferred local ID after two distinct slots, including " +
+  "held, retained or guarded work. Preserve its protection and actual next boundary; reporting " +
+  "is owner visibility, never retry, wake, auto-ACK, clearance or resume permission. " +
   "Find every hold, block and pending user decision. For a pending decision, make sure its owner " +
   "has it open as a structured prompt in its own session with its recommendation first; if not, " +
   "ask the owner to open it now, then list it for the user with owner, exact text, options and " +
@@ -119,6 +122,7 @@ export function messageReview(
             "reason",
             "nextBoundary",
             "nextAction",
+            "protected",
           ]),
         );
       }

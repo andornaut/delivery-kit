@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -146,7 +146,7 @@ describe("scheduled durable message health", () => {
     });
   });
 
-  it("keeps retained questions, explicit holds and guarded deliveries out of starvation aging", async () => {
+  it("reports retained, held and guarded IDs after two slots without changing their protections", async () => {
     const { context, layout, store } = inbox();
     const input = {
       schema: 1 as const,
@@ -175,13 +175,60 @@ describe("scheduled durable message health", () => {
     const guarded = await store.enqueue({ ...input, id: "guarded" });
     const lease = await store.beginAttempt(messageExpectation(guarded));
     const blocked = lease.complete({ reason: "guarded", source: lease.source, state: "blocked" });
-    recordMessageHealth(context, RECIPIENT, 60, captureMessageSummary(layout));
-    const second = recordMessageHealth(context, RECIPIENT, 120, captureMessageSummary(layout));
-    expect(second).toMatchObject({
+    const questionPath = join(context.unblock, "decisions", `${RECIPIENT}.json`);
+    const marker = JSON.stringify({
+      state: "pending",
+      thread_id: RECIPIENT,
+      question: "owner decision remains open",
+    });
+    mkdirSync(join(context.unblock, "decisions"), { recursive: true });
+    writeFileSync(questionPath, marker);
+    expect(
+      recordMessageHealth(context, RECIPIENT, 60, captureMessageSummary(layout)),
+    ).toMatchObject({
       message_health_status: "ok",
-      message_backlog_slots: 0,
+      message_backlog_slots: 1,
       message_stalled: [],
     });
+    expect(
+      recordMessageHealth(context, RECIPIENT, 60, captureMessageSummary(layout)),
+    ).toMatchObject({
+      message_health_status: "ok",
+      message_backlog_slots: 1,
+    });
+    const second = recordMessageHealth(context, RECIPIENT, 120, captureMessageSummary(layout));
+    expect(second).toMatchObject({
+      message_health_status: "stalled",
+      message_backlog_slots: 2,
+    });
+    expect(second.message_stalled).toHaveLength(3);
+    expect(second.message_stalled).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "question",
+          reason: "retained",
+          protected: true,
+          ownerRole: retention.ownerRole,
+          nextBoundary: retention.nextBoundary,
+          nextAction: expect.stringContaining("actual recorded nextBoundary without changing it"),
+        }),
+        expect.objectContaining({
+          id: "held",
+          reason: "explicit-hold",
+          protected: true,
+          ownerRole: retention.ownerRole,
+          nextBoundary: retention.nextBoundary,
+        }),
+        expect.objectContaining({
+          id: "guarded",
+          reason: "guarded",
+          protected: true,
+          ownerRole: "game-coordinator",
+          nextBoundary: null,
+          nextAction: expect.stringContaining("records the blocker and an explicit nextBoundary"),
+        }),
+      ]),
+    );
     expect(second.message_protected).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -196,5 +243,6 @@ describe("scheduled durable message health", () => {
     expect(store.read("question")).toEqual(retained);
     expect(store.read("held")).toEqual(held);
     expect(store.read("guarded")).toEqual(blocked);
+    expect(readFileSync(questionPath, "utf8")).toBe(marker);
   });
 });

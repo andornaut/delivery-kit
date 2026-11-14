@@ -71,19 +71,18 @@ export function recordMessageHealth(
       continue;
     }
     const ownerRole = message.ownerRole ?? message.parentRole ?? message.toRole;
-    if (
+    const protectedWork =
       message.state === "retained" ||
       message.state === "held" ||
       message.reason === "guarded" ||
-      message.reason === "explicit-hold"
-    ) {
+      message.reason === "explicit-hold";
+    if (protectedWork) {
       protectedRows.push({
         id: message.id,
         nextBoundary: message.nextBoundary,
         ownerRole,
         reason: message.reason,
       });
-      continue;
     }
     const signature = hash([
       message.id,
@@ -102,14 +101,23 @@ export function recordMessageHealth(
     maximum = Math.max(maximum, age);
     items[message.id] = { age, ownerRole, signature, slots, state: message.state };
     if (age >= 2) {
+      const protectedReview =
+        message.nextBoundary === null
+          ? "required owner records the blocker and an explicit nextBoundary"
+          : "required owner reviews the blocker at the actual recorded nextBoundary without changing it";
+      const notice =
+        "preserve questions and holds; no retry, wake, auto-ACK, clearance or resume permission";
       stalled.push({
         id: message.id,
-        nextAction:
-          message.state === "ambiguous" || message.state === "sending"
+        nextAction: protectedWork
+          ? `${protectedReview}; ${notice}`
+          : message.state === "ambiguous" || message.state === "sending"
             ? "owner reconciles the exact attempt before retry; preserve questions and holds"
             : "recipient reconciles handled/superseded evidence or retains with owner, reason " +
               "and nextBoundary; preserve questions",
+        nextBoundary: message.nextBoundary,
         ownerRole,
+        protected: protectedWork,
         reason: message.reason ?? "unhandled-across-two-slots",
         toRole: message.toRole,
         ...(message.workerId === undefined
