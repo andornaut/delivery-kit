@@ -78,8 +78,9 @@ explicit; it is never inferred from the working directory.
   spool is reported under the snapshot's `errors`, with
   `complete` false and exit 1; only a missing spool counts as empty.
 
-Worker inbox reconciliation in the new source contract requires a reviewed package pin containing
-this support; public 4.0.0 lacks the supported worker path and rejects unregistered worker UUIDs.
+The 4.1.0 candidate adds worker inbox reconciliation; using it requires a reviewed package pin
+containing this support. Public 4.0.0 lacks the supported worker path and rejects unregistered
+worker UUIDs. Candidate status does not establish publication or adoption.
 Use the existing inbox commands with a canonical worker UUID and exactly one registered parent
 role whose current Codex conversation belongs to the active review route:
 
@@ -491,7 +492,7 @@ The recipient's instruction contract for every existing :20/:50 review pass is:
 - Report unavailable visibility explicitly, including unavailable Claude native target queues and
   worker visibility; never infer an empty backlog from unavailable data. Refused native historical
   worker-queue access remains unknown. Public 4.0.0 lacks the supported worker inbox path; adopt a
-  reviewed package pin containing the new source contract before using it. Report capability
+  reviewed package pin containing the 4.1.0 worker inbox support before using it. Report capability
   limits and require owner reconciliation without bypassing refusals or forcing session loads.
 - Acknowledge only exact unchanged originals with evidence of actual handling or supersession.
   Native or channel acceptance proves delivery, not handling.
