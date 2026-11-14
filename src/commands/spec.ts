@@ -113,7 +113,7 @@ export const SPECS = {
     summary: "persist the requested delivery state without starting a runner",
   },
   "harness doctor": {
-    forms: [["game?", "role?"]],
+    forms: [["game", "role?"], ["role"]],
     group: "harness",
     options: DOCTOR_OPTIONS,
     summary: "diagnose explicitly selected roles without sending or activating",
@@ -185,7 +185,7 @@ export const SPECS = {
     group: "message",
     options: MESSAGE_SEND_OPTIONS,
     summary: "store an exact message locally without waking a recipient",
-    values: { id: "UUID" },
+    values: { id: "UUID", parent: "ROLE" },
   },
   "message status": {
     forms: [
@@ -195,7 +195,7 @@ export const SPECS = {
     group: "message",
     options: MESSAGE_STATUS_OPTIONS,
     summary: "read local message metadata or the exact original body",
-    values: { id: "UUID" },
+    values: { id: "UUID", recipient: "ROLE" },
   },
   request: {
     forms: [["game", "id"]],

@@ -4,6 +4,7 @@ import { loadLayout } from "../layout.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { makeFixture, registryInput } from "../testFixtures.ts";
 import { harnessDoctor } from "./doctor.ts";
+import { synopsis } from "./spec.ts";
 
 async function run(root: string, ...args: string[]) {
   let out = "";
@@ -32,6 +33,12 @@ describe("harness doctor handler", () => {
       const result = await run("/not/read", ...args);
       expect(result).toMatchObject({ code: 2, out: "" });
       expect(result.err).not.toContain("DO_NOT_PRINT");
+      expect(result.err).toBe(
+        `delivery-kit: invalid_doctor_scope\n${ 
+          synopsis("harness doctor")
+            .map((form) => `delivery-kit ${form}\n`)
+            .join("")}`,
+      );
     }
   });
 

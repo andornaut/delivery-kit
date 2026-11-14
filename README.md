@@ -370,7 +370,8 @@ from another working directory; body-file paths remain relative to the caller's 
 directory. Without `--root`, resolution uses `DELIVERY_KIT_ROOT`, then the working directory.
 
 `message send --from ROLE --recipient ROLE_OR_UUID --id UUID --body-file PATH` stores the
-entire file locally, including whitespace and trailing newlines. It defaults to `--intent queue`;
+entire valid UTF-8 file locally, including whitespace and trailing newlines. Invalid UTF-8
+is rejected without storing altered text. It defaults to `--intent queue`;
 `--intent unblock` also stores locally. Sending never dispatches. Reusing an ID with changed
 payload or target fails; create a new ID for a different message. Output omits the body.
 
@@ -388,8 +389,10 @@ delivery-kit message status --recipient game-kit --include-body --root /path/to/
 Status requires exactly one of `--id UUID` or `--recipient ROLE`; `--include-body` opts into
 full original text. Reading does not acknowledge, dispatch or modify the message.
 
-`message dispatch --id UUID` explicitly requests guarded delivery. Unknown question, HOLD,
-owner or draft clearance never permits native admission. Local `state: "queued"` is durable
+`message dispatch --id UUID` explicitly requests guarded delivery. It checks registered
+ownership, routing and supported recipient decision guards. It does not inspect frontend
+drafts or independently attest native HOLD state. Callers preserve known drafts and holds,
+leaving messages local when their clearance is unknown. Local `state: "queued"` is durable
 pending work, not native acceptance. Native acceptance is not handling. A queued Claude spool
 also does not prove channel acceptance. Inspect the returned state: exit 0 reports a completed
 operation, including a guarded or still-pending result, not proof of delivery.

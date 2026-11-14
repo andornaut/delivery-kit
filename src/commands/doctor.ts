@@ -11,7 +11,9 @@ export const DOCTOR_OPTIONS = {
   role: { multiple: true, type: "string" },
 } as const;
 
-const USAGE = "delivery-kit harness doctor [--game ID]... [--role ROLE]...";
+const USAGE =
+  "delivery-kit harness doctor --game ID ... [--role ROLE ...]\n" +
+  "delivery-kit harness doctor --role ROLE ...";
 
 export const harnessDoctor: Handler = async (io, root, args) => {
   let values;

@@ -68,7 +68,7 @@ export const USAGE = [
     ]),
   ]),
   "",
-  "--recipient and --parent take a role name resolved through var/registry.json, or a",
+  "Inbox --recipient and --parent take a role name resolved through var/registry.json, or a",
   "conversation UUID registered for the active harness. Repeat --parent UUID for each parent.",
   "",
   "  help, --help    print this text",
