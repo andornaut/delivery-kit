@@ -21,6 +21,7 @@ import type {
   MessageExpectation,
   MessageInput,
   MessageOwner,
+  MessageReason,
   MessageRecord,
   MessageRetention,
   MessageStatus,
@@ -44,6 +45,7 @@ const REASONS = new Set([
   "owner-unavailable",
   "guarded",
   "transport-unavailable",
+  "transport-pending",
   "worker-parent-required",
   "refused",
   "lost-response",
@@ -469,6 +471,24 @@ export class MessageStore {
     }
   }
 
+  /** A qualified pre-dispatch refusal does not create a native attempt or release a hold. */
+  async block(expected: MessageExpectation, reason: MessageReason): Promise<MessageRecord> {
+    requireThat(reasonValid(reason) && reason !== null, "invalid-reason");
+    const lock = await this.lock(expected.envelope.id);
+    try {
+      const record = this.existing(expected);
+      const last = record.attempts.at(-1);
+      requireThat(
+        ["queued", "blocked", "parent-required"].includes(record.state) &&
+          (last === undefined || ["blocked", "parent-required"].includes(last.state)),
+        "retry-not-permitted",
+      );
+      return this.save({ ...record, reason, state: "blocked" });
+    } finally {
+      lock.release();
+    }
+  }
+
   async beginAttempt(
     expected: MessageExpectation,
     hop: "recipient" | "parent" = "recipient",
@@ -635,7 +655,7 @@ export class MessageStore {
         }
       }
       const preserveHold =
-        record.state === "held" &&
+        (record.state === "held" || record.state === "retained") &&
         (evidence.kind === "not-delivered" || evidence.kind === "accepted");
       return this.save({
         ...record,
@@ -643,7 +663,7 @@ export class MessageStore {
         evidence: [...record.evidence, clone(evidence)],
         reason: preserveHold ? record.reason : evidence.kind === "retained" ? "retained" : null,
         retention: preserveHold ? record.retention : evidence.retention,
-        state: preserveHold ? "held" : state,
+        state: preserveHold ? record.state : state,
       });
     } finally {
       lock.release();

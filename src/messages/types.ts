@@ -51,6 +51,7 @@ export type MessageReason =
   | "owner-unavailable"
   | "guarded"
   | "transport-unavailable"
+  | "transport-pending"
   | "worker-parent-required"
   | "refused"
   | "lost-response"
