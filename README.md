@@ -353,13 +353,58 @@ alongside game bus directories by default. Explicit `--state-dir` is exclusive: 
 Doctor reports the generic reference even if absent; neither the reference nor directory
 presence proves a connected channel. No inactive frontend or additional channel is started.
 
-Native enqueue can wake a loaded idle thread through `enqueue_with_metadata` and
-`wake_if_loaded`. Omitting resume does not guarantee no wake. Message delivery therefore needs
-its own guarded dispatch and reconciliation contract; doctor performs neither. Normal message
-send retains durable `queued_local` work while pending-question, HOLD or draft clearance is
-unknown. Read exact stored payloads with `message status --id UUID --include-body` or
-`message status --recipient ROLE --include-body`. Dispatch and reconciliation require explicit
-safe guards; local storage, native acceptance and recipient handling are distinct stages.
+## Common messages
+
+The installed CLI accepts `--root COORDINATOR_ROOT` once, in any argument position. Use it
+from another working directory; body-file paths remain relative to the caller's working
+directory. Without `--root`, resolution uses `DELIVERY_KIT_ROOT`, then the working directory.
+
+`message send --from ROLE --recipient ROLE_OR_UUID --id UUID --body-file PATH` stores the
+entire file locally, including whitespace and trailing newlines. It defaults to `--intent queue`;
+`--intent unblock` also stores locally. Sending never dispatches. Reusing an ID with changed
+payload or target fails; create a new ID for a different message. Output omits the body.
+
+`--parent ROLE` binds a worker UUID recipient to its registered parent role. Dispatch uses
+only the parent hop, preserving the exact original payload and child target. Parent acceptance
+is not child delivery or handling.
+
+Pull full stored payloads explicitly:
+
+```bash
+delivery-kit --root /path/to/game-coordinator message status --id UUID --include-body
+delivery-kit message status --recipient game-kit --include-body --root /path/to/game-coordinator
+```
+
+Status requires exactly one of `--id UUID` or `--recipient ROLE`; `--include-body` opts into
+full original text. Reading does not acknowledge, dispatch or modify the message.
+
+`message dispatch --id UUID` explicitly requests guarded delivery. Unknown question, HOLD,
+owner or draft clearance never permits native admission. Local `state: "queued"` is durable
+pending work, not native acceptance. Native acceptance is not handling. A queued Claude spool
+also does not prove channel acceptance. Inspect the returned state: exit 0 reports a completed
+operation, including a guarded or still-pending result, not proof of delivery.
+
+Native queue/add can wake a loaded idle thread through `enqueue_with_metadata` and
+`wake_if_loaded`, without resume. Client message IDs do not deduplicate native adds. A lost
+response, interrupted attempt or other ambiguous outcome must not produce another add. Neither
+queue absence nor blocked guards prove non-delivery. TUI unsent drafts remain untouched.
+
+Reconciliation has two exclusive forms:
+
+- `message reconcile --id UUID --receipt` reads existing bound receipt evidence. It does not
+  resend an uncertain attempt or attest handling.
+- `message reconcile --id UUID --expected-revision N --disposition DISPOSITION --evidence REF`
+  records exact evidence at the observed revision. Disposition is `accepted`, `handled`,
+  `superseded` or `retained`. Acceptance requires a verified bound receipt, never a user's
+  assertion. Retained requires `--reason TEXT --next-boundary TEXT`; optional `--owner-role ROLE`
+  defaults to the recipient. Retention options are exclusive to `retained`.
+
+There is no `not-delivered` reconciliation authority. Stale revisions fail closed. Review
+and retain ambiguous work until exact supported evidence establishes its outcome.
+
+The existing scheduled review includes message health and outbox references; it adds no timer.
+Before rollout to all registered roles, gate the combined feature, then verify actual installed
+help and package behaviour for that exact artifact. These commands do not activate roles.
 
 ## Review route
 
