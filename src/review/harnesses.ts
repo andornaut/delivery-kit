@@ -17,7 +17,7 @@ export function adapterFor(
     return claudeAdapter(env, game);
   }
   if (harness === "codex") {
-    return codexAdapter(layout);
+    return codexAdapter(layout, { env });
   }
   throw new Error("inbox adapter harness invalid");
 }

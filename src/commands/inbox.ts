@@ -1,11 +1,13 @@
-// `delivery-kit inbox snapshot` and `inbox ack` for one game. The recipient is a role name
-// (default: the game's reports.recipient) resolved through the registry for its active harness.
+// `delivery-kit inbox snapshot` and `inbox ack` for a registered recipient or a verified
+// Codex worker with one registered parent. Registered recipients default to reports.recipient.
 import { parseArgs } from "node:util";
 
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { unblockDir } from "../adapters/claude/spool.ts";
+import { codexAdapter } from "../adapters/codex/index.ts";
+import type { WorkerBinding } from "../adapters/codex/workerInbox.ts";
 import { canonicalUuid, isCanonicalUuid } from "../adapters/shared/ids.ts";
-import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
+import { pyJsonDumps, sameJson } from "../adapters/shared/pyjson.ts";
 import {
   type ActiveScope,
   readRoleRoute,
@@ -27,7 +29,7 @@ import {
   captureMixed,
   TransportUnavailable,
 } from "../review/snapshot.ts";
-import { type Json, locked, snapshotPath } from "../review/store.ts";
+import { type Json, locked, persist, readRecord, snapshotPath } from "../review/store.ts";
 import { SPECS } from "./spec.ts";
 
 const UNAVAILABLE_OUTPUT = {
@@ -43,6 +45,7 @@ interface Scope {
   readonly harness: Harness;
   readonly harnesses: Readonly<Record<string, Harness>>;
   readonly parents: string[];
+  readonly worker: WorkerBinding | null;
   /**
    * Recipient and peers of an active route; null when a declared route is not active;
    * undefined when no route is declared, which leaves collection unscoped.
@@ -104,15 +107,40 @@ function scope(
   const layout = loadLayout(root);
   const registry = readRegistry(layout);
   const entry = gameLayout(layout, game);
-  const resolvedRecipient = conversation(
-    registry,
-    recipient ?? loadProjectConfig(entry.configFile).reports.recipient,
-  );
   const resolvedParents = parents.map((parent) => conversation(registry, parent).id);
   if (new Set(resolvedParents).size !== resolvedParents.length) {
     throw new UsageError("duplicate parent");
   }
   const members = codexMembers(layout, registry);
+  const workerRecipient =
+    recipient !== undefined &&
+    isCanonicalUuid(recipient) &&
+    !Object.keys(registry.roles).some((role) => resolveConversation(registry, role) === recipient);
+  let worker: WorkerBinding | null = null;
+  if (workerRecipient) {
+    const parent = parents[0];
+    if (parents.length !== 1 || parent === undefined || isCanonicalUuid(parent)) {
+      throw new UsageError(
+        "recipient UUID must identify exactly one active registered role or provide one registered --parent role",
+      );
+    }
+    const resolved = conversation(registry, parent);
+    conversation(registry, resolved.id);
+    if (resolved.harness !== "codex" || members == null || !members.includes(resolved.id)) {
+      throw new UsageError(
+        "worker parent must be a current Codex member of the active review route",
+      );
+    }
+    worker = {
+      harness: "codex",
+      parent: resolved.id,
+      worker: recipient,
+    };
+  }
+  const resolvedRecipient =
+    worker === null
+      ? conversation(registry, recipient ?? loadProjectConfig(entry.configFile).reports.recipient)
+      : { harness: worker.harness, id: worker.worker };
   // Worker parents must belong to the active route before any native call.
   if (
     resolvedRecipient.harness === "codex" &&
@@ -142,6 +170,7 @@ function scope(
     parents: resolvedParents,
     recipient: resolvedRecipient.id,
     registry,
+    worker,
   };
 }
 
@@ -198,6 +227,37 @@ function channelSummary(record: Json): Json {
 async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise<number> {
   const unblock = unblockDir(context.game.busDir);
   const { parents, recipient } = context;
+  if (context.worker !== null) {
+    const binding = context.worker;
+    const adapter = codexAdapter(context.layout, { env: io.env });
+    const record = await locked(unblock, () =>
+      adapter.withWorkerInbox(binding, async (workerAdapter) => {
+        const captured = await captureCodex(
+          { busDir: context.game.busDir, unblock },
+          workerAdapter,
+          [recipient],
+          [],
+        );
+        captured.worker_binding = workerSnapshotBinding(binding);
+        persist(snapshotPath(unblock, captured.snapshot_id as string), captured);
+        return captured;
+      }),
+    );
+    const queues = record.queues as Record<string, { id: string }[]>;
+    const complete = Object.keys(record.errors as Json).length === 0;
+    io.out(
+      `${pyJsonDumps({
+        complete,
+        harness: "codex",
+        path: snapshotPath(unblock, record.snapshot_id as string),
+        question_state_status: statusMap(record.question_state, "status"),
+        queue_ids: (queues[recipient] ?? []).map((entry) => entry.id),
+        snapshot_id: record.snapshot_id,
+        worker_binding: record.worker_binding,
+      })}\n`,
+    );
+    return complete ? EXIT_OK : EXIT_INVALID;
+  }
   if (context.harness === "claude") {
     const route = claudeRoute(context.layout, context.registry, recipient);
     const members = new Set([recipient, ...route.peers]);
@@ -312,6 +372,10 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
   return Object.keys(errors).length === 0 ? EXIT_OK : EXIT_INVALID;
 }
 
+function workerSnapshotBinding(binding: WorkerBinding): Json {
+  return { harness: binding.harness, parent: binding.parent, worker: binding.worker };
+}
+
 async function guarded(io: Io, body: () => Promise<number>): Promise<number> {
   try {
     return await body();
@@ -378,14 +442,31 @@ export const inboxAck: Handler = (io, root, args) => {
     if (context.harness === "claude") {
       claudeRoute(context.layout, context.registry, context.recipient);
     }
-    const adapter = adapterFor(io.env, context.layout, context.game, context.harness);
-    const results = await acknowledge(adapter, unblockDir(context.game.busDir), {
+    const unblock = unblockDir(context.game.busDir);
+    const captured = readRecord(snapshotPath(unblock, snapshotId));
+    const expectedBinding =
+      context.worker === null ? undefined : workerSnapshotBinding(context.worker);
+    if (!sameJson(captured?.worker_binding, expectedBinding)) {
+      throw new Error("snapshot worker binding mismatch");
+    }
+    const request = {
       disposition,
       queueIds,
       reason: values.reason,
       recipient: context.recipient,
       snapshotId,
-    });
+    };
+    const results =
+      context.worker === null
+        ? await acknowledge(
+            adapterFor(io.env, context.layout, context.game, context.harness),
+            unblock,
+            request,
+          )
+        : await codexAdapter(context.layout, { env: io.env }).withWorkerInbox(
+            context.worker,
+            (adapter) => acknowledge(adapter, unblock, request),
+          );
     io.out(`${pyJsonDumps({ results })}\n`);
     return ackSucceeded(results) ? EXIT_OK : EXIT_INVALID;
   });

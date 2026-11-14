@@ -16,9 +16,10 @@ import type {
   Inventory,
 } from "../types.ts";
 import { collectAll, unavailableCollected } from "./collect.ts";
-import { acknowledgeEntry, type AckOutcome, queueEntries, queuePayload } from "./inventory.ts";
+import { acknowledgeEntry, ackStatus, queueEntries, queuePayload } from "./inventory.ts";
 import { connectControl, type RpcClient } from "./rpc.ts";
 import { deferLocally, deliverReceipt } from "./steer.ts";
+import { verifyWorker, type WorkerBinding, workerInboxAdapter } from "./workerInbox.ts";
 
 export { BudgetClient, collectAll, unavailableCollected } from "./collect.ts";
 export { nativeQuestionsClear, questionItem } from "./guard.ts";
@@ -51,6 +52,10 @@ export type ReceiptSeed = Readonly<Record<string, PyJson>>;
 export interface CodexAdapter extends HarnessAdapter {
   readonly harness: "codex";
   readonly collectors: HarnessCollectors;
+  withWorkerInbox<T>(
+    binding: WorkerBinding,
+    use: (adapter: HarnessAdapter) => Promise<T>,
+  ): Promise<T>;
   deliver(
     receiptPath: string,
     requestId: string,
@@ -89,27 +94,6 @@ function unblockDirFor(layout: Layout, receiptPath: string): string | null {
     return join(dirname(dirname(parent)), "unblock");
   }
   return null;
-}
-
-/**
- * The receipt status `inbox ack` maps back to its operation state: accepted is deleted,
- * unchanged is confirmed absent (or retained), rejected is a changed payload, anything else
- * ambiguous. The exact native outcome is the receipt reason.
- */
-function ackStatus(outcome: AckOutcome): DeliveryReceipt["status"] {
-  switch (outcome) {
-    case "deleted":
-      return "accepted";
-    case "confirmed_absent":
-    case "retained":
-      return "unchanged";
-    case "changed_payload":
-      return "rejected";
-    case "unavailable":
-      return "blocked";
-    default:
-      return "ambiguous";
-  }
 }
 
 export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexAdapter {
@@ -151,7 +135,7 @@ export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexA
       }
       try {
         const outcome = await withClient((client) =>
-          acknowledgeEntry(client, conversationId, queueId, payload, disposition),
+          acknowledgeEntry(client, undefined, conversationId, queueId, payload, disposition),
         );
         return { reason: outcome, requestId, status: ackStatus(outcome) };
       } catch {
@@ -243,6 +227,12 @@ export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexA
       } catch {
         return { reason: METADATA_UNAVAILABLE, status: "unavailable" };
       }
+    },
+    async withWorkerInbox(binding, use) {
+      return withClient(async (client) => {
+        await verifyWorker(client, binding);
+        return use(workerInboxAdapter(client, binding));
+      });
     },
   };
 }

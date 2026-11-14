@@ -1,10 +1,11 @@
 import { readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
 import { deliveredDir, spoolDir, spoolReviewBrief } from "../adapters/claude/spool.ts";
+import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { slotRequestId } from "../adapters/shared/ids.ts";
 import { digest } from "../adapters/shared/pyjson.ts";
 import { main } from "../cli.ts";
@@ -20,6 +21,321 @@ import {
 } from "../review/fixtures.ts";
 import { persist } from "../review/store.ts";
 import { CODEX_TECH } from "../testFixtures.ts";
+
+const WORKER = "00000000-0000-4000-8000-000000000080";
+const OTHER_PARENT = "00000000-0000-4000-8000-000000000081";
+
+describe("inbox verified Codex workers", () => {
+  const controls: FakeControl[] = [];
+  afterEach(async () => {
+    await Promise.all(controls.splice(0).map((control) => control.close()));
+  });
+
+  async function workerFixture() {
+    const fixture = claudeFixture();
+    select(fixture, (registry) => {
+      registry.roles["archies-dog-walks/tech"]!.harness = "codex";
+    });
+    const state = {
+      clientId: "message-1",
+      deleteMode: "success",
+      lineage: CODEX_TECH,
+      payload: "handled worker original",
+      present: true,
+      queueReads: 0,
+      readMode: "available",
+      reparentBeforeDelete: false,
+      sourceParent: CODEX_TECH,
+    };
+    const control = await startFakeControl(fixture.base, (method, params) => {
+      if (method === "thread/read") {
+        if (state.readMode === "refused") {
+          return { error: { code: -32000, message: "read refused" } };
+        }
+        if (state.readMode === "unknown") {
+          return { result: { thread: null } };
+        }
+        return {
+          result: {
+            thread: {
+              id: params.threadId,
+              parentThreadId: state.lineage,
+              source: { subAgent: { thread_spawn: { parent_thread_id: state.sourceParent } } },
+              status: { activeFlags: ["waitingOnUserInput"], type: "active" },
+            },
+          },
+        };
+      }
+      if (method === "thread/queue/list") {
+        state.queueReads += 1;
+        if (state.readMode === "queue refused") {
+          return { error: { code: -32000, message: "queue refused" } };
+        }
+        if (state.reparentBeforeDelete && state.queueReads === 3) {
+          state.lineage = OTHER_PARENT;
+        }
+        return {
+          result: {
+            data: state.present
+              ? [
+                  {
+                    clientUserMessageId: state.clientId,
+                    id: "worker-q1",
+                    input: [{ text: state.payload, type: "text" }],
+                  },
+                ]
+              : [],
+            nextCursor: null,
+          },
+        };
+      }
+      if (method === "thread/queue/delete") {
+        if (state.deleteMode === "ambiguous") {
+          state.readMode = "queue refused";
+          return { drop: true };
+        }
+        state.present = false;
+        if (state.deleteMode === "lost response") {
+          return { error: { code: -32000, message: "response lost" } };
+        }
+        return { result: { deleted: true } };
+      }
+      return { error: { code: -32601, message: "unsupported" } };
+    });
+    controls.push(control);
+    const connected = { ...fixture, env: { ...fixture.env, CODEX_CONTROL_SOCKET: control.path } };
+    const args = ["--game", GAME, "--recipient", WORKER, "--parent", "archies-dog-walks/tech"];
+    const capture = () => run(connected, "inbox", "snapshot", ...args);
+    const remove = (snapshotId: string, disposition = "handled", ...extra: string[]) =>
+      run(
+        connected,
+        "inbox",
+        "ack",
+        ...args,
+        "--snapshot",
+        snapshotId,
+        "--queue-id",
+        "worker-q1",
+        "--disposition",
+        disposition,
+        ...extra,
+      );
+    return { args, capture, control, fixture: connected, remove, state };
+  }
+
+  it.each(["handled", "superseded"])(
+    "acknowledges a bound worker original as %s on one connection",
+    async (disposition) => {
+      const { capture, control, fixture, remove, state } = await workerFixture();
+      const pendingPath = join(fixture.unblock, "decisions", `${WORKER}.json`);
+      const pending = JSON.stringify({
+        state: "pending",
+        thread_id: WORKER,
+        question: "Keep open",
+      });
+      writeFileSync(pendingPath, pending);
+      const parentPath = join(fixture.unblock, "decisions", `${CODEX_TECH}.json`);
+      const parentMarker = JSON.stringify({ state: "pending", thread_id: CODEX_TECH });
+      writeFileSync(parentPath, parentMarker);
+      const snap = await capture();
+      expect(snap.code, snap.err).toBe(EXIT_OK);
+      const output = JSON.parse(snap.out);
+      expect(output.worker_binding).toEqual({
+        harness: "codex",
+        parent: CODEX_TECH,
+        worker: WORKER,
+      });
+      const persisted = JSON.parse(readFileSync(output.path, "utf8"));
+      expect(persisted.worker_binding).toEqual(output.worker_binding);
+      expect(persisted.queues[WORKER][0].id).toBe("worker-q1");
+      expect(snap.out).not.toContain(state.payload);
+      const before = control.calls.length;
+      const result = await remove(output.snapshot_id, disposition);
+      expect(result.code, result.err + result.out).toBe(EXIT_OK);
+      expect(JSON.parse(result.out).results).toEqual([{ queue_id: "worker-q1", state: "deleted" }]);
+      expect(state.present).toBe(false);
+      const calls = control.calls.slice(before);
+      expect(calls.filter((call) => call.method === "initialize")).toHaveLength(1);
+      expect(calls.filter((call) => call.method === "thread/queue/delete")).toHaveLength(1);
+      expect(
+        control
+          .methods()
+          .every((method) =>
+            ["thread/read", "thread/queue/list", "thread/queue/delete"].includes(method),
+          ),
+      ).toBe(true);
+      expect(readFileSync(pendingPath, "utf8")).toBe(pending);
+      expect(readFileSync(parentPath, "utf8")).toBe(parentMarker);
+    },
+  );
+
+  it.each(["wrong parent", "source mismatch", "unknown", "refused", "queue refused"])(
+    "refuses worker snapshot with %s without mutation",
+    async (failure) => {
+      const { capture, control, state } = await workerFixture();
+      if (failure === "wrong parent") {
+        state.lineage = OTHER_PARENT;
+      } else if (failure === "source mismatch") {
+        state.sourceParent = OTHER_PARENT;
+      } else {
+        state.readMode = failure;
+      }
+      expect((await capture()).code).toBe(EXIT_INVALID);
+      expect(control.methods()).not.toContain("thread/queue/delete");
+      expect(state.present).toBe(true);
+    },
+  );
+
+  it.each([
+    "reparented",
+    "refused",
+    "unknown",
+    "queue refused",
+    "changed payload",
+    "before delete",
+    "changed client ID",
+  ])("preserves an original when %s after snapshot", async (failure) => {
+    const { capture, control, remove, state } = await workerFixture();
+    const snap = JSON.parse((await capture()).out);
+    if (failure === "reparented") {
+      state.lineage = OTHER_PARENT;
+    } else if (failure === "changed payload") {
+      state.payload = "new independent work";
+    } else if (failure === "changed client ID") {
+      state.clientId = "new-client-message";
+    } else if (failure === "before delete") {
+      state.reparentBeforeDelete = true;
+    } else {
+      state.readMode = failure;
+    }
+    const result = await remove(snap.snapshot_id);
+    expect(result.code, result.out).toBe(EXIT_INVALID);
+    expect(control.methods()).not.toContain("thread/queue/delete");
+    expect(state.present).toBe(true);
+    if (["changed payload", "changed client ID"].includes(failure)) {
+      expect(result.out).toContain("changed_payload");
+    }
+  });
+
+  it.each(["parent", "worker", "harness"])(
+    "rejects mismatched snapshot %s before connecting",
+    async (field) => {
+      const { capture, control, remove } = await workerFixture();
+      const snap = JSON.parse((await capture()).out);
+      const record = JSON.parse(readFileSync(snap.path, "utf8"));
+      record.worker_binding[field] = field === "harness" ? "claude" : OTHER_PARENT;
+      writeFileSync(snap.path, JSON.stringify(record));
+      const before = control.calls.length;
+      const result = await remove(snap.snapshot_id);
+      expect(result.err).toContain("snapshot worker binding mismatch");
+      expect(control.calls).toHaveLength(before);
+    },
+  );
+
+  it.each(["lost response", "ambiguous"])(
+    "preserves existing deletion reconciliation for %s",
+    async (mode) => {
+      const { capture, control, remove, state } = await workerFixture();
+      const snap = JSON.parse((await capture()).out);
+      state.deleteMode = mode;
+      const result = await remove(snap.snapshot_id);
+      expect(result.code).toBe(mode === "lost response" ? EXIT_OK : EXIT_INVALID);
+      expect(result.out).toContain(mode === "lost response" ? "confirmed_absent" : "ambiguous");
+      expect(control.methods().filter((method) => method === "thread/queue/delete")).toHaveLength(
+        1,
+      );
+    },
+  );
+
+  it("requires one current registered Codex route parent before any native call", async () => {
+    const { control, fixture } = await workerFixture();
+    const invalidParents = [
+      [],
+      [CODEX_TECH],
+      ["game-coordinator"],
+      ["archies-dog-walks/tech", "game-coordinator"],
+    ];
+    const results = await Promise.all(
+      invalidParents.map((parents) =>
+        run(
+          fixture,
+          "inbox",
+          "snapshot",
+          "--game",
+          GAME,
+          "--recipient",
+          WORKER,
+          ...parents.flatMap((parent) => ["--parent", parent]),
+        ),
+      ),
+    );
+    for (const result of results) {
+      expect(result.code).toBe(EXIT_USAGE);
+    }
+    fixture.route({ state: "held" });
+    const held = await run(
+      fixture,
+      "inbox",
+      "snapshot",
+      "--game",
+      GAME,
+      "--recipient",
+      WORKER,
+      "--parent",
+      "archies-dog-walks/tech",
+    );
+    expect(held.code).toBe(EXIT_USAGE);
+    expect(control.calls).toHaveLength(0);
+  });
+
+  it("keeps registered Codex snapshot and ACK compatible without worker binding or parent", async () => {
+    const { control, fixture, state } = await workerFixture();
+    const snap = await run(
+      fixture,
+      "inbox",
+      "snapshot",
+      "--game",
+      GAME,
+      "--recipient",
+      "archies-dog-walks/tech",
+    );
+    expect(snap.code, snap.err).toBe(EXIT_OK);
+    const output = JSON.parse(snap.out);
+    const record = JSON.parse(readFileSync(output.path, "utf8"));
+    expect(record.worker_binding).toBeUndefined();
+    const result = await run(
+      fixture,
+      "inbox",
+      "ack",
+      "--game",
+      GAME,
+      "--recipient",
+      CODEX_TECH,
+      "--snapshot",
+      output.snapshot_id,
+      "--queue-id",
+      "worker-q1",
+      "--disposition",
+      "handled",
+    );
+    expect(result.code, result.err + result.out).toBe(EXIT_OK);
+    expect(state.present).toBe(false);
+    expect(
+      control.calls.find((call) => call.method === "thread/queue/delete")?.params.threadId,
+    ).toBe(CODEX_TECH);
+  });
+
+  it("rejects the snapshot after the registered parent moves to a different conversation", async () => {
+    const { capture, control, fixture, remove } = await workerFixture();
+    const snap = JSON.parse((await capture()).out);
+    select(fixture, (registry) => {
+      registry.roles["archies-dog-walks/tech"]!.conversations = { codex: OTHER_PARENT };
+    });
+    const before = control.calls.length;
+    expect((await remove(snap.snapshot_id)).code).toBe(EXIT_INVALID);
+    expect(control.calls).toHaveLength(before);
+  });
+});
 
 async function run(
   fixture: ClaudeFixture,

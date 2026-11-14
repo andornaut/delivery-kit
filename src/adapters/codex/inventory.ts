@@ -2,6 +2,7 @@
 // native half of an explicit acknowledgement (thread/queue/delete).
 // Durable acknowledgement and retention records stay with the inbox that owns the snapshot.
 import { dumpsJson, isRecord, type PyJson, sameJson } from "../shared/pyjson.ts";
+import type { DeliveryReceipt } from "../types.ts";
 import { NATIVE_ITEM_TYPES, questionItem } from "./guard.ts";
 import { NativeTimeout, type RpcClient, RpcError } from "./rpc.ts";
 
@@ -203,6 +204,23 @@ export type AckOutcome =
   | "retained"
   | "unavailable";
 
+/** The exact native outcome stays in the receipt reason for durable ACK reconciliation. */
+export function ackStatus(outcome: AckOutcome): DeliveryReceipt["status"] {
+  switch (outcome) {
+    case "deleted":
+      return "accepted";
+    case "confirmed_absent":
+    case "retained":
+      return "unchanged";
+    case "changed_payload":
+      return "rejected";
+    case "unavailable":
+      return "blocked";
+    default:
+      return "ambiguous";
+  }
+}
+
 async function absentAfter(
   client: RpcClient,
   recipient: string,
@@ -218,6 +236,7 @@ async function absentAfter(
  */
 export async function acknowledgeEntry(
   client: RpcClient,
+  beforeDelete: (() => Promise<void>) | undefined,
   recipient: string,
   queueId: string,
   payload: string,
@@ -237,6 +256,14 @@ export async function acknowledgeEntry(
   }
   if (disposition === "retained") {
     return "retained";
+  }
+  // A refused guard precedes deletion and is never reconciled as an attempted deletion.
+  if (beforeDelete !== undefined) {
+    try {
+      await beforeDelete();
+    } catch {
+      return "unavailable";
+    }
   }
   try {
     const response = await client.call("thread/queue/delete", {
