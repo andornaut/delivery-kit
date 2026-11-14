@@ -1,7 +1,15 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { decisionClear } from "../adapters/shared/decisions.ts";
 import { writeJsonDurable } from "../durable.ts";
@@ -10,7 +18,7 @@ import { createRegistry, readRegistry, type Registry } from "../registry/index.t
 import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 import { messageChannelStateDir } from "./paths.ts";
 import { messageConsumeGuard, messageGuardDirectory, MessageService } from "./service.ts";
-import { messageExpectation } from "./store.ts";
+import { messageExpectation, MessageStore } from "./store.ts";
 import type { MessageTransport, NativeMessage } from "./transports.ts";
 
 const GAME = "archies-dog-walks";
@@ -23,6 +31,7 @@ const NOW = "2026-11-14T22:00:00.000Z";
 const BODY = "\ufeff  Full original é.\nLast line.\n";
 const bases: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const base of bases.splice(0)) {
     rmSync(base, { recursive: true });
   }
@@ -324,5 +333,67 @@ describe("message service", () => {
     expect(
       existsSync(join(messageChannelStateDir(test.layout, CLAUDE_COORDINATOR), "decisions")),
     ).toBe(false);
+  });
+
+  it("blocks an old spool when a newer attempt replaces it between summary and record reads", async () => {
+    const test = fixture();
+    writeJsonDurable(test.layout.routeFile, {
+      schema: 2,
+      state: "active",
+      host: GAME,
+      targets: [ROLE],
+    });
+    marker(join(gameLayout(test.layout, GAME).busDir, "unblock"), CLAUDE_COORDINATOR);
+    const executable = join(test.base, "idle-listing.mjs");
+    const listing = JSON.stringify([{ sessionId: CLAUDE_COORDINATOR, status: "idle" }]);
+    writeFileSync(
+      executable,
+      `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(listing)});\n`,
+    );
+    chmodSync(executable, 0o700);
+    const env = { CLAUDE_BIN: executable };
+    const service = new MessageService({ layout: test.layout, env });
+    const queued = await service.send(input("game-coordinator"));
+    const firstLease = await service.store.beginAttempt(messageExpectation(queued));
+    const first = firstLease.complete({
+      source: firstLease.source,
+      state: "blocked",
+      reason: "refused",
+    });
+    const secondLease = await service.store.beginAttempt(messageExpectation(first));
+    const second = secondLease.complete({
+      source: secondLease.source,
+      state: "ambiguous",
+      reason: "transport-pending",
+    });
+    expect(firstLease.source.owner).toEqual(secondLease.source.owner);
+    expect(first.envelope).toEqual(second.envelope);
+    expect(firstLease.source.requestId).not.toBe(secondLease.source.requestId);
+    const directory = join(test.layout.reviewDir, "messages");
+    const file = readdirSync(directory).find((name) => name.endsWith(".json"))!;
+    const path = join(directory, file);
+    // The summary observes the refused attempt; a concurrent sender then persists its successor.
+    writeJsonDurable(path, first);
+    const summary = MessageStore.prototype.summary;
+    vi.spyOn(MessageStore.prototype, "summary").mockImplementationOnce(function (
+      this: MessageStore,
+    ) {
+      const snapshot = summary.call(this);
+      writeJsonDurable(path, second);
+      return snapshot;
+    });
+    const outcome = await messageConsumeGuard(
+      test.layout,
+      env,
+    )({
+      requestId: firstLease.source.requestId,
+      recipient: CLAUDE_COORDINATOR,
+      text: BODY,
+    });
+    expect(outcome.status).toBe("blocked");
+    expect(service.store.read(ID)).toEqual(second);
+    expect(service.store.read(ID)?.attempts.at(-1)?.source.requestId).toBe(
+      secondLease.source.requestId,
+    );
   });
 });

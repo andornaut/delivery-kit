@@ -144,10 +144,14 @@ export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv) {
       if (matches.length !== 1) {
         return { status: "blocked" };
       }
-      const record = store.read(matches[0]!.id)!;
-      const source = record.attempts.at(-1)?.source;
+      const snapshot = matches[0]!;
+      const record = store.read(snapshot.id);
+      const source = record?.attempts.at(-1)?.source;
       if (
+        record === undefined ||
+        record.revision !== snapshot.revision ||
         source === undefined ||
+        source.requestId !== message.requestId ||
         source.owner.harness !== "claude" ||
         !["sending", "ambiguous"].includes(record.state) ||
         messageNativeRecipient(source) !== message.recipient ||
@@ -171,7 +175,9 @@ export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv) {
       const latest = store.read(record.envelope.id);
       return {
         status:
-          latest?.revision === record.revision &&
+          latest?.revision === snapshot.revision &&
+          latest.attempts.at(-1)?.source.requestId === message.requestId &&
+          isDeepStrictEqual(latest.attempts.at(-1)?.source, source) &&
           bindingCurrent(layout, record, source) &&
           messageGuardDirectory(layout, record.envelope.toRole) === directory &&
           (route === null || isDeepStrictEqual(route, readRoleRoute(layout))) &&
