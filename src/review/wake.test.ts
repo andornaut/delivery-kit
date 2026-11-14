@@ -7,6 +7,7 @@ import { deliverPending } from "../adapters/claude/channel.ts";
 import { spoolDir } from "../adapters/claude/spool.ts";
 import { type FakeHandler, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { gameLayout } from "../layout.ts";
+import { holdLock } from "../lock.ts";
 import { MessageStore } from "../messages/store.ts";
 import { readRegistry, updateRegistry } from "../registry/index.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
@@ -64,6 +65,17 @@ describe("deliverScheduledWake (claude)", () => {
       toRole: "archies-dog-walks/tech",
       workerId: "00000000-0000-4000-8000-000000000080",
     });
+    const lock = holdLock(join(fixture.unblock, "unblock.lock"));
+    try {
+      expect(JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT))).toEqual({
+        status: "busy",
+      });
+      expect(existsSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`))).toBe(false);
+      expect(existsSync(spoolDir(fixture.game.busDir))).toBe(false);
+      expect(store.read("worker-ready")).toEqual(original);
+    } finally {
+      lock.release();
+    }
     const first = await deliverScheduledWake(fixture.layout, fixture.game, SLOT);
     expect(JSON.parse(first)).toMatchObject({
       status: "sending",
@@ -72,13 +84,10 @@ describe("deliverScheduledWake (claude)", () => {
       message_backlog_slots: 1,
       message_health_status: "ok",
     });
-    expect(
-      JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)),
-    ).toMatchObject({
+    expect(JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT))).toEqual({
       status: "deduplicated",
       previousStatus: "sending",
       reason: null,
-      message_backlog_slots: 1,
     });
     const snapshot = JSON.parse(readFileSync(JSON.parse(first).snapshot_path, "utf8"));
     expect(snapshot.message_summary.messages).toContainEqual(

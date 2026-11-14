@@ -415,6 +415,9 @@ export async function deliverScheduledWake(
       },
     ];
     const state = spoolReviewBrief(process.env, game.busDir, scope, slot, unique, diagnostics);
+    if (state.status === "busy" || state.status === "deduplicated") {
+      return line({ ...state });
+    }
     return line({
       ...state,
       ...(snapshot.message_health as Json),
