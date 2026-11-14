@@ -458,6 +458,26 @@ still apply. Worker failure and question notice deduplication remain independent
 Acceptance does not acknowledge queue work: acknowledgements still validate unchanged originals,
 and retention remains bound to the exact payload.
 
+The recipient's instruction contract for every existing :20/:50 review pass is:
+
+- Cover all registered games, kits and game-coordinator, plus ready worker handoffs. Classify every
+  original backlog item, including independent work. This is a recipient obligation, not an
+  automatic backlog drain or a guarantee that one snapshot contains every role's payloads.
+- Report unavailable visibility explicitly, including unavailable Claude native target queues and
+  worker visibility; never infer an empty backlog from unavailable data.
+- Acknowledge only exact unchanged originals with evidence of actual handling or supersession.
+  Native or channel acceptance proves delivery, not handling.
+- Retain guarded items and unanswered decisions with their owner, reason and next review boundary.
+  Never interrupt or clear an unanswered question, or treat silence as an answer.
+- Use native live delivery only for confirmed unblockers; send ordinary independent work through
+  the normal queue. Preserve recipient guards, exact-payload validation, inventory semantics and
+  existing deduplication.
+- Report disposition counts and remaining item IDs. An item still unhandled or repeatedly deferred
+  across two distinct scheduled slots is a starvation failure: report its ID, blocker, required
+  owner and next action.
+
+This contract changes no cadence, routing or runtime capability.
+
 To replace a runner: record its identity, stop it while idle, start one runner, verify exactly one
 holder of each lock with `status` and `runner.json`, then observe the next normal slot. A
 replacement resumes every CI watch whose `ci/<sha>.status` is still running, with its original
