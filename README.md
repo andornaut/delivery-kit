@@ -310,6 +310,57 @@ checks are clear.
 Readiness exits 0 when ready and 1 when not, including when the registry is missing or the layout
 cannot be read. Malformed command options exit 2. It sends nothing and activates nothing.
 
+### Scoped harness doctor
+
+`delivery-kit harness doctor --role ROLE` diagnoses only the role's current effective harness.
+Repeat `--role` or `--game ID` to select more roles. At least one nonempty explicit scope is
+required; an invalid selection fails before any probe. It sends nothing, performs no queue
+writes, starts no frontend and changes no registry, HOLD, activation or draft state.
+
+Output is one JSON line with `schema: 1` and `roles`. Each row includes the exact `role`,
+`effective_harness`, `native_id`, `endpoint` path and source, registry `config_reference`,
+`channel_reference`, `native_session`, and `layers` for adapter, service, frontend, bridge and channel. Layer
+statuses distinguish `available`, `unavailable`, `unknown` and `held`; a registry entry alone
+never proves a native HOLD or activation. Inactive bindings are skipped as unknown, and
+unselected harnesses are not probed. `failed_layer`, `recovery_owner` and
+`supported_next_action` identify an observed failure and its supported diagnostic follow-up.
+Recovery actions are reported, never executed. Unknown capabilities remain unknown even when
+`failed_layer` is null. Exit 0 means the report has no observed failed layer, not that all
+layers are healthy or delivery is safe. Observed failures or invalid configuration exit 1;
+malformed options or missing scope exit 2.
+
+Codex endpoint selection uses `resolveCodexControlSocket({env?, home?, controlSocket?})`:
+explicit option, then `CODEX_CONTROL_SOCKET`, then the managed socket under
+`~/.codex/app-server-control/app-server-control.sock`. The result is `{path, source}`, where
+source is `option`, `environment` or `managed`. Selection performs no probe; an invalid
+explicit path never falls back. Doctor uses environment or managed selection and performs only
+control connect/initialization and exact `thread/read` with `includeTurns: false` for selected
+active bindings. A readable native thread does not prove a healthy TUI, HTTP MCP bridge,
+channel, native HOLD clearance or activation. Bridge diagnosis and recovery require the native
+owner; doctor never probes authenticated HTTP ports or opens private configuration.
+
+Claude diagnosis uses only `claude agents --json` and an exact session ID match. Session
+reported state does not provide native history, queue or authoritative question state. Channel
+connection remains unknown: a configured spool or receipt alone does not prove a connected
+channel, acceptance or handling. Reports contain normalized codes and nonsecret references,
+never message bodies, raw errors, environments or authentication material.
+
+`messageChannelStateDir(layout, conversationId)` returns
+`<reviewDir>/messages/recipients/<conversationId>/unblock` without creating state. An already
+active Claude session's existing channel process includes its exact conversation's generic bus
+alongside game bus directories by default. Explicit `--state-dir` is exclusive: configure
+`claude channel --conversation UUID --state-dir DIR` with existing absolute directories only.
+Doctor reports the generic reference even if absent; neither the reference nor directory
+presence proves a connected channel. No inactive frontend or additional channel is started.
+
+Native enqueue can wake a loaded idle thread through `enqueue_with_metadata` and
+`wake_if_loaded`. Omitting resume does not guarantee no wake. Message delivery therefore needs
+its own guarded dispatch and reconciliation contract; doctor performs neither. Normal message
+send retains durable `queued_local` work while pending-question, HOLD or draft clearance is
+unknown. Read exact stored payloads with `message status --id UUID --include-body` or
+`message status --recipient ROLE --include-body`. Dispatch and reconciliation require explicit
+safe guards; local storage, native acceptance and recipient handling are distinct stages.
+
 ## Review route
 
 `var/route.json` (schema 2) names the scheduled review's host game and its targets by role:
