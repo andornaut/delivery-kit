@@ -24,6 +24,12 @@ const STDOUT_KEYS = [
   "recipient",
   "backlog_slots",
   "deferral_slots",
+  "message_health_status",
+  "message_health_reason",
+  "message_counts",
+  "message_backlog_slots",
+  "message_stalled",
+  "message_protected",
 ];
 
 suite("unblock delivery", () => {
@@ -47,6 +53,25 @@ suite("unblock delivery", () => {
     expect(m.socket.methods()[0]).toBe("initialize");
     expect(Object.keys(tick.result ?? {}).every((key) => STDOUT_KEYS.includes(key))).toBe(true);
     expect(tick.result).toHaveProperty("history_status");
+    expect(tick.result).toMatchObject({
+      message_health_status: "ok",
+      message_health_reason: null,
+      message_backlog_slots: 0,
+      message_stalled: [],
+      message_protected: [],
+    });
+    expect(tick.result?.message_counts).toEqual({
+      queued: 0,
+      held: 0,
+      blocked: 0,
+      sending: 0,
+      accepted: 0,
+      ambiguous: 0,
+      "parent-required": 0,
+      handled: 0,
+      superseded: 0,
+      retained: 0,
+    });
     expect(tick.output).not.toContain("private user content");
     expect(tick.output).not.toContain("queue-one");
     const receipt = m.receipt(wake(0));
