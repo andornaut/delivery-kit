@@ -460,11 +460,15 @@ and retention remains bound to the exact payload.
 
 The recipient's instruction contract for every existing :20/:50 review pass is:
 
-- Cover all registered games, kits and game-coordinator, plus ready worker handoffs. Classify every
-  original backlog item, including independent work. This is a recipient obligation, not an
-  automatic backlog drain or a guarantee that one snapshot contains every role's payloads.
+- Inventory registered parent queues, verified workers' queues and ready worker handoffs across
+  all registered games, kits and game-coordinator. Classify every original backlog item, including
+  independent work. This is a recipient obligation, not an automatic backlog drain or a guarantee
+  that one snapshot contains every role's payloads.
 - Report unavailable visibility explicitly, including unavailable Claude native target queues and
-  worker visibility; never infer an empty backlog from unavailable data.
+  worker visibility; never infer an empty backlog from unavailable data. Refused native historical
+  worker-queue access remains unknown. The installed `inbox ack` rejects unregistered worker UUIDs:
+  report the capability limit and require owner reconciliation without bypassing refusals or
+  forcing session loads.
 - Acknowledge only exact unchanged originals with evidence of actual handling or supersession.
   Native or channel acceptance proves delivery, not handling.
 - Retain guarded items and unanswered decisions with their owner, reason and next review boundary.
