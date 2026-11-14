@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -132,6 +132,56 @@ describe("guarded native queue transport", () => {
     expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("accepted");
     expect(f.calls.filter((method) => method === "thread/queue/add")).toHaveLength(1);
   });
+
+  it.each(["missing", "blocked", "unavailable", "sending"])(
+    "preserves lost-response ambiguity when %s clearance prevents reconciliation",
+    async (mode) => {
+      const f = fixture(() => {
+        throw new Error("lost reply");
+      });
+      expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
+      if (mode === "sending") {
+        const state = JSON.parse(readFileSync(f.path, "utf8"));
+        writeFileSync(f.path, JSON.stringify({ ...state, status: "sending" }));
+      }
+      const before = [...f.calls];
+      const guards: QueueGuards | undefined =
+        mode === "missing" || mode === "sending"
+          ? undefined
+          : {
+              beforeAdd: async () => ({ status: mode === "blocked" ? "blocked" : "unavailable" }),
+            };
+      expect((await queueMessage(f.client, f.path, message, guards)).status).toBe("ambiguous");
+      expect(JSON.parse(readFileSync(f.path, "utf8")).status).toBe("ambiguous");
+      let connections = 0;
+      const transport = codexQueueTransport({
+        connect: async () => {
+          connections++;
+          return f.client;
+        },
+        guards: clear,
+        canConnect: () => false,
+      });
+      expect((await transport.send(f.path, message)).status).toBe("ambiguous");
+      expect(connections).toBe(0);
+      expect(
+        (
+          await codexQueueTransport({
+            connect: async () => {
+              throw new Error("connect failed");
+            },
+            guards: clear,
+            canConnect: () => true,
+          }).send(f.path, message)
+        ).status,
+      ).toBe("ambiguous");
+      expect(
+        (await codexQueueTransport({ connect: async () => f.client }).send(f.path, message)).status,
+      ).toBe("ambiguous");
+      expect(f.calls).toEqual(before);
+      expect(f.calls.filter((method) => method === "thread/queue/add")).toHaveLength(1);
+    },
+  );
 
   it("retains ambiguity for absent or changed queue entries and rejects workers without input", async () => {
     const f = fixture(() => {

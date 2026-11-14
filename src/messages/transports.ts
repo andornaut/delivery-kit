@@ -52,21 +52,16 @@ export function codexQueueTransport(ports: {
         // Unknown owner or HOLD state leaves the message local.
       }
       if (!locallyClear) {
-        return {
-          reason: "explicit queue clearance required; keep queued locally",
-          requestId: message.requestId,
-          status: "blocked",
-        };
+        return queueMessage(null, path, message);
       }
       let client: RpcClient;
       try {
         client = await ports.connect();
       } catch {
-        return {
-          reason: "transport unavailable",
-          requestId: message.requestId,
-          status: "unavailable",
-        };
+        const previous = await queueMessage(null, path, message);
+        return previous.status === "blocked"
+          ? { reason: "transport unavailable", requestId: message.requestId, status: "unavailable" }
+          : previous;
       }
       try {
         return await queueMessage(client, path, message, ports.guards);

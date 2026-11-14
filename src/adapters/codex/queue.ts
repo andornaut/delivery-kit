@@ -117,7 +117,7 @@ async function reconcile(
 }
 
 async function operate(
-  client: RpcClient,
+  client: RpcClient | null,
   path: string,
   message: NativeMessage,
   reconciliationOnly: boolean,
@@ -140,41 +140,45 @@ async function operate(
     ) {
       return result(message, "accepted", undefined, previous.queueId);
     }
-    if (guards === undefined) {
-      return result(message, "blocked", "explicit queue clearance required; keep queued locally");
+    const uncertain =
+      isRecord(previous) && (previous.status === "sending" || previous.status === "ambiguous");
+    if (uncertain && previous.status === "sending") {
+      previous.status = "ambiguous";
+      writeJsonDurable(path, previous);
     }
-    try {
-      const clearance = await guards.beforeAdd(client, message);
-      if (clearance.status !== "clear") {
-        return result(
-          message,
-          clearance.status,
-          "queue clearance unavailable; keep queued locally",
-        );
-      }
-    } catch {
-      return result(message, "blocked", "queue clearance unavailable; keep queued locally");
-    }
-    try {
-      if (!(await rootRecipient(client, message.recipient))) {
-        return result(
-          message,
-          "blocked",
-          "worker parent required or recipient binding unavailable",
-        );
-      }
-    } catch {
-      return result(message, "unavailable", "recipient binding unavailable");
-    }
-    if (isRecord(previous)) {
-      if (previous.status === "sending" || previous.status === "ambiguous") {
-        return await reconcile(client, path, message, previous);
-      }
+    const guarded = (status: "blocked" | "unavailable", reason: string): TransportReceipt =>
+      result(
+        message,
+        uncertain ? "ambiguous" : status,
+        uncertain ? "previous send outcome unknown; reconciliation guarded; do not resend" : reason,
+      );
+    if (isRecord(previous) && !uncertain) {
       return result(
         message,
         previous.status === "unsupported" ? "unsupported" : "rejected",
         "previous native refusal; do not resend",
       );
+    }
+    if (guards === undefined || client === null) {
+      return guarded("blocked", "explicit queue clearance required; keep queued locally");
+    }
+    try {
+      const clearance = await guards.beforeAdd(client, message);
+      if (clearance.status !== "clear") {
+        return guarded(clearance.status, "queue clearance unavailable; keep queued locally");
+      }
+    } catch {
+      return guarded("blocked", "queue clearance unavailable; keep queued locally");
+    }
+    try {
+      if (!(await rootRecipient(client, message.recipient))) {
+        return guarded("blocked", "worker parent required or recipient binding unavailable");
+      }
+    } catch {
+      return guarded("unavailable", "recipient binding unavailable");
+    }
+    if (isRecord(previous)) {
+      return await reconcile(client, path, message, previous);
     }
     if (reconciliationOnly) {
       return result(message, "ambiguous", "receipt unavailable; do not resend");
@@ -182,14 +186,10 @@ async function operate(
     try {
       const clearance = await guards.beforeAdd(client, message);
       if (clearance.status !== "clear") {
-        return result(
-          message,
-          clearance.status,
-          "queue clearance unavailable; keep queued locally",
-        );
+        return guarded(clearance.status, "queue clearance unavailable; keep queued locally");
       }
     } catch {
-      return result(message, "blocked", "queue clearance unavailable; keep queued locally");
+      return guarded("blocked", "queue clearance unavailable; keep queued locally");
     }
     const state = {
       clientUserMessageId: message.requestId,
@@ -233,7 +233,7 @@ async function operate(
 }
 
 export function queueMessage(
-  client: RpcClient,
+  client: RpcClient | null,
   path: string,
   message: NativeMessage,
   guards?: QueueGuards,
