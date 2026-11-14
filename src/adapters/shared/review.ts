@@ -1,4 +1,6 @@
 // Common backlog and decision policy carried by both harnesses' scheduled reviews.
+import { isRecord, unicodeDumps } from "./pyjson.ts";
+
 export const UNBLOCK_INSTRUCTIONS =
   "Review recent Art, Gameplay and Tech activity alongside the backlog. " +
   "Resolve reciprocal waits with the smallest owner question. " +
@@ -29,6 +31,11 @@ export const UNBLOCK_INSTRUCTIONS =
   "Finish with disposition counts and remaining IDs, including retained items. " +
   "Preserve existing recipient guards, deduplication and runtime cadence; add no runtime or " +
   "queue feature, timer or manual review slot. " +
+  "Durable local message IDs are separate from native queue ACK IDs. Recipients pull original " +
+  "bodies through message status --recipient ROLE --include-body in their own session. " +
+  "Accepted local messages still require recipient handling; preserve retained, held and " +
+  "guarded messages with their owner, reason and next boundary. Never auto retry an ambiguous " +
+  "attempt or treat a message health warning as question clearance. " +
   "Find every hold, block and pending user decision. For a pending decision, make sure its owner " +
   "has it open as a structured prompt in its own session with its recommendation first; if not, " +
   "ask the owner to open it now, then list it for the user with owner, exact text, options and " +
@@ -38,3 +45,100 @@ export const UNBLOCK_INSTRUCTIONS =
   "interrupt, answer, cancel or clear another owner's question, and never make a user decision " +
   "yourself or treat silence as an answer. Keep pending prompts open while doing independent " +
   "authorized work; do not end or interrupt their turn to clear them.";
+
+function fields(value: unknown, names: readonly string[]): Record<string, unknown> {
+  const row = isRecord(value) ? value : {};
+  return Object.fromEntries(
+    names.filter((name) => Object.hasOwn(row, name)).map((name) => [name, row[name]]),
+  );
+}
+
+const MESSAGE_FIELDS = [
+  "id",
+  "fromRole",
+  "toRole",
+  "workerId",
+  "parentRole",
+  "intent",
+  "created",
+  "state",
+  "attempts",
+  "reason",
+  "revision",
+  "ownerRole",
+  "nextBoundary",
+] as const;
+
+/** Only public metadata enters either harness's brief, even if a future record gains fields. */
+export function messageReview(
+  context: { readonly snapshotPath: string; readonly health?: unknown },
+  summary: unknown,
+): string {
+  if (summary === undefined) {
+    return "";
+  }
+  if (!isRecord(summary) || summary.status !== "available" || !Array.isArray(summary.messages)) {
+    return (
+      "\nDurable local message visibility is unavailable/unknown (unreadable-inbox); " +
+      "counts and messages are unknown, never empty or handled. " +
+      `Inspect local snapshot ${context.snapshotPath}; preserve originals and recipient guards.`
+    );
+  }
+  const messages = (summary.messages as unknown[]).map((value) => {
+    const row = isRecord(value) ? value : {};
+    return {
+      ...fields(row, MESSAGE_FIELDS),
+      outbox: Array.isArray(row.outbox)
+        ? (row.outbox as unknown[]).map((entry) => fields(entry, ["requestId", "hop", "state"]))
+        : [],
+    };
+  });
+  const counts = isRecord(summary.counts)
+    ? Object.fromEntries(
+        Object.entries(summary.counts).filter(
+          ([, count]) => typeof count === "number" && Number.isSafeInteger(count) && count >= 0,
+        ),
+      )
+    : null;
+  const health = fields(context.health, [
+    "message_health_status",
+    "message_backlog_slots",
+    "message_health_reason",
+  ]);
+  if (isRecord(context.health)) {
+    for (const name of ["message_stalled", "message_protected"]) {
+      const rows = context.health[name];
+      if (Array.isArray(rows)) {
+        health[name] = (rows as unknown[]).map((row) =>
+          fields(row, [
+            "id",
+            "toRole",
+            "workerId",
+            "parentRole",
+            "ownerRole",
+            "reason",
+            "nextBoundary",
+            "nextAction",
+          ]),
+        );
+      }
+    }
+  }
+  const metadata = unicodeDumps({ counts, health, messages, schema: 1, status: "available" });
+  const bounded =
+    Buffer.byteLength(metadata, "utf8") <= 32768
+      ? metadata
+      : unicodeDumps({
+          counts,
+          metadata_omitted: true,
+          reason: "brief-bound",
+          status: "available",
+        });
+  return (
+    `\nDurable local messages (metadata only): ${bounded}. ` +
+    `Full local metadata: ${context.snapshotPath}. Each recipient pulls its original body with ` +
+    "message status --recipient ROLE --include-body in its own session. Reconcile handled or " +
+    "superseded evidence, or retain with owner/reason/nextBoundary. Acceptance is delivery only. " +
+    "Do not map these IDs to native inbox ACKs, auto retry, or clear pending questions."
+  );
+}

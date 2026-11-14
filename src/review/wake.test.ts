@@ -3,8 +3,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { deliverPending } from "../adapters/claude/channel.ts";
+import { spoolDir } from "../adapters/claude/spool.ts";
 import { type FakeHandler, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { gameLayout } from "../layout.ts";
+import { MessageStore } from "../messages/store.ts";
 import { readRegistry, updateRegistry } from "../registry/index.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { type ClaudeFixture, claudeFixture, GAME, RECIPIENT, SLOT, TECH } from "./fixtures.ts";
@@ -16,6 +19,30 @@ function useEnv(fixture: ClaudeFixture): void {
   }
 }
 
+function localMessages(fixture: ClaudeFixture): MessageStore {
+  return new MessageStore({
+    layout: fixture.layout,
+    resolveOwner: () => ({ harness: "codex", nativeId: TECH, parentBinding: null }),
+  });
+}
+
+function breakLocalInbox(fixture: ClaudeFixture): void {
+  const directory = join(fixture.layout.reviewDir, "messages");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, `${"a".repeat(64)}.json`), "{");
+}
+
+function queuedBrief(fixture: ClaudeFixture, slot: number): string {
+  const state = JSON.parse(
+    readFileSync(join(fixture.unblock, `${RECIPIENT}-${slot}.json`), "utf8"),
+  );
+  return (
+    JSON.parse(
+      readFileSync(join(spoolDir(fixture.game.busDir), `${state.requestId}.json`), "utf8"),
+    ) as { text: string }
+  ).text;
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -24,13 +51,48 @@ describe("deliverScheduledWake (claude)", () => {
   it("spools one brief for the configured recipient and deduplicates the slot", async () => {
     const fixture = claudeFixture();
     useEnv(fixture);
+    const store = localMessages(fixture);
+    const body = "private local worker body, never in a coordinator brief";
+    const original = await store.enqueue({
+      body,
+      created: "2026-11-14T20:00:00Z",
+      fromRole: "game-coordinator",
+      id: "worker-ready",
+      intent: "queue",
+      parentRole: "archies-dog-walks/tech",
+      schema: 1,
+      toRole: "archies-dog-walks/tech",
+      workerId: "00000000-0000-4000-8000-000000000080",
+    });
     const first = await deliverScheduledWake(fixture.layout, fixture.game, SLOT);
-    expect(first).toBe(
-      `{"status": "sending", "recipient": "${RECIPIENT}", "recipient_session_status": "idle"}`,
+    expect(JSON.parse(first)).toMatchObject({
+      status: "sending",
+      recipient: RECIPIENT,
+      recipient_session_status: "idle",
+      message_backlog_slots: 1,
+      message_health_status: "ok",
+    });
+    expect(
+      JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)),
+    ).toMatchObject({
+      status: "deduplicated",
+      previousStatus: "sending",
+      reason: null,
+      message_backlog_slots: 1,
+    });
+    const snapshot = JSON.parse(readFileSync(JSON.parse(first).snapshot_path, "utf8"));
+    expect(snapshot.message_summary.messages).toContainEqual(
+      expect.objectContaining({
+        id: "worker-ready",
+        workerId: original.envelope.workerId,
+        parentRole: original.envelope.parentRole,
+      }),
     );
-    expect(await deliverScheduledWake(fixture.layout, fixture.game, SLOT)).toBe(
-      '{"status": "deduplicated", "previousStatus": "sending", "reason": null}',
-    );
+    expect(JSON.stringify(snapshot)).not.toContain(body);
+    const text = queuedBrief(fixture, SLOT);
+    expect(text).toContain("worker-ready");
+    expect(text).toContain("message status --recipient ROLE --include-body");
+    expect(text).not.toContain(body);
     const receipt = JSON.parse(
       readFileSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`), "utf8"),
     ) as {
@@ -39,6 +101,45 @@ describe("deliverScheduledWake (claude)", () => {
     expect(receipt.diagnostics).toContainEqual(
       expect.objectContaining({ kind: "worker_health", parent: RECIPIENT }),
     );
+    await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
+    expect(
+      JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800)),
+    ).toMatchObject({
+      status: "sending",
+      message_backlog_slots: 2,
+      message_health_status: "stalled",
+    });
+    expect(queuedBrief(fixture, SLOT + 1800)).toContain("ownerRole");
+    expect(store.read("worker-ready")).toEqual(original);
+  });
+
+  it("still spools each distinct Claude slot when local message visibility is unavailable", async () => {
+    const fixture = claudeFixture();
+    useEnv(fixture);
+    breakLocalInbox(fixture);
+    const first = JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT));
+    expect(first).toMatchObject({
+      status: "sending",
+      message_health_status: "unknown",
+      message_counts: null,
+    });
+    const captured = JSON.parse(readFileSync(first.snapshot_path, "utf8"));
+    expect(captured.message_summary).toEqual({
+      schema: 1,
+      status: "unavailable",
+      reason: "unreadable-inbox",
+      counts: null,
+      messages: null,
+    });
+    expect(queuedBrief(fixture, SLOT)).toContain("unavailable/unknown");
+    await deliverPending(() => undefined, fixture.game.busDir, RECIPIENT);
+    expect(
+      JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800)),
+    ).toMatchObject({
+      status: "sending",
+      message_health_status: "unknown",
+      message_counts: null,
+    });
   });
 
   it("does not dispatch from a nonhost project", async () => {
@@ -215,6 +316,22 @@ describe("deliverScheduledWake (codex)", () => {
 
   it("reminds the configured recipient once over one connection and deduplicates the slot", async () => {
     const fixture = codexFixture();
+    const store = localMessages(fixture);
+    const record = await store.enqueue({
+      body: "private durable body",
+      created: "2026-11-14T20:00:00Z",
+      fromRole: "game-coordinator",
+      id: "accepted-not-handled",
+      intent: "queue",
+      schema: 1,
+      toRole: "archies-dog-walks/tech",
+    });
+    const lease = await store.beginAttempt({
+      envelope: record.envelope,
+      revision: record.revision,
+      source: null,
+    });
+    const accepted = lease.complete({ reason: null, source: lease.source, state: "accepted" });
     const steers: Record<string, unknown>[] = [];
     const control = await startFakeControl(fixture.base, handler(steers));
     vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
@@ -232,6 +349,12 @@ describe("deliverScheduledWake (codex)", () => {
       const text = JSON.stringify(steers[0]?.input);
       expect(text).toContain(`${TECH}: q1`);
       expect(text).toContain(`${RECIPIENT}: none`);
+      expect(text).toContain("accepted-not-handled");
+      expect(text).toContain("message status --recipient ROLE --include-body");
+      expect(text).not.toContain(record.envelope.body);
+      const captured = JSON.parse(readFileSync(first.snapshot_path as string, "utf8"));
+      expect(captured.message_summary.counts.accepted).toBe(1);
+      expect(JSON.stringify(captured.message_summary)).not.toContain(record.envelope.body);
       const receipt = JSON.parse(
         readFileSync(join(fixture.unblock, `${RECIPIENT}-${SLOT}.json`), "utf8"),
       ) as Record<string, unknown>;
@@ -241,6 +364,51 @@ describe("deliverScheduledWake (codex)", () => {
       ) as Record<string, unknown>;
       expect(second).toMatchObject({ previousStatus: "accepted", status: "deduplicated" });
       expect(steers).toHaveLength(1);
+      const next = JSON.parse(
+        await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800),
+      );
+      expect(next).toMatchObject({
+        status: "accepted",
+        message_health_status: "stalled",
+        message_backlog_slots: 2,
+      });
+      expect(next.message_stalled).toContainEqual(
+        expect.objectContaining({
+          id: "accepted-not-handled",
+          ownerRole: "archies-dog-walks/tech",
+        }),
+      );
+      expect(JSON.stringify(steers[1]?.input)).toContain("accepted-not-handled");
+      expect(store.read("accepted-not-handled")).toEqual(accepted);
+    } finally {
+      await control.close();
+    }
+  });
+
+  it("does not turn unavailable local messages into a native queue failure or skip a Codex slot", async () => {
+    const fixture = codexFixture();
+    breakLocalInbox(fixture);
+    const steers: Record<string, unknown>[] = [];
+    const control = await startFakeControl(fixture.base, handler(steers));
+    vi.stubEnv("CODEX_CONTROL_SOCKET", control.path);
+    try {
+      const first = JSON.parse(await deliverScheduledWake(fixture.layout, fixture.game, SLOT));
+      const second = JSON.parse(
+        await deliverScheduledWake(fixture.layout, fixture.game, SLOT + 1800),
+      );
+      expect(first).toMatchObject({
+        status: "accepted",
+        message_health_status: "unknown",
+        message_counts: null,
+      });
+      expect(second).toMatchObject({
+        status: "accepted",
+        message_health_status: "unknown",
+        message_counts: null,
+      });
+      expect(steers).toHaveLength(2);
+      expect(JSON.stringify(steers[1]?.input)).toContain("unavailable/unknown");
+      expect(JSON.parse(readFileSync(second.snapshot_path, "utf8")).errors).toEqual({});
     } finally {
       await control.close();
     }

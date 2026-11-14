@@ -1,12 +1,13 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
 import type { HarnessAdapter, HarnessCollectors } from "../adapters/types.ts";
+import { MessageStore } from "../messages/store.ts";
 import type { Harness } from "../registry/schema.ts";
-import { captureMixed } from "./snapshot.ts";
+import { captureMessageSummary, captureMixed } from "./snapshot.ts";
 import { payloadSignature, persist, queueEntry, retentionPath, snapshotPath } from "./store.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000001";
@@ -42,6 +43,39 @@ function adapter(harness: Harness) {
 }
 
 describe("mixed inbox capture", () => {
+  it("keeps local metadata and identical native IDs separate without aging an explicit snapshot", async () => {
+    const target = context();
+    const layout = { reviewDir: join(target.busDir, "review") };
+    const store = new MessageStore({ layout, resolveOwner: () => null });
+    await store.enqueue({
+      schema: 1,
+      id: "same-id",
+      body: "private local body",
+      created: "2026-11-14T20:00:00Z",
+      fromRole: "art-kit",
+      toRole: "game-coordinator",
+      intent: "queue",
+    });
+    const record = await captureMixed(
+      { ...target, messageSummary: captureMessageSummary(layout) },
+      { codex: adapter("codex") },
+      { [RECIPIENT]: "codex" },
+      [RECIPIENT],
+      [],
+      { slot: 2 },
+    );
+    expect(record.message_summary).toMatchObject({
+      status: "available",
+      counts: { queued: 1 },
+      messages: [{ id: "same-id" }],
+    });
+    expect(record.queues).toMatchObject({
+      [RECIPIENT]: [{ id: "same-id", input: [{ text: "work" }] }],
+    });
+    expect(JSON.stringify(record)).not.toContain("private local body");
+    expect(record).not.toHaveProperty("message_health");
+    expect(existsSync(join(target.unblock, "health"))).toBe(false);
+  });
   it("reports uncollected Codex route peer diagnostics without issuing cross-harness RPCs", async () => {
     const codex = adapter("codex");
     const claude = adapter("claude");

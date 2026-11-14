@@ -11,6 +11,9 @@ import { unavailableCollected } from "../adapters/codex/collect.ts";
 import { SOCKET_MISSING_OUTPUT, TRANSPORT_UNAVAILABLE } from "../adapters/codex/index.ts";
 import type { ActiveScope } from "../adapters/shared/route.ts";
 import type { CollectRequest, HarnessAdapter } from "../adapters/types.ts";
+import type { Layout } from "../layout.ts";
+import { messageSummary } from "../messages/store.ts";
+import type { MessageSummary } from "../messages/types.ts";
 import type { Harness } from "../registry/schema.ts";
 import { nativeEntry } from "./ack.ts";
 import {
@@ -30,6 +33,23 @@ const UNAVAILABLE: Readonly<Json> = Object.freeze({
 export interface SnapshotContext {
   readonly busDir: string;
   readonly unblock: string;
+  readonly messageSummary?: MessageSummary;
+  readonly slot?: number;
+}
+
+/** Local message visibility never depends on native transport or mutates the inbox. */
+export function captureMessageSummary(layout: Pick<Layout, "reviewDir">): MessageSummary {
+  try {
+    return messageSummary(layout);
+  } catch {
+    return {
+      counts: null,
+      messages: null,
+      reason: "unreadable-inbox",
+      schema: 1,
+      status: "unavailable",
+    };
+  }
 }
 
 /** The spool's pending entries; an absent spool has none, any other read failure is an error. */
@@ -89,6 +109,8 @@ export function captureClaude(
       route.targets.map((target) => [target.sessionId, { ...UNAVAILABLE, name: target.name }]),
     ),
     worker_health: Object.fromEntries(parents.map((parent) => [parent, { ...UNAVAILABLE }])),
+    ...(context.messageSummary === undefined ? {} : { message_summary: context.messageSummary }),
+    ...(context.slot === undefined ? {} : { slot: context.slot }),
   };
   persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   return record;
@@ -120,7 +142,7 @@ async function collectCodex(
   parents: readonly string[],
   options: CodexCaptureOptions = {},
 ): Promise<Json> {
-  const slot = options.slot ?? null;
+  const slot = options.slot ?? context.slot ?? null;
   const queues: Json = {};
   const errors: Json = {};
   const inventories = await Promise.all(
@@ -167,6 +189,7 @@ async function collectCodex(
     queues,
     snapshot_id: randomUUID(),
     worker_health: collected.worker_health,
+    ...(context.messageSummary === undefined ? {} : { message_summary: context.messageSummary }),
   };
   if (slot !== null) {
     record.slot = slot;
@@ -320,6 +343,7 @@ export async function captureMixed(
     });
   }
   Object.assign(record, {
+    ...(context.messageSummary === undefined ? {} : { message_summary: context.messageSummary }),
     channel_queues: channelQueues,
     harness: harnesses[recipients[0] as string],
     harnesses: Object.fromEntries(endpoints.map((id) => [id, harnesses[id]])),
@@ -329,8 +353,8 @@ export async function captureMixed(
     native_queues: nativeQueues,
     queue_sources: sources,
   });
-  if (options.slot != null) {
-    record.slot = options.slot;
+  if ((options.slot ?? context.slot) != null) {
+    record.slot = options.slot ?? context.slot;
   }
   persist(snapshotPath(context.unblock, record.snapshot_id as string), record);
   return record;

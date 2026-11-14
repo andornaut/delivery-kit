@@ -21,7 +21,7 @@ import {
   sameJson,
   unicodeDumps,
 } from "../adapters/shared/pyjson.ts";
-import { UNBLOCK_INSTRUCTIONS } from "../adapters/shared/review.ts";
+import { messageReview, UNBLOCK_INSTRUCTIONS } from "../adapters/shared/review.ts";
 import {
   type Json,
   type QueueEntry,
@@ -307,6 +307,8 @@ export interface Brief {
   readonly workerFailures: readonly unknown[];
   readonly questions: readonly Json[];
   readonly questionDiagnostics: readonly Json[];
+  readonly messageSummary?: unknown;
+  readonly messageHealth?: unknown;
 }
 
 export function reminder(
@@ -342,10 +344,14 @@ export function reminder(
     brief.questionDiagnostics.length > 0
       ? `\nQuestion capability diagnostics (no pending-decision inference): ${ascii(brief.questionDiagnostics)}`
       : "";
+  const messages = messageReview(
+    { health: brief.messageHealth, snapshotPath: snapshotFile },
+    brief.messageSummary,
+  );
   return (
     `Scheduled review, slot ${slot}. ${UNBLOCK_INSTRUCTIONS}\n` +
     `Full local inventory: ${snapshotFile}\n${inventory}${workerReview}${questionReview}` +
-    `${diagnosticReview}`
+    `${diagnosticReview}${messages}`
   );
 }
 
@@ -431,6 +437,8 @@ export async function reconcileSlot(
   state.question_notice_keys = noticeKeys;
   const qDiagnostics = questionDiagnostics(snapshot, snapshotFile);
   const text = reminder(slot, queues, snapshotFile, {
+    messageHealth: snapshot.message_health,
+    messageSummary: snapshot.message_summary,
     questionDiagnostics: qDiagnostics,
     questions,
     workerFailures: pendingWorkerFailures(unblock, recipient, snapshot),

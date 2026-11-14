@@ -2,6 +2,7 @@
 // distinct slots, deferral counts, question observation history, and one
 // `review-stuck` event per failed episode. Delivery acceptance deduplicates worker and question
 // notices, never distinct scheduled reviews. It never acknowledges queue work or records recovery.
+import type { MessageSummary } from "../messages/types.ts";
 import {
   hasErrors,
   hash,
@@ -23,6 +24,114 @@ export type HealthEmit = (kind: string, key: string, message: string) => void;
 export interface HealthContext {
   readonly unblock: string;
   readonly emit: HealthEmit;
+}
+
+export const MESSAGE_HEALTH_FIELDS = [
+  "message_health_status",
+  "message_health_reason",
+  "message_counts",
+  "message_backlog_slots",
+  "message_stalled",
+  "message_protected",
+] as const;
+
+/** Local IDs age only at an actual scheduled wake, in a separate record from native queue IDs. */
+export function recordMessageHealth(
+  context: Pick<HealthContext, "unblock">,
+  recipient: string,
+  slot: number,
+  summary: MessageSummary,
+): Json {
+  const path = healthPath(context.unblock, `messages-${recipient}`);
+  const record: Json = readRecord(path) ?? { schema: 1 };
+  if (typeof record.last_slot === "number" && slot < record.last_slot) {
+    return rec(record.health);
+  }
+  record.last_slot = slot;
+  if (summary.status === "unavailable") {
+    const health = {
+      message_backlog_slots: null,
+      message_counts: null,
+      message_health_reason: "local inbox unavailable; visibility is unknown, not empty or handled",
+      message_health_status: "unknown",
+      message_protected: null,
+      message_stalled: null,
+    };
+    Object.assign(record, { health });
+    persist(path, record);
+    return health;
+  }
+  const previous = rec(record.message_backlog_items);
+  const items: Json = {};
+  const protectedRows: Json[] = [];
+  const stalled: Json[] = [];
+  let maximum = 0;
+  for (const message of summary.messages) {
+    if (message.state === "handled" || message.state === "superseded") {
+      continue;
+    }
+    const ownerRole = message.ownerRole ?? message.parentRole ?? message.toRole;
+    if (
+      message.state === "retained" ||
+      message.state === "held" ||
+      message.reason === "guarded" ||
+      message.reason === "explicit-hold"
+    ) {
+      protectedRows.push({
+        id: message.id,
+        nextBoundary: message.nextBoundary,
+        ownerRole,
+        reason: message.reason,
+      });
+      continue;
+    }
+    const signature = hash([
+      message.id,
+      message.fromRole,
+      message.toRole,
+      message.created,
+      message.workerId ?? null,
+      message.parentRole ?? null,
+    ]);
+    const old = rec(previous[message.id]);
+    const slots = old.signature === signature ? [...list(old.slots)] : [];
+    if (!slots.includes(slot)) {
+      slots.push(slot);
+    }
+    const age = slots.length;
+    maximum = Math.max(maximum, age);
+    items[message.id] = { age, ownerRole, signature, slots, state: message.state };
+    if (age >= 2) {
+      stalled.push({
+        id: message.id,
+        nextAction:
+          message.state === "ambiguous" || message.state === "sending"
+            ? "owner reconciles the exact attempt before retry; preserve questions and holds"
+            : "recipient reconciles handled/superseded evidence or retains with owner, reason " +
+              "and nextBoundary; preserve questions",
+        ownerRole,
+        reason: message.reason ?? "unhandled-across-two-slots",
+        toRole: message.toRole,
+        ...(message.workerId === undefined
+          ? {}
+          : { parentRole: message.parentRole, workerId: message.workerId }),
+      });
+    }
+  }
+  const health = {
+    message_backlog_slots: maximum,
+    message_counts: summary.counts,
+    message_health_reason:
+      stalled.length === 0
+        ? null
+        : "unhandled local message IDs observed in two distinct scheduled slots; route reconciliation to their owners",
+    message_health_status: stalled.length === 0 ? "ok" : "stalled",
+    message_protected: protectedRows,
+    message_stalled: stalled,
+  };
+  Object.assign(record, { health, message_backlog_items: items });
+  persist(path, record);
+  return health;
 }
 
 type NoticeKey = Pick<QuestionNotice, "identity" | "signature" | "level">;
@@ -211,6 +320,12 @@ export function recordHealth(
     ["backlog_slots", backlogSlots],
     ["deferral_slots", deferralSlots],
   ]);
+  const messageHealth = rec(snapshot.message_health);
+  for (const key of MESSAGE_HEALTH_FIELDS) {
+    if (Object.hasOwn(messageHealth, key)) {
+      health[key] = messageHealth[key];
+    }
+  }
   const reasons: string[] = [];
   if (failed) {
     if (backlogSlots >= 2) {

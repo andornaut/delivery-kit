@@ -4,7 +4,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { recordHealth } from "./health.ts";
+import { messageExpectation, MessageStore } from "../messages/store.ts";
+import { recordHealth, recordMessageHealth } from "./health.ts";
+import { captureMessageSummary } from "./snapshot.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 
@@ -60,5 +62,139 @@ describe("recordHealth", () => {
       });
       expect(health).toMatchObject({ deferral_slots: 0, review_status: "ok" });
     }
+  });
+});
+
+describe("scheduled durable message health", () => {
+  function inbox() {
+    const root = mkdtempSync(join(tmpdir(), "message-health-"));
+    const layout = { reviewDir: join(root, "review") };
+    const store = new MessageStore({
+      layout,
+      resolveOwner: () => ({ harness: "codex", nativeId: RECIPIENT, parentBinding: null }),
+    });
+    return { context: { unblock: join(root, "unblock") }, layout, store };
+  }
+
+  it("ages accepted-but-unhandled local IDs across known distinct slots without native ACK mapping", async () => {
+    const { context, layout, store } = inbox();
+    const queued = await store.enqueue({
+      schema: 1,
+      id: "local-only",
+      body: "private body",
+      created: "2026-11-14T20:00:00Z",
+      fromRole: "art-kit",
+      toRole: "game-coordinator",
+      intent: "queue",
+    });
+    const first = recordMessageHealth(context, RECIPIENT, 60, captureMessageSummary(layout));
+    expect(first).toMatchObject({ message_health_status: "ok", message_backlog_slots: 1 });
+    const lease = await store.beginAttempt(messageExpectation(queued));
+    const accepted = lease.complete({ source: lease.source, state: "accepted", reason: null });
+    expect(
+      recordMessageHealth(context, RECIPIENT, 60, captureMessageSummary(layout)),
+    ).toMatchObject({
+      message_health_status: "ok",
+      message_backlog_slots: 1,
+    });
+    expect(
+      recordMessageHealth(context, RECIPIENT, 120, {
+        schema: 1,
+        status: "unavailable",
+        reason: "unreadable-inbox",
+        counts: null,
+        messages: null,
+      }),
+    ).toMatchObject({
+      message_health_status: "unknown",
+      message_backlog_slots: null,
+      message_counts: null,
+    });
+    const second = recordMessageHealth(context, RECIPIENT, 180, captureMessageSummary(layout));
+    expect(second).toMatchObject({
+      message_health_status: "stalled",
+      message_backlog_slots: 2,
+      message_stalled: [
+        {
+          id: "local-only",
+          ownerRole: "game-coordinator",
+          nextAction: expect.stringContaining("preserve questions"),
+        },
+      ],
+    });
+    const state = JSON.parse(
+      readFileSync(join(context.unblock, "health", `messages-${RECIPIENT}.json`), "utf8"),
+    );
+    expect(state.message_backlog_items["local-only"].slots).toEqual([60, 180]);
+    expect(state).not.toHaveProperty("backlog_items");
+    expect(JSON.stringify(state)).not.toContain(queued.envelope.body);
+    expect(store.read("local-only")).toEqual(accepted);
+    const expected = messageExpectation(accepted);
+    await store.reconcile(expected, {
+      kind: "handled",
+      ref: "recipient/handled",
+      retention: null,
+      source: expected.source,
+    });
+    expect(
+      recordMessageHealth(context, RECIPIENT, 240, captureMessageSummary(layout)),
+    ).toMatchObject({
+      message_backlog_slots: 0,
+      message_counts: { handled: 1 },
+      message_health_status: "ok",
+      message_stalled: [],
+    });
+  });
+
+  it("keeps retained questions, explicit holds and guarded deliveries out of starvation aging", async () => {
+    const { context, layout, store } = inbox();
+    const input = {
+      schema: 1 as const,
+      body: "unanswered question stays private",
+      created: "2026-11-14T20:00:00Z",
+      fromRole: "art-kit",
+      toRole: "game-coordinator",
+      intent: "queue" as const,
+    };
+    const retention = {
+      ownerRole: "game-coordinator",
+      reason: "pending user decision",
+      nextBoundary: "explicit owner answer",
+    };
+    const queued = await store.enqueue({ ...input, id: "question" });
+    const retained = await store.reconcile(messageExpectation(queued), {
+      kind: "retained",
+      ref: "owner/decision",
+      retention,
+      source: null,
+    });
+    const held = await store.hold(
+      messageExpectation(await store.enqueue({ ...input, id: "held" })),
+      retention,
+    );
+    const guarded = await store.enqueue({ ...input, id: "guarded" });
+    const lease = await store.beginAttempt(messageExpectation(guarded));
+    const blocked = lease.complete({ reason: "guarded", source: lease.source, state: "blocked" });
+    recordMessageHealth(context, RECIPIENT, 60, captureMessageSummary(layout));
+    const second = recordMessageHealth(context, RECIPIENT, 120, captureMessageSummary(layout));
+    expect(second).toMatchObject({
+      message_health_status: "ok",
+      message_backlog_slots: 0,
+      message_stalled: [],
+    });
+    expect(second.message_protected).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "question",
+          ownerRole: retention.ownerRole,
+          nextBoundary: retention.nextBoundary,
+        }),
+        expect.objectContaining({ id: "held" }),
+        expect.objectContaining({ id: "guarded", reason: "guarded" }),
+      ]),
+    );
+    expect(store.read("question")).toEqual(retained);
+    expect(store.read("held")).toEqual(held);
+    expect(store.read("guarded")).toEqual(blocked);
   });
 });

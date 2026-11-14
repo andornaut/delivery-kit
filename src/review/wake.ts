@@ -15,6 +15,7 @@ import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
 import { persistSlot, previousSlot, SlotInterrupted } from "../adapters/codex/slot.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord, pyJsonDumps } from "../adapters/shared/pyjson.ts";
+import { messageReview } from "../adapters/shared/review.ts";
 import {
   type ActiveScope,
   activeScope,
@@ -35,10 +36,15 @@ import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { resolveRole } from "../registry/resolve.ts";
 import type { Harness } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
-import { type HealthEmit, recordHealth } from "./health.ts";
+import {
+  type HealthEmit,
+  MESSAGE_HEALTH_FIELDS,
+  recordHealth,
+  recordMessageHealth,
+} from "./health.ts";
 import { reconcileSlot } from "./reconcile.ts";
-import { captureMixed } from "./snapshot.ts";
-import { type Json, locked, snapshotPath } from "./store.ts";
+import { captureClaude, captureMessageSummary, captureMixed } from "./snapshot.ts";
+import { type Json, locked, persist, snapshotPath } from "./store.ts";
 
 const PRINTED = [
   "status",
@@ -55,6 +61,7 @@ const PRINTED = [
   "backlog_slots",
   "deferral_slots",
   "recipient_session_status",
+  ...MESSAGE_HEALTH_FIELDS,
 ] as const;
 
 function line(outcome: Readonly<Record<string, unknown>>): string {
@@ -155,6 +162,7 @@ function snapshotAdapter(client: RpcClient | null, deadline: number): HarnessAda
 }
 
 interface Wake {
+  readonly layout: Pick<Layout, "reviewDir">;
   readonly claude: HarnessAdapter;
   readonly harnesses: Readonly<Record<string, Harness>>;
   readonly unblock: string;
@@ -171,16 +179,25 @@ interface Wake {
 
 function capture(wake: Wake, client: RpcClient | null, deadline: number): Promise<Json> {
   const recipients = [...new Set([wake.recipient, ...wake.peers])];
-  return locked(wake.unblock, () =>
-    captureMixed(
-      { busDir: wake.busDir, unblock: wake.unblock },
+  return locked(wake.unblock, async () => {
+    const summary = captureMessageSummary(wake.layout);
+    const snapshot = await captureMixed(
+      { busDir: wake.busDir, messageSummary: summary, unblock: wake.unblock },
       { claude: wake.claude, codex: snapshotAdapter(client, deadline) },
       wake.harnesses,
       recipients,
       wake.parents,
       { routeMembers: recipients, slot: wake.slot },
-    ),
-  );
+    );
+    snapshot.message_health = recordMessageHealth(
+      { unblock: wake.unblock },
+      wake.recipient,
+      wake.slot,
+      summary,
+    );
+    persist(snapshotPath(wake.unblock, String(snapshot.snapshot_id)), snapshot);
+    return snapshot;
+  });
 }
 
 /** One slot under the non-blocking unblock lock, over one native connection. */
@@ -270,6 +287,7 @@ async function runSlot(wake: Wake): Promise<Json> {
 
 /** The Codex slot: socket and parent checks, then one budgeted connection for the whole slot. */
 async function codexSlot(
+  layout: Layout,
   game: GameLayout,
   scope: ActiveScope,
   parents: readonly string[],
@@ -290,6 +308,7 @@ async function codexSlot(
       Object.fromEntries(
         [scope.recipient, ...scope.peers, ...parents].map((id) => [id, "codex" as const]),
       ),
+    layout,
     parents,
     peers: scope.peers,
     recipient: scope.recipient,
@@ -367,14 +386,41 @@ export async function deliverScheduledWake(
     }
     const unique = [...new Set(parents as string[])];
     if (send.harness === "codex") {
-      return await codexSlot(game, scope, unique, config.reports.project, slot, signal);
+      return await codexSlot(layout, game, scope, unique, config.reports.project, slot, signal);
     }
-    return line(
-      spoolReviewBrief(process.env, game.busDir, scope, slot, unique) as unknown as Record<
-        string,
-        unknown
-      >,
-    );
+    const unblock = unblockDir(game.busDir);
+    const summary = captureMessageSummary(layout);
+    const snapshot = await locked(unblock, () => {
+      const captured = captureClaude(
+        { busDir: game.busDir, messageSummary: summary, slot, unblock },
+        null,
+        scope,
+        scope.recipient,
+        unique,
+      );
+      captured.message_health = recordMessageHealth({ unblock }, scope.recipient, slot, summary);
+      persist(snapshotPath(unblock, String(captured.snapshot_id)), captured);
+      return captured;
+    });
+    const snapshotFile = snapshotPath(unblock, String(snapshot.snapshot_id));
+    const diagnostics = [
+      {
+        detail: messageReview(
+          { health: snapshot.message_health, snapshotPath: snapshotFile },
+          summary,
+        ),
+        kind: "durable_messages",
+        snapshot_path: snapshotFile,
+        status: summary.status,
+      },
+    ];
+    const state = spoolReviewBrief(process.env, game.busDir, scope, slot, unique, diagnostics);
+    return line({
+      ...state,
+      ...(snapshot.message_health as Json),
+      snapshot_id: snapshot.snapshot_id,
+      snapshot_path: snapshotFile,
+    });
   } catch (error) {
     if (error instanceof SlotInterrupted) {
       return "";
