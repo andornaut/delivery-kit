@@ -136,9 +136,9 @@ export function brief(
 ): string {
   const targets = route.targets.map((target) => `${target.name}: ${target.sessionId}`).join("\n");
   return (
-    `Scheduled review, slot ${slot}, for these active route targets. ` +
-    `${UNBLOCK_INSTRUCTIONS} Channel acceptance is delivery only; record handling separately.` +
-    `\n${targets}\nCapability diagnostics (unavailable is never clearance): ` +
+    `Scheduled review, slot ${slot}. ${UNBLOCK_INSTRUCTIONS}` +
+    `\nActive route targets (not the full backlog inventory):\n${targets}` +
+    `\nCapability diagnostics (unavailable is never clearance): ` +
     `${pyJsonDumps(diagnostics)}`
   );
 }

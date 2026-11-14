@@ -343,12 +343,7 @@ export function reminder(
       ? `\nQuestion capability diagnostics (no pending-decision inference): ${ascii(brief.questionDiagnostics)}`
       : "";
   return (
-    `Scheduled review, slot ${slot}. Review recent Art, Gameplay and Tech activity ` +
-    "and these persisted queue IDs. Reconcile already handled IDs; prioritize actual user replies " +
-    "and dependency unblockers. Use native live steering only for confirmed unblockers. Remove an " +
-    "original only after confirmed delivery or reconciliation. Preserve unanswered questions and " +
-    "independent work; silence is not a decision. Resolve reciprocal waits with the smallest owner " +
-    `question. ${UNBLOCK_INSTRUCTIONS}\n` +
+    `Scheduled review, slot ${slot}. ${UNBLOCK_INSTRUCTIONS}\n` +
     `Full local inventory: ${snapshotFile}\n${inventory}${workerReview}${questionReview}` +
     `${diagnosticReview}`
   );
