@@ -1,7 +1,14 @@
 // Inspect a built package without claiming that its source snapshot is an immutable commit.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +94,48 @@ export function inspectPackage(
       "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
       "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
   ]);
+  const consumer = join(proof, "consumer");
+  const scope = join(consumer, "node_modules", "@andornaut");
+  mkdirSync(scope, { recursive: true });
+  symlinkSync(pkg, join(scope, "delivery-kit"), "dir");
+  const source = join(consumer, "consumer.mts");
+  writeFileSync(
+    source,
+    `import {
+  readRegistry, updateRegistry, RevisionConflict, type Registry,
+} from "@andornaut/delivery-kit/registry";
+import {
+  resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
+} from "@andornaut/delivery-kit/transport";
+const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
+const channel: string = messageChannelStateDir(
+  { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
+);
+const revision: (registry: Registry) => number = registry => registry.revision;
+// @ts-expect-error Registry declarations must preserve the numeric revision type.
+const wrongRevision: (registry: Registry) => string = registry => registry.revision;
+// @ts-expect-error Endpoint sources must remain a finite union rather than any.
+const wrongSource: "other" = endpoint.source;
+// @ts-expect-error The named transport export requires a string conversation ID.
+messageChannelStateDir({ reviewDir: "/review" }, 42);
+export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict };
+`,
+  );
+  node(consumer, join(root, "node_modules/typescript/bin/tsc"), [
+    "--noEmit",
+    "--strict",
+    "--module",
+    "NodeNext",
+    "--moduleResolution",
+    "NodeNext",
+    "--target",
+    "ES2024",
+    "--types",
+    "node",
+    "--typeRoots",
+    join(root, "node_modules/@types"),
+    source,
+  ]);
   const result = {
     version: 1,
     ...context,
@@ -94,6 +143,11 @@ export function inspectPackage(
     archive: metadata.filename,
     archiveSha256: createHash("sha256").update(readFileSync(archive)).digest("hex"),
     cliVersion: version.stdout.trim(),
+    nodeNextExports: {
+      source: "extracted-package",
+      specifiers: ["@andornaut/delivery-kit/registry", "@andornaut/delivery-kit/transport"],
+      status: "passed",
+    },
     SOURCE_DATE_EPOCH: env.SOURCE_DATE_EPOCH ?? null,
   };
   writeFileSync(join(proof, "CHECK_CONTEXT.json"), JSON.stringify(result, null, 2) + "\n");
