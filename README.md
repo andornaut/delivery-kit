@@ -621,6 +621,15 @@ Two environment variables are test-only overrides for the contract harness, neve
   `0.5`, read in place of the host load. A `loadLimit` of 0 still holds every departure, after the
   15-minute load wait.
 
+## Transport endpoint selection
+
+Import `resolveCodexControlSocket` from `@andornaut/delivery-kit/transport`.
+It returns `{ path, source }`, selecting the explicit `controlSocket` option, then
+`CODEX_CONTROL_SOCKET` from the supplied environment, then the managed socket under
+`home/.codex/app-server-control/app-server-control.sock`. Invalid explicit paths
+throw without fallback. Selection performs no connection or authentication probe.
+Existing runtime adapters and `codex ready` still require configured endpoints.
+
 ## Registry library
 
 `@andornaut/delivery-kit/registry` (`exports["./registry"]`: `dist/registry.js` with

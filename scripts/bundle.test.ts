@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BUNDLES = ["dist/cli.js", "dist/registry.js"];
+const BUNDLES = ["dist/cli.js", "dist/registry.js", "dist/transport.js"];
 const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json"];
 
 beforeAll(() => {
@@ -49,6 +49,13 @@ describe("dist/registry.js", () => {
     writeFileSync(
       consumer,
       `import { readRegistry, type Registry, RevisionConflict, updateRegistry } from ${target};
+import {
+  resolveCodexControlSocket, type CodexControlSocketEndpoint,
+} from ${JSON.stringify(join(root, "dist/transport.js"))};
+const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
+// @ts-expect-error Endpoint sources are a finite union, not arbitrary strings.
+const source: "other" = endpoint.source;
+export { endpoint, source };
 const check: (registry: Registry) => number = (registry) => registry.revision;
 // @ts-expect-error A resolved Registry type rejects this; an unresolved one would be any.
 const wrong: (registry: Registry) => string = (registry) => registry.revision;
@@ -97,6 +104,8 @@ describe("packed package", () => {
       "dist/cli.js",
       "dist/registry.d.ts",
       "dist/registry.js",
+      "dist/transport.d.ts",
+      "dist/transport.js",
     ]);
     expect(
       dist.filter((path) => path.startsWith("dist/types/") && !path.endsWith(".d.ts")),
@@ -105,6 +114,8 @@ describe("packed package", () => {
       "cli.js",
       "registry.d.ts",
       "registry.js",
+      "transport.d.ts",
+      "transport.js",
       "types",
     ]);
   });

@@ -9,5 +9,5 @@
     "outDir": "dist/types"
   },
   "include": [],
-  "files": ["src/registry/index.ts"]
+  "files": ["src/registry/index.ts", "src/transport.ts"]
 }

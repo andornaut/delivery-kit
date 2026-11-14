@@ -1,6 +1,5 @@
-// Build dist/cli.js and dist/registry.js as separate self-contained bundles, then the registry
-// declarations. Each bundle is one file that imports only node: builtins, so a running process
-// never reads its package again after startup.
+// Build self-contained CLI and public API bundles with declarations. Each imports only node:
+// builtins, so a running process never reads its package again after startup.
 import { execFileSync } from "node:child_process";
 import { chmodSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,10 +10,11 @@ const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const ENTRIES = [
   { entry: "src/bin.ts", name: "cli" },
   { entry: "src/registry/index.ts", name: "registry" },
+  { entry: "src/transport.ts", name: "transport" },
 ];
 
 for (const [index, { entry, name }] of ENTRIES.entries()) {
-  // Sequential: the first build empties dist/ and the second adds to it.
+  // Sequential: the first build empties dist/ and later builds add to it.
   // eslint-disable-next-line no-await-in-loop
   await build({
     build: {
@@ -49,3 +49,4 @@ for (const name of readdirSync("dist/types", { recursive: true })) {
   }
 }
 writeFileSync("dist/registry.d.ts", 'export * from "./types/registry/index.js";\n');
+writeFileSync("dist/transport.d.ts", 'export * from "./types/transport.js";\n');

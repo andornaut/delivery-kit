@@ -76,6 +76,15 @@ export function inspectPackage(
     "import { readRegistry, resolveConversation, updateRegistry } from '@andornaut/delivery-kit/registry'; " +
       "if (![readRegistry, resolveConversation, updateRegistry].every(value => typeof value === 'function')) process.exit(1);",
   ]);
+  const transport = manifest.exports["./transport"];
+  if (transport === undefined || !existsSync(join(pkg, transport.types)))
+    throw new Error("package transport declarations missing");
+  node(pkg, "--input-type=module", [
+    "-e",
+    "import { resolveCodexControlSocket } from '@andornaut/delivery-kit/transport'; " +
+      "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
+      "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
+  ]);
   const result = {
     version: 1,
     ...context,

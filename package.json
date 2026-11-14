@@ -1,6 +1,6 @@
 {
   "name": "@andornaut/delivery-kit",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "description": "Local scheduled Git delivery with an isolated gate, exact-commit CI watch and deployment.",
   "license": "MIT",
   "type": "module",
@@ -15,6 +15,10 @@
     "./registry": {
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "import": "./dist/transport.js"
     }
   },
   "files": [
