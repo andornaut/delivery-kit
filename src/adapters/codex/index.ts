@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { performance } from "node:perf_hooks";
 
 import type { Layout } from "../../layout.ts";
+import { resolveCodexEndpoint } from "../shared/endpoints.ts";
 import { NAMESPACE_URL, uuid5 } from "../shared/ids.ts";
 import { isRecord, type PyJson } from "../shared/pyjson.ts";
 import type {
@@ -65,8 +66,8 @@ export interface CodexAdapter extends HarnessAdapter {
   ): Promise<DeliveryReceipt>;
 }
 
-function socketAvailable(path: string | undefined): path is string {
-  if (path === undefined || !isAbsolute(path)) {
+function socketAvailable(path: string | null): path is string {
+  if (path === null) {
     return false;
   }
   try {
@@ -98,7 +99,7 @@ function unblockDirFor(layout: Layout, receiptPath: string): string | null {
 
 export function codexAdapter(layout: Layout, options: CodexOptions = {}): CodexAdapter {
   const env = options.env ?? process.env;
-  const socket = options.controlSocket ?? env.CODEX_CONTROL_SOCKET;
+  const socket = resolveCodexEndpoint({ discovery: "configured", env }, options.controlSocket).path;
   const deadlineMs = options.deadlineMs ?? 15_000;
   const collectDeadlineMs = options.collectDeadlineMs ?? 25_000;
 

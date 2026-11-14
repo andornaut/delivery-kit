@@ -8,6 +8,7 @@ import { type FakeControl, startFakeControl } from "../adapters/codex/testContro
 import { type Layout, loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
+import { resolveCodexControlSocket } from "../transport.ts";
 import { harnessReadiness } from "./readiness.ts";
 
 const CODEX_COORDINATOR = "00000000-0000-4000-8000-000000000004";
@@ -68,6 +69,10 @@ describe("harnessReadiness", () => {
     }));
     controls.push(control);
     const env = { CODEX_CONTROL_SOCKET: control.path };
+    expect(resolveCodexControlSocket({ env })).toEqual({
+      path: control.path,
+      source: "environment",
+    });
     const before = await harnessReadiness(env, layout, readRegistry(layout), "codex");
     expect(before).toEqual({
       adapter: { reason: null, status: "available" },

@@ -1,10 +1,10 @@
 // Read-only adapter and conversation readiness for a target harness or each role's selection.
 import { statSync } from "node:fs";
-import { isAbsolute } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { connectControl } from "../adapters/codex/rpc.ts";
+import { resolveCodexEndpoint } from "../adapters/shared/endpoints.ts";
 import { readRoleRoute, routeRecipient } from "../adapters/shared/route.ts";
 import { gameRecipients } from "../config.ts";
 import type { Layout } from "../layout.ts";
@@ -47,9 +47,9 @@ export interface EffectiveReadiness {
 const PROBE_MS = 5000;
 
 async function codexAdapterStatus(env: NodeJS.ProcessEnv): Promise<string | null> {
-  const socket = env.CODEX_CONTROL_SOCKET;
+  const socket = resolveCodexEndpoint({ discovery: "configured", env }).path;
   try {
-    if (socket === undefined || !isAbsolute(socket) || !statSync(socket).isSocket()) {
+    if (socket === null || !statSync(socket).isSocket()) {
       return "set CODEX_CONTROL_SOCKET to an available absolute Codex control socket path";
     }
   } catch {
