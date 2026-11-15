@@ -18,7 +18,7 @@ import { decide, Reviewed, wake } from "../lib/unblock-runner.ts";
 import type { Workspace } from "../lib/workspace.ts";
 import { routeRole, setRecipient } from "../lib/routes.ts";
 
-const COMPACTION = "native latest-turn context compaction prevents complete question proof";
+const UNKNOWN_HISTORY = "native question history incomplete or unknown";
 
 type Item = Record<string, unknown>;
 const turnOne = (item: Item) => ({ turnId: "turn-one", item });
@@ -253,7 +253,7 @@ suite("unblock guards", () => {
     expect(m.world.mutations()).toHaveLength(1);
   });
 
-  contract("latest-turn compaction defers even with visible exact proof", async () => {
+  contract("mixed compaction or unavailable predecessor history defers without input", async () => {
     const question = { id: "question", type: "agentMessage", questions: [{}] };
     const answer = { id: "answer", type: "userMessage" };
     const marker = { id: "compaction", type: "contextCompaction" };
@@ -264,7 +264,7 @@ suite("unblock guards", () => {
       answer_item_id: "answer",
     };
     const cases: Array<[string, Item[], unknown[]]> = [
-      ["structural marker", [marker], []],
+      ["completed compaction without predecessor cursor", [marker], []],
       ["unattested answer", [question, marker, answer], []],
       ["exact proof", [question, marker, answer], [resolution]],
       ["lost question proof", [marker, answer], [resolution]],
@@ -293,6 +293,9 @@ suite("unblock guards", () => {
       ],
     ];
     const m = await routed();
+    m.world.thread(TECH).status = { type: "idle" };
+    // This fixture exposes only its latest completed turn, with no predecessor cursor.
+    m.world.thread(TECH).turn = { id: "turn-one", status: "completed" };
     await m.start();
     for (const [index, [name, items, resolutions]] of cases.entries()) {
       decide(m.ws, TECH, { thread_id: TECH, state: "clear", resolutions });
@@ -305,10 +308,75 @@ suite("unblock guards", () => {
       });
       const tick = await m.slot(wake(index));
       expect(tick.result?.status, name).toBe("deferred");
-      if (name !== "unknown item") expect(m.receipt(wake(index)).reason, name).toBe(COMPACTION);
+      expect(m.receipt(wake(index)).reason, name).toBe(UNKNOWN_HISTORY);
     }
     expect(m.world.mutations()).toEqual([]);
   });
+
+  contract(
+    "completed compaction verifies predecessor answers and starts on the current thread",
+    async () => {
+      const m = await routed();
+      m.world.thread(TECH).status = { type: "idle" };
+      m.world.thread(TECH).turn = { id: "compaction-turn", status: "completed" };
+      m.socket.on("thread/turns/list", (params: Params) => {
+        if (params.threadId !== TECH) {
+          const turn = m.world.thread(String(params.threadId)).turn;
+          return { data: turn ? [turn] : [] };
+        }
+        return params.cursor === "previous"
+          ? { data: [{ id: "proof-turn", status: "completed" }], nextCursor: null }
+          : {
+              data: [{ id: "compaction-turn", status: "completed" }],
+              nextCursor: "previous",
+            };
+      });
+      history(m, (params) => {
+        if (params.turnId === "compaction-turn") {
+          return {
+            data: [
+              {
+                turnId: "compaction-turn",
+                item: { id: "compaction", type: "contextCompaction" },
+              },
+            ],
+            nextCursor: null,
+          };
+        }
+        return {
+          data:
+            params.turnId === "proof-turn"
+              ? [
+                  { id: "question", type: "agentMessage", questions: [{}] },
+                  { id: "answer", type: "userMessage" },
+                ].map((item) => ({ turnId: "proof-turn", item }))
+              : [],
+          nextCursor: null,
+        };
+      });
+      decide(m.ws, TECH, {
+        thread_id: TECH,
+        state: "clear",
+        resolutions: [
+          {
+            question_turn_id: "proof-turn",
+            question_item_id: "question",
+            answer_turn_id: "proof-turn",
+            answer_item_id: "answer",
+          },
+        ],
+      });
+      const decision = m.ws.read(`unblock/decisions/${TECH}.json`);
+      await m.start();
+      expect((await m.slot(wake(0))).result?.status).toBe("accepted");
+      const mutations = m.world.mutations();
+      expect(mutations).toHaveLength(1);
+      expect(mutations[0]?.method).toBe("turn/start");
+      expect(mutations[0]?.params.threadId).toBe(TECH);
+      expect(mutations[0]?.params.expectedTurnId).toBeUndefined();
+      expect(m.ws.read(`unblock/decisions/${TECH}.json`)).toBe(decision);
+    },
+  );
 
   contract("older-turn compaction does not poison a clear latest turn", async () => {
     const m = await routed();
