@@ -4,6 +4,7 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -13,13 +14,17 @@ import {
 import { join } from "node:path";
 
 const [, , tool, ...args] = process.argv;
+// Public identity helpers deliberately discard harness environment variables.
+if (tool === "git" && args[0] === "--no-replace-objects" && args.includes("--git-dir"))
+  passthrough("/usr/bin/git", args);
 const dir = process.env.DK_FAKE_DIR;
 if (!dir) {
   process.stderr.write("fake tool: DK_FAKE_DIR is required\n");
   process.exit(97);
 }
 const control = readJson(join(dir, "control.json"), {});
-const sha = control.sha ?? "a".repeat(40);
+const identity = readJson(join(dir, "identity.json"), {});
+const sha = control.sha ?? identity.sha;
 const remoteHeadFile = join(dir, "remote-head");
 
 function readJson(path, fallback) {
@@ -62,22 +67,23 @@ function git() {
   if (behaviour.real) passthrough(realBinary("git"), args);
   let rest = args;
   while (rest[0] === "-C" || rest[0] === "-c") rest = rest.slice(2);
-  const [command, ...tail] = rest;
+  const [command] = rest;
   const last = rest.at(-1) ?? "";
   const out = (text) => process.stdout.write(text);
   switch (command) {
     case "rev-parse":
-      if (last.endsWith("^{tree}")) {
-        out(`${"f".repeat(40)}\n`);
-      } else if (
+      if (
         behaviour.localMain &&
         ["main", "refs/heads/main", "refs/heads/main^{commit}"].includes(last)
       ) {
         out(`${behaviour.localMain}\n`);
-      } else {
-        out(`${last === "HEAD" ? sha : remoteHead()}\n`);
-      }
+      } else if (last.startsWith("origin/") || last.startsWith("refs/remotes/"))
+        out(`${remoteHead()}\n`);
+      else passthrough("/usr/bin/git", args);
       return 0;
+    case "ls-tree":
+      passthrough("/usr/bin/git", args);
+      break;
     case "ls-remote":
       out(`${remoteHead()}\trefs/heads/main\n`);
       return 0;
@@ -94,9 +100,8 @@ function git() {
       out(`${sha} fixture\n`);
       return 0;
     case "worktree":
-      // `git worktree add` creates the checkout; node_modules/ comes only from an install.
-      if (tail[0] === "add") mkdirSync(rest.at(-2), { recursive: true });
-      return 0;
+      passthrough("/usr/bin/git", args);
+      break;
     case "push":
       writeFileSync(remoteHeadFile, sha);
       return 0;
@@ -199,7 +204,9 @@ function gateProtocol(behaviour) {
       if (!groups.includes(gid))
         return fail(`gate must pass --group-add ${gid} (the checkout gid of ${source})`);
     }
-    save(name, { built: false, started: false, work: binds[0] });
+    const root = join(containers, name);
+    mkdirSync(root, { recursive: true });
+    save(name, { built: false, started: false, source: binds[0], root });
     process.stdout.write(`${name}\n`);
     return 0;
   }
@@ -214,6 +221,15 @@ function gateProtocol(behaviour) {
   if (verb === "network") return args[1] === "disconnect" ? 0 : 0;
   if (verb === "cp") {
     const [from, to] = args.slice(-2);
+    if (!from.includes(":") && to.includes(":")) {
+      const [name, destination] = to.split(":");
+      const state = load(name);
+      if (!state?.started) return fail(`container ${name} is not running`);
+      if (destination !== "/tmp/gate-source-identity.tar")
+        return fail("unexpected host-to-container copy");
+      copyFileSync(from, join(state.root, "gate-source-identity.tar"));
+      return 0;
+    }
     const name = from.split(":")[0];
     const state = load(name);
     if (!state) return fail(`no container ${name}`);
@@ -242,7 +258,21 @@ function gateProtocol(behaviour) {
     if (!state?.started) return fail(`container ${name} is not running`);
     const script = command[0] === "sh" ? (command[2] ?? "") : "";
     if (command[0] === "test") return state.built ? 0 : 1;
-    if ("EXPECTED_TREE" in env) return env.EXPECTED_TREE !== "f".repeat(40) ? 1 : 0;
+    if ("EXPECTED_TREE" in env) {
+      // Execute the actual copy/identity scripts with native Git and tar inside this fixture's
+      // isolated filesystem. Install, network, CI and deployment remain controlled fakes.
+      const translated = script
+        .replaceAll("/tmp/work", join(state.root, "work"))
+        .replaceAll("/tmp/gate-logs", join(state.root, "gate-logs"))
+        .replaceAll("/tmp/gate-source-identity.tar", join(state.root, "gate-source-identity.tar"))
+        .replaceAll("/src", state.source);
+      const result = spawnSync("/bin/sh", ["-c", translated], {
+        env: { ...process.env, ...env, PATH: "/usr/bin:/bin" },
+        stdio: "inherit",
+      });
+      if (result.status === 0 && "EXPECTED_COMMIT" in env) save(name, { ...state, verified: true });
+      return result.status ?? 1;
+    }
     if (script.includes("/sys/class/net")) return 0;
     if (script.startsWith("set -e")) {
       if (behaviour.gateFail) return 1;

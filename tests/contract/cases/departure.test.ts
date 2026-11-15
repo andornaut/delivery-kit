@@ -1,5 +1,5 @@
-// Scheduled departures through the resident runner with fake Git, Docker, GitHub and Wrangler
-//. Every case drives `run` under the virtual clock.
+// Scheduled departures use real Git identity with controlled remote, Docker, GitHub and Wrangler
+// behaviour. Every case drives `run` under the virtual clock.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { expect } from "vitest";
 
@@ -17,7 +17,7 @@ const WRANGLER = "node_modules/wrangler/bin/wrangler.js";
 function copiedOut(ws: Workspace): string[] {
   return ws
     .calls("docker")
-    .filter((call) => call.args[0] === "cp")
+    .filter((call) => call.args[0] === "cp" && (call.args.at(-2) ?? "").includes(":"))
     .map((call) => call.args.at(-2) ?? "")
     .map((source) => source.slice(source.indexOf(":") + 1));
 }
@@ -49,8 +49,9 @@ function containers(ws: Workspace) {
   return ws.calls("docker").filter((call) => {
     if (call.args[0] === "run") return true;
     if (call.args[0] !== "exec") return false;
+    if (call.args.some((arg) => arg.startsWith("EXPECTED_TREE="))) return false;
     const script = call.args.at(-1) ?? "";
-    return script.startsWith("set -e") || script.startsWith("cd /tmp/work && ");
+    return script.startsWith("set -e") || script.includes("cd /tmp/work && ");
   });
 }
 
@@ -148,6 +149,19 @@ suite("departure", () => {
     ]);
     // Copied after the gate script and before the deployment.
     const calls = ws.calls();
+    const identity = calls.findIndex(
+      (call) =>
+        call.tool === "docker" &&
+        call.args.includes(`EXPECTED_COMMIT=${SHA}`) &&
+        call.args.includes(`EXPECTED_TREE=${ws.git("rev-parse", `${SHA}^{tree}`)}`),
+    );
+    expect(identity).toBeGreaterThan(-1);
+    const identityCall = calls[identity]!;
+    const container = identityCall.args[identityCall.args.indexOf("sh") - 1]!;
+    const state = JSON.parse(
+      readFileSync(`${ws.fakeDir}/containers/${container}.json`, "utf8"),
+    ) as { verified: boolean };
+    expect(state.verified).toBe(true);
     const gate = calls.findIndex(
       (call) => call.tool === "docker" && (call.args.at(-1) ?? "").startsWith("set -e"),
     );
@@ -156,7 +170,7 @@ suite("departure", () => {
         call.tool === "docker" && (call.args.at(-2) ?? "").endsWith(":/tmp/work/node_modules/."),
     );
     const deploy = calls.findIndex((call) => call.tool === "wrangler");
-    expect(gate).toBeGreaterThanOrEqual(0);
+    expect(gate).toBeGreaterThan(identity);
     expect(copy).toBeGreaterThan(gate);
     expect(deploy).toBeGreaterThan(copy);
   });

@@ -1,6 +1,7 @@
 // Scratch workspace shared by both implementation adapters: a game-coordinator root, one or more
 // game checkouts, scratch HOME and XDG state, and fake external tools on PATH.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -22,7 +23,23 @@ export const KIT_ROOT = join(HERE, "..", "..", "..");
 const FAKE_TOOLS = ["claude", "docker", "gh", "git", "wrangler"] as const;
 export type FakeTool = (typeof FAKE_TOOLS)[number];
 
-export const SHA = "a".repeat(40);
+function objectId(type: string, body: Buffer | string): string {
+  const bytes = Buffer.from(body);
+  return createHash("sha1").update(`${type} ${bytes.length}\0`).update(bytes).digest("hex");
+}
+
+const FIXTURE_IGNORE = "dist/\n";
+const FIXTURE_TREE = objectId(
+  "tree",
+  Buffer.concat([
+    Buffer.from("100644 .gitignore\0"),
+    Buffer.from(objectId("blob", FIXTURE_IGNORE), "hex"),
+  ]),
+);
+export const SHA = objectId(
+  "commit",
+  `tree ${FIXTURE_TREE}\nauthor Fixture <fixture@example.invalid> 1700000000 +0000\ncommitter Fixture <fixture@example.invalid> 1700000000 +0000\n\nfixture\n`,
+);
 const BASE = "b".repeat(40);
 
 /** The committed game `delivery-kit.json` (plan schema 1). Values are passed through as given. */
@@ -63,7 +80,7 @@ export interface GameOptions {
   /** Key in game-coordinator `config.json`; the checkout is created beside game-coordinator. */
   game?: string;
   config?: GameConfig;
-  /** Use a real Git repository instead of the scripted fake. */
+  /** Use native Git for remote/history operations too, instead of scripting those operations. */
   realGit?: boolean;
   /** Harness-only; see Workspace.hostLoad. */
   hostLoad?: HostLoad;
@@ -169,7 +186,8 @@ export class Workspace {
     this.writeCoordinator();
     if (options.deliveryState !== null)
       this.adoptDeliveryControl(options.deliveryState ?? "enabled");
-    if (this.realGit) this.initRealGit();
+    this.initRealGit();
+    writeJson(join(this.fakeDir, "identity.json"), { sha: SHA, tree: FIXTURE_TREE });
   }
 
   private installFakes(): void {
@@ -386,11 +404,20 @@ export class Workspace {
   private initRealGit(): void {
     this.git("init", "-q", "-b", "main");
     // Games ignore build output, so the gate's dist/ does not change the Git fingerprint.
-    this.commit("fixture", { ".gitignore": "dist/\n" });
+    writeFileSync(join(this.repo, ".gitignore"), FIXTURE_IGNORE);
+    this.git("add", "--", ".gitignore");
+    execFileSync("/usr/bin/git", ["-C", this.repo, "commit", "--no-verify", "-qm", "fixture"], {
+      env: {
+        ...this.baseEnv(),
+        GIT_AUTHOR_DATE: "1700000000 +0000",
+        GIT_COMMITTER_DATE: "1700000000 +0000",
+      },
+    });
+    if (this.git("rev-parse", "HEAD") !== SHA) throw new Error("fixture commit identity differs");
   }
 
   git(...args: string[]): string {
-    return execFileSync("git", ["-C", this.repo, ...args], {
+    return execFileSync("/usr/bin/git", ["-C", this.repo, ...args], {
       env: this.baseEnv(),
       encoding: "utf8",
     }).trim();
