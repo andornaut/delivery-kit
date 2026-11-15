@@ -105,7 +105,11 @@ function itemPage(page: unknown, turnId: string, items: Map<string, NativeItem>)
     throw new Error("native item history incomplete");
   }
   for (const entry of page.data as unknown[]) {
-    if (!isRecord(entry) || entry.turnId !== turnId) {
+    if (
+      !isRecord(entry) ||
+      entry.turnId !== turnId ||
+      (Object.hasOwn(entry, "outputDeferred") && entry.outputDeferred !== false)
+    ) {
       throw new Error("native turn identity mismatch");
     }
     const item = entry.item;

@@ -147,6 +147,31 @@ describe("question proof after completed compaction", () => {
     expect(readFileSync(path, "utf8")).toBe(changed);
   });
 
+  it("does not treat a deferred saved output as fully read native proof", async () => {
+    const native = new Native();
+    native.override = (method) =>
+      method === "thread/items/list"
+        ? {
+            data: [
+              {
+                item: { id: "deferred", type: "agentMessage" },
+                outputDeferred: true,
+                turnId: "compact",
+              },
+            ],
+            nextCursor: null,
+          }
+        : undefined;
+    expect(
+      await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact", { diagnostics: true }),
+    ).toEqual([
+      false,
+      "native question history incomplete or unknown",
+      { category: "history-unavailable", classification: "unavailable", stage: "question-guard" },
+    ]);
+    expect(native.calls.map(({ method }) => method)).toEqual(["thread/items/list"]);
+  });
+
   it("uses the complete preceding turn and rechecks the current head", async () => {
     const native = new Native();
     expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact")).toEqual([
