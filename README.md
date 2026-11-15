@@ -737,17 +737,30 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
 One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and labelled
 `delivery-kit-gate=<game>`:
 
+- requires the complete approved tracked source inventory, rejecting extra ignored/untracked
+  paths and unsupported filesystem entries before creating a source-mounted container;
 - runs `gate.image` as `--user 19001:19001` with `HOME=/tmp`, `--group-add` of the worktree's
   group, `--cpus` from `resources.cpus` and `--memory <memoryMiB>m` from
   `resources.memoryMiB` (MiB);
-- binds the worktree read-only at `/src` (`--mount type=bind,...,readonly`) and the npm cache
+- binds a verified source-only stage read-only at `/src` (`--mount type=bind,...,readonly`) and the npm cache
   volume at `/var/tmp` (`npm_config_cache=/var/tmp/npm`), and sets `WORKERS_CI_COMMIT_SHA`;
 - checks that the image has `git`, `tar`, `ls` and `tail`, then copies `/src` without `.git`
   into `/tmp/work` and checks that the copy's tree is the commit's tree;
+- captures exact commit/tree/digest pins with the source-identity helpers and validates the
+  source bytes in fresh runner scratch before the stage is exposed to the image. A dirty or
+  mismatched stage is rejected; original Git metadata is never mounted;
+- transfers only freshly generated, sanitized Git metadata as a binary archive. The gate
+  verifies its digest, genuine detached HEAD, raw/index tree, exact object inventory and clean
+  status before install. Original Git configuration, history, refs, remotes, hooks and
+  credentials are not copied;
 - runs `install` with network, disconnects the container from every network and confirms only
   loopback remains, then runs each step in order under `sh -c` with `set -e`, logging to
   `NN-<name>.log`;
 - gives install and the steps four hours each.
+
+The identity bridge runs in the Node runner and adds no gate-image tool requirement. Builds
+read genuine Git identity alongside the existing `WORKERS_CI_COMMIT_SHA`; no synthetic commit,
+build-ID override or consumer-specific identity environment is required.
 
 After a gate the host copies the logs out with `docker cp` and removes the container, also after a
 failure or timeout. Git status and the content of every file it reports are fingerprinted before
