@@ -12,17 +12,18 @@ import { RunnerRefused, runRunner } from "./runner.ts";
 import { readTrimmed } from "./state.ts";
 import {
   fakeExec,
+  gateDocker,
   makeGame,
   manualClock,
   mergeFastForward,
-  ok,
   recordingEvents,
   testContext,
   type TestGame,
 } from "./testGame.ts";
 import { zonedParts } from "./time.ts";
 
-vi.mock("../review/wake.ts", () => ({
+vi.mock("../review/wake.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../review/wake.ts")>()),
   deliverScheduledWake: vi.fn(() => Promise.resolve("delivered")),
 }));
 
@@ -86,7 +87,7 @@ describe("runRunner", () => {
     const context = testContext(test, {
       clock,
       events,
-      exec: fakeExec(() => ok("lint ok\n")),
+      exec: fakeExec(gateDocker()),
       startCi: (sha) => started.push(sha),
     });
     await captureRequest(requestStore(context), "r1");
@@ -99,11 +100,12 @@ describe("runRunner", () => {
     );
     controller.abort();
     await running;
-    expect(JSON.parse(readFileSync(request, "utf8"))).toMatchObject({
+    expect(JSON.parse(readFileSync(request, "utf8")), context.lines.join("\n")).toMatchObject({
       departure_exit: 0,
       state: "finished",
     });
     expect(started).toHaveLength(1);
+    expect(context.lines).toContainEqual(expect.stringMatching(/scheduled review \d+: delivered/u));
     expect(JSON.parse(readFileSync(context.paths.identity, "utf8"))).toMatchObject({
       cli_sha256: createHash("sha256").update("loaded build").digest("hex"),
       pid: process.pid,
