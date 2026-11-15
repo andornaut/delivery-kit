@@ -114,6 +114,135 @@ function currentNative(items: Json[]): Native {
 }
 
 describe("observed native UI reply admission", () => {
+  it("accepts retained native item and wrapper lifecycle timestamps without dropping them", async () => {
+    const timestamp = 1794716830668;
+    const reply = { ...uiReply(), completedAtMs: timestamp, startedAtMs: timestamp };
+    const entry = {
+      item: reply,
+      turnId: "current",
+      completedAtMs: timestamp,
+      startedAtMs: timestamp,
+    };
+    const beforeEntry = JSON.stringify(entry);
+    const native = currentNative([]);
+    native.override = (method) =>
+      method === "thread/items/list"
+        ? { data: [{ item: asyncQuestion, turnId: "current" }, entry], nextCursor: null }
+        : undefined;
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    const beforeRecord = readFileSync(path);
+    expect(await nativeQuestionsClear(native, directory, RECIPIENT, "current")).toEqual([
+      true,
+      null,
+    ]);
+    expect(JSON.stringify(entry)).toBe(beforeEntry);
+    expect(readFileSync(path)).toEqual(beforeRecord);
+    expect(native.calls.filter(({ method }) => method === "thread/items/list")).toHaveLength(2);
+  });
+
+  it("accepts the native schema's nullable optional item timestamps", async () => {
+    const reply = { ...uiReply(), completedAtMs: null, startedAtMs: null };
+    const native = currentNative([]);
+    native.override = (method) =>
+      method === "thread/items/list"
+        ? {
+            data: [
+              { item: asyncQuestion, turnId: "current" },
+              { item: reply, turnId: "current", completedAtMs: null, startedAtMs: null },
+            ],
+            nextCursor: null,
+          }
+        : undefined;
+    expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "current")).toEqual([
+      true,
+      null,
+    ]);
+  });
+
+  it.each([
+    { label: "string", metadata: { startedAtMs: "1794716830668" } },
+    { label: "fractional", metadata: { completedAtMs: 1794716830668.5 } },
+    { label: "unsafe integer", metadata: { startedAtMs: Number.MAX_SAFE_INTEGER + 1 } },
+  ])("does not derive a reply from $label timestamp metadata", async ({ metadata }) => {
+    const native = currentNative([asyncQuestion, { ...uiReply(), ...metadata }]);
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
+  });
+
+  it.each([{ startedAtMs: "1794716830668" }, { completedAtMs: 1794716830668.5 }])(
+    "refuses malformed known wrapper timestamp metadata %j",
+    async (metadata) => {
+      const native = currentNative([]);
+      native.override = (method) =>
+        method === "thread/items/list"
+          ? {
+              data: [
+                { item: asyncQuestion, turnId: "current" },
+                { item: uiReply(), turnId: "current", ...metadata },
+              ],
+              nextCursor: null,
+            }
+          : undefined;
+      expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(
+        false,
+      );
+      expect(native.calls.map(({ method }) => method)).toEqual(["thread/items/list"]);
+    },
+  );
+
+  it("keeps unknown item fields guarded even alongside valid native timestamp metadata", async () => {
+    const reply = {
+      ...uiReply(),
+      completedAtMs: 1794716830668,
+      startedAtMs: 1794716830668,
+      unknownNativeMetadata: true,
+    };
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, reply]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+  });
+
+  it("does not turn timestamps into evidence that an unanswered question is resolved", async () => {
+    const native = currentNative([
+      { ...asyncQuestion, startedAtMs: 1794716830668, completedAtMs: 1794716830668 },
+    ]);
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[1]).toContain(
+      "question_item_id=question",
+    );
+  });
+
+  it("refuses changed item timestamps during the full native proof reread", async () => {
+    const native = currentNative([]);
+    let reads = 0;
+    native.override = (method) =>
+      method === "thread/items/list"
+        ? {
+            data: [
+              { item: asyncQuestion, turnId: "current" },
+              {
+                item: {
+                  ...uiReply(),
+                  startedAtMs: 1794716830668,
+                  completedAtMs: 1794716830668 + reads++,
+                },
+                turnId: "current",
+              },
+            ],
+            nextCursor: null,
+          }
+        : undefined;
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[1]).toBe(
+      "native answer proof items changed",
+    );
+  });
+
   it("accepts answer-first object fields while refusing additional response fields", async () => {
     const reply = uiReply();
     const content = (reply.content as Json[])[0]!;

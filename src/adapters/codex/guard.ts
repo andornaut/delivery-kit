@@ -31,6 +31,7 @@ const MAX_ITEM_PAGES = 64;
 const MAX_PROOF_TURNS = 8;
 const REPLY_OPEN = "<send_user_message_question_reply>\n";
 const REPLY_CLOSE = "\n</send_user_message_question_reply>";
+const ITEM_TIMESTAMPS: readonly string[] = ["completedAtMs", "startedAtMs"];
 
 export type NativeItem = Record<string, unknown> & { readonly id: string; readonly type: string };
 
@@ -102,6 +103,14 @@ export function questionItem(item: Record<string, unknown>): boolean {
   return false;
 }
 
+/** Optional native int64 metadata is nullable and must be exactly representable in JavaScript. */
+function nativeTimestamps(record: Record<string, unknown>): boolean {
+  return ITEM_TIMESTAMPS.every(
+    (key) =>
+      !Object.hasOwn(record, key) || record[key] === null || Number.isSafeInteger(record[key]),
+  );
+}
+
 function itemPage(
   page: unknown,
   recipient: string,
@@ -115,6 +124,7 @@ function itemPage(
     if (
       !isRecord(entry) ||
       entry.turnId !== turnId ||
+      !nativeTimestamps(entry) ||
       (Object.hasOwn(entry, "threadId") && entry.threadId !== recipient) ||
       (Object.hasOwn(entry, "outputDeferred") && entry.outputDeferred !== false)
     ) {
@@ -326,7 +336,11 @@ function nativeReplyBinding(item: NativeItem): NativeReplyBinding | null {
   if (
     item.type !== "userMessage" ||
     item.clientId !== null ||
-    Object.keys(item).sort().join(",") !== "clientId,content,id,type" ||
+    Object.keys(item)
+      .filter((key) => !ITEM_TIMESTAMPS.includes(key))
+      .sort()
+      .join(",") !== "clientId,content,id,type" ||
+    !nativeTimestamps(item) ||
     !Array.isArray(item.content) ||
     item.content.length !== 1
   ) {
