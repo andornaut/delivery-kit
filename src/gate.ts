@@ -15,9 +15,17 @@ import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BusContext } from "./bus/context.ts";
-import { assertNotInterrupted, type ExecResult, git, Interrupted } from "./bus/exec.ts";
+import { assertNotInterrupted, type ExecResult, Interrupted } from "./bus/exec.ts";
 import type { GateStep } from "./config.ts";
 import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
+import {
+  captureGateIdentity,
+  GATE_GIT_CONTEXT,
+  GATE_GIT_ENV,
+  GATE_IDENTITY_SCRIPT,
+  type GateIdentity,
+  releaseGateIdentity,
+} from "./gate-identity.ts";
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -38,7 +46,7 @@ const GATE_TIMEOUT_SECONDS = 4 * 3600;
 
 /** One `sh -c` script running every step in order, logging each to GATE_LOGS. */
 export function gateScript(steps: readonly GateStep[]): string {
-  const lines = ["set -e", `cd ${GATE_WORK}`];
+  const lines = ["set -e", GATE_GIT_ENV, `cd ${GATE_WORK}`];
   steps.forEach((step, index) => {
     const log = shellQuote(`${GATE_LOGS}/${stepLogName(index + 1, step.name)}`);
     lines.push(
@@ -101,7 +109,12 @@ function gateContainerName(game: string, departure: string): string {
   return `delivery-kit-gate-${game}-${departure}`;
 }
 
-function createArgs(context: BusContext, name: string, input: GateInput): string[] {
+function createArgs(
+  context: BusContext,
+  name: string,
+  input: GateInput,
+  identity: GateIdentity,
+): string[] {
   const { config, game } = context;
   return [
     "create",
@@ -114,7 +127,7 @@ function createArgs(context: BusContext, name: string, input: GateInput): string
     "--memory",
     `${config.resources.memoryMiB}m`,
     ...userArgs(),
-    ...checkoutMount(input.work, GATE_SOURCE),
+    ...checkoutMount(identity.copied, GATE_SOURCE),
     "-e",
     `WORKERS_CI_COMMIT_SHA=${input.sha}`,
     ...npmCacheArgs(npmVolume(game.id)),
@@ -239,10 +252,12 @@ const COPY_SCRIPT = [
     `command -v "$tool" >/dev/null 2>&1 || { echo "$tool"; exit ${MISSING_TOOL}; };`,
     "done",
   ].join(" "),
+  GATE_GIT_ENV,
   `mkdir -p ${GATE_WORK} ${GATE_LOGS}`,
   `tar -C ${GATE_SOURCE} --exclude=./.git -cf - . | tar -x -C ${GATE_WORK}`,
   `cd ${GATE_WORK}`,
-  "git init -q",
+  "git init -q --template=",
+  GATE_GIT_CONTEXT,
   "git add -A -f",
   "actual=$(git write-tree)",
   "rm -rf .git",
@@ -253,9 +268,9 @@ const COPY_SCRIPT = [
 async function copyIn(
   context: BusContext,
   name: string,
-  input: GateInput,
+  identity: GateIdentity,
 ): Promise<string | undefined> {
-  const tree = await git(context.exec, input.work, ["rev-parse", `${input.sha}^{tree}`]);
+  const tree = identity.manifest.tree;
   const copy = await docker(context, [
     "exec",
     "-e",
@@ -266,7 +281,33 @@ async function copyIn(
     COPY_SCRIPT,
   ]);
   if (copy.status === 0) {
-    return undefined;
+    const transferred = await docker(context, [
+      "cp",
+      "--quiet",
+      identity.archive,
+      `${name}:/tmp/gate-source-identity.tar`,
+    ]);
+    if (transferred.status !== 0) {
+      return `copying fresh gate source identity failed: ${diagnostic(transferred)}`;
+    }
+    const verified = await docker(context, [
+      "exec",
+      "-e",
+      `EXPECTED_COMMIT=${identity.manifest.commit}`,
+      "-e",
+      `EXPECTED_TREE=${tree}`,
+      "-e",
+      `EXPECTED_ARCHIVE_BLOB=${identity.archiveBlob}`,
+      "-e",
+      `EXPECTED_OBJECTS_BLOB=${identity.objectsBlob}`,
+      name,
+      "sh",
+      "-c",
+      GATE_IDENTITY_SCRIPT,
+    ]);
+    return verified.status === 0
+      ? undefined
+      : `gate source identity validation failed: ${diagnostic(verified)}`;
   }
   if (copy.status === MISSING_TOOL) {
     const tool = copy.stdout.trim() || "required tool";
@@ -311,10 +352,15 @@ async function copyOut(
   }
 }
 
-async function gate(context: BusContext, name: string, input: GateInput): Promise<GateOutcome> {
+async function gate(
+  context: BusContext,
+  name: string,
+  input: GateInput,
+  identity: GateIdentity,
+): Promise<GateOutcome> {
   const { gate: settings } = context.config;
   const timeoutMs = GATE_TIMEOUT_SECONDS * 1000;
-  const created = await docker(context, createArgs(context, name, input));
+  const created = await docker(context, createArgs(context, name, input, identity));
   if (created.status !== 0) {
     return blockedGate(`docker create of the gate container failed: ${diagnostic(created)}`);
   }
@@ -322,7 +368,7 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
   if (started.status !== 0) {
     return blockedGate(`docker start of the gate container failed: ${diagnostic(started)}`);
   }
-  const copyProblem = await copyIn(context, name, input);
+  const copyProblem = await copyIn(context, name, identity);
   if (copyProblem !== undefined) {
     return blockedGate(copyProblem);
   }
@@ -330,7 +376,7 @@ async function gate(context: BusContext, name: string, input: GateInput): Promis
     const log = join(input.logs, "install.log");
     const install = await docker(
       context,
-      ["exec", name, "sh", "-c", `cd ${GATE_WORK} && ${settings.install}`],
+      ["exec", name, "sh", "-c", `${GATE_GIT_ENV} && cd ${GATE_WORK} && ${settings.install}`],
       log,
       timeoutMs,
     );
@@ -387,8 +433,11 @@ export async function runGate(
   await removeLeftoverGates(context);
   const name = gateContainerName(context.game.id, input.departure);
   let outcome: GateOutcome = blockedGate("gate did not start");
+  let identity: GateIdentity | undefined;
   try {
-    outcome = await gate(context, name, input);
+    // Complete source-only admission precedes any source-bound image or entrypoint.
+    identity = await captureGateIdentity(context, input);
+    outcome = await gate(context, name, input, identity);
     if (outcome.ok) {
       // Checked before the outputs are copied into the worktree, so the copy is not a change.
       const problem = await verify();
@@ -407,7 +456,29 @@ export async function runGate(
       outcome = blockedGate(error instanceof Error ? error.message : String(error));
     }
   } finally {
-    await docker(context, ["rm", "--force", name]);
+    const removed = await docker(context, ["rm", "--force", name]);
+    if (identity !== undefined) {
+      let absent = removed.status === 0;
+      if (!absent) {
+        const listed = await docker(context, [
+          "ps",
+          "--all",
+          "--filter",
+          `name=${name}`,
+          "--format",
+          "{{.Names}}",
+        ]);
+        absent = listed.status === 0 && !listed.stdout.split("\n").includes(name);
+      }
+      if (absent) {
+        releaseGateIdentity(identity);
+      } else {
+        context.log(`gate removal failed; approved source stage retained at ${identity.directory}`);
+        if (outcome.ok) {
+          outcome = blockedGate("gate container removal failed; approved source stage retained");
+        }
+      }
+    }
   }
   return outcome;
 }

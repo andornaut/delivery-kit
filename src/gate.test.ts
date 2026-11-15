@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,11 +17,13 @@ import { describe, expect, it } from "vitest";
 import type { ExecResult } from "./bus/exec.ts";
 import {
   assertContainerRules,
+  commitFile,
   FAKE_WRANGLER,
   fakeExec,
   gateDocker,
   gitSync,
   makeGame,
+  mergeWithCommit,
   ok,
   testContext,
 } from "./bus/testGame.ts";
@@ -67,6 +78,7 @@ describe("runGate", () => {
     expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
     const copies = exec.calls.filter((call) => call.args[0] === "cp").map((call) => call.args[2]);
     expect(copies).toEqual([
+      expect.stringMatching(/delivery-gate-identity-.*\/identity\.tar$/u),
       `${NAME}:/tmp/gate-logs/.`,
       `${NAME}:/tmp/work/dist/.`,
       `${NAME}:/tmp/work/node_modules/.`,
@@ -76,7 +88,9 @@ describe("runGate", () => {
       expect.arrayContaining([
         "--group-add",
         String(statSync(test.repo).gid),
-        `type=bind,src=${test.repo},dst=/src,readonly`,
+        expect.stringMatching(
+          /type=bind,src=.*delivery-gate-identity-.*\/copied,dst=\/src,readonly/u,
+        ),
       ]),
     );
     expect(create[create.indexOf("--memory") + 1]).toBe("2305m");
@@ -85,12 +99,243 @@ describe("runGate", () => {
     const copy = exec.calls.find((call) => call.args.includes(`EXPECTED_TREE=${tree}`))?.args ?? [];
     expect(copy.at(-1)).toContain('test "$actual" = "$EXPECTED_TREE"');
     expect(
-      exec.calls.some(
-        (call) => call.args[0] === "cp" && !call.args.some((arg) => arg.startsWith(NAME)),
-      ),
-    ).toBe(false);
+      exec.calls.filter((call) => call.args[0] === "cp" && call.args[2]?.endsWith("identity.tar")),
+    ).toHaveLength(1);
+    const identityCheck = exec.calls.find((call) =>
+      call.args.some((arg) => arg.startsWith("EXPECTED_COMMIT=")),
+    );
+    expect(identityCheck?.args.at(-1)).not.toContain("node ");
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
+
+  it("provides the real shallow merge HEAD and clean tree before install and every gate category", async () => {
+    let expected = "";
+    let tree = "";
+    let parent = "";
+    const seen: string[] = [];
+    const inspect = (work: string): ExecResult => {
+      expect(gitSync(work, "rev-parse", "HEAD")).toBe(expected);
+      expect(gitSync(work, "rev-parse", "HEAD^{tree}")).toBe(tree);
+      expect(gitSync(work, "write-tree")).toBe(tree);
+      expect(gitSync(work, "status", "--porcelain=v1", "--untracked-files=all")).toBe("");
+      expect(gitSync(work, "rev-list", "--count", "HEAD")).toBe("1");
+      expect(
+        spawnSync("git", ["-C", work, "cat-file", "-e", parent], { stdio: "ignore" }).status,
+      ).not.toBe(0);
+      expect(readFileSync(join(work, ".git", "config"), "utf8")).not.toContain("remote");
+      expect(readFileSync(join(work, ".git", "config"), "utf8")).not.toContain("worktree");
+      seen.push(work);
+      return ok();
+    };
+    const test = setup({ install: inspect, gate: inspect });
+    parent = test.input.sha;
+    expected = mergeWithCommit(test.test, "identity-topic");
+    tree = gitSync(test.test.repo, "rev-parse", "HEAD^{tree}");
+    test.input.sha = expected;
+    expect(await runGate(test.context, test.input)).toEqual({ ok: true, output: "" });
+    expect(seen).toHaveLength(2);
+    expect(gitSync(test.test.repo, "rev-parse", "HEAD")).toBe(expected);
+    expect(gitSync(test.test.repo, "rev-list", "--count", "HEAD")).toBe("4");
+  });
+
+  it("rejects an ignored unknown store before any source-bound container exists", async () => {
+    const test = setup({});
+    commitFile(test.test.repo, ".gitignore", ".private-store/\n");
+    test.input.sha = gitSync(test.test.repo, "rev-parse", "HEAD");
+    const store = join(test.test.repo, ".private-store");
+    mkdirSync(store, { mode: 0o000 });
+    const outcome = await runGate(test.context, test.input);
+    expect(outcome).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: "gate source contains a path outside the approved tracked inventory",
+    });
+    expect(verbs(test.exec)).not.toContain("create");
+    expect(verbs(test.exec)).not.toContain("start");
+    expect(test.exec.calls.some((call) => call.args.includes("sh"))).toBe(false);
+  });
+
+  it("mounts only verified source staging without any original Git metadata", async () => {
+    const test = makeGame();
+    let inspected = false;
+    const exec = fakeExec((spec) => {
+      if (spec.args[0] === "create") {
+        const mount = spec.args.find((arg) => arg.endsWith("dst=/src,readonly"));
+        const path = /src=([^,]+)/u.exec(mount ?? "")?.[1];
+        expect(path).toBeDefined();
+        expect(path).not.toBe(test.repo);
+        expect(lstatSync(path!).isDirectory()).toBe(true);
+        expect(existsSync(join(path!, ".git"))).toBe(false);
+        expect(readdirSync(path!).sort()).toEqual(["README.md", "delivery-kit.json"]);
+        inspected = true;
+      }
+      return gateDocker()(spec);
+    });
+    expect(
+      await runGate(testContext(test, { exec }), {
+        departure: "masked",
+        work: test.repo,
+        sha: gitSync(test.repo, "rev-parse", "HEAD"),
+        logs: mkdtempSync(join(tmpdir(), "logs-")),
+      }),
+    ).toMatchObject({ ok: true });
+    expect(inspected).toBe(true);
+  });
+
+  it("ignores inherited image Git redirections and injected configuration during source proof", async () => {
+    const test = setup({
+      environment: {
+        GIT_DIR: "/missing/foreign-git",
+        GIT_WORK_TREE: "/missing/foreign-work",
+        GIT_COMMON_DIR: "/missing/common",
+        GIT_INDEX_FILE: "/missing/index",
+        GIT_OBJECT_DIRECTORY: "/missing/objects",
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: "/missing/alternates",
+        GIT_SHALLOW_FILE: "/missing/shallow",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.worktree",
+        GIT_CONFIG_VALUE_0: "/missing/injected",
+      },
+    });
+    expect(await runGate(test.context, test.input)).toMatchObject({ ok: true });
+  });
+
+  it("refuses an unknown Git cleanliness result instead of treating empty stdout as clean", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "gate-git-"));
+    const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nif [ "$1" = status ]; then exit 1; fi\nexec '${real}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    const test = setup({ environment: { PATH: `${bin}:${process.env.PATH ?? ""}` } });
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("gate source identity validation failed"),
+    });
+    expect(test.exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+  });
+
+  it("refuses a source whose current HEAD differs from the selected exact commit", async () => {
+    const test = setup({});
+    commitFile(test.test.repo, "README.md", "new source\n");
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: "source HEAD mismatch",
+    });
+    expect(verbs(test.exec)).not.toContain("create");
+  });
+
+  it("rejects a changed container source after the independent copy-tree check", async () => {
+    const test = setup({
+      afterCopy: (work) => writeFileSync(join(work, "README.md"), "changed copy\n"),
+    });
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("gate source identity validation failed"),
+    });
+    expect(test.exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+    expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("game\n");
+  });
+
+  it("rejects dirty source before image exposure and leaves the original files dirty", async () => {
+    const test = setup({});
+    writeFileSync(join(test.test.repo, "README.md"), "uncommitted change\n");
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: "gate source identity copy is dirty",
+    });
+    expect(verbs(test.exec)).not.toContain("create");
+    expect(gitSync(test.test.repo, "status", "--porcelain")).toContain("M README.md");
+    expect(gitSync(test.test.repo, "diff", "--cached", "--name-only")).toBe("");
+    expect(test.exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+  });
+
+  it("rejects a corrupted binary metadata transfer before extraction and install", async () => {
+    const test = makeGame();
+    const exec = fakeExec((spec) => {
+      if (spec.args[0] === "cp" && spec.args[3]?.endsWith(":/tmp/gate-source-identity.tar")) {
+        const archive = spec.args[2]!;
+        const bytes = readFileSync(archive);
+        bytes[0] = bytes[0]! ^ 1;
+        writeFileSync(archive, bytes);
+      }
+      return gateDocker()(spec);
+    });
+    expect(
+      await runGate(testContext(test, { exec }), {
+        departure: "identity",
+        work: test.repo,
+        sha: gitSync(test.repo, "rev-parse", "HEAD"),
+        logs: mkdtempSync(join(tmpdir(), "logs-")),
+      }),
+    ).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("gate source identity validation failed"),
+    });
+    expect(exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+  });
+
+  it("retains the existing image tool contract without requiring Node for identity transfer", async () => {
+    const test = makeGame();
+    const exec = fakeExec((spec) =>
+      spec.args.at(-1)?.includes("for tool in git tar ls tail")
+        ? { status: 3, stdout: "git\n", stderr: "" }
+        : gateDocker()(spec),
+    );
+    expect(
+      await runGate(testContext(test, { exec }), {
+        departure: "identity",
+        work: test.repo,
+        sha: gitSync(test.repo, "rev-parse", "HEAD"),
+        logs: mkdtempSync(join(tmpdir(), "logs-")),
+      }),
+    ).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("it needs sh, git, tar, ls, tail"),
+    });
+    expect(exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+  });
+
+  it.each(["identity-archive", "identity-verification"])(
+    "stops before install on %s transfer failure and removes the container",
+    async (stage) => {
+      const test = makeGame();
+      const exec = fakeExec((spec) => {
+        if (
+          (stage === "identity-archive" &&
+            spec.args[0] === "cp" &&
+            spec.args[3]?.endsWith(":/tmp/gate-source-identity.tar")) ||
+          (stage === "identity-verification" &&
+            spec.args[0] === "exec" &&
+            spec.args.some((arg) => arg.startsWith("EXPECTED_COMMIT=")))
+        ) {
+          return { status: 1, stdout: "", stderr: "fixture transfer failed" };
+        }
+        return gateDocker()(spec);
+      });
+      expect(
+        await runGate(testContext(test, { exec }), {
+          departure: "identity",
+          work: test.repo,
+          sha: gitSync(test.repo, "rev-parse", "HEAD"),
+          logs: mkdtempSync(join(tmpdir(), "logs-")),
+        }),
+      ).toMatchObject({ ok: false, failure: "infrastructure" });
+      expect(exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+      expect(exec.calls.at(-1)?.args).toEqual([
+        "rm",
+        "--force",
+        "delivery-kit-gate-archies-dog-walks-identity",
+      ]);
+    },
+  );
 
   it("removes the container when the copied tree is not the departure commit", async () => {
     const test = makeGame();
@@ -214,21 +459,61 @@ describe("runGate", () => {
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
     expect(exec.calls.filter((call) => call.args[0] === "cp").map((call) => call.args[2])).toEqual([
+      expect.stringMatching(/delivery-gate-identity-.*\/identity\.tar$/u),
       `${NAME}:/tmp/gate-logs/.`,
     ]);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 
   it("verifies the tree before any output is copied into it", async () => {
-    const { context, input, test } = setup({});
+    const { context, exec, input, test } = setup({});
     const seen: boolean[] = [];
+    let stage = "";
     const verify = () => {
+      const mount = exec.calls
+        .find((call) => call.args[0] === "create")
+        ?.args.find((arg) => arg.endsWith("dst=/src,readonly"));
+      stage = /src=([^,]+)/u.exec(mount ?? "")?.[1] ?? "";
+      expect(existsSync(stage)).toBe(true);
       seen.push(existsSync(join(test.repo, "dist")), existsSync(join(test.repo, "node_modules")));
       return Promise.resolve(undefined);
     };
     expect(await runGate(context, input, verify)).toMatchObject({ ok: true });
     expect(seen).toEqual([false, false]);
     expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
+    expect(existsSync(stage)).toBe(false);
+  });
+
+  it("retains approved staging if container removal fails instead of deleting a live mount", async () => {
+    const test = makeGame();
+    let stage = "";
+    const exec = fakeExec((spec) => {
+      if (spec.args[0] === "create") {
+        const mount = spec.args.find((arg) => arg.endsWith("dst=/src,readonly"));
+        stage = /src=([^,]+)/u.exec(mount ?? "")?.[1] ?? "";
+      }
+      if (spec.args[0] === "rm") {
+        return { status: 1, stdout: "", stderr: "fixture removal failed" };
+      }
+      return gateDocker()(spec);
+    });
+    const context = testContext(test, { exec });
+    expect(
+      await runGate(context, {
+        departure: "cleanup",
+        work: test.repo,
+        sha: gitSync(test.repo, "rev-parse", "HEAD"),
+        logs: mkdtempSync(join(tmpdir(), "logs-")),
+      }),
+    ).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: "gate container removal failed; approved source stage retained",
+    });
+    expect(existsSync(stage)).toBe(true);
+    expect(context.lines.some((line) => line.includes("approved source stage retained"))).toBe(
+      true,
+    );
   });
 
   it("removes the container after a gate timeout", async () => {

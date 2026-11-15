@@ -1,7 +1,8 @@
 // Test fixtures for the bus: a scratch game-coordinator tree whose game is a real Git checkout with a
 // bare origin, fake docker, gh and Wrangler children, recorded events and a manual clock.
-import { execFileSync } from "node:child_process";
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ProjectConfig, validateProjectConfig } from "../config.ts";
@@ -85,6 +86,13 @@ export function manualClock(start: number): ManualClock {
 
 export type FakeChild = (spec: ExecSpec) => ExecResult | Promise<ExecResult>;
 
+interface FakeGateContainer {
+  readonly source: string;
+  readonly root: string;
+  readonly work: string;
+}
+const gateStates = new WeakMap<ExecSpec, Map<string, FakeGateContainer>>();
+
 export const ok = (stdout = ""): ExecResult => ({ status: 0, stderr: "", stdout });
 
 /**
@@ -123,11 +131,13 @@ export function assertContainerRules(spec: ExecSpec): void {
 /** Real git; docker, gh and Wrangler go to `fake`, which records every call. */
 export function fakeExec(fake: FakeChild): Exec & { calls: ExecSpec[] } {
   const calls: ExecSpec[] = [];
+  const containers = new Map<string, FakeGateContainer>();
   const exec = (async (spec: ExecSpec) => {
     if (spec.command === "git") {
       return spawnExec(spec);
     }
     calls.push(spec);
+    gateStates.set(spec, containers);
     if (spec.command === "docker") {
       assertContainerRules(spec);
     }
@@ -138,9 +148,13 @@ export function fakeExec(fake: FakeChild): Exec & { calls: ExecSpec[] } {
 }
 
 export interface GateFake {
+  /** Mutate the simulated container copy after the independent forced-tree check. */
+  readonly afterCopy?: (work: string) => void;
+  /** Image Git variables are applied only to its emulated copy/identity shell processes. */
+  readonly environment?: Readonly<Record<string, string>>;
   /** The gate step script's result; defaults to success. */
-  readonly gate?: () => ExecResult;
-  readonly install?: () => ExecResult;
+  readonly gate?: (work: string) => ExecResult;
+  readonly install?: (work: string) => ExecResult;
   /** The gate container has no node_modules/, as after an install that provides none. */
   readonly noNodeModules?: boolean;
 }
@@ -159,18 +173,73 @@ export function gateDocker(fake: GateFake = {}): FakeChild {
     if (spec.command !== "docker") {
       return ok();
     }
+    const containers = gateStates.get(spec);
+    if (verb === "ps" && rest.some((arg) => arg.startsWith("name="))) {
+      return ok([...(containers?.keys() ?? [])].join("\n"));
+    }
+    if (verb === "create" && containers !== undefined) {
+      const name = rest[rest.indexOf("--name") + 1]!;
+      const mount = rest.find((arg) => arg.includes("dst=/src,"));
+      const source = /src=([^,]+)/u.exec(mount ?? "")?.[1];
+      if (source === undefined) {
+        throw new Error("fake gate source mount missing");
+      }
+      const root = mkdtempSync(join(tmpdir(), "fake-gate-container-"));
+      containers.set(name, { root, source, work: join(root, "work") });
+    }
+    const containerName = rest.find((arg) => containers?.has(arg));
+    const container = containerName === undefined ? undefined : containers?.get(containerName);
+    const script = rest.at(-1) ?? "";
+    if (
+      verb === "exec" &&
+      container !== undefined &&
+      (rest.some((arg) => arg.startsWith("EXPECTED_TREE=")) ||
+        script.includes("gate-source-identity.tar"))
+    ) {
+      const environment = { ...process.env, ...fake.environment };
+      rest.forEach((arg, index) => {
+        if (rest[index - 1] === "-e") {
+          const at = arg.indexOf("=");
+          environment[arg.slice(0, at)] = arg.slice(at + 1);
+        }
+      });
+      // Emulate non-root extraction ownership even when the isolated test process is root.
+      const paths: Record<string, string> = {
+        "/src": container.source,
+        "/tmp/gate-logs": join(container.root, "logs"),
+        "/tmp/gate-source-identity.tar": join(container.root, "identity.tar"),
+        "/tmp/work": container.work,
+      };
+      const mapped = script
+        .replace(
+          /\/tmp\/gate-source-identity\.tar|\/tmp\/gate-logs|\/tmp\/work|\/src/gu,
+          (path) => paths[path]!,
+        )
+        .replace("tar -xf", "tar --no-same-owner -xf");
+      const result = spawnSync("sh", ["-c", mapped], { encoding: "utf8", env: environment });
+      if (result.status === 0 && !rest.some((arg) => arg.startsWith("EXPECTED_COMMIT="))) {
+        fake.afterCopy?.(container.work);
+      }
+      return { status: result.status, stderr: result.stderr ?? "", stdout: result.stdout ?? "" };
+    }
     if (verb === "exec" && rest.at(-1)?.startsWith("set -e") === true) {
-      return fake.gate?.() ?? ok("lint ok\ntest ok\n");
+      return fake.gate?.(container?.work ?? "") ?? ok("lint ok\ntest ok\n");
     }
     if (verb === "exec" && rest.includes("sh") && rest.at(-1)?.includes("npm ci") === true) {
-      return fake.install?.() ?? ok();
+      return fake.install?.(container?.work ?? "") ?? ok();
     }
     if (verb === "exec" && rest[1] === "test" && rest.at(-1) === "/tmp/work/node_modules") {
       return fake.noNodeModules === true ? { status: 1, stderr: "", stdout: "" } : ok();
     }
     if (verb === "cp") {
       const [source = "", destination = ""] = rest.filter((arg) => arg !== "--quiet");
-      if (source.endsWith(":/tmp/work/dist/.")) {
+      if (destination.endsWith(":/tmp/gate-source-identity.tar")) {
+        const copy = containers?.get(destination.slice(0, destination.indexOf(":")));
+        if (copy === undefined) {
+          throw new Error("fake gate identity destination missing");
+        }
+        cpSync(source, join(copy.root, "identity.tar"));
+      } else if (source.endsWith(":/tmp/work/dist/.")) {
         writeFileSync(join(destination, "index.js"), "built\n");
       } else if (source.endsWith(":/tmp/work/node_modules/.")) {
         const entry = join(destination, FAKE_WRANGLER);
@@ -179,6 +248,10 @@ export function gateDocker(fake: GateFake = {}): FakeChild {
       } else if (source.endsWith(":/tmp/gate-logs/.")) {
         writeFileSync(join(destination, "01-lint.log"), "linted\n");
       }
+    }
+    if (verb === "rm" && container !== undefined && containerName !== undefined) {
+      rmSync(container.root, { force: true, recursive: true });
+      containers?.delete(containerName);
     }
     return ok();
   };
@@ -206,6 +279,7 @@ export function makeGame(
   const origin = join(base, "origin.git");
   execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
   gitSync(game.repo, "init", "-q", "-b", "main");
+  gitSync(game.repo, "add", "--", "delivery-kit.json");
   commitFile(game.repo, "README.md", "game\n", "initial");
   gitSync(game.repo, "remote", "add", "origin", origin);
   gitSync(game.repo, "push", "-q", "origin", "main");
