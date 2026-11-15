@@ -125,6 +125,7 @@ describe("runGate", () => {
       expect(readFileSync(join(work, ".git", "config"), "utf8")).not.toContain("remote");
       expect(readFileSync(join(work, ".git", "config"), "utf8")).not.toContain("worktree");
       expect(readFileSync(join(work, " leading.txt"), "utf8")).toBe("leading filename\n");
+      gitSync(work, "config", "core.hooksPath", ".hooks/_");
       seen.push(work);
       return ok();
     };
@@ -267,7 +268,7 @@ describe("runGate", () => {
     expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("game\n");
     expect(
       test.exec.calls.filter((call) => call.args.some((arg) => arg.startsWith("EXPECTED_COMMIT="))),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 
   it("refuses an install that hides changed tracked bytes with an index flag", async () => {
@@ -291,6 +292,26 @@ describe("runGate", () => {
     });
     expect(ranCategory).toBe(false);
     expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("game\n");
+  });
+
+  it("refuses duplicate install config keys before native category execution", async () => {
+    let ranCategory = false;
+    const test = setup({
+      install: (work) => {
+        gitSync(work, "config", "--add", "core.fsmonitor", "false");
+        return ok();
+      },
+      gate: () => {
+        ranCategory = true;
+        return ok();
+      },
+    });
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("unsafe or unavailable Git configuration"),
+    });
+    expect(ranCategory).toBe(false);
   });
 
   it("rejects dirty source before image exposure and leaves the original files dirty", async () => {

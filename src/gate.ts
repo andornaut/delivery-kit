@@ -19,7 +19,9 @@ import { assertNotInterrupted, type ExecResult, Interrupted } from "./bus/exec.t
 import type { GateStep } from "./config.ts";
 import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
 import {
+  approvedGateConfigBlob,
   captureGateIdentity,
+  GATE_CONFIG_SCRIPT,
   GATE_GIT_CONTEXT,
   GATE_GIT_ENV,
   GATE_IDENTITY_SCRIPT,
@@ -310,6 +312,26 @@ async function verifyIdentity(
   identity: GateIdentity,
   script = GATE_VERIFY_IDENTITY_SCRIPT,
 ): Promise<string | undefined> {
+  let configBlob = identity.configBlob;
+  if (script === GATE_VERIFY_IDENTITY_SCRIPT) {
+    const configuration = await docker(context, [
+      "exec",
+      "-e",
+      `EXPECTED_COMMIT=${identity.manifest.commit}`,
+      "-e",
+      `EXPECTED_TREE=${identity.manifest.tree}`,
+      name,
+      "sh",
+      "-c",
+      GATE_CONFIG_SCRIPT,
+    ]);
+    const approved =
+      configuration.status === 0 ? approvedGateConfigBlob(configuration.stdout) : undefined;
+    if (approved === undefined) {
+      return "gate source identity validation failed: unsafe or unavailable Git configuration";
+    }
+    configBlob = approved;
+  }
   const verified = await docker(context, [
     "exec",
     "-e",
@@ -321,7 +343,7 @@ async function verifyIdentity(
     "-e",
     `EXPECTED_OBJECTS_BLOB=${identity.objectsBlob}`,
     "-e",
-    `EXPECTED_CONFIG_BLOB=${identity.configBlob}`,
+    `EXPECTED_CONFIG_BLOB=${configBlob}`,
     name,
     "sh",
     "-c",

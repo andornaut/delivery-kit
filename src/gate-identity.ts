@@ -320,9 +320,72 @@ export const GATE_GIT_CONTEXT = [
   "export GIT_SHALLOW_FILE=/tmp/work/.git/shallow",
 ].join(" && ");
 
+/** Parse this invocation's complete native response without exposing config values. */
+export function approvedGateConfigBlob(output: string): string | undefined {
+  if (Buffer.byteLength(output) > 16_384) {
+    return undefined;
+  }
+  const entries = output.split("\0");
+  const digest = entries.pop();
+  if (digest === undefined || !/^[a-f0-9]{40}\n$/u.test(digest)) {
+    return undefined;
+  }
+  const expected = new Map([
+    ["core.repositoryformatversion", "0"],
+    ["core.filemode", "true"],
+    ["core.bare", "false"],
+    ["core.logallrefupdates", "false"],
+    ["core.fsmonitor", "false"],
+    ["core.untrackedcache", "false"],
+  ]);
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const separator = entry.indexOf("\n");
+    if (separator < 1) {
+      return undefined;
+    }
+    const key = entry.slice(0, separator);
+    const value = entry.slice(separator + 1);
+    if (seen.has(key)) {
+      return undefined;
+    }
+    seen.add(key);
+    if (key === "core.hookspath") {
+      if (
+        value === "" ||
+        [...value].some((character) => {
+          const code = character.charCodeAt(0);
+          return code < 32 || code === 127;
+        })
+      ) {
+        return undefined;
+      }
+    } else if (!expected.has(key) || value !== expected.get(key)) {
+      return undefined;
+    }
+  }
+  return seen.size === expected.size + 1 && seen.has("core.hookspath")
+    ? digest.trimEnd()
+    : undefined;
+}
+
+/** Read outside the repository; includes are returned as keys, never followed. */
+export const GATE_CONFIG_SCRIPT = [
+  GATE_GIT_ENV,
+  "cd /tmp",
+  "test -f /tmp/work/.git/config && test ! -L /tmp/work/.git/config",
+  "before=$(git hash-object --no-filters /tmp/work/.git/config)",
+  "git config --file /tmp/work/.git/config --no-includes --null --list",
+  "after=$(git hash-object --no-filters /tmp/work/.git/config)",
+  'test "$before" = "$after"',
+  'printf "%s\\n" "$after"',
+].join(" && ");
+
 /** Read-only validation is shared by admission and the boundary after install. */
 export const GATE_VERIFY_IDENTITY_SCRIPT = [
   GATE_GIT_ENV,
+  "export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null",
+  "export GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false",
   "cd /tmp/work",
   'test "$(git -C /tmp hash-object --no-filters /tmp/work/.git/config)" = "$EXPECTED_CONFIG_BLOB"',
   'test "$(git rev-parse --show-toplevel)" = /tmp/work',
