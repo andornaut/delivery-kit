@@ -117,7 +117,9 @@ export function inspectPackage(
   ]);
   node(pkg, "--input-type=module", [
     "-e",
-    "import { resolveCodexControlSocket, messageChannelStateDir } from '@andornaut/delivery-kit/build/transport'; " +
+    "import * as transport from '@andornaut/delivery-kit/build/transport'; " +
+      "if (JSON.stringify(Object.keys(transport).sort()) !== JSON.stringify(['messageChannelStateDir', 'resolveCodexControlSocket'])) process.exit(1); " +
+      "const { resolveCodexControlSocket, messageChannelStateDir } = transport; " +
       "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
       "const channel = messageChannelStateDir({ reviewDir: '/review' }, '00000000-0000-4000-8000-000000000001'); " +
       "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
@@ -140,6 +142,7 @@ export function inspectPackage(
 } from "@andornaut/delivery-kit/build/registry";
 import {
   resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
+  type DeliveryDiagnostic, type NativeRpcCode,
 } from "@andornaut/delivery-kit/build/transport";
 import {
   snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
@@ -149,6 +152,27 @@ const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}
 const channel: string = messageChannelStateDir(
   { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
 );
+const rpcCode: NativeRpcCode = -32000;
+const diagnostic: DeliveryDiagnostic = {
+  stage: "native-send", category: "rpc-refusal", classification: "native-rejected",
+  method: "thread/queue/add", rpcCode,
+};
+const localDiagnostic: DeliveryDiagnostic = {
+  stage: "local", category: "decision-clearance", classification: "guarded",
+};
+const diagnosticFields: Record<keyof DeliveryDiagnostic, true> = {
+  stage: true, category: true, classification: true, method: true, rpcCode: true,
+};
+// @ts-expect-error Public diagnostic stages remain a finite union, not any or string.
+const wrongStage: DeliveryDiagnostic["stage"] = "raw-native-stage";
+// @ts-expect-error Public diagnostic categories cannot expose arbitrary native messages.
+const wrongCategory: DeliveryDiagnostic["category"] = "raw-native-message";
+// @ts-expect-error Classifications retain the finite safe diagnostic contract.
+const wrongClassification: DeliveryDiagnostic["classification"] = "raw-native-classification";
+// @ts-expect-error Methods cannot expose arbitrary native method names.
+const wrongMethod: DeliveryDiagnostic["method"] = "private/native-method";
+// @ts-expect-error Unknown native codes are omitted, not widened to arbitrary numbers.
+const wrongRpcCode: NativeRpcCode = -31999;
 const revision: (registry: Registry) => number = registry => registry.revision;
 // @ts-expect-error Registry declarations must preserve the numeric revision type.
 const wrongRevision: (registry: Registry) => string = registry => registry.revision;
@@ -163,7 +187,8 @@ snapshotSourceIdentity({ sourceRoot: "/source", artifactDir: "/artifact" }, { ex
 // @ts-expect-error Restore requires an independently pinned digest.
 restoreSourceIdentity({ workRoot: "/work", artifactDir: "/artifact" }, { expectedCommit: "", expectedTree: "" });
 export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict,
-  commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError };
+  commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
+  diagnostic, localDiagnostic, diagnosticFields, rpcCode };
 `;
   writeFileSync(source, consumerSource);
   const aliasSource = join(consumer, "compatibility.mts");
