@@ -3,8 +3,11 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { DeliveryDiagnostic } from "../adapters/types.ts";
 import type { Handler } from "../io.ts";
 import { loadLayout } from "../layout.ts";
+import { MessageService } from "../messages/service.ts";
+import { messageExpectation } from "../messages/store.ts";
 import { createRegistry, type Registry } from "../registry/index.ts";
 import { makeFixture, registryInput } from "../testFixtures.ts";
 import { messageDispatch, messageReconcile, messageSend, messageStatus } from "./messages.ts";
@@ -305,4 +308,43 @@ describe("common message command handlers", () => {
       expect(result.err).not.toContain("PRIVATE_VALUE");
     }
   });
+});
+
+it("prints only allowlisted per-attempt diagnostics and preserves old schema-one records", async () => {
+  const test = setup();
+  const service = new MessageService({ layout: test.layout, env: {} });
+  const queued = await service.send({
+    id: ID,
+    fromRole: "game-coordinator",
+    recipient: ROLE,
+    body: BODY,
+  });
+  const legacy = await run(test, messageStatus, "--id", ID);
+  expect(JSON.parse(legacy.out)[0]).not.toHaveProperty("diagnostic");
+  const lease = await service.store.beginAttempt(messageExpectation(queued));
+  const diagnostic = {
+    stage: "native-send",
+    category: "rpc-refusal",
+    classification: "native-rejected",
+    method: "turn/start",
+    rpcCode: -32000,
+  } as const;
+  lease.complete({
+    source: lease.source,
+    state: "blocked",
+    reason: "refused",
+    diagnostic: {
+      ...diagnostic,
+      nativeMessage: "private-fixture-detail",
+      context: { payload: "private-fixture-context" },
+    } as DeliveryDiagnostic,
+  });
+  const result = await run(test, messageStatus, "--id", ID);
+  expect(result).toMatchObject({ code: 0, err: "" });
+  const status = JSON.parse(result.out)[0];
+  expect(status.diagnostic).toEqual(diagnostic);
+  expect(status.outbox[0].diagnostic).toEqual(diagnostic);
+  expect(status).not.toHaveProperty("body");
+  expect(result.out).not.toContain("private-fixture");
+  expect(result.out).not.toContain(BODY);
 });

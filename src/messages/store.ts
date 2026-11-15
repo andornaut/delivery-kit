@@ -7,6 +7,7 @@ import { isDeepStrictEqual as same } from "node:util";
 
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
+import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../adapters/types.ts";
 import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../durable.ts";
 import { holdLockAsync, type LockHandle } from "../lock.ts";
 import { ID_PATTERN } from "../validate.ts";
@@ -190,7 +191,8 @@ function attemptValid(value: unknown): value is MessageAttempt {
     ATTEMPT_STATES.has(value.state) &&
     stamp(value.started) &&
     (value.state === "sending" ? value.completed === null : stamp(value.completed)) &&
-    reasonValid(value.reason)
+    reasonValid(value.reason) &&
+    (value.diagnostic === undefined || safeDeliveryDiagnostic(value.diagnostic) !== undefined)
   );
 }
 
@@ -208,7 +210,8 @@ function validRecord(value: unknown): asserts value is MessageRecord {
       Array.isArray(value.evidence) &&
       value.evidence.every(evidenceValid) &&
       (value.retention === null || retentionValid(value.retention)) &&
-      reasonValid(value.reason),
+      reasonValid(value.reason) &&
+      (value.diagnostic === undefined || safeDeliveryDiagnostic(value.diagnostic) !== undefined),
     "invalid-record",
   );
   requireThat(
@@ -252,16 +255,28 @@ function terminal(record: MessageRecord): boolean {
   return record.state === "handled" || record.state === "superseded";
 }
 
+function withoutDiagnostic(record: MessageRecord): MessageRecord {
+  const copy = { ...record };
+  delete copy.diagnostic;
+  return copy;
+}
+
 function publicStatus(record: MessageRecord): MessageStatus {
   const { created, fromRole, id, intent, toRole } = record.envelope;
   return {
+    ...(safeDeliveryDiagnostic(record.diagnostic) === undefined
+      ? {}
+      : { diagnostic: safeDeliveryDiagnostic(record.diagnostic)! }),
     attempts: record.attempts.length,
     created,
     fromRole,
     id,
     intent,
     nextBoundary: record.retention?.nextBoundary ?? null,
-    outbox: record.attempts.map(({ source, state }) => ({
+    outbox: record.attempts.map(({ diagnostic, source, state }) => ({
+      ...(safeDeliveryDiagnostic(diagnostic) === undefined
+        ? {}
+        : { diagnostic: safeDeliveryDiagnostic(diagnostic)! }),
       hop: source.hop,
       requestId: source.requestId,
       state,
@@ -472,7 +487,11 @@ export class MessageStore {
   }
 
   /** A qualified pre-dispatch refusal does not create a native attempt or release a hold. */
-  async block(expected: MessageExpectation, reason: MessageReason): Promise<MessageRecord> {
+  async block(
+    expected: MessageExpectation,
+    reason: MessageReason,
+    diagnostic?: DeliveryDiagnostic,
+  ): Promise<MessageRecord> {
     requireThat(reasonValid(reason) && reason !== null, "invalid-reason");
     const lock = await this.lock(expected.envelope.id);
     try {
@@ -483,7 +502,14 @@ export class MessageStore {
           (last === undefined || ["blocked", "parent-required"].includes(last.state)),
         "retry-not-permitted",
       );
-      return this.save({ ...record, reason, state: "blocked" });
+      return this.save({
+        ...withoutDiagnostic(record),
+        ...(safeDeliveryDiagnostic(diagnostic) === undefined
+          ? {}
+          : { diagnostic: safeDeliveryDiagnostic(diagnostic)! }),
+        reason,
+        state: "blocked",
+      });
     } finally {
       lock.release();
     }
@@ -552,7 +578,7 @@ export class MessageStore {
         state: "sending",
       };
       const sending = this.save({
-        ...record,
+        ...withoutDiagnostic(record),
         attempts: [...record.attempts, attempt],
         reason: null,
         state: "sending",
@@ -597,16 +623,22 @@ export class MessageStore {
             ? "parent-required"
             : receipt.state;
         const result = this.save({
-          ...current,
+          ...withoutDiagnostic(current),
           attempts: [
             ...current.attempts.slice(0, -1),
             {
               ...current.attempts.at(-1)!,
+              ...(safeDeliveryDiagnostic(receipt.diagnostic) === undefined
+                ? {}
+                : { diagnostic: safeDeliveryDiagnostic(receipt.diagnostic)! }),
               completed: this.now(),
               reason: receipt.reason,
               state: receipt.state,
             },
           ],
+          ...(safeDeliveryDiagnostic(receipt.diagnostic) === undefined
+            ? {}
+            : { diagnostic: safeDeliveryDiagnostic(receipt.diagnostic)! }),
           reason: receipt.reason,
           state,
         });

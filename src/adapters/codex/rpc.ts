@@ -8,6 +8,7 @@ import { createConnection, type Socket } from "node:net";
 import { performance } from "node:perf_hooks";
 
 import { isRecord } from "../shared/pyjson.ts";
+import { type DeliveryDiagnostic, safeDeliveryDiagnostic, safeRpcCode } from "../types.ts";
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
@@ -17,16 +18,34 @@ const STEP_MS = 5000;
 export const OPCODE = { binary: 2, close: 8, ping: 9, pong: 10, text: 1 } as const;
 
 export class RpcError extends Error {
-  readonly code: unknown;
+  readonly code: ReturnType<typeof safeRpcCode>;
+  readonly diagnostic: DeliveryDiagnostic;
   readonly staleTurn: boolean;
 
-  constructor(error: unknown) {
+  constructor(error: unknown, method?: string) {
     super("native request rejected");
     this.name = "RpcError";
     const record = isRecord(error) ? error : {};
-    this.code = record.code;
+    this.code = safeRpcCode(record.code);
     const message = typeof record.message === "string" ? record.message : "";
     this.staleTurn = /expectedTurnId.*(?:does not match|mismatch)/i.test(message);
+    const category = this.staleTurn
+      ? "stale-turn"
+      : /direct(?: app[- ]?server)? input (?:is )?not allowed/i.test(message)
+        ? "direct-input-not-allowed"
+        : "rpc-refusal";
+    this.diagnostic = safeDeliveryDiagnostic({
+      category,
+      classification: "native-rejected",
+      method,
+      rpcCode: this.code,
+      stage:
+        method === "initialize"
+          ? "connection"
+          : method?.startsWith("thread/") && method !== "thread/queue/add"
+            ? "question-guard"
+            : "native-send",
+    })!;
   }
 }
 
@@ -325,7 +344,7 @@ class Connection implements RpcClient {
         continue;
       }
       if ("error" in record) {
-        throw new RpcError(record.error);
+        throw new RpcError(record.error, method);
       }
       return record.result;
     }

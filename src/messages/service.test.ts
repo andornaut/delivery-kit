@@ -11,7 +11,9 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import { decisionClear } from "../adapters/shared/decisions.ts";
+import { safeDeliveryDiagnostic } from "../adapters/types.ts";
 import { writeJsonDurable } from "../durable.ts";
 import { gameLayout, loadLayout } from "../layout.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
@@ -445,4 +447,159 @@ describe("message service", () => {
       secondLease.source.requestId,
     );
   });
+});
+
+describe("safe refusal diagnostics", () => {
+  it("separates local zero-attempt guards from durable native RPC refusals", async () => {
+    const test = fixture();
+    codex(test);
+    let sends = 0;
+    const client: RpcClient = {
+      close() {},
+      async call(method) {
+        if (method === "thread/read") {
+          return {
+            thread: { id: CODEX_TECH, canAcceptDirectInput: true, status: { type: "idle" } },
+          };
+        }
+        if (method === "thread/turns/list") {
+          return { data: [{ id: "prior-turn", status: "completed" }] };
+        }
+        if (method === "thread/items/list") {
+          return { data: [] };
+        }
+        if (method === "turn/start") {
+          sends++;
+          throw new RpcError(
+            {
+              code: -32000,
+              message: "private-fixture-detail",
+              data: { context: "private-fixture-context" },
+            },
+            method,
+          );
+        }
+        throw new Error("unexpected method");
+      },
+    };
+    const context = { layout: test.layout, env: {}, connect: async () => client };
+    const service = new MessageService(context);
+    await service.send({ ...input(), intent: "unblock" });
+    const local = await service.dispatch(ID);
+    expect(local.attempts).toHaveLength(0);
+    expect(service.status({ id: ID })[0]).toMatchObject({
+      state: "blocked",
+      reason: "guarded",
+      diagnostic: { stage: "local", category: "decision-clearance", classification: "guarded" },
+    });
+    marker(messageGuardDirectory(test.layout, ROLE)!, CODEX_TECH);
+    const refused = await service.dispatch(ID);
+    expect(sends).toBe(1);
+    expect(refused.state).toBe("blocked");
+    expect(refused.attempts).toHaveLength(1);
+    const diagnostic = {
+      stage: "native-send",
+      category: "rpc-refusal",
+      classification: "native-rejected",
+      method: "turn/start",
+      rpcCode: -32000,
+    };
+    const status = service.status({ id: ID })[0]!;
+    expect(status.diagnostic).toEqual(diagnostic);
+    expect(status.outbox[0]?.diagnostic).toEqual(diagnostic);
+    const requestId = status.outbox[0]!.requestId;
+    const restarted = new MessageService(context);
+    expect(restarted.status({ id: ID })[0]?.outbox[0]).toMatchObject({ requestId, diagnostic });
+    await restarted.reconcile({
+      id: ID,
+      expectedRevision: refused.revision,
+      disposition: "superseded",
+      evidence: "fixture-owner-reconciliation",
+    });
+    expect(restarted.status({ id: ID })[0]?.outbox[0]).toMatchObject({ requestId, diagnostic });
+    expect(sends).toBe(1);
+    expect(JSON.stringify(status)).not.toContain("private-fixture");
+    expect(JSON.stringify(refused)).not.toContain("private-fixture");
+  });
+
+  it("projects finite diagnostics and omits unknown RPC codes, methods and native context", () => {
+    const error = new RpcError(
+      {
+        code: 123456,
+        message: "private-fixture-native-message",
+        data: { detail: "private-fixture-native-data" },
+      },
+      "unknown/private-fixture-method",
+    );
+    expect(error.diagnostic).toEqual({
+      stage: "native-send",
+      category: "rpc-refusal",
+      classification: "native-rejected",
+    });
+    expect(error.code).toBeUndefined();
+    expect(JSON.stringify(error)).not.toContain("private-fixture");
+    expect(
+      safeDeliveryDiagnostic({
+        ...error.diagnostic,
+        text: "private-fixture-payload",
+        context: "private-fixture-context",
+        rpcCode: 123456,
+        method: "unknown",
+      }),
+    ).toEqual(error.diagnostic);
+    expect(
+      safeDeliveryDiagnostic({ ...error.diagnostic, category: "private-fixture-category" }),
+    ).toBeUndefined();
+  });
+});
+
+it("preserves a typed question guard through the native receipt without claiming native input", async () => {
+  const test = fixture();
+  codex(test);
+  let inputCalls = 0;
+  marker(messageGuardDirectory(test.layout, ROLE)!, CODEX_TECH);
+  const client: RpcClient = {
+    close() {},
+    async call(method) {
+      if (method === "thread/read") {
+        return { thread: { id: CODEX_TECH, canAcceptDirectInput: true, status: { type: "idle" } } };
+      }
+      if (method === "thread/turns/list") {
+        return { data: [{ id: "prior-turn", status: "completed" }] };
+      }
+      if (method === "thread/items/list") {
+        return {
+          data: [
+            {
+              turnId: "prior-turn",
+              item: { id: "pending-item", type: "dynamicToolCall", tool: "request_user_input" },
+            },
+          ],
+        };
+      }
+      inputCalls++;
+      throw new Error("must not admit native input");
+    },
+  };
+  const service = new MessageService({ layout: test.layout, env: {}, connect: async () => client });
+  await service.send({ ...input(), intent: "unblock" });
+  const record = await service.dispatch(ID);
+  expect(record.state).toBe("blocked");
+  expect(record.reason).toBe("refused");
+  expect(record.attempts).toHaveLength(1);
+  expect(inputCalls).toBe(0);
+  const diagnostic = {
+    stage: "question-guard",
+    category: "pending-question",
+    classification: "guarded",
+  };
+  expect(service.status({ id: ID })[0]).toMatchObject({ diagnostic, outbox: [{ diagnostic }] });
+  const source = record.attempts[0]!.source;
+  const nativeReceipt = JSON.parse(
+    readFileSync(
+      join(messageChannelStateDir(test.layout, CODEX_TECH), `${source.requestId}.json`),
+      "utf8",
+    ),
+  );
+  expect(nativeReceipt).toMatchObject({ status: "deferred", diagnostic, attempts: [] });
 });

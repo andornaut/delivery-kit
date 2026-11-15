@@ -7,13 +7,14 @@ import { isDeepStrictEqual } from "node:util";
 
 import { recipientReady } from "../adapters/claude/agents.ts";
 import { clearanceUnchanged } from "../adapters/codex/guard.ts";
-import { connectControl, type RpcClient } from "../adapters/codex/rpc.ts";
+import { connectControl, type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import { deliverReceipt, selectTarget } from "../adapters/codex/steer.ts";
 import { decisionClear, decisionRecord } from "../adapters/shared/decisions.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { readRoleRoute } from "../adapters/shared/route.ts";
+import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../adapters/types.ts";
 import { readJsonIfExists } from "../durable.ts";
 import { gameLayout, type Layout } from "../layout.ts";
 import { resolveConversation, resolveHarness, resolveRole } from "../registry/resolve.ts";
@@ -307,7 +308,11 @@ export class MessageService {
     );
   }
 
-  private receipt(record: MessageRecord): { readonly status: string; readonly ref: string } | null {
+  private receipt(record: MessageRecord): {
+    readonly status: string;
+    readonly ref: string;
+    readonly diagnostic?: DeliveryDiagnostic;
+  } | null {
     const source = record.attempts.at(-1)?.source;
     if (source === undefined) {
       return null;
@@ -323,7 +328,12 @@ export class MessageService {
       ) {
         return null;
       }
-      return { ref: source.requestId, status: value.status };
+      const diagnostic = safeDeliveryDiagnostic(value.diagnostic);
+      return {
+        ref: source.requestId,
+        status: value.status,
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+      };
     } catch {
       return null;
     }
@@ -439,8 +449,9 @@ export class MessageService {
             }
             const recipient = messageNativeRecipient(source);
             const marker = decisionRecord(directory, recipient);
-            const [target] = await selectTarget(client, directory, recipient);
+            const [target, , diagnostic] = await selectTarget(client, directory, recipient);
             return {
+              ...(diagnostic === undefined ? {} : { diagnostic }),
               status:
                 target !== null &&
                 clearanceUnchanged(directory, recipient, marker) &&
@@ -455,13 +466,32 @@ export class MessageService {
     return {
       send: async (_path, message) => {
         if (!this.localClear(record, source, directory)) {
-          return { requestId: message.requestId, status: "blocked" };
+          return {
+            diagnostic: {
+              category: "decision-clearance",
+              classification: "guarded",
+              stage: "local",
+            },
+            requestId: message.requestId,
+            status: "blocked",
+          };
         }
         let client: RpcClient;
         try {
           client = await this.connect();
-        } catch {
-          return { requestId: message.requestId, status: "unavailable" };
+        } catch (error) {
+          return {
+            diagnostic:
+              error instanceof RpcError
+                ? { ...error.diagnostic, stage: "connection" }
+                : {
+                    category: "transport-unavailable",
+                    classification: "unavailable",
+                    stage: "connection",
+                  },
+            requestId: message.requestId,
+            status: "unavailable",
+          };
         }
         try {
           // Existing guarded delivery performs native question checks and never resumes a turn.
@@ -488,6 +518,9 @@ export class MessageService {
           );
           const status = receipt.status === "sending" ? "ambiguous" : receipt.status;
           return {
+            ...(safeDeliveryDiagnostic(receipt.diagnostic) === undefined
+              ? {}
+              : { diagnostic: safeDeliveryDiagnostic(receipt.diagnostic)! }),
             requestId: message.requestId,
             status: status === "deduplicated" || status === "unchanged" ? "blocked" : status,
           };
@@ -513,23 +546,40 @@ export class MessageService {
     }
     const owner = currentMessageOwner(this.context.layout, record.envelope);
     if (owner === null) {
-      return this.store.block(messageExpectation(record), "owner-unavailable");
+      return this.store.block(messageExpectation(record), "owner-unavailable", {
+        category: "owner-unavailable",
+        classification: "unavailable",
+        stage: "local",
+      });
     }
     const hop = record.envelope.workerId === undefined ? "recipient" : "parent";
     const recipient = hop === "parent" ? owner.parentBinding?.nativeId : owner.nativeId;
     const directory = messageGuardDirectory(this.context.layout, record.envelope.toRole);
     if (recipient === undefined || directory === null || !decisionClear(directory, recipient)) {
-      return this.store.block(messageExpectation(record), "guarded");
+      return this.store.block(messageExpectation(record), "guarded", {
+        category: "decision-clearance",
+        classification: "guarded",
+        stage: "local",
+      });
     }
     if (owner.harness === "claude" && recipientReady(this.context.env, recipient).status === null) {
-      return this.store.block(messageExpectation(record), "transport-unavailable");
+      return this.store.block(messageExpectation(record), "transport-unavailable", {
+        category: "transport-unavailable",
+        classification: "unavailable",
+        stage: "local",
+      });
     }
     const lease = await this.store.beginAttempt(messageExpectation(record), hop);
     try {
       record = this.record(id);
       const source = lease.source;
       if (!this.localClear(record, source, directory)) {
-        return lease.complete({ reason: "guarded", source, state: "blocked" });
+        return lease.complete({
+          diagnostic: { category: "decision-clearance", classification: "guarded", stage: "local" },
+          reason: "guarded",
+          source,
+          state: "blocked",
+        });
       }
       const message: NativeMessage = {
         recipient: messageNativeRecipient(source),
@@ -539,7 +589,16 @@ export class MessageService {
       try {
         mkdirSync(dirname(this.receiptPath(source)), { mode: 0o700, recursive: true });
       } catch {
-        return lease.complete({ reason: "transport-unavailable", source, state: "blocked" });
+        return lease.complete({
+          diagnostic: {
+            category: "transport-unavailable",
+            classification: "unavailable",
+            stage: "receipt",
+          },
+          reason: "transport-unavailable",
+          source,
+          state: "blocked",
+        });
       }
       let result: TransportReceipt;
       try {
@@ -548,28 +607,45 @@ export class MessageService {
           message,
         );
       } catch {
-        return lease.complete({ reason: "lost-response", source, state: "ambiguous" });
+        return lease.complete({
+          diagnostic: { category: "unknown", classification: "outcome-unknown", stage: "receipt" },
+          reason: "lost-response",
+          source,
+          state: "ambiguous",
+        });
       }
       const saved = this.receipt(record);
+      const diagnostic = safeDeliveryDiagnostic(saved?.diagnostic ?? result.diagnostic);
+      const diagnosticFields = diagnostic === undefined ? {} : { diagnostic };
       // A durable unknown receipt dominates a later failed/blocked guard or connector result.
       if (
         result.requestId !== source.requestId ||
         saved?.status === "sending" ||
         saved?.status === "ambiguous"
       ) {
-        return lease.complete({ reason: "lost-response", source, state: "ambiguous" });
+        return lease.complete({
+          diagnostic:
+            diagnostic === undefined
+              ? { category: "unknown", classification: "outcome-unknown", stage: "receipt" }
+              : { ...diagnostic, classification: "outcome-unknown" },
+          reason: "lost-response",
+          source,
+          state: "ambiguous",
+        });
       }
       if (result.status === "accepted" || saved?.status === "accepted") {
         return lease.complete({ reason: null, source, state: "accepted" });
       }
       if (result.status === "ambiguous" || result.status === "queued") {
         return lease.complete({
+          ...diagnosticFields,
           reason: result.status === "queued" ? "transport-pending" : "lost-response",
           source,
           state: "ambiguous",
         });
       }
       return lease.complete({
+        ...diagnosticFields,
         reason: result.status === "unavailable" ? "transport-unavailable" : "refused",
         source,
         state: "blocked",

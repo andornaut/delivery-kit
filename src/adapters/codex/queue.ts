@@ -6,11 +6,15 @@ import { holdLockAsync } from "../../lock.ts";
 import type { NativeMessage, TransportReceipt } from "../../messages/transports.ts";
 import { isCanonicalUuid } from "../shared/ids.ts";
 import { isRecord } from "../shared/pyjson.ts";
+import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../types.ts";
 import { acknowledgeEntry, queueEntries, type QueueEntry } from "./inventory.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 
 /** Queue add may wake a loaded idle thread. Unknown clearance never permits native mutation. */
-export type QueueClearance = { readonly status: "clear" | "blocked" | "unavailable" };
+export type QueueClearance = {
+  readonly diagnostic?: DeliveryDiagnostic;
+  readonly status: "clear" | "blocked" | "unavailable";
+};
 export interface QueueGuards {
   /** Must check owner HOLD, local decisions, and nativeQuestionsClear on this same connection. */
   readonly beforeAdd: (client: RpcClient, message: NativeMessage) => Promise<QueueClearance>;
@@ -71,8 +75,11 @@ function result(
   status: TransportReceipt["status"],
   reason?: string,
   queueId?: string,
+  diagnostic?: unknown,
 ): TransportReceipt {
+  const safe = safeDeliveryDiagnostic(diagnostic);
   return {
+    ...(safe === undefined ? {} : { diagnostic: safe }),
     requestId: message.requestId,
     status,
     ...(reason === undefined ? {} : { reason }),
@@ -148,17 +155,37 @@ async function operate(
       previous.status = "ambiguous";
       writeJsonDurable(path, previous);
     }
-    const guarded = (status: "blocked" | "unavailable", reason: string): TransportReceipt =>
+    const guarded = (
+      status: "blocked" | "unavailable",
+      reason: string,
+      diagnostic?: DeliveryDiagnostic,
+    ): TransportReceipt =>
       result(
         message,
         uncertain ? "ambiguous" : status,
         uncertain ? "previous send outcome unknown; reconciliation guarded; do not resend" : reason,
+        undefined,
+        uncertain
+          ? {
+              ...(safeDeliveryDiagnostic(previous.diagnostic) ?? {
+                category: "unknown",
+                stage: "receipt",
+              }),
+              classification: "outcome-unknown",
+            }
+          : (diagnostic ?? {
+              category: "decision-clearance",
+              classification: "guarded",
+              stage: "local",
+            }),
       );
     if (isRecord(previous) && !uncertain) {
       return result(
         message,
         previous.status === "unsupported" ? "unsupported" : "rejected",
         "previous native refusal; do not resend",
+        undefined,
+        previous.diagnostic,
       );
     }
     if (guards === undefined || client === null) {
@@ -167,17 +194,43 @@ async function operate(
     try {
       const clearance = await guards.beforeAdd(client, message);
       if (clearance.status !== "clear") {
-        return guarded(clearance.status, "queue clearance unavailable; keep queued locally");
+        return guarded(
+          clearance.status,
+          "queue clearance unavailable; keep queued locally",
+          clearance.diagnostic,
+        );
       }
-    } catch {
-      return guarded("blocked", "queue clearance unavailable; keep queued locally");
+    } catch (error) {
+      return guarded(
+        "blocked",
+        "queue clearance unavailable; keep queued locally",
+        error instanceof RpcError
+          ? { ...error.diagnostic, stage: "question-guard" }
+          : { category: "unknown", classification: "guarded", stage: "question-guard" },
+      );
     }
     try {
       if (!(await rootRecipient(client, message.recipient))) {
-        return guarded("blocked", "worker parent required or recipient binding unavailable");
+        return guarded("blocked", "worker parent required or recipient binding unavailable", {
+          category: "binding-mismatch",
+          classification: "guarded",
+          method: "thread/read",
+          stage: "question-guard",
+        });
       }
-    } catch {
-      return guarded("unavailable", "recipient binding unavailable");
+    } catch (error) {
+      return guarded(
+        "unavailable",
+        "recipient binding unavailable",
+        error instanceof RpcError
+          ? { ...error.diagnostic, stage: "question-guard" }
+          : {
+              category: "history-unavailable",
+              classification: "unavailable",
+              method: "thread/read",
+              stage: "question-guard",
+            },
+      );
     }
     if (isRecord(previous)) {
       return await reconcile(client, path, message, previous);
@@ -188,10 +241,20 @@ async function operate(
     try {
       const clearance = await guards.beforeAdd(client, message);
       if (clearance.status !== "clear") {
-        return guarded(clearance.status, "queue clearance unavailable; keep queued locally");
+        return guarded(
+          clearance.status,
+          "queue clearance unavailable; keep queued locally",
+          clearance.diagnostic,
+        );
       }
-    } catch {
-      return guarded("blocked", "queue clearance unavailable; keep queued locally");
+    } catch (error) {
+      return guarded(
+        "blocked",
+        "queue clearance unavailable; keep queued locally",
+        error instanceof RpcError
+          ? { ...error.diagnostic, stage: "question-guard" }
+          : { category: "unknown", classification: "guarded", stage: "question-guard" },
+      );
     }
     const state = {
       clientUserMessageId: message.requestId,
@@ -210,13 +273,24 @@ async function operate(
       });
     } catch (error) {
       const status = rejected(error);
-      writeJsonDurable(path, { ...state, status });
+      const diagnostic: DeliveryDiagnostic =
+        error instanceof RpcError
+          ? { ...error.diagnostic, method: "thread/queue/add", stage: "native-send" }
+          : {
+              category: "transport-unavailable",
+              classification: "outcome-unknown",
+              method: "thread/queue/add",
+              stage: "native-send",
+            };
+      writeJsonDurable(path, { ...state, diagnostic, status });
       return result(
         message,
         status,
         status === "ambiguous"
           ? "response unavailable; do not resend"
           : "native queue request refused",
+        undefined,
+        diagnostic,
       );
     }
     const entry = isRecord(response) ? response.queuedSubmission : undefined;

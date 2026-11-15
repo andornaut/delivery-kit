@@ -2,8 +2,12 @@ import { dirname } from "node:path";
 
 import { spoolMessage } from "../adapters/claude/spool.ts";
 import { type QueueGuards, queueMessage } from "../adapters/codex/queue.ts";
-import type { RpcClient } from "../adapters/codex/rpc.ts";
-import type { HarnessAdapter } from "../adapters/types.ts";
+import { type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
+import {
+  type DeliveryDiagnostic,
+  type HarnessAdapter,
+  safeDeliveryDiagnostic,
+} from "../adapters/types.ts";
 
 /** The service resolves ownership and parent hops before selecting a transport. */
 export interface NativeMessage {
@@ -13,6 +17,7 @@ export interface NativeMessage {
 }
 
 export interface TransportReceipt {
+  readonly diagnostic?: DeliveryDiagnostic;
   readonly requestId: string;
   readonly status:
     | "accepted"
@@ -57,10 +62,22 @@ export function codexQueueTransport(ports: {
       let client: RpcClient;
       try {
         client = await ports.connect();
-      } catch {
+      } catch (error) {
         const previous = await queueMessage(null, path, message);
         return previous.status === "blocked"
-          ? { reason: "transport unavailable", requestId: message.requestId, status: "unavailable" }
+          ? {
+              diagnostic:
+                error instanceof RpcError
+                  ? { ...error.diagnostic, stage: "connection" as const }
+                  : {
+                      category: "transport-unavailable" as const,
+                      classification: "unavailable" as const,
+                      stage: "connection" as const,
+                    },
+              reason: "transport unavailable",
+              requestId: message.requestId,
+              status: "unavailable",
+            }
           : previous;
       }
       try {
@@ -96,6 +113,9 @@ export function guardedMessageTransport(adapter: HarnessAdapter): MessageTranspo
         );
         const status = result.status === "sending" ? "ambiguous" : result.status;
         return {
+          ...(safeDeliveryDiagnostic(result.diagnostic) === undefined
+            ? {}
+            : { diagnostic: safeDeliveryDiagnostic(result.diagnostic)! }),
           requestId: message.requestId,
           status: status === "unchanged" || status === "deduplicated" ? "blocked" : status,
         };

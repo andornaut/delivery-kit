@@ -234,9 +234,41 @@ describe("guarded native queue transport", () => {
       });
       const outcome = await queueMessage(f.client, f.path, message, clear);
       expect(outcome.status).toBe(code === -32601 ? "unsupported" : "rejected");
+      expect(outcome.diagnostic).toMatchObject({
+        stage: "native-send",
+        category: "rpc-refusal",
+        classification: "native-rejected",
+        method: "thread/queue/add",
+        rpcCode: code,
+      });
       expect(JSON.stringify(outcome)).not.toContain("private diagnostic");
       await queueMessage(f.client, f.path, message, clear);
       expect(f.calls.filter((method) => method === "thread/queue/add")).toHaveLength(1);
     },
   );
+});
+
+it("distinguishes a rejected read-only native guard RPC from an input submission", async () => {
+  const f = fixture();
+  const client: RpcClient = {
+    close() {},
+    async call(method) {
+      if (method === "thread/read") {
+        throw new RpcError({ code: -32000, message: "private-fixture-read-error" }, method);
+      }
+      throw new Error("must not add");
+    },
+  };
+  const outcome = await queueMessage(client, f.path, message, clear);
+  expect(outcome).toMatchObject({
+    status: "unavailable",
+    diagnostic: {
+      stage: "question-guard",
+      category: "rpc-refusal",
+      classification: "native-rejected",
+      method: "thread/read",
+      rpcCode: -32000,
+    },
+  });
+  expect(JSON.stringify(outcome)).not.toContain("private-fixture");
 });

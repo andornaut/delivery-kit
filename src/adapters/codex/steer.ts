@@ -7,7 +7,12 @@ import { dirname } from "node:path";
 import { readJson, writeDurable } from "../../durable.ts";
 import { decisionClear, decisionRecord } from "../shared/decisions.ts";
 import { dumpsJson, isRecord, type PyJson, sameJson } from "../shared/pyjson.ts";
-import type { DeliveryReceipt, DeliveryStatus } from "../types.ts";
+import {
+  type DeliveryDiagnostic,
+  type DeliveryReceipt,
+  type DeliveryStatus,
+  safeDeliveryDiagnostic,
+} from "../types.ts";
 import { clearanceUnchanged, nativeQuestionsClear } from "./guard.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
 
@@ -36,7 +41,7 @@ export async function selectTarget(
   client: RpcClient,
   unblockDir: string,
   recipient: string,
-): Promise<[Target | null, string | null]> {
+): Promise<[Target | null, string | null, DeliveryDiagnostic?]> {
   const read = await client.call("thread/read", { includeTurns: false, threadId: recipient });
   const thread = isRecord(read) && isRecord(read.thread) ? read.thread : undefined;
   if (thread === undefined) {
@@ -44,11 +49,19 @@ export async function selectTarget(
   }
   const status = isRecord(thread.status) ? thread.status : {};
   if (thread.canAcceptDirectInput !== true) {
-    return [null, "recipient input availability unknown"];
+    return [
+      null,
+      "recipient input availability unknown",
+      { category: "input-unavailable", classification: "guarded", stage: "question-guard" },
+    ];
   }
   const flags = status.activeFlags;
   if (status.type === "active" && !(Array.isArray(flags) && flags.length === 0)) {
-    return [null, "recipient waiting on a question or approval"];
+    return [
+      null,
+      "recipient waiting on a question or approval",
+      { category: "state-unavailable", classification: "guarded", stage: "question-guard" },
+    ];
   }
   const listed = await client.call("thread/turns/list", {
     itemsView: "notLoaded",
@@ -61,9 +74,15 @@ export async function selectTarget(
   }
   const latest = latestTurn(listed.data[0]);
   if (latest !== undefined) {
-    const [clear, reason] = await nativeQuestionsClear(client, unblockDir, recipient, latest.id);
+    const [clear, reason, diagnostic] = await nativeQuestionsClear(
+      client,
+      unblockDir,
+      recipient,
+      latest.id,
+      { diagnostics: true },
+    );
     if (!clear) {
-      return [null, reason];
+      return diagnostic === undefined ? [null, reason] : [null, reason, diagnostic];
     }
     if (status.type === "active" && latest.status === "inProgress") {
       return [{ expectedTurnId: latest.id, method: "turn/steer" }, null];
@@ -72,11 +91,16 @@ export async function selectTarget(
       return [{ method: "turn/start" }, null];
     }
   }
-  return [null, "recipient state ambiguous or interrupted; no automatic resume"];
+  return [
+    null,
+    "recipient state ambiguous or interrupted; no automatic resume",
+    { category: "state-unavailable", classification: "guarded", stage: "question-guard" },
+  ];
 }
 
 // A type alias, not an interface, so it satisfies the receipt's JSON index signature.
 type Attempt = {
+  diagnostic?: DeliveryDiagnostic;
   method: TurnMethod;
   status: DeliveryStatus;
   expectedTurnId?: string;
@@ -89,6 +113,7 @@ export interface ReceiptState {
   clientUserMessageId: string;
   attempts: Attempt[];
   status?: DeliveryStatus;
+  diagnostic?: DeliveryDiagnostic;
 }
 
 function persistReceipt(path: string, state: ReceiptState): void {
@@ -96,8 +121,19 @@ function persistReceipt(path: string, state: ReceiptState): void {
   writeDurable(path, `${dumpsJson(state as PyJson)}\n`);
 }
 
-function receipt(requestId: string, status: DeliveryStatus, reason?: string): DeliveryReceipt {
-  return reason === undefined ? { requestId, status } : { reason, requestId, status };
+function receipt(
+  requestId: string,
+  status: DeliveryStatus,
+  reason?: string,
+  diagnostic?: unknown,
+): DeliveryReceipt {
+  const safe = safeDeliveryDiagnostic(diagnostic);
+  return {
+    requestId,
+    status,
+    ...(reason === undefined ? {} : { reason }),
+    ...(safe === undefined ? {} : { diagnostic: safe }),
+  };
 }
 
 function turnIdOf(response: unknown): string | null {
@@ -164,6 +200,7 @@ async function send(
   }
   state.attempts.push(record);
   state.status = "sending";
+  delete state.diagnostic;
   persistReceipt(path, state);
   admission.started = true;
   let response: unknown;
@@ -172,8 +209,19 @@ async function send(
   } catch (error) {
     const status = error instanceof RpcError ? "rejected" : "ambiguous";
     record.status = status;
+    const diagnostic: DeliveryDiagnostic =
+      error instanceof RpcError
+        ? { ...error.diagnostic, method: target.method, stage: "native-send" }
+        : {
+            category: "transport-unavailable",
+            classification: "outcome-unknown",
+            method: target.method,
+            stage: "native-send",
+          };
+    record.diagnostic = diagnostic;
+    Object.assign(state, { diagnostic });
     // The receipt state belongs to this one delivery; nothing else updates it concurrently.
-    // eslint-disable-next-line require-atomic-updates
+
     state.status = status;
     persistReceipt(path, state);
     return error instanceof RpcError && error.staleTurn && target.method === "turn/steer"
@@ -186,6 +234,16 @@ async function send(
     turnId !== "" &&
     (target.method !== "turn/steer" || turnId === target.expectedTurnId);
   record.status = accepted ? "accepted" : "ambiguous";
+  if (!accepted) {
+    const diagnostic: DeliveryDiagnostic = {
+      category: "binding-mismatch",
+      classification: "outcome-unknown",
+      method: target.method,
+      stage: "native-send",
+    };
+    record.diagnostic = diagnostic;
+    Object.assign(state, { diagnostic });
+  }
   // eslint-disable-next-line require-atomic-updates
   state.status = record.status;
   if (accepted) {
@@ -220,8 +278,9 @@ export function deferLocally(
     return null;
   }
   state.status = "deferred";
+  state.diagnostic = { category: "decision-clearance", classification: "guarded", stage: "local" };
   persistReceipt(path, state);
-  return receipt(requestId, "deferred", CLEARANCE_MISSING);
+  return receipt(requestId, "deferred", CLEARANCE_MISSING, state.diagnostic);
 }
 
 /**
@@ -263,22 +322,35 @@ async function deliverPreparedReceipt(
       state.status = "ambiguous";
       persistReceipt(path, state);
     }
-    return receipt(requestId, state.status, PREVIOUS_SEND);
+    return receipt(requestId, state.status, PREVIOUS_SEND, state.diagnostic);
   }
   for (let attempt = state.attempts.length; attempt < 2; attempt += 1) {
     const clearance = decisionRecord(unblockDir, recipient);
     if (!decisionClear(unblockDir, recipient)) {
       state.status = "deferred";
+      state.diagnostic = {
+        category: "decision-clearance",
+        classification: "guarded",
+        stage: "local",
+      };
       persistReceipt(path, state);
-      return receipt(requestId, "deferred", CLEARANCE_MISSING);
+      return receipt(requestId, "deferred", CLEARANCE_MISSING, state.diagnostic);
     }
     // The guard reads native history in order before each attempt.
     // eslint-disable-next-line no-await-in-loop
-    const [target, reason] = await selectTarget(client, unblockDir, recipient);
+    const [target, reason, diagnostic] = await selectTarget(client, unblockDir, recipient);
     if (target === null || !clearanceUnchanged(unblockDir, recipient, clearance)) {
       state.status = "deferred";
+      state.diagnostic =
+        target === null
+          ? (diagnostic ?? {
+              category: "unknown",
+              classification: "guarded",
+              stage: "question-guard",
+            })
+          : { category: "decision-clearance", classification: "guarded", stage: "local" };
       persistReceipt(path, state);
-      return receipt(requestId, "deferred", reason ?? CLEARANCE_MISSING);
+      return receipt(requestId, "deferred", reason ?? CLEARANCE_MISSING, state.diagnostic);
     }
     const params: Record<string, unknown> = {
       clientUserMessageId: requestId,
@@ -300,6 +372,7 @@ async function deliverPreparedReceipt(
       requestId,
       outcome === "ambiguous" ? "ambiguous" : "rejected",
       outcome === "ambiguous" ? "response unavailable; do not resend" : "native request rejected",
+      state.diagnostic,
     );
   }
   return receipt(requestId, "rejected", "bounded attempts exhausted");
@@ -327,13 +400,23 @@ export async function deliverReceipt(
       recipient,
       text,
     );
-  } catch {
+  } catch (error) {
     return receipt(
       requestId,
       admission.started ? "ambiguous" : "unavailable",
       admission.started
         ? "receipt or response unavailable; do not resend"
         : "receipt preparation or native probe unavailable",
+      error instanceof RpcError
+        ? {
+            ...error.diagnostic,
+            classification: admission.started ? "outcome-unknown" : "unavailable",
+          }
+        : {
+            category: "unknown",
+            classification: admission.started ? "outcome-unknown" : "unavailable",
+            stage: "receipt",
+          },
     );
   }
 }

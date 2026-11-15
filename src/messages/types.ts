@@ -1,3 +1,4 @@
+import type { DeliveryDiagnostic } from "../adapters/types.ts";
 import type { Layout } from "../layout.ts";
 import type { Harness } from "../registry/schema.ts";
 
@@ -60,6 +61,7 @@ export type MessageReason =
   | "explicit-hold";
 
 export interface MessageAttempt {
+  readonly diagnostic?: DeliveryDiagnostic;
   readonly source: MessageAttemptSource;
   readonly state: "sending" | "accepted" | "blocked" | "ambiguous" | "parent-required";
   readonly started: string;
@@ -88,6 +90,7 @@ export interface MessageEvidence {
 }
 
 export interface MessageRecord {
+  readonly diagnostic?: DeliveryDiagnostic;
   readonly schema: 1;
   readonly revision: number;
   readonly envelope: MessageEnvelope;
@@ -100,6 +103,7 @@ export interface MessageRecord {
 
 /** Public diagnostics contain no payload, payload digest, evidence text or native binding. */
 export interface MessageStatus {
+  readonly diagnostic?: DeliveryDiagnostic;
   readonly id: string;
   readonly revision: number;
   readonly workerId?: string;
@@ -111,6 +115,7 @@ export interface MessageStatus {
   readonly state: MessageState;
   readonly attempts: number;
   readonly outbox: readonly {
+    readonly diagnostic?: DeliveryDiagnostic;
     readonly requestId: string;
     readonly hop: MessageAttemptSource["hop"];
     readonly state: MessageAttempt["state"];
@@ -146,6 +151,7 @@ export interface MessageContext {
 }
 
 export interface MessageCompletion {
+  readonly diagnostic?: DeliveryDiagnostic;
   readonly source: MessageAttemptSource;
   readonly state: Exclude<MessageAttempt["state"], "sending">;
   readonly reason: MessageReason | null;

@@ -187,7 +187,18 @@ describe("codexAdapter.deliver", () => {
     const result = await adapter(context).deliver(context.receipt, REQUEST, RECIPIENT, "review");
     expect(result.status).toBe("accepted");
     expect(receiptOf(context).attempts).toEqual([
-      { expectedTurnId: TURN, method: "turn/steer", status: "rejected" },
+      {
+        diagnostic: {
+          stage: "native-send",
+          category: "stale-turn",
+          classification: "native-rejected",
+          method: "turn/steer",
+          rpcCode: -32600,
+        },
+        expectedTurnId: TURN,
+        method: "turn/steer",
+        status: "rejected",
+      },
       { expectedTurnId: TURN, method: "turn/steer", status: "accepted", turnId: TURN },
     ]);
   });

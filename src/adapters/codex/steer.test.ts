@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as durable from "../../durable.ts";
-import type { RpcClient } from "./rpc.ts";
+import { type RpcClient, RpcError } from "./rpc.ts";
 import { deferLocally, deliverReceipt } from "./steer.ts";
 
 vi.mock("./guard.ts", async (original) => ({
@@ -143,5 +143,44 @@ describe("guarded receipt preparation", () => {
     expect((await f.deliver()).status).toBe("ambiguous");
     expect((await f.deliver()).status).toBe("ambiguous");
     expect(f.sends()).toBe(1);
+  });
+});
+
+describe("durable safe native refusal", () => {
+  it("keeps an allowlisted refusal on the receipt and deduplicates without a second send", async () => {
+    const test = fixture();
+    let sends = 0;
+    const client: RpcClient = {
+      close() {},
+      async call(method, params) {
+        if (method === "turn/start") {
+          sends++;
+          throw new RpcError({
+            code: -32600,
+            message: "direct app-server input not allowed: private-fixture",
+          });
+        }
+        return test.client.call(method, params);
+      },
+    };
+    const deliver = () =>
+      deliverReceipt(client, test.directory, test.path, seed, requestId, recipient, seed.text);
+    const first = await deliver();
+    const diagnostic = {
+      stage: "native-send",
+      category: "direct-input-not-allowed",
+      classification: "native-rejected",
+      method: "turn/start",
+      rpcCode: -32600,
+    };
+    expect(first).toMatchObject({ status: "rejected", diagnostic });
+    expect(JSON.parse(readFileSync(test.path, "utf8"))).toMatchObject({
+      status: "rejected",
+      diagnostic,
+      attempts: [{ diagnostic }],
+    });
+    expect(await deliver()).toMatchObject({ status: "rejected", diagnostic });
+    expect(sends).toBe(1);
+    expect(readFileSync(test.path, "utf8")).not.toContain("private-fixture");
   });
 });
