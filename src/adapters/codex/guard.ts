@@ -29,6 +29,8 @@ export const NATIVE_ITEM_TYPES: ReadonlySet<string> = new Set([
 const QUESTION_TOOLS = ["requestuserinput", "askuserquestion", "elicitation"];
 const MAX_ITEM_PAGES = 64;
 const MAX_PROOF_TURNS = 8;
+const REPLY_OPEN = "<send_user_message_question_reply>\n";
+const REPLY_CLOSE = "\n</send_user_message_question_reply>";
 
 export type NativeItem = Record<string, unknown> & { readonly id: string; readonly type: string };
 
@@ -100,7 +102,12 @@ export function questionItem(item: Record<string, unknown>): boolean {
   return false;
 }
 
-function itemPage(page: unknown, turnId: string, items: Map<string, NativeItem>): unknown {
+function itemPage(
+  page: unknown,
+  recipient: string,
+  turnId: string,
+  items: Map<string, NativeItem>,
+): unknown {
   if (!isRecord(page) || !Array.isArray(page.data) || page.truncated || page.hasMore) {
     throw new Error("native item history incomplete");
   }
@@ -108,6 +115,7 @@ function itemPage(page: unknown, turnId: string, items: Map<string, NativeItem>)
     if (
       !isRecord(entry) ||
       entry.turnId !== turnId ||
+      (Object.hasOwn(entry, "threadId") && entry.threadId !== recipient) ||
       (Object.hasOwn(entry, "outputDeferred") && entry.outputDeferred !== false)
     ) {
       throw new Error("native turn identity mismatch");
@@ -154,7 +162,7 @@ async function nativeItems(
     }
     // Pages follow their cursor in order.
     // eslint-disable-next-line no-await-in-loop
-    const next = itemPage(await client.call("thread/items/list", params), turnId, items);
+    const next = itemPage(await client.call("thread/items/list", params), recipient, turnId, items);
     if (next === null) {
       return items;
     }
@@ -308,7 +316,126 @@ async function resolvedQuestions(
   return resolved;
 }
 
-/** Exact question proof, inherited only across completed compaction-only turns. */
+interface NativeReplyBinding {
+  readonly questionId: string;
+  readonly title: string;
+}
+
+/** Only the observed native UI envelope, never arbitrary prose or a substring match. */
+function nativeReplyBinding(item: NativeItem): NativeReplyBinding | null {
+  if (
+    item.type !== "userMessage" ||
+    item.clientId !== null ||
+    Object.keys(item).sort().join(",") !== "clientId,content,id,type" ||
+    !Array.isArray(item.content) ||
+    item.content.length !== 1
+  ) {
+    return null;
+  }
+  const content: unknown = item.content[0];
+  if (
+    !isRecord(content) ||
+    content.type !== "text" ||
+    Object.keys(content).sort().join(",") !== "text,text_elements,type" ||
+    !Array.isArray(content.text_elements) ||
+    content.text_elements.length !== 0 ||
+    typeof content.text !== "string" ||
+    !content.text.startsWith(REPLY_OPEN) ||
+    !content.text.endsWith(REPLY_CLOSE)
+  ) {
+    return null;
+  }
+  try {
+    const raw = content.text.slice(REPLY_OPEN.length, -REPLY_CLOSE.length);
+    const replies: unknown = JSON.parse(raw);
+    if (!Array.isArray(replies) || replies.length !== 1 || JSON.stringify(replies) !== raw) {
+      return null;
+    }
+    const reply: unknown = replies[0];
+    if (
+      !isRecord(reply) ||
+      Object.keys(reply).join(",") !== "questionItemId,question,answer" ||
+      typeof reply.questionItemId !== "string" ||
+      typeof reply.question !== "string" ||
+      typeof reply.answer !== "string" ||
+      reply.answer.trim() === ""
+    ) {
+      return null;
+    }
+    const reference: unknown = JSON.parse(reply.questionItemId);
+    if (
+      !Array.isArray(reference) ||
+      reference.length !== 3 ||
+      reference[0] !== "request_user_input_async" ||
+      typeof reference[1] !== "string" ||
+      reference[1] === "" ||
+      reference[2] !== 0 ||
+      JSON.stringify(reference) !== reply.questionItemId
+    ) {
+      return null;
+    }
+    return { questionId: reference[1], title: reply.question };
+  } catch {
+    return null;
+  }
+}
+
+function nativeAnsweredQuestion(items: Map<string, NativeItem>, question: NativeItem): boolean {
+  if (
+    question.type !== "agentMessage" ||
+    question.delivery !== "async" ||
+    !Array.isArray(question.questions) ||
+    question.questions.length !== 1
+  ) {
+    return false;
+  }
+  const rendered: unknown = question.questions[0];
+  if (
+    !isRecord(rendered) ||
+    Object.keys(rendered).some((key) => key !== "title" && key !== "options") ||
+    typeof rendered.title !== "string" ||
+    rendered.title === "" ||
+    !(
+      rendered.options == null ||
+      (Array.isArray(rendered.options) &&
+        rendered.options.every((option: unknown) => typeof option === "string"))
+    )
+  ) {
+    return false;
+  }
+  const order = [...items.values()];
+  if (
+    order.some(
+      (item) =>
+        item.type === "userMessage" &&
+        Array.isArray(item.content) &&
+        item.content.some(
+          (content: unknown) =>
+            isRecord(content) &&
+            typeof content.text === "string" &&
+            content.text.includes("send_user_message_question_reply"),
+        ) &&
+        nativeReplyBinding(item) === null,
+    )
+  ) {
+    return false;
+  }
+  const matches = order.filter((item) => {
+    const binding = nativeReplyBinding(item);
+    return binding?.questionId === question.id;
+  });
+  return (
+    matches.length === 1 &&
+    nativeReplyBinding(matches[0]!)?.title === rendered.title &&
+    order.indexOf(matches[0]!) > order.indexOf(question)
+  );
+}
+
+/**
+ * Exact owner-record or observed native UI envelope proof. The UI text envelope is trusted
+ * within native history and the owner's clear-record boundary, not authenticated UI origin.
+ * A byte-identical manually authored native user message cannot be distinguished from it.
+ */
 export async function nativeQuestionsClear(
   client: RpcClient,
   unblockDir: string,
@@ -347,6 +474,24 @@ export async function nativeQuestionsClear(
     if (typeof resolved === "string") {
       return refused("question-resolution", resolved);
     }
+    let derived = false;
+    for (const item of proof.values()) {
+      if (questionItem(item) && !resolved.has(item.id) && nativeAnsweredQuestion(proof, item)) {
+        if (!derived) {
+          // The first derived binding requires a completed current head on this connection.
+          // eslint-disable-next-line no-await-in-loop
+          const headClear = await sameCompletedHead(client, recipient, turnId);
+          if (!headClear) {
+            return refused(
+              "binding-mismatch",
+              "native answer proof requires the same completed head",
+            );
+          }
+        }
+        derived = true;
+        resolved.add(item.id);
+      }
+    }
     for (const item of proof.values()) {
       if (questionItem(item) && !resolved.has(item.id)) {
         return refused(
@@ -355,7 +500,17 @@ export async function nativeQuestionsClear(
         );
       }
     }
-    if (compacted && !(await sameCompletedHead(client, recipient, turnId))) {
+    if (derived) {
+      for (const [readTurn, snapshot] of pages) {
+        // Each complete turn is read again in native order before deriving admission.
+        // eslint-disable-next-line no-await-in-loop
+        const current = await nativeItems(client, recipient, readTurn);
+        if (!sameJson([...snapshot.values()], [...current.values()])) {
+          return refused("binding-mismatch", "native answer proof items changed");
+        }
+      }
+    }
+    if ((compacted || derived) && !(await sameCompletedHead(client, recipient, turnId))) {
       return refused("binding-mismatch", "native question proof head changed");
     }
     if (!clearanceUnchanged(unblockDir, recipient, record)) {

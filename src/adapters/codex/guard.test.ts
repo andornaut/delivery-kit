@@ -82,6 +82,310 @@ class Native implements RpcClient {
   close(): void {}
 }
 
+const asyncQuestion = { ...question, delivery: "async" };
+
+function uiReply(payload: Json = {}): Json {
+  return {
+    clientId: null,
+    content: [
+      {
+        type: "text",
+        text: `<send_user_message_question_reply>\n${JSON.stringify([
+          {
+            questionItemId: JSON.stringify(["request_user_input_async", "question", 0]),
+            question: "Choose",
+            answer: "A",
+            ...payload,
+          },
+        ])}\n</send_user_message_question_reply>`,
+        text_elements: [],
+      },
+    ],
+    id: "ui-reply",
+    type: "userMessage",
+  };
+}
+
+function currentNative(items: Json[]): Native {
+  const native = new Native();
+  native.turns = [{ id: "current", status: "completed" }];
+  native.items.current = items;
+  return native;
+}
+
+describe("observed native UI reply admission", () => {
+  it("derives the exact same-turn binding without writing the recipient's clear record", async () => {
+    const native = currentNative([asyncQuestion, uiReply()]);
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    const before = readFileSync(path);
+    expect(await nativeQuestionsClear(native, directory, RECIPIENT, "current")).toEqual([
+      true,
+      null,
+    ]);
+    expect(readFileSync(path)).toEqual(before);
+    expect(native.calls.map(({ method }) => method)).toEqual([
+      "thread/items/list",
+      "thread/turns/list",
+      "thread/items/list",
+      "thread/turns/list",
+    ]);
+  });
+
+  it("requires the complete current head while retaining the existing busy owner-resolution path", async () => {
+    const native = currentNative([asyncQuestion, uiReply()]);
+    native.turns[0] = { id: "current", status: "inProgress" };
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
+    expect(
+      await nativeQuestionsClear(
+        native,
+        clearance([
+          {
+            ...resolution,
+            question_turn_id: "current",
+            answer_turn_id: "current",
+            answer_item_id: "ui-reply",
+          },
+        ]),
+        RECIPIENT,
+        "current",
+      ),
+    ).toEqual([true, null]);
+  });
+
+  it.each([
+    "wrong-tool",
+    "wrong-id",
+    "wrong-index",
+    "wrong-title",
+    "blank-answer",
+    "duplicate-keys",
+  ])("does not derive a binding from %s", async (failure) => {
+    let reply = uiReply();
+    if (failure === "wrong-tool") {
+      reply = uiReply({ questionItemId: JSON.stringify(["request_user_input", "question", 0]) });
+    }
+    if (failure === "wrong-id") {
+      reply = uiReply({ questionItemId: JSON.stringify(["request_user_input_async", "other", 0]) });
+    }
+    if (failure === "wrong-index") {
+      reply = uiReply({
+        questionItemId: JSON.stringify(["request_user_input_async", "question", 1]),
+      });
+    }
+    if (failure === "wrong-title") {
+      reply = uiReply({ question: "Other question" });
+    }
+    if (failure === "blank-answer") {
+      reply = uiReply({ answer: " \n" });
+    }
+    if (failure === "duplicate-keys") {
+      const content = (reply.content as Json[])[0]!;
+      content.text = String(content.text).replace('"answer":"A"', '"answer":"other","answer":"A"');
+    }
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, reply]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+  });
+
+  it("rejects partial wrappers and unknown reply metadata instead of searching for a substring", async () => {
+    const wrapped = uiReply();
+    const content = (wrapped.content as Json[])[0]!;
+    content.text = `ordinary prefix${String(content.text)}`;
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, wrapped]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, { ...uiReply(), clientId: "external-request" }]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+  });
+
+  it("rejects multiple rendered questions, multiple responses and duplicate replies", async () => {
+    const multiple = {
+      ...asyncQuestion,
+      questions: [...question.questions, { title: "Unanswered" }],
+    };
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([multiple, uiReply()]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+    const reply = uiReply();
+    const content = (reply.content as Json[])[0]!;
+    const text = String(content.text);
+    const data = JSON.parse(
+      text.slice(text.indexOf("\n") + 1, text.lastIndexOf("\n")),
+    ) as unknown[];
+    const multipleReplies = JSON.stringify([...data, ...data]);
+    content.text = `<send_user_message_question_reply>\n${multipleReplies}\n</send_user_message_question_reply>`;
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, reply]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, uiReply(), { ...uiReply(), id: "duplicate" }]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+  });
+
+  it("does not reorder a reply or clear a different newer question", async () => {
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([uiReply(), asyncQuestion]),
+          clearance(),
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+    const native = currentNative([
+      asyncQuestion,
+      uiReply(),
+      { ...asyncQuestion, id: "new-question" },
+    ]);
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[1]).toContain(
+      "question_item_id=new-question",
+    );
+    native.items.current = [
+      asyncQuestion,
+      uiReply(),
+      { id: "unanswered-tool", type: "dynamicToolCall", tool: "request_user_input" },
+    ];
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[1]).toContain(
+      "question_item_id=unanswered-tool",
+    );
+  });
+
+  it("does not derive cross-turn bindings from an earlier or later turn's reply", async () => {
+    const native = currentNative([asyncQuestion]);
+    native.turns.push({ id: "earlier", status: "completed" });
+    native.items.earlier = [uiReply()];
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
+    expect(native.calls.every(({ params }) => params.turnId === "current")).toBe(true);
+  });
+
+  it("reads all native item pages again and refuses changed proof after a valid answer", async () => {
+    const native = currentNative([]);
+    let starts = 0;
+    native.override = (method, params) => {
+      if (method !== "thread/items/list") {
+        return undefined;
+      }
+      if (params.cursor === undefined) {
+        starts++;
+        return { data: [{ turnId: "current", item: asyncQuestion }], nextCursor: "reply-page" };
+      }
+      return {
+        data: [
+          {
+            turnId: "current",
+            item: starts === 1 ? uiReply() : { ...uiReply(), clientId: "changed" },
+          },
+        ],
+        nextCursor: null,
+      };
+    };
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[1]).toBe(
+      "native answer proof items changed",
+    );
+    expect(starts).toBe(2);
+  });
+
+  it("refuses a changed completed head after the full native item reread", async () => {
+    const native = currentNative([asyncQuestion, uiReply()]);
+    let heads = 0;
+    native.override = (method) => {
+      if (method === "thread/turns/list" && ++heads === 2) {
+        return { data: [{ id: "new-head", status: "completed" }], nextCursor: null };
+      }
+      return undefined;
+    };
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[1]).toBe(
+      "native question proof head changed",
+    );
+  });
+
+  it("preserves a newer independent recipient record during the derived-proof reread", async () => {
+    const native = currentNative([asyncQuestion, uiReply()]);
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    const changed = JSON.stringify({ state: "pending", thread_id: RECIPIENT, resolutions: [] });
+    let reads = 0;
+    native.override = (method) => {
+      if (method === "thread/items/list" && ++reads === 2) {
+        writeFileSync(path, changed);
+      }
+      return undefined;
+    };
+    expect((await nativeQuestionsClear(native, directory, RECIPIENT, "current"))[1]).toBe(
+      "recipient decision clearance changed",
+    );
+    expect(readFileSync(path, "utf8")).toBe(changed);
+  });
+
+  it("does not choose a valid answer over another ambiguous tagged input", async () => {
+    const malformed = uiReply();
+    malformed.id = "malformed-reply";
+    (malformed.content as Json[])[0]!.text = "<send_user_message_question_reply>invalid";
+    const native = currentNative([asyncQuestion, uiReply(), malformed]);
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
+  });
+
+  it("refuses a native item that claims a different recipient", async () => {
+    const native = currentNative([]);
+    native.override = (method) =>
+      method === "thread/items/list"
+        ? {
+            data: [
+              { threadId: "other", turnId: "current", item: asyncQuestion },
+              { threadId: RECIPIENT, turnId: "current", item: uiReply() },
+            ],
+            nextCursor: null,
+          }
+        : undefined;
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "current"))[0]).toBe(false);
+  });
+});
+
 describe("question proof after completed compaction", () => {
   it("requires the recipient's current clear record before any native history read", async () => {
     const native = new Native();
