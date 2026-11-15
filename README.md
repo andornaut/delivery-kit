@@ -401,6 +401,14 @@ pending work, not native acceptance. Native acceptance is not handling. A queued
 also does not prove channel acceptance. Inspect the returned state: exit 0 reports a completed
 operation, including a guarded or still-pending result, not proof of delivery.
 
+Status and outbox entries may include `diagnostic`: allowlisted `stage`, `category` and
+`classification`, with optional known native `method` and `rpcCode`. Service attempt counts
+do not count accepted native sends. A local or question-guard refusal is distinct from a
+native-send rejection or an unknown send outcome. Raw native messages, context and unknown
+codes are not exposed. Older receipts without diagnostics remain readable; absence supplies
+no historical cause or clearance. `DeliveryDiagnostic` and `NativeRpcCode` are type-only
+exports from `@andornaut/delivery-kit/build/transport` and its compatibility alias.
+
 The CLI creates receipt storage before delivery. A failure proven to occur before native
 admission sends nothing and permits a guarded retry of the same unchanged original. A failure
 after a possible native mutation, or an unknown or corrupt prior receipt, remains ambiguous:
@@ -416,6 +424,16 @@ may be skipped within a bounded question-proof lookup. The first complete semant
 clearance through the existing exact question/answer checks, and the latest head must remain
 unchanged. Pending questions and mixed, active, partial or unavailable history remain guarded.
 Delivery still targets the current turn, never the older proof turn.
+
+An existing recipient-bound clear record remains mandatory. For a single rendered asynchronous
+question, the guard can derive an answer from the exact supported native reply envelope in
+the same complete native turn. The tool, question ID, index, title and cardinality must match,
+with one later reply and canonical JSON encoding. JSON object member order is immaterial.
+The current head must be completed and unchanged, all read items are re-read unchanged, and
+the owner's clear record must remain unchanged. Other, newer, malformed, deferred or unknown
+questions remain guarded. This reads trusted native-history text, not authenticated UI-origin
+metadata; an identical manually authored native user message is indistinguishable. No decision
+record, native question or UI state is changed, and unsupported envelopes grant no clearance.
 
 Reconciliation has two exclusive forms:
 
