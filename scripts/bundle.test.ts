@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BUNDLES = ["dist/cli.js", "dist/registry.js", "dist/transport.js"];
+const BUNDLES = ["dist/cli.js", "dist/registry.js", "dist/source-identity.js", "dist/transport.js"];
 const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json"];
 
 beforeAll(() => {
@@ -116,6 +116,8 @@ describe("packed package", () => {
       "dist/cli.js",
       "dist/registry.d.ts",
       "dist/registry.js",
+      "dist/source-identity.d.ts",
+      "dist/source-identity.js",
       "dist/transport.d.ts",
       "dist/transport.js",
     ]);
@@ -126,6 +128,8 @@ describe("packed package", () => {
       "cli.js",
       "registry.d.ts",
       "registry.js",
+      "source-identity.d.ts",
+      "source-identity.js",
       "transport.d.ts",
       "transport.js",
       "types",

@@ -29,8 +29,8 @@ const requirements = [
     "Resolve reciprocal waits with the smallest owner question.",
   ],
   [
-    "full backlog at each existing slot",
-    "At every existing :20/:50 scheduled review, inventory ALL registered game, kit and " +
+    "full backlog at each caller-configured slot",
+    "At every caller-configured scheduled review, inventory ALL registered game, kit and " +
       "game-coordinator recipients and ready worker handoffs",
     "including recipients outside the active route targets",
     "Read the actual queued payloads and current handoff artifacts",
