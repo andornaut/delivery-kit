@@ -124,18 +124,20 @@ describe("runGate", () => {
       ).not.toBe(0);
       expect(readFileSync(join(work, ".git", "config"), "utf8")).not.toContain("remote");
       expect(readFileSync(join(work, ".git", "config"), "utf8")).not.toContain("worktree");
+      expect(readFileSync(join(work, " leading.txt"), "utf8")).toBe("leading filename\n");
       seen.push(work);
       return ok();
     };
     const test = setup({ install: inspect, gate: inspect });
-    parent = test.input.sha;
+    commitFile(test.test.repo, " leading.txt", "leading filename\n");
+    parent = gitSync(test.test.repo, "rev-parse", "HEAD");
     expected = mergeWithCommit(test.test, "identity-topic");
     tree = gitSync(test.test.repo, "rev-parse", "HEAD^{tree}");
     test.input.sha = expected;
     expect(await runGate(test.context, test.input)).toEqual({ ok: true, output: "" });
     expect(seen).toHaveLength(2);
     expect(gitSync(test.test.repo, "rev-parse", "HEAD")).toBe(expected);
-    expect(gitSync(test.test.repo, "rev-list", "--count", "HEAD")).toBe("4");
+    expect(gitSync(test.test.repo, "rev-list", "--count", "HEAD")).toBe("5");
   });
 
   it("rejects an ignored unknown store before any source-bound container exists", async () => {
@@ -266,6 +268,29 @@ describe("runGate", () => {
     expect(
       test.exec.calls.filter((call) => call.args.some((arg) => arg.startsWith("EXPECTED_COMMIT="))),
     ).toHaveLength(2);
+  });
+
+  it("refuses an install that hides changed tracked bytes with an index flag", async () => {
+    let ranCategory = false;
+    const test = setup({
+      install: (work) => {
+        gitSync(work, "update-index", "--assume-unchanged", "README.md");
+        writeFileSync(join(work, "README.md"), "hidden install change\n");
+        expect(gitSync(work, "status", "--porcelain=v1")).toBe("");
+        return ok();
+      },
+      gate: () => {
+        ranCategory = true;
+        return ok();
+      },
+    });
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("gate source identity validation failed"),
+    });
+    expect(ranCategory).toBe(false);
+    expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("game\n");
   });
 
   it("rejects dirty source before image exposure and leaves the original files dirty", async () => {

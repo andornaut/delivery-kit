@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type { BusContext } from "./bus/context.ts";
-import { git } from "./bus/exec.ts";
+import { assertNotInterrupted, git } from "./bus/exec.ts";
 import {
   restoreSourceIdentity,
   snapshotSourceIdentity,
@@ -91,11 +91,17 @@ export async function captureGateIdentity(
 ): Promise<GateIdentity> {
   const directory = mkdtempSync(join(tmpdir(), "delivery-gate-identity-"));
   try {
-    const approvedPaths = (
-      await git(context.exec, input.work, ["ls-tree", "-r", "-z", "--name-only", input.sha])
-    )
-      .split("\0")
-      .filter(Boolean);
+    const inventory = assertNotInterrupted(
+      "git ls-tree",
+      await context.exec({
+        args: ["-C", input.work, "ls-tree", "-r", "-z", "--name-only", input.sha],
+        command: "git",
+      }),
+    );
+    if (inventory.status !== 0) {
+      throw new Error("gate source tracked inventory unavailable");
+    }
+    const approvedPaths = inventory.stdout.split("\0").filter(Boolean);
     const entries = new Map<string, Pick<SourceIdentityEntry, "path" | "type">>();
     for (const path of approvedPaths) {
       entries.set(path, { path, type: "blob" });
@@ -325,6 +331,13 @@ export const GATE_VERIFY_IDENTITY_SCRIPT = [
   'test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"',
   'test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"',
   'test "$(git write-tree)" = "$EXPECTED_TREE"',
+  "index=$(git ls-files -v)",
+  [
+    "{ while IFS= read -r entry; do case \"$entry\" in 'H '*) ;; *) exit 1 ;; esac; done <<GATE_INDEX",
+    "$index",
+    "GATE_INDEX",
+    "}",
+  ].join("\n"),
   'test "$(git rev-list --count HEAD)" = 1',
   "objects=$(git cat-file --batch-all-objects --batch-check='%(objectname) %(objecttype)' | git hash-object --stdin)",
   'test "$objects" = "$EXPECTED_OBJECTS_BLOB"',
