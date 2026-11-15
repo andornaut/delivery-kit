@@ -408,6 +408,8 @@ native-send rejection or an unknown send outcome. Raw native messages, context a
 codes are not exposed. Older receipts without diagnostics remain readable; absence supplies
 no historical cause or clearance. `DeliveryDiagnostic` and `NativeRpcCode` are type-only
 exports from `@andornaut/delivery-kit/build/transport` and its compatibility alias.
+A `pending-question` diagnostic means clearance was not proved, not that a user question is
+necessarily unanswered.
 
 The CLI creates receipt storage before delivery. A failure proven to occur before native
 admission sends nothing and permits a guarded retry of the same unchanged original. A failure
@@ -429,6 +431,8 @@ An existing recipient-bound clear record remains mandatory. For a single rendere
 question, the guard can derive an answer from the exact supported native reply envelope in
 the same complete native turn. The tool, question ID, index, title and cardinality must match,
 with one later reply and canonical JSON encoding. JSON object member order is immaterial.
+Known optional native timestamps accept null or signed safe integers; malformed metadata and
+unknown reply-item fields remain guarded. Timestamps do not establish question chronology.
 The current head must be completed and unchanged, all read items are re-read unchanged, and
 the owner's clear record must remain unchanged. Other, newer, malformed, deferred or unknown
 questions remain guarded. This reads trusted native-history text, not authenticated UI-origin
