@@ -764,6 +764,10 @@ The identity bridge runs in the Node runner and adds no gate-image tool requirem
 read genuine Git identity alongside the existing `WORKERS_CI_COMMIT_SHA`; no synthetic commit,
 build-ID override or consumer-specific identity environment is required.
 
+Installers may change only `core.hooksPath` in the generated Git configuration; all other
+configuration and source-identity fields remain pinned. Validation disables hooks and
+fsmonitor only for its own Git commands, leaving installer and category configuration untouched.
+
 After a gate the host copies the logs out with `docker cp` and removes the container, also after a
 failure or timeout. Git status and the content of every file it reports are fingerprinted before
 and after; a change discards the gate. Only a passing gate whose fingerprint is unchanged also
