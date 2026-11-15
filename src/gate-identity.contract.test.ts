@@ -86,6 +86,7 @@ function dockerFilesystem(root: string) {
   const mounts = new Map<string, string>();
   const calls: string[][] = [];
   const containerEnv: NodeJS.ProcessEnv = {};
+  let networkDisconnected = false;
   const resolvePath = (value: string): string => {
     const mapping = [...mounts]
       .sort(([a], [b]) => b.length - a.length)
@@ -103,10 +104,15 @@ function dockerFilesystem(root: string) {
     const args = [...spec.args];
     calls.push(args);
     const ok = { status: 0, stdout: "", stderr: "" };
-    if (["ps", "start", "network", "rm"].includes(args[0]!)) {
+    if (["ps", "start", "rm"].includes(args[0]!)) {
+      return ok;
+    }
+    if (args[0] === "network" && args[1] === "disconnect" && args[2] === "bridge") {
+      networkDisconnected = true;
       return ok;
     }
     if (args[0] === "create") {
+      networkDisconnected = false;
       mkdirSync(container, { recursive: true });
       for (let index = 0; index < args.length; index++) {
         if (args[index] === "-e") {
@@ -137,6 +143,14 @@ function dockerFilesystem(root: string) {
       index++;
       const command = args[index++]!;
       const childArgs = args.slice(index);
+      if (
+        command === "sh" &&
+        childArgs[0] === "-c" &&
+        childArgs[1] === 'test "$(ls /sys/class/net)" = lo'
+      ) {
+        // This probe observes the emulated container's network state.
+        return { ...ok, status: networkDisconnected ? 0 : 1 };
+      }
       if (command === "sh" && childArgs[0] === "-c") {
         childArgs[1] = shellPaths(childArgs[1]!);
       } else {
