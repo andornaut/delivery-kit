@@ -1,6 +1,7 @@
 // Durable local delivery is independent of native admission. Only explicit dispatch consults
 // current registered ownership and the existing recipient guards.
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
 
@@ -456,7 +457,12 @@ export class MessageService {
         if (!this.localClear(record, source, directory)) {
           return { requestId: message.requestId, status: "blocked" };
         }
-        const client = await this.connect();
+        let client: RpcClient;
+        try {
+          client = await this.connect();
+        } catch {
+          return { requestId: message.requestId, status: "unavailable" };
+        }
         try {
           // Existing guarded delivery performs native question checks and never resumes a turn.
           const boundClient: RpcClient = {
@@ -530,6 +536,11 @@ export class MessageService {
         requestId: source.requestId,
         text: messageTransportText(record, source),
       };
+      try {
+        mkdirSync(dirname(this.receiptPath(source)), { mode: 0o700, recursive: true });
+      } catch {
+        return lease.complete({ reason: "transport-unavailable", source, state: "blocked" });
+      }
       let result: TransportReceipt;
       try {
         result = await this.transport(record, source, directory).send(

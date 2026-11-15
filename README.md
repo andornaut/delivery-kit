@@ -401,10 +401,21 @@ pending work, not native acceptance. Native acceptance is not handling. A queued
 also does not prove channel acceptance. Inspect the returned state: exit 0 reports a completed
 operation, including a guarded or still-pending result, not proof of delivery.
 
+The CLI creates receipt storage before delivery. A failure proven to occur before native
+admission sends nothing and permits a guarded retry of the same unchanged original. A failure
+after a possible native mutation, or an unknown or corrupt prior receipt, remains ambiguous:
+reconcile its bound receipt before any retry.
+
 Native queue/add can wake a loaded idle thread through `enqueue_with_metadata` and
 `wake_if_loaded`, without resume. Client message IDs do not deduplicate native adds. A lost
 response, interrupted attempt or other ambiguous outcome must not produce another add. Neither
 queue absence nor blocked guards prove non-delivery. TUI unsent drafts remain untouched.
+
+Completed, error-free turns whose full native contents contain exactly one compaction item
+may be skipped within a bounded question-proof lookup. The first complete semantic turn must prove
+clearance through the existing exact question/answer checks, and the latest head must remain
+unchanged. Pending questions and mixed, active, partial or unavailable history remain guarded.
+Delivery still targets the current turn, never the older proof turn.
 
 Reconciliation has two exclusive forms:
 

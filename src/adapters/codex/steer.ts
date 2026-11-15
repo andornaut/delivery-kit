@@ -1,7 +1,8 @@
 // Guarded native input: turn/steer into a busy turn or turn/start on an idle thread, never an
 // interrupt. The receipt is persisted as `sending` before the request, so an
 // interrupted send becomes `ambiguous` and is never resent.
-import { existsSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { readJson, writeDurable } from "../../durable.ts";
 import { decisionClear, decisionRecord } from "../shared/decisions.ts";
@@ -91,6 +92,7 @@ export interface ReceiptState {
 }
 
 function persistReceipt(path: string, state: ReceiptState): void {
+  mkdirSync(dirname(path), { mode: 0o700, recursive: true });
   writeDurable(path, `${dumpsJson(state as PyJson)}\n`);
 }
 
@@ -111,6 +113,19 @@ function turnIdOf(response: unknown): string | null {
   return null;
 }
 
+function receiptExists(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 /** Load the existing receipt, or start one. A receipt bound to another request is refused. */
 function loadReceipt(
   path: string,
@@ -119,7 +134,7 @@ function loadReceipt(
   seed: Readonly<Record<string, PyJson>>,
 ): ReceiptState | null {
   const fresh: ReceiptState = { ...seed, attempts: [], clientUserMessageId: requestId, recipient };
-  if (!existsSync(path)) {
+  if (!receiptExists(path)) {
     return fresh;
   }
   const stored = readJson(path);
@@ -136,6 +151,7 @@ function loadReceipt(
 }
 
 async function send(
+  admission: { started: boolean },
   client: RpcClient,
   path: string,
   state: ReceiptState,
@@ -149,6 +165,7 @@ async function send(
   state.attempts.push(record);
   state.status = "sending";
   persistReceipt(path, state);
+  admission.started = true;
   let response: unknown;
   try {
     response = await client.call(target.method, params);
@@ -190,7 +207,12 @@ export function deferLocally(
   requestId: string,
   recipient: string,
 ): DeliveryReceipt | null {
-  const state = loadReceipt(path, requestId, recipient, seed);
+  let state: ReceiptState | null;
+  try {
+    state = loadReceipt(path, requestId, recipient, seed);
+  } catch {
+    return receipt(requestId, "ambiguous", "previous receipt unavailable; do not resend");
+  }
   if (state === null || (state.status !== undefined && state.status !== "deferred")) {
     return null;
   }
@@ -208,7 +230,8 @@ export function deferLocally(
  * sending, ambiguous or rejected receipt is never resent. A stale-turn rejection of turn/steer
  * permits one refreshed attempt.
  */
-export async function deliverReceipt(
+async function deliverPreparedReceipt(
+  admission: { started: boolean },
   client: RpcClient,
   unblockDir: string,
   path: string,
@@ -217,14 +240,23 @@ export async function deliverReceipt(
   recipient: string,
   text: string,
 ): Promise<DeliveryReceipt> {
+  const existed = receiptExists(path);
   const state = loadReceipt(path, requestId, recipient, seed);
   if (state === null) {
     return receipt(requestId, "blocked", "receipt is bound to another request");
   }
+  if (
+    existed &&
+    !["accepted", "sending", "ambiguous", "rejected", "deferred"].includes(state.status ?? "")
+  ) {
+    return receipt(requestId, "ambiguous", "unknown previous receipt state; do not resend");
+  }
+  admission.started = existed && (state.status === "sending" || state.status === "ambiguous");
   if (state.status === "accepted") {
     return receipt(requestId, "accepted");
   }
   if (state.status === "sending" || state.status === "ambiguous" || state.status === "rejected") {
+    admission.started = true;
     // Native userMessage items expose no clientUserMessageId linkage, so nothing proves a
     // previous request was not accepted.
     if (state.status === "sending") {
@@ -257,7 +289,7 @@ export async function deliverReceipt(
       params.expectedTurnId = target.expectedTurnId;
     }
     // eslint-disable-next-line no-await-in-loop
-    const outcome = await send(client, path, state, params, target);
+    const outcome = await send(admission, client, path, state, params, target);
     if (outcome === "stale" && attempt === 0) {
       continue;
     }
@@ -271,4 +303,37 @@ export async function deliverReceipt(
     );
   }
   return receipt(requestId, "rejected", "bounded attempts exhausted");
+}
+
+/** Receipt preparation and read-only probes cannot admit native input. */
+export async function deliverReceipt(
+  client: RpcClient,
+  unblockDir: string,
+  path: string,
+  seed: Readonly<Record<string, PyJson>>,
+  requestId: string,
+  recipient: string,
+  text: string,
+): Promise<DeliveryReceipt> {
+  const admission = { started: true };
+  try {
+    return await deliverPreparedReceipt(
+      admission,
+      client,
+      unblockDir,
+      path,
+      seed,
+      requestId,
+      recipient,
+      text,
+    );
+  } catch {
+    return receipt(
+      requestId,
+      admission.started ? "ambiguous" : "unavailable",
+      admission.started
+        ? "receipt or response unavailable; do not resend"
+        : "receipt preparation or native probe unavailable",
+    );
+  }
 }

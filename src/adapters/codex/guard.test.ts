@@ -1,0 +1,274 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { nativeQuestionsClear } from "./guard.ts";
+import type { RpcClient } from "./rpc.ts";
+
+const RECIPIENT = "00000000-0000-4000-8000-000000000003";
+const directories: string[] = [];
+type Json = Record<string, unknown>;
+
+afterEach(() => {
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { recursive: true });
+  }
+});
+
+function clearance(resolutions: Json[] = []): string {
+  const directory = mkdtempSync(join(tmpdir(), "question-guard-"));
+  directories.push(directory);
+  mkdirSync(join(directory, "decisions"));
+  writeFileSync(
+    join(directory, "decisions", `${RECIPIENT}.json`),
+    JSON.stringify({ resolutions, state: "clear", thread_id: RECIPIENT }),
+  );
+  return directory;
+}
+
+const question = {
+  id: "question",
+  questions: [{ title: "Choose", options: ["A", "B"] }],
+  type: "agentMessage",
+};
+const answer = { id: "answer", type: "userMessage" };
+const resolution = {
+  answer_item_id: "answer",
+  answer_turn_id: "previous",
+  question_item_id: "question",
+  question_turn_id: "previous",
+};
+
+class Native implements RpcClient {
+  readonly calls: { method: string; params: Json }[] = [];
+  turns: Json[] = [
+    { id: "compact", status: "completed" },
+    { id: "previous", status: "completed" },
+  ];
+  readonly items: Record<string, Json[]> = {
+    compact: [{ id: "compaction", type: "contextCompaction" }],
+    previous: [{ id: "done", questions: null, type: "agentMessage" }],
+  };
+  override?: (method: string, params: Json) => unknown;
+
+  async call(method: string, value: unknown): Promise<unknown> {
+    const params = value as Json;
+    this.calls.push({ method, params });
+    const overridden = this.override?.(method, params);
+    if (overridden !== undefined) {
+      return overridden;
+    }
+    if (method === "thread/turns/list") {
+      const index = params.cursor === undefined ? 0 : Number(params.cursor);
+      return {
+        data: this.turns.slice(index, index + 1),
+        nextCursor: index + 1 < this.turns.length ? String(index + 1) : null,
+      };
+    }
+    if (method === "thread/items/list") {
+      return {
+        data: (this.items[String(params.turnId)] ?? []).map((item) => ({
+          item,
+          turnId: params.turnId,
+        })),
+        nextCursor: null,
+      };
+    }
+    throw new Error(`unexpected method: ${method}`);
+  }
+
+  close(): void {}
+}
+
+describe("question proof after completed compaction", () => {
+  it("uses the complete preceding turn and rechecks the current head", async () => {
+    const native = new Native();
+    expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact")).toEqual([
+      true,
+      null,
+    ]);
+    expect(native.calls.map(({ method }) => method)).toEqual([
+      "thread/items/list",
+      "thread/turns/list",
+      "thread/turns/list",
+      "thread/items/list",
+      "thread/turns/list",
+    ]);
+    expect(native.calls.at(-1)?.params.cursor).toBeUndefined();
+  });
+
+  it("preserves an unanswered prompt in the preceding completed turn", async () => {
+    const native = new Native();
+    native.items.previous = [question];
+    expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact")).toEqual([
+      false,
+      "native question pending: question_turn_id=previous question_item_id=question",
+    ]);
+  });
+
+  it("accepts only the exact recorded answer after its question", async () => {
+    const native = new Native();
+    native.items.previous = [question, answer];
+    expect(
+      await nativeQuestionsClear(native, clearance([resolution]), RECIPIENT, "compact"),
+    ).toEqual([true, null]);
+    expect(
+      await nativeQuestionsClear(
+        native,
+        clearance([{ ...resolution, answer_item_id: "absent" }]),
+        RECIPIENT,
+        "compact",
+      ),
+    ).toEqual([false, "recipient question resolution cannot be verified by exact native IDs"]);
+    native.items.previous = [answer, question];
+    expect(
+      (await nativeQuestionsClear(native, clearance([resolution]), RECIPIENT, "compact"))[0],
+    ).toBe(false);
+  });
+
+  it("walks consecutive completed compaction-only turns", async () => {
+    const native = new Native();
+    native.turns.splice(1, 0, { id: "second-compact", status: "completed" });
+    native.items["second-compact"] = [{ id: "second", type: "contextCompaction" }];
+    expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact")).toEqual([
+      true,
+      null,
+    ]);
+  });
+
+  it.each(["inProgress", "interrupted", "failed"])(
+    "rejects a %s compaction turn",
+    async (status) => {
+      const native = new Native();
+      native.turns[0] = { id: "compact", status };
+      expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact"))[0]).toBe(
+        false,
+      );
+    },
+  );
+
+  it("rejects mixed compaction, even with a recorded answer", async () => {
+    const native = new Native();
+    native.items.compact = [{ id: "compaction", type: "contextCompaction" }, question, answer];
+    const currentResolution = {
+      ...resolution,
+      answer_turn_id: "compact",
+      question_turn_id: "compact",
+    };
+    expect(
+      (await nativeQuestionsClear(native, clearance([currentResolution]), RECIPIENT, "compact"))[0],
+    ).toBe(false);
+  });
+
+  it("retains an active current question without looking past it", async () => {
+    const native = new Native();
+    native.items.compact = [question];
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact"))[0]).toBe(false);
+    expect(native.calls.map(({ method }) => method)).toEqual(["thread/items/list"]);
+  });
+
+  it.each([
+    "partial-items",
+    "unknown-items",
+    "missing-predecessor",
+    "repeated-cursor",
+    "head-change",
+    "turn-error",
+    "active-predecessor",
+    "empty-predecessor",
+  ])("fails closed on %s", async (failure) => {
+    const native = new Native();
+    if (failure === "empty-predecessor") {
+      native.items.previous = [];
+    }
+    if (failure === "missing-predecessor") {
+      native.turns.splice(1);
+    }
+    if (failure === "unknown-items") {
+      native.items.previous = [{ id: "new", type: "unknownFutureItem" }];
+    }
+    if (failure === "turn-error") {
+      native.turns[0] = { id: "compact", status: "completed", error: { message: "failure" } };
+    }
+    if (failure === "active-predecessor") {
+      native.turns[1] = { id: "previous", status: "inProgress" };
+    }
+    let headReads = 0;
+    native.override = (method, params) => {
+      if (
+        failure === "partial-items" &&
+        method === "thread/items/list" &&
+        params.turnId === "previous"
+      ) {
+        return { data: [], truncated: true };
+      }
+      if (failure === "repeated-cursor" && method === "thread/turns/list") {
+        return { data: [{ id: "compact", status: "completed" }], nextCursor: "repeat" };
+      }
+      if (
+        failure === "head-change" &&
+        method === "thread/turns/list" &&
+        params.cursor === undefined &&
+        ++headReads === 2
+      ) {
+        return { data: [{ id: "new-question-turn", status: "completed" }] };
+      }
+      return undefined;
+    };
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact"))[0]).toBe(false);
+  });
+
+  it("finds a question on a later native item page", async () => {
+    const native = new Native();
+    native.override = (method, params) => {
+      if (method !== "thread/items/list" || params.turnId !== "previous") {
+        return undefined;
+      }
+      return params.cursor === undefined
+        ? {
+            data: [{ item: { id: "first", type: "reasoning" }, turnId: "previous" }],
+            nextCursor: "question-page",
+          }
+        : { data: [{ item: question, turnId: "previous" }], nextCursor: null };
+    };
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact"))[1]).toContain(
+      "question_item_id=question",
+    );
+  });
+
+  it("bounds a compaction chain instead of granting empty-history clearance", async () => {
+    const native = new Native();
+    native.turns = Array.from({ length: 20 }, (_, index) => ({
+      id: index === 0 ? "compact" : `compact-${index}`,
+      status: "completed",
+    }));
+    for (const turn of native.turns) {
+      native.items[String(turn.id)] = [
+        { id: `item-${String(turn.id)}`, type: "contextCompaction" },
+      ];
+    }
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact"))[0]).toBe(false);
+    expect(native.calls.filter(({ method }) => method === "thread/turns/list")).toHaveLength(8);
+  });
+
+  it("bounds unfinished item pagination before granting question clearance", async () => {
+    const native = new Native();
+    native.override = (method, params) => {
+      if (method !== "thread/items/list" || params.turnId !== "previous") {
+        return undefined;
+      }
+      const index = Number(params.cursor ?? 0);
+      return {
+        data: [{ item: { id: `item-${index}`, type: "reasoning" }, turnId: "previous" }],
+        nextCursor: String(index + 1),
+      };
+    };
+    expect((await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact"))[0]).toBe(false);
+    const reads = native.calls.filter(
+      ({ method, params }) => method === "thread/items/list" && params.turnId === "previous",
+    );
+    expect(reads).toHaveLength(64);
+  });
+});

@@ -148,6 +148,55 @@ describe("message service", () => {
     expect(service.status({ id: ID, includeBody: true })[0]?.body).toBe(BODY);
   });
 
+  it("prepares receipt storage before transport and blocks directory failures without sending", async () => {
+    const test = fixture();
+    codex(test);
+    marker(messageGuardDirectory(test.layout, ROLE)!, CODEX_TECH);
+    const directory = messageChannelStateDir(test.layout, CODEX_TECH);
+    mkdirSync(dirname(directory), { recursive: true });
+    writeFileSync(directory, "not a directory");
+    let sends = 0;
+    const service = new MessageService({
+      layout: test.layout,
+      env: {},
+      transport: () => ({
+        send: async (path, message) => {
+          sends++;
+          expect(existsSync(dirname(path))).toBe(true);
+          return { requestId: message.requestId, status: "accepted" };
+        },
+      }),
+    });
+    await service.send(input());
+    expect(await service.dispatch(ID)).toMatchObject({
+      state: "blocked",
+      reason: "transport-unavailable",
+    });
+    expect(sends).toBe(0);
+    rmSync(directory);
+    expect((await service.dispatch(ID)).state).toBe("accepted");
+    expect(sends).toBe(1);
+    expect(service.store.read(ID)?.envelope.body).toBe(BODY);
+  });
+
+  it("reports connection failure before unblock admission as unavailable", async () => {
+    const test = fixture();
+    codex(test);
+    marker(messageGuardDirectory(test.layout, ROLE)!, CODEX_TECH);
+    const service = new MessageService({
+      layout: test.layout,
+      env: {},
+      connect: async () => {
+        throw new Error("connection unavailable");
+      },
+    });
+    await service.send({ ...input(), intent: "unblock" });
+    expect(await service.dispatch(ID)).toMatchObject({
+      state: "blocked",
+      reason: "transport-unavailable",
+    });
+  });
+
   it("never turns a lost-response receipt and later blocked guard into another add or native identity", async () => {
     const test = fixture();
     codex(test);

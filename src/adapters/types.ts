@@ -1,5 +1,6 @@
 // Harness adapter contract shared by the Claude and Codex implementations.
 export type DeliveryStatus =
+  | "unavailable"
   | "accepted"
   | "ambiguous"
   | "blocked"

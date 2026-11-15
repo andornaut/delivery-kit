@@ -2,8 +2,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import * as durable from "../../durable.ts";
 import { codexQueueTransport, type NativeMessage } from "../../messages/transports.ts";
 import { type QueueGuards, queueMessage } from "./queue.ts";
 import { type RpcClient, RpcError } from "./rpc.ts";
@@ -61,6 +62,26 @@ function fixture(add?: (params: unknown) => unknown) {
 }
 
 describe("guarded native queue transport", () => {
+  it("reports a failed pre-send receipt write as unavailable without native add", async () => {
+    const f = fixture();
+    const spy = vi.spyOn(durable, "writeJsonDurable").mockImplementation(() => {
+      throw new Error("prewrite failed");
+    });
+    try {
+      expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("unavailable");
+      expect(f.calls).not.toContain("thread/queue/add");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("preserves uncertainty for a corrupt previous receipt without native input", async () => {
+    const f = fixture();
+    writeFileSync(f.path, "invalid JSON");
+    expect((await queueMessage(f.client, f.path, message, clear)).status).toBe("ambiguous");
+    expect(f.calls).toEqual([]);
+  });
+
   it("defaults to local pending without connecting or probing, and honours fresh HOLD clearance", async () => {
     const f = fixture();
     let connections = 0;

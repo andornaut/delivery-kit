@@ -27,6 +27,8 @@ export const NATIVE_ITEM_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const QUESTION_TOOLS = ["requestuserinput", "askuserquestion", "elicitation"];
+const MAX_ITEM_PAGES = 64;
+const MAX_PROOF_TURNS = 8;
 
 export type NativeItem = Record<string, unknown> & { readonly id: string; readonly type: string };
 
@@ -114,7 +116,7 @@ async function nativeItems(
   const items = new Map<string, NativeItem>();
   const cursors = new Set<string>();
   let cursor: string | null = null;
-  for (;;) {
+  for (let page = 0; page < MAX_ITEM_PAGES; page += 1) {
     const params: Record<string, unknown> = {
       limit: 100,
       sortDirection: "asc",
@@ -136,6 +138,7 @@ async function nativeItems(
     cursors.add(next);
     cursor = next;
   }
+  throw new Error("native item history page bound reached");
 }
 
 async function itemsFor(
@@ -151,6 +154,94 @@ async function itemsFor(
   const items = await nativeItems(client, recipient, turnId);
   pages.set(turnId, items);
   return items;
+}
+
+interface CompletedTurn {
+  readonly id: string;
+}
+
+function completedTurn(page: unknown): { readonly turn: CompletedTurn; readonly next: unknown } {
+  if (
+    !isRecord(page) ||
+    !Array.isArray(page.data) ||
+    page.data.length !== 1 ||
+    page.truncated ||
+    page.hasMore
+  ) {
+    throw new Error("native turn history incomplete");
+  }
+  const turn: unknown = page.data[0];
+  if (
+    !isRecord(turn) ||
+    typeof turn.id !== "string" ||
+    turn.id === "" ||
+    turn.status !== "completed" ||
+    turn.error != null
+  ) {
+    throw new Error("native question proof requires a completed turn");
+  }
+  return { next: page.nextCursor ?? null, turn: { id: turn.id } };
+}
+
+/** Only a completed, single-item compaction turn may inherit its preceding question proof. */
+async function precedingQuestionTurn(
+  client: RpcClient,
+  pages: Map<string, Map<string, NativeItem>>,
+  recipient: string,
+  latestId: string,
+): Promise<string> {
+  const seen = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let index = 0; index < MAX_PROOF_TURNS; index += 1) {
+    // Pages follow their native cursor; no turn is inferred from timestamps or IDs.
+    // eslint-disable-next-line no-await-in-loop
+    const listed = await client.call("thread/turns/list", {
+      ...(cursor === null ? {} : { cursor }),
+      itemsView: "notLoaded",
+      limit: 1,
+      sortDirection: "desc",
+      threadId: recipient,
+    });
+    const { next, turn } = completedTurn(listed);
+    if ((index === 0 && turn.id !== latestId) || seen.has(turn.id)) {
+      throw new Error("native question proof head changed or turn repeated");
+    }
+    seen.add(turn.id);
+    // eslint-disable-next-line no-await-in-loop
+    const items = await itemsFor(client, pages, recipient, turn.id);
+    if (items.size === 0) {
+      throw new Error("native compaction predecessor is empty");
+    }
+    if (![...items.values()].some((item) => item.type === "contextCompaction")) {
+      return turn.id;
+    }
+    if (items.size !== 1) {
+      throw new Error("mixed native compaction turn cannot inherit question proof");
+    }
+    if (typeof next !== "string" || next === "" || cursors.has(next)) {
+      throw new Error("native compaction predecessor unavailable");
+    }
+    cursors.add(next);
+    cursor = next;
+  }
+  throw new Error("native compaction question proof bound reached");
+}
+
+async function sameCompletedHead(
+  client: RpcClient,
+  recipient: string,
+  turnId: string,
+): Promise<boolean> {
+  const { turn } = completedTurn(
+    await client.call("thread/turns/list", {
+      itemsView: "notLoaded",
+      limit: 1,
+      sortDirection: "desc",
+      threadId: recipient,
+    }),
+  );
+  return turn.id === turnId;
 }
 
 async function resolvedQuestions(
@@ -191,7 +282,7 @@ async function resolvedQuestions(
   return resolved;
 }
 
-/** [clear, reason]: every question in the latest turn has a verified recorded answer. */
+/** Exact question proof, inherited only across completed compaction-only turns. */
 export async function nativeQuestionsClear(
   client: RpcClient,
   unblockDir: string,
@@ -205,20 +296,25 @@ export async function nativeQuestionsClear(
     }
     const pages = new Map<string, Map<string, NativeItem>>();
     const latest = await itemsFor(client, pages, recipient, turnId);
-    if ([...latest.values()].some((item) => item.type === "contextCompaction")) {
-      return [false, "native latest-turn context compaction prevents complete question proof"];
-    }
-    const resolved = await resolvedQuestions(client, pages, record, recipient, turnId);
+    const compacted = [...latest.values()].some((item) => item.type === "contextCompaction");
+    const proofId = compacted
+      ? await precedingQuestionTurn(client, pages, recipient, turnId)
+      : turnId;
+    const proof = await itemsFor(client, pages, recipient, proofId);
+    const resolved = await resolvedQuestions(client, pages, record, recipient, proofId);
     if (typeof resolved === "string") {
       return [false, resolved];
     }
-    for (const item of latest.values()) {
+    for (const item of proof.values()) {
       if (questionItem(item) && !resolved.has(item.id)) {
         return [
           false,
-          `native question pending: question_turn_id=${turnId} question_item_id=${item.id}`,
+          `native question pending: question_turn_id=${proofId} question_item_id=${item.id}`,
         ];
       }
+    }
+    if (compacted && !(await sameCompletedHead(client, recipient, turnId))) {
+      return [false, "native question proof head changed"];
     }
     return [true, null];
   } catch {

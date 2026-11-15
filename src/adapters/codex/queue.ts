@@ -117,6 +117,7 @@ async function reconcile(
 }
 
 async function operate(
+  admission: { started: boolean },
   client: RpcClient | null,
   path: string,
   message: NativeMessage,
@@ -126,7 +127,7 @@ async function operate(
   if (!valid(message)) {
     return result(message, "blocked", "invalid message binding");
   }
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { mode: 0o700, recursive: true });
   const lock = await holdLockAsync(`${path}.lock`);
   try {
     const previous = readJsonIfExists(path);
@@ -142,6 +143,7 @@ async function operate(
     }
     const uncertain =
       isRecord(previous) && (previous.status === "sending" || previous.status === "ambiguous");
+    admission.started = uncertain;
     if (uncertain && previous.status === "sending") {
       previous.status = "ambiguous";
       writeJsonDurable(path, previous);
@@ -198,6 +200,7 @@ async function operate(
       text: message.text,
     };
     writeJsonDurable(path, state);
+    admission.started = true;
     let response: unknown;
     try {
       response = await client.call("thread/queue/add", {
@@ -238,8 +241,15 @@ export function queueMessage(
   message: NativeMessage,
   guards?: QueueGuards,
 ): Promise<TransportReceipt> {
-  return operate(client, path, message, false, guards).catch(() =>
-    result(message, "ambiguous", "receipt or transport unavailable; do not resend"),
+  const admission = { started: true };
+  return operate(admission, client, path, message, false, guards).catch(() =>
+    result(
+      message,
+      admission.started ? "ambiguous" : "unavailable",
+      admission.started
+        ? "receipt or transport unavailable; do not resend"
+        : "receipt preparation unavailable",
+    ),
   );
 }
 
@@ -249,7 +259,7 @@ export function reconcileQueueMessage(
   message: NativeMessage,
   guards?: QueueGuards,
 ): Promise<TransportReceipt> {
-  return operate(client, path, message, true, guards).catch(() =>
+  return operate({ started: true }, client, path, message, true, guards).catch(() =>
     result(message, "ambiguous", "receipt or transport unavailable; do not resend"),
   );
 }
