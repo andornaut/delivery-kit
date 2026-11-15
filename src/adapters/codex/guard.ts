@@ -32,6 +32,28 @@ const MAX_PROOF_TURNS = 8;
 
 export type NativeItem = Record<string, unknown> & { readonly id: string; readonly type: string };
 
+export interface NativeQuestionDiagnostic {
+  readonly stage: "question-guard";
+  readonly category:
+    | "decision-clearance"
+    | "pending-question"
+    | "question-resolution"
+    | "history-unavailable"
+    | "compaction-unproven"
+    | "binding-mismatch";
+  readonly classification: "guarded" | "unavailable";
+}
+
+type QuestionResult = [boolean, string | null, NativeQuestionDiagnostic?];
+
+function refusedQuestion(
+  diagnostic: Omit<NativeQuestionDiagnostic, "stage">,
+  reason: string,
+  include: boolean,
+): QuestionResult {
+  return include ? [false, reason, { ...diagnostic, stage: "question-guard" }] : [false, reason];
+}
+
 interface Resolution {
   readonly question_turn_id: string;
   readonly question_item_id: string;
@@ -288,36 +310,59 @@ export async function nativeQuestionsClear(
   unblockDir: string,
   recipient: string,
   turnId: string,
-): Promise<[boolean, string | null]> {
+  options: { readonly diagnostics?: boolean } = {},
+): Promise<QuestionResult> {
+  const refused = (
+    category: NativeQuestionDiagnostic["category"],
+    reason: string,
+    classification: NativeQuestionDiagnostic["classification"] = "guarded",
+  ): QuestionResult =>
+    refusedQuestion({ category, classification }, reason, options.diagnostics === true);
   try {
     const record = decisionRecord(unblockDir, recipient);
-    if (record === null) {
-      return [false, "recipient resolution record missing or invalid"];
+    if (record === null || record.state !== "clear") {
+      return refused("decision-clearance", "recipient resolution record missing or invalid");
     }
     const pages = new Map<string, Map<string, NativeItem>>();
     const latest = await itemsFor(client, pages, recipient, turnId);
     const compacted = [...latest.values()].some((item) => item.type === "contextCompaction");
-    const proofId = compacted
-      ? await precedingQuestionTurn(client, pages, recipient, turnId)
-      : turnId;
+    let proofId = turnId;
+    if (compacted) {
+      try {
+        proofId = await precedingQuestionTurn(client, pages, recipient, turnId);
+      } catch {
+        return refused(
+          "compaction-unproven",
+          "native question history incomplete or unknown",
+          "unavailable",
+        );
+      }
+    }
     const proof = await itemsFor(client, pages, recipient, proofId);
     const resolved = await resolvedQuestions(client, pages, record, recipient, proofId);
     if (typeof resolved === "string") {
-      return [false, resolved];
+      return refused("question-resolution", resolved);
     }
     for (const item of proof.values()) {
       if (questionItem(item) && !resolved.has(item.id)) {
-        return [
-          false,
+        return refused(
+          "pending-question",
           `native question pending: question_turn_id=${proofId} question_item_id=${item.id}`,
-        ];
+        );
       }
     }
     if (compacted && !(await sameCompletedHead(client, recipient, turnId))) {
-      return [false, "native question proof head changed"];
+      return refused("binding-mismatch", "native question proof head changed");
+    }
+    if (!clearanceUnchanged(unblockDir, recipient, record)) {
+      return refused("decision-clearance", "recipient decision clearance changed");
     }
     return [true, null];
   } catch {
-    return [false, "native question history incomplete or unknown"];
+    return refused(
+      "history-unavailable",
+      "native question history incomplete or unknown",
+      "unavailable",
+    );
   }
 }

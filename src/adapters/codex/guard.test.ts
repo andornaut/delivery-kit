@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -83,6 +83,70 @@ class Native implements RpcClient {
 }
 
 describe("question proof after completed compaction", () => {
+  it("requires the recipient's current clear record before any native history read", async () => {
+    const native = new Native();
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({ resolutions: [], state: "pending", thread_id: RECIPIENT }),
+    );
+    const before = readFileSync(path);
+    expect(
+      await nativeQuestionsClear(native, directory, RECIPIENT, "compact", { diagnostics: true }),
+    ).toEqual([
+      false,
+      "recipient resolution record missing or invalid",
+      { category: "decision-clearance", classification: "guarded", stage: "question-guard" },
+    ]);
+    expect(native.calls).toEqual([]);
+    expect(readFileSync(path)).toEqual(before);
+  });
+
+  it("keeps an unbound native reply guarded and exposes only an opt-in diagnostic category", async () => {
+    const native = new Native();
+    native.items.compact = [
+      question,
+      { ...answer, content: [{ text: "PRIVATE_REPLY", type: "text" }] },
+    ];
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    const before = readFileSync(path);
+    const result = await nativeQuestionsClear(native, directory, RECIPIENT, "compact", {
+      diagnostics: true,
+    });
+    expect(result).toEqual([
+      false,
+      "native question pending: question_turn_id=compact question_item_id=question",
+      { category: "pending-question", classification: "guarded", stage: "question-guard" },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_REPLY");
+    expect(readFileSync(path)).toEqual(before);
+    expect(await nativeQuestionsClear(native, directory, RECIPIENT, "compact")).toHaveLength(2);
+  });
+
+  it("refuses clearance if its recipient record changes during native proof reads", async () => {
+    const native = new Native();
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    native.items.compact = [{ id: "done", type: "agentMessage", questions: null }];
+    const changed = JSON.stringify({ resolutions: [], state: "pending", thread_id: RECIPIENT });
+    native.override = (method) => {
+      if (method === "thread/items/list") {
+        writeFileSync(path, changed);
+      }
+      return undefined;
+    };
+    expect(
+      await nativeQuestionsClear(native, directory, RECIPIENT, "compact", { diagnostics: true }),
+    ).toEqual([
+      false,
+      "recipient decision clearance changed",
+      { category: "decision-clearance", classification: "guarded", stage: "question-guard" },
+    ]);
+    expect(readFileSync(path, "utf8")).toBe(changed);
+  });
+
   it("uses the complete preceding turn and rechecks the current head", async () => {
     const native = new Native();
     expect(await nativeQuestionsClear(native, clearance(), RECIPIENT, "compact")).toEqual([
