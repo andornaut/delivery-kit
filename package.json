@@ -16,6 +16,10 @@
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
     },
+    "./source-identity": {
+      "types": "./dist/source-identity.d.ts",
+      "import": "./dist/source-identity.js"
+    },
     "./transport": {
       "types": "./dist/transport.d.ts",
       "import": "./dist/transport.js"

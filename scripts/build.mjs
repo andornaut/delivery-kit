@@ -10,6 +10,7 @@ const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const ENTRIES = [
   { entry: "src/bin.ts", name: "cli" },
   { entry: "src/registry/index.ts", name: "registry" },
+  { entry: "src/source-identity.ts", name: "source-identity" },
   { entry: "src/transport.ts", name: "transport" },
 ];
 
@@ -49,4 +50,5 @@ for (const name of readdirSync("dist/types", { recursive: true })) {
   }
 }
 writeFileSync("dist/registry.d.ts", 'export * from "./types/registry/index.js";\n');
+writeFileSync("dist/source-identity.d.ts", 'export * from "./types/source-identity.js";\n');
 writeFileSync("dist/transport.d.ts", 'export * from "./types/transport.js";\n');

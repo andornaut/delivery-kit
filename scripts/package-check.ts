@@ -94,6 +94,16 @@ export function inspectPackage(
       "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
       "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
   ]);
+  const sourceIdentity = manifest.exports["./source-identity"];
+  if (sourceIdentity === undefined || !existsSync(join(pkg, sourceIdentity.types)))
+    throw new Error("package source identity declarations missing");
+  node(pkg, "--input-type=module", [
+    "-e",
+    "import { snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError } " +
+      "from '@andornaut/delivery-kit/source-identity'; " +
+      "if (![snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError]" +
+      ".every(value => typeof value === 'function')) process.exit(1);",
+  ]);
   const consumer = join(proof, "consumer");
   const scope = join(consumer, "node_modules", "@andornaut");
   mkdirSync(scope, { recursive: true });
@@ -107,6 +117,10 @@ export function inspectPackage(
 import {
   resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
 } from "@andornaut/delivery-kit/transport";
+import {
+  snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
+  type SourceIdentityManifest, type SourceIdentityStatus,
+} from "@andornaut/delivery-kit/source-identity";
 const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
 const channel: string = messageChannelStateDir(
   { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
@@ -118,7 +132,14 @@ const wrongRevision: (registry: Registry) => string = registry => registry.revis
 const wrongSource: "other" = endpoint.source;
 // @ts-expect-error The named transport export requires a string conversation ID.
 messageChannelStateDir({ reviewDir: "/review" }, 42);
-export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict };
+const commit = (manifest: SourceIdentityManifest): string => manifest.commit;
+const dirty = (status: SourceIdentityStatus): boolean => status.dirty;
+// @ts-expect-error Source identity must preserve a string expected commit, not any.
+snapshotSourceIdentity({ sourceRoot: "/source", artifactDir: "/artifact" }, { expectedCommit: 42, approvedPaths: [] });
+// @ts-expect-error Restore requires an independently pinned digest.
+restoreSourceIdentity({ workRoot: "/work", artifactDir: "/artifact" }, { expectedCommit: "", expectedTree: "" });
+export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict,
+  commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError };
 `,
   );
   node(consumer, join(root, "node_modules/typescript/bin/tsc"), [
@@ -145,7 +166,11 @@ export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, 
     cliVersion: version.stdout.trim(),
     nodeNextExports: {
       source: "extracted-package",
-      specifiers: ["@andornaut/delivery-kit/registry", "@andornaut/delivery-kit/transport"],
+      specifiers: [
+        "@andornaut/delivery-kit/registry",
+        "@andornaut/delivery-kit/source-identity",
+        "@andornaut/delivery-kit/transport",
+      ],
       status: "passed",
     },
     SOURCE_DATE_EPOCH: env.SOURCE_DATE_EPOCH ?? null,

@@ -4,7 +4,7 @@ import { isRecord, unicodeDumps } from "./pyjson.ts";
 export const UNBLOCK_INSTRUCTIONS =
   "Review recent Art, Gameplay and Tech activity alongside the backlog. " +
   "Resolve reciprocal waits with the smallest owner question. " +
-  "At every existing :20/:50 scheduled review, inventory ALL registered game, kit and " +
+  "At every caller-configured scheduled review, inventory ALL registered game, kit and " +
   "game-coordinator recipients and ready worker handoffs, including recipients outside the " +
   "active route targets, through available supported interfaces and owner cooperation. " +
   "Inventory verified workers' queues as well as registered parents' queues and ready " +
