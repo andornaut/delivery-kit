@@ -66,7 +66,7 @@ export function inspectPackage(
   const pkg = join(extracted, "package");
   const manifest = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")) as {
     version: string;
-    exports: Record<string, { types: string; import: string }>;
+    exports: Record<string, string | { types: string; import: string }>;
   };
   if (manifest.version !== readFileSync(join(root, "VERSION"), "utf8").trim())
     throw new Error("package version differs from VERSION");
@@ -75,32 +75,58 @@ export function inspectPackage(
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const registry = manifest.exports["./registry"];
-  if (registry === undefined || !existsSync(join(pkg, registry.types)))
-    throw new Error("package registry declarations missing");
+  const modules = ["registry", "source-identity", "transport"];
+  const expectedExports = [
+    "./package.json",
+    ...modules.flatMap((name) => [`./build/${name}`, `./${name}`]),
+  ].sort();
+  if (JSON.stringify(Object.keys(manifest.exports).sort()) !== JSON.stringify(expectedExports))
+    throw new Error(
+      "package must export only explicit build APIs, compatibility aliases and metadata",
+    );
+  if (manifest.exports["./package.json"] !== "./package.json")
+    throw new Error("package metadata export differs");
+  for (const name of modules) {
+    for (const path of [`./build/${name}`, `./${name}`]) {
+      const entry = manifest.exports[path];
+      if (
+        entry === undefined ||
+        typeof entry === "string" ||
+        entry.types !== `./dist/${name}.d.ts` ||
+        entry.import !== `./dist/${name}.js` ||
+        JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(["import", "types"]) ||
+        !existsSync(join(pkg, entry.types)) ||
+        !existsSync(join(pkg, entry.import))
+      ) {
+        throw new Error("package build API or compatibility target differs: " + path);
+      }
+    }
+  }
   node(pkg, "--input-type=module", [
     "-e",
-    "import { readRegistry, resolveConversation, updateRegistry } from '@andornaut/delivery-kit/registry'; " +
+    `for (const name of ${JSON.stringify(modules)}) {
+      const canonical = await import('@andornaut/delivery-kit/build/' + name);
+      const alias = await import('@andornaut/delivery-kit/' + name);
+      if (canonical !== alias) throw new Error('compatibility alias has a separate module: ' + name);
+    }`,
+  ]);
+  node(pkg, "--input-type=module", [
+    "-e",
+    "import { readRegistry, resolveConversation, updateRegistry } from '@andornaut/delivery-kit/build/registry'; " +
       "if (![readRegistry, resolveConversation, updateRegistry].every(value => typeof value === 'function')) process.exit(1);",
   ]);
-  const transport = manifest.exports["./transport"];
-  if (transport === undefined || !existsSync(join(pkg, transport.types)))
-    throw new Error("package transport declarations missing");
   node(pkg, "--input-type=module", [
     "-e",
-    "import { resolveCodexControlSocket, messageChannelStateDir } from '@andornaut/delivery-kit/transport'; " +
+    "import { resolveCodexControlSocket, messageChannelStateDir } from '@andornaut/delivery-kit/build/transport'; " +
       "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
       "const channel = messageChannelStateDir({ reviewDir: '/review' }, '00000000-0000-4000-8000-000000000001'); " +
       "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
       "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
   ]);
-  const sourceIdentity = manifest.exports["./source-identity"];
-  if (sourceIdentity === undefined || !existsSync(join(pkg, sourceIdentity.types)))
-    throw new Error("package source identity declarations missing");
   node(pkg, "--input-type=module", [
     "-e",
     "import { snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError } " +
-      "from '@andornaut/delivery-kit/source-identity'; " +
+      "from '@andornaut/delivery-kit/build/source-identity'; " +
       "if (![snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError]" +
       ".every(value => typeof value === 'function')) process.exit(1);",
   ]);
@@ -109,18 +135,16 @@ export function inspectPackage(
   mkdirSync(scope, { recursive: true });
   symlinkSync(pkg, join(scope, "delivery-kit"), "dir");
   const source = join(consumer, "consumer.mts");
-  writeFileSync(
-    source,
-    `import {
+  const consumerSource = `import {
   readRegistry, updateRegistry, RevisionConflict, type Registry,
-} from "@andornaut/delivery-kit/registry";
+} from "@andornaut/delivery-kit/build/registry";
 import {
   resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
-} from "@andornaut/delivery-kit/transport";
+} from "@andornaut/delivery-kit/build/transport";
 import {
   snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
   type SourceIdentityManifest, type SourceIdentityStatus,
-} from "@andornaut/delivery-kit/source-identity";
+} from "@andornaut/delivery-kit/build/source-identity";
 const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
 const channel: string = messageChannelStateDir(
   { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
@@ -140,7 +164,12 @@ snapshotSourceIdentity({ sourceRoot: "/source", artifactDir: "/artifact" }, { ex
 restoreSourceIdentity({ workRoot: "/work", artifactDir: "/artifact" }, { expectedCommit: "", expectedTree: "" });
 export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict,
   commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError };
-`,
+`;
+  writeFileSync(source, consumerSource);
+  const aliasSource = join(consumer, "compatibility.mts");
+  writeFileSync(
+    aliasSource,
+    consumerSource.replaceAll("@andornaut/delivery-kit/build/", "@andornaut/delivery-kit/"),
   );
   node(consumer, join(root, "node_modules/typescript/bin/tsc"), [
     "--noEmit",
@@ -156,6 +185,7 @@ export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, 
     "--typeRoots",
     join(root, "node_modules/@types"),
     source,
+    aliasSource,
   ]);
   const result = {
     version: 1,
@@ -166,11 +196,10 @@ export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, 
     cliVersion: version.stdout.trim(),
     nodeNextExports: {
       source: "extracted-package",
-      specifiers: [
-        "@andornaut/delivery-kit/registry",
-        "@andornaut/delivery-kit/source-identity",
-        "@andornaut/delivery-kit/transport",
-      ],
+      canonicalSpecifiers: modules.map((name) => `@andornaut/delivery-kit/build/${name}`),
+      compatibilitySpecifiers: modules.map((name) => `@andornaut/delivery-kit/${name}`),
+      compatibilityModuleIdentity: "equal",
+      classification: "node-build-operations-only",
       status: "passed",
     },
     SOURCE_DATE_EPOCH: env.SOURCE_DATE_EPOCH ?? null,

@@ -8,7 +8,7 @@ credentials and schedule; `game-coordinator` owns `config.json`, the registry an
 
 The `game-coordinator` role coordinates from the `game-coordinator` repository.
 
-The package is `@andornaut/delivery-kit`. Its one runtime entry point is the `delivery-kit` CLI,
+The package is `@andornaut/delivery-kit`. Its operator build tool is the `delivery-kit` CLI,
 bundled into `dist/cli.js`. The bundle imports only `node:` builtins, has no dynamic `import()`,
 relative `require`, worker threads or source maps, never spawns its own files, and reads nothing
 from disk after startup except configuration and state. Its child processes are `git`, `docker`,
@@ -748,9 +748,29 @@ Two environment variables are test-only overrides for the contract harness, neve
   `0.5`, read in place of the host load. A `loadLimit` of 0 still holds every departure, after the
   15-minute load wait.
 
+## Public build APIs
+
+All library APIs are Node build/operations tools, not APIs for the running game. Import their
+explicit canonical subpaths:
+
+| Canonical subpath                               | Purpose                                                           | Deprecated compatibility alias            |
+| ----------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
+| `@andornaut/delivery-kit/build/registry`        | Registry configuration, routing and guarded updates.              | `@andornaut/delivery-kit/registry`        |
+| `@andornaut/delivery-kit/build/transport`       | Read-only endpoint selection and message channel path references. | `@andornaut/delivery-kit/transport`       |
+| `@andornaut/delivery-kit/build/source-identity` | Exact Git identity capture and isolated restoration.              | `@andornaut/delivery-kit/source-identity` |
+
+Each alias resolves to the same bundle and declarations as its canonical path. Known consumers
+include game-coordinator's registry/transport imports and Ada the Navigator's source-identity
+integration. Aliases remain until the known consumer owners confirm migration; publication
+alone changes no consumer imports or pins. Use canonical paths in new integrations.
+
+There is no root barrel, wildcard export, public runtime API or public test API. Fixtures,
+harnesses and private modules are not exported. The `./package.json` export is package metadata,
+not a game API. The CLI remains the operator entry point with unchanged commands.
+
 ## Transport endpoint selection
 
-Import `resolveCodexControlSocket` from `@andornaut/delivery-kit/transport`.
+Import `resolveCodexControlSocket` from `@andornaut/delivery-kit/build/transport`.
 It returns `{ path, source }`, selecting the explicit `controlSocket` option, then
 `CODEX_CONTROL_SOCKET` from the supplied environment, then the managed socket under
 `home/.codex/app-server-control/app-server-control.sock`. Invalid explicit paths
@@ -760,7 +780,7 @@ Existing runtime adapters and `codex ready` still require configured endpoints.
 ## Source identity library
 
 Import `snapshotSourceIdentity`, `restoreSourceIdentity` and their manifest/status types from
-`@andornaut/delivery-kit/source-identity`. These synchronous helpers preserve an exact Git
+`@andornaut/delivery-kit/build/source-identity`. These synchronous helpers preserve an exact Git
 commit for an independently copied source tree; they do not copy working files or run a gate.
 
 - `snapshotSourceIdentity({ sourceRoot, artifactDir }, { expectedCommit, approvedPaths })`
@@ -796,7 +816,7 @@ registry, schedule or activation state.
 
 ## Registry library
 
-`@andornaut/delivery-kit/registry` (`exports["./registry"]`: `dist/registry.js` with
+`@andornaut/delivery-kit/build/registry` (`exports["./build/registry"]`: `dist/registry.js` with
 `dist/registry.d.ts`) is the typed registry module the skills use. It uses only `node:` builtins
 and `flock(1)`; `dist/cli.js` embeds the same source. Context parameters come first and the
 subject last.
@@ -893,10 +913,10 @@ Remove them when upstream resolves the patched versions without overrides.
 | `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection. |
 | `npm run check`         | Root and contract types.                                                                                 |
 | `npm run lint`          | Prettier, ESLint, Markdown and ShellCheck with `-x -P SCRIPTDIR`.                                        |
-| `npm run build`         | Build the CLI and registry bundles and declarations.                                                     |
+| `npm run build`         | Build the CLI and public build API bundles and declarations.                                             |
 | `npm test`              | Unit tests, using at most four workers by default; build first.                                          |
 | `npm run contract`      | Build, contract types and the complete native contract suite.                                            |
-| `npm run package:check` | Inspect built package contents, CLI version and registry declarations/exports.                           |
+| `npm run package:check` | Inspect the extracted CLI, canonical/alias API identity and strict NodeNext declarations.                |
 
 Explicit source or contract paths passed to `npm run verify --` select the corresponding
 suite; unscoped filters apply to both. Standalone `npm run contract -- --lock` regenerates

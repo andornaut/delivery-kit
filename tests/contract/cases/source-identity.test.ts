@@ -79,7 +79,7 @@ function publicApi<T>(
   env: NodeJS.ProcessEnv = {},
 ): Reply<T> {
   const program = `
-    import { snapshotSourceIdentity, restoreSourceIdentity } from '@andornaut/delivery-kit/source-identity';
+    import { snapshotSourceIdentity, restoreSourceIdentity } from '@andornaut/delivery-kit/build/source-identity';
     const [operation, context, input] = JSON.parse(process.argv[1]);
     try {
       const value = operation === 'snapshot'
