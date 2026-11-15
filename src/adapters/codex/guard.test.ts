@@ -114,6 +114,45 @@ function currentNative(items: Json[]): Native {
 }
 
 describe("observed native UI reply admission", () => {
+  it("accepts answer-first object fields while refusing additional response fields", async () => {
+    const reply = uiReply();
+    const content = (reply.content as Json[])[0]!;
+    content.text = [
+      "<send_user_message_question_reply>",
+      JSON.stringify([
+        {
+          answer: "A",
+          question: "Choose",
+          questionItemId: JSON.stringify(["request_user_input_async", "question", 0]),
+        },
+      ]),
+      "</send_user_message_question_reply>",
+    ].join("\n");
+    const directory = clearance();
+    const path = join(directory, "decisions", `${RECIPIENT}.json`);
+    const before = readFileSync(path);
+    expect(
+      await nativeQuestionsClear(
+        currentNative([asyncQuestion, reply]),
+        directory,
+        RECIPIENT,
+        "current",
+      ),
+    ).toEqual([true, null]);
+    expect(readFileSync(path)).toEqual(before);
+    expect(
+      (
+        await nativeQuestionsClear(
+          currentNative([asyncQuestion, uiReply({ unknown: true })]),
+          directory,
+          RECIPIENT,
+          "current",
+        )
+      )[0],
+    ).toBe(false);
+    expect(readFileSync(path)).toEqual(before);
+  });
+
   it("derives the exact same-turn binding without writing the recipient's clear record", async () => {
     const native = currentNative([asyncQuestion, uiReply()]);
     const directory = clearance();

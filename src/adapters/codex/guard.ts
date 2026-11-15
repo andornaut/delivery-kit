@@ -354,7 +354,7 @@ function nativeReplyBinding(item: NativeItem): NativeReplyBinding | null {
     const reply: unknown = replies[0];
     if (
       !isRecord(reply) ||
-      Object.keys(reply).join(",") !== "questionItemId,question,answer" ||
+      Object.keys(reply).sort().join(",") !== "answer,question,questionItemId" ||
       typeof reply.questionItemId !== "string" ||
       typeof reply.question !== "string" ||
       typeof reply.answer !== "string" ||
