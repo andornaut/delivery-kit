@@ -753,9 +753,11 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
   verifies its digest, genuine detached HEAD, raw/index tree, exact object inventory and clean
   status before install. Original Git configuration, history, refs, remotes, hooks and
   credentials are not copied;
-- runs `install` with network, disconnects the container from every network and confirms only
-  loopback remains, then runs each step in order under `sh -c` with `set -e`, logging to
-  `NN-<name>.log`;
+- runs `install` with network;
+- repeats read-only identity and clean-source validation after install, before gate categories.
+  Changed or unavailable identity fails closed without resetting, cleaning or rewriting source;
+- disconnects the container from every network and confirms only loopback remains, then runs
+  each step in order under `sh -c` with `set -e`, logging to `NN-<name>.log`;
 - gives install and the steps four hours each.
 
 The identity bridge runs in the Node runner and adds no gate-image tool requirement. Builds
