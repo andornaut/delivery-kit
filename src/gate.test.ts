@@ -241,6 +241,33 @@ describe("runGate", () => {
     expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("game\n");
   });
 
+  it("refuses categories when install changes the copied tracked source", async () => {
+    let installedWork = "";
+    let ranCategory = false;
+    const test = setup({
+      install: (work) => {
+        installedWork = work;
+        writeFileSync(join(work, "README.md"), "install changed source\n");
+        return ok();
+      },
+      gate: () => {
+        ranCategory = true;
+        return ok();
+      },
+    });
+    expect(await runGate(test.context, test.input)).toMatchObject({
+      ok: false,
+      failure: "infrastructure",
+      reason: expect.stringContaining("gate source identity validation failed"),
+    });
+    expect(ranCategory).toBe(false);
+    expect(installedWork).not.toBe("");
+    expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("game\n");
+    expect(
+      test.exec.calls.filter((call) => call.args.some((arg) => arg.startsWith("EXPECTED_COMMIT="))),
+    ).toHaveLength(2);
+  });
+
   it("rejects dirty source before image exposure and leaves the original files dirty", async () => {
     const test = setup({});
     writeFileSync(join(test.test.repo, "README.md"), "uncommitted change\n");

@@ -84,7 +84,12 @@ describe("trunk-based departures", () => {
     expect(kinds()).toEqual(["scheduled-status", "attempt", "push"]);
     const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
     expect(create[2]).toBe(`delivery-kit-gate-archies-dog-walks-${head.slice(0, 12)}`);
-    expect(create).toContain(
+    expect(create).toContainEqual(
+      expect.stringMatching(
+        /type=bind,src=.*delivery-gate-identity-.*\/copied,dst=\/src,readonly/u,
+      ),
+    );
+    expect(create).not.toContain(
       `type=bind,src=${join(test.game.busDir, `gate-${head}`)},dst=/src,readonly`,
     );
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", create[2]]);

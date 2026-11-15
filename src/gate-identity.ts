@@ -41,6 +41,7 @@ export interface GateIdentity extends CapturedGateIdentity {
   readonly archive: string;
   readonly archiveBlob: string;
   readonly objectsBlob: string;
+  readonly configBlob: string;
 }
 
 /** Names/modes only. An unapproved directory is rejected without traversing its contents. */
@@ -252,6 +253,7 @@ function prepareGateIdentity(identity: CapturedGateIdentity): {
   readonly archive: string;
   readonly archiveBlob: string;
   readonly objectsBlob: string;
+  readonly configBlob: string;
 } {
   sourceOnly(identity.copied, identity.manifest.entries);
   const restored = restoreSourceIdentity(
@@ -284,6 +286,7 @@ function prepareGateIdentity(identity: CapturedGateIdentity): {
   return {
     archive,
     archiveBlob: archiveMetadata(join(identity.copied, ".git"), archive),
+    configBlob: blobHash(readFileSync(join(identity.copied, ".git", "config"))),
     objectsBlob: blobHash(
       identity.manifest.objects.map((object) => `${object.oid} ${object.type}\n`).join(""),
     ),
@@ -311,13 +314,13 @@ export const GATE_GIT_CONTEXT = [
   "export GIT_SHALLOW_FILE=/tmp/work/.git/shallow",
 ].join(" && ");
 
-/** All tools already belong to the stock image contract; extraction runs as its gate user. */
-export const GATE_IDENTITY_SCRIPT = [
+/** Read-only validation is shared by admission and the boundary after install. */
+export const GATE_VERIFY_IDENTITY_SCRIPT = [
   GATE_GIT_ENV,
   "cd /tmp/work",
-  "test ! -e .git && test ! -L .git",
-  'test "$(git hash-object --no-filters /tmp/gate-source-identity.tar)" = "$EXPECTED_ARCHIVE_BLOB"',
-  "tar -xf /tmp/gate-source-identity.tar -C /tmp/work",
+  'test "$(git -C /tmp hash-object --no-filters /tmp/work/.git/config)" = "$EXPECTED_CONFIG_BLOB"',
+  'test "$(git rev-parse --show-toplevel)" = /tmp/work',
+  'test "$(git rev-parse --absolute-git-dir)" = /tmp/work/.git',
   GATE_GIT_CONTEXT,
   'test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"',
   'test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"',
@@ -328,4 +331,14 @@ export const GATE_IDENTITY_SCRIPT = [
   "git fsck --strict --no-reflogs",
   "status=$(git status --porcelain=v1 --untracked-files=all)",
   'test -z "$status"',
+].join(" && ");
+
+/** All tools already belong to the stock image contract; extraction runs as its gate user. */
+export const GATE_IDENTITY_SCRIPT = [
+  GATE_GIT_ENV,
+  "cd /tmp/work",
+  "test ! -e .git && test ! -L .git",
+  'test "$(git hash-object --no-filters /tmp/gate-source-identity.tar)" = "$EXPECTED_ARCHIVE_BLOB"',
+  "tar -xf /tmp/gate-source-identity.tar -C /tmp/work",
+  GATE_VERIFY_IDENTITY_SCRIPT,
 ].join(" && ");

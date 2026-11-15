@@ -23,6 +23,7 @@ import {
   GATE_GIT_CONTEXT,
   GATE_GIT_ENV,
   GATE_IDENTITY_SCRIPT,
+  GATE_VERIFY_IDENTITY_SCRIPT,
   type GateIdentity,
   releaseGateIdentity,
 } from "./gate-identity.ts";
@@ -290,24 +291,7 @@ async function copyIn(
     if (transferred.status !== 0) {
       return `copying fresh gate source identity failed: ${diagnostic(transferred)}`;
     }
-    const verified = await docker(context, [
-      "exec",
-      "-e",
-      `EXPECTED_COMMIT=${identity.manifest.commit}`,
-      "-e",
-      `EXPECTED_TREE=${tree}`,
-      "-e",
-      `EXPECTED_ARCHIVE_BLOB=${identity.archiveBlob}`,
-      "-e",
-      `EXPECTED_OBJECTS_BLOB=${identity.objectsBlob}`,
-      name,
-      "sh",
-      "-c",
-      GATE_IDENTITY_SCRIPT,
-    ]);
-    return verified.status === 0
-      ? undefined
-      : `gate source identity validation failed: ${diagnostic(verified)}`;
+    return verifyIdentity(context, name, identity, GATE_IDENTITY_SCRIPT);
   }
   if (copy.status === MISSING_TOOL) {
     const tool = copy.stdout.trim() || "required tool";
@@ -317,6 +301,35 @@ async function copyIn(
     return "gate container copy of the checkout does not match the departure commit";
   }
   return `copying the checkout into the gate container failed: ${diagnostic(copy)}`;
+}
+
+/** Verify exact metadata and actual source without rewriting either. */
+async function verifyIdentity(
+  context: BusContext,
+  name: string,
+  identity: GateIdentity,
+  script = GATE_VERIFY_IDENTITY_SCRIPT,
+): Promise<string | undefined> {
+  const verified = await docker(context, [
+    "exec",
+    "-e",
+    `EXPECTED_COMMIT=${identity.manifest.commit}`,
+    "-e",
+    `EXPECTED_TREE=${identity.manifest.tree}`,
+    "-e",
+    `EXPECTED_ARCHIVE_BLOB=${identity.archiveBlob}`,
+    "-e",
+    `EXPECTED_OBJECTS_BLOB=${identity.objectsBlob}`,
+    "-e",
+    `EXPECTED_CONFIG_BLOB=${identity.configBlob}`,
+    name,
+    "sh",
+    "-c",
+    script,
+  ]);
+  return verified.status === 0
+    ? undefined
+    : `gate source identity validation failed: ${diagnostic(verified)}`;
 }
 
 /** The build outputs a passing, verified gate copies back into the scratch worktree. */
@@ -404,6 +417,10 @@ async function gate(
   ]);
   if (offline.status !== 0) {
     return blockedGate("gate container still has a network interface; gate not run");
+  }
+  const identityProblem = await verifyIdentity(context, name, identity);
+  if (identityProblem !== undefined) {
+    return blockedGate(identityProblem);
   }
   const result = await docker(
     context,
