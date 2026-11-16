@@ -373,6 +373,52 @@ describe("accounting ingress", () => {
     expect(guarded.gaps).toContainEqual(
       expect.objectContaining({ reason: "protected-question-unresolved" }),
     );
+    expect(guarded.pendingCandidateIds).toEqual([]);
+    const handedOff = {
+      ...reviewed,
+      requests: reviewed.requests.map((request) => ({
+        ...request,
+        assignment: {
+          ownerRole: "art-kit",
+          harness: "codex" as const,
+          nativeId: "00000000-0000-4000-8000-000000000030",
+          worker: null,
+        },
+        question: {
+          native: null,
+          options: null,
+          text: null,
+          status: "pending" as const,
+          resolutionRef: null,
+        },
+      })),
+    };
+    const observedAgain = messageIntake({ ...context, known: handedOff }, input);
+    expect(observedAgain.commands).toEqual([]);
+    expect(observedAgain.pendingCandidateIds).toEqual([]);
+    expect(observedAgain.gaps).toEqual([]);
+    expect(observedAgain.accounting_ready).toBe(true);
+    expect(
+      auditIntake(
+        { ...context, ownerRole: "art-kit", known: handedOff },
+        {
+          reference: "art-owner-review:empty-window",
+          reviewed: true,
+          range: { from: "known-start", through: "known-end" },
+          sources: [],
+          gaps: [],
+        },
+      ),
+    ).toMatchObject({
+      accounting_ready: false,
+      gaps: expect.arrayContaining([
+        expect.objectContaining({
+          reason: "protected-question-unresolved",
+          requiredOwner: "art-kit",
+        }),
+      ]),
+    });
+    expect(handedOff.requests[0]?.question.status).toBe("pending");
   });
 
   it("retains Claude references with unavailable native history and local-message visibility", () => {

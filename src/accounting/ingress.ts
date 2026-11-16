@@ -115,10 +115,7 @@ function reviewed(context: IntakeContext, id: string): boolean {
   const attested = [record.source, ...record.sources.map((link) => link.source)].some(
     (item) => item.origin === "owner-attested" && token(item.reference),
   );
-  return (
-    attested &&
-    (record.question === null || ["answered", "cancelled"].includes(record.question.status))
-  );
+  return attested;
 }
 
 function finish(
@@ -140,7 +137,9 @@ function finish(
     .map((request) => request.id);
   const protectedQuestion = context.known?.requests.some(
     (request) =>
-      request.question !== null && ["pending", "unknown"].includes(request.question.status),
+      (request.assignment?.ownerRole ?? request.createdBy) === context.ownerRole &&
+      request.question !== null &&
+      ["pending", "unknown"].includes(request.question.status),
   );
   const observations = [
     ...reasons,
