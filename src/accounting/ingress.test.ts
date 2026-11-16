@@ -8,7 +8,7 @@ import {
   messageIntake,
   snapshotIntake,
 } from "./ingress.ts";
-import type { LedgerProjection, LedgerRequest } from "./types.ts";
+import type { LedgerProjection, LedgerRequest, LedgerSource } from "./types.ts";
 
 const context: IntakeContext = {
   ownerRole: "game-kit",
@@ -179,6 +179,28 @@ describe("accounting ingress", () => {
       }),
     );
     expect(result.accounting_ready).toBe(false);
+    const projection = known(result);
+    const cancelled = projection.requests.map((request) => ({
+      ...request,
+      state: "cancelled" as const,
+    }));
+    expect(
+      auditIntake(
+        { ...context, known: { ...projection, requests: cancelled } },
+        {
+          reference: "owner-audit:empty-window",
+          reviewed: true,
+          range: { from: "known-start", through: "known-end" },
+          sources: [],
+          gaps: [],
+        },
+      ),
+    ).toMatchObject({
+      accounting_ready: false,
+      gaps: expect.arrayContaining([
+        expect.objectContaining({ reason: "protected-question-unresolved" }),
+      ]),
+    });
   });
 
   it("captures messages once for their owner without treating accepted or handled delivery as requests", () => {
@@ -260,34 +282,35 @@ describe("accounting ingress", () => {
   });
 
   it("records reviewed audit windows without approving sources or filling unknown native references", () => {
-    const result = auditIntake(context, {
+    const sources: LedgerSource[] = Array.from({ length: 9 }, (_, index) => ({
+      origin: "unknown",
+      reference: `synthetic-owner-audit:${index + 1}`,
+      native: { harness: null, threadId: null, turnId: null, itemId: null, index: null },
+      wordingHash: null,
+    }));
+    sources.push({
+      origin: "unknown",
+      reference: "synthetic-approval-ledger:clause-1",
+      native: null,
+      wordingHash: null,
+    });
+    const submission = {
       reference: "owner-audit:9",
       reviewed: true,
       range: { from: "audit-start", through: "audit-end" },
-      sources: [
-        {
-          origin: "unknown",
-          reference: "old-relay:8",
-          native: {
-            harness: null,
-            threadId: null,
-            turnId: null,
-            itemId: null,
-            index: null,
-          },
-          wordingHash: null,
-        },
-      ],
+      sources,
       gaps: [{ from: "missing-a", through: "missing-b", reason: "old-worker-unreadable" }],
+    };
+    const result = auditIntake(context, submission);
+    const registers = result.commands.filter((command) => command.type === "register");
+    expect(registers).toHaveLength(10);
+    expect(
+      registers.every((command) => command.request.kind === "unknown" && !command.request.reviewed),
+    ).toBe(true);
+    expect(registers.find((command) => command.request.source.native !== null)).toMatchObject({
+      request: { source: { origin: "unknown", native: { threadId: null } } },
     });
-    expect(result.commands[0]).toMatchObject({
-      type: "register",
-      request: {
-        kind: "unknown",
-        reviewed: false,
-        source: { origin: "unknown", native: { threadId: null } },
-      },
-    });
+    expect(auditIntake({ ...context, known: known(result) }, submission).commands).toEqual([]);
     expect(result.gaps).toContainEqual(
       expect.objectContaining({
         range: { from: "missing-a", through: "missing-b" },

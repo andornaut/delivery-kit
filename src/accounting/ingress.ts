@@ -134,9 +134,14 @@ function finish(
   const pendingCandidateIds = unique
     .filter((request) => !reviewed(context, request.id))
     .map((request) => request.id);
+  const protectedQuestion = context.known?.requests.some(
+    (request) =>
+      request.question !== null && ["pending", "unknown"].includes(request.question.status),
+  );
   const observations = [
     ...reasons,
     ...(pendingCandidateIds.length ? ["owner-review-required"] : []),
+    ...(protectedQuestion ? ["protected-question-unresolved"] : []),
   ].map((reason) => (typeof reason === "string" ? { ...range, reason } : { ...reason }));
   const gaps = [...new Map(observations.map((gap) => [JSON.stringify(gap), gap])).entries()]
     .sort(([left], [right]) => left.localeCompare(right))
