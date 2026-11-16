@@ -294,6 +294,85 @@ describe("accounting ingress", () => {
       state: "open",
     });
     expect(reconciled.accounting_ready).toBe(false);
+    const covered = {
+      ...initial.coverage[0]!,
+      state: "covered" as const,
+      gaps: [],
+      source: {
+        origin: "owner-attested" as const,
+        reference: "owner-reviewed:local-window",
+        native: null,
+        wordingHash: null,
+      },
+    };
+    const reviewed = { ...projection, coverage: [covered] };
+    const preserved = messageIntake({ ...context, known: reviewed }, input);
+    expect(preserved.commands).toEqual([]);
+    expect(preserved.coverage).toEqual([covered]);
+    expect(preserved.gaps).toEqual([]);
+    expect(preserved.observedGaps).toContainEqual(
+      expect.objectContaining({
+        reason: "transport-is-not-human-origin-proof",
+      }),
+    );
+    expect(preserved.accounting_ready).toBe(true);
+    expect(Object.isFrozen(covered)).toBe(false);
+    const changed = messageIntake(
+      { ...context, known: reviewed },
+      messages([message("relay-reviewed"), message("new-source")]),
+    );
+    expect(changed.coverage[0]?.id).not.toBe(covered.id);
+    expect(changed.commands).toContainEqual(expect.objectContaining({ type: "coverage" }));
+    expect(changed.accounting_ready).toBe(false);
+    const mismatchedRange = messageIntake(
+      {
+        ...context,
+        known: {
+          ...reviewed,
+          coverage: [
+            {
+              ...covered,
+              range: { from: "different-start", through: "different-end" },
+            },
+          ],
+        },
+      },
+      input,
+    );
+    expect(mismatchedRange.commands).toContainEqual(expect.objectContaining({ type: "coverage" }));
+    expect(mismatchedRange.accounting_ready).toBe(false);
+    const pending = messageIntake(
+      { ...context, known: { ...known(initial), coverage: [covered] } },
+      input,
+    );
+    expect(pending.coverage).toEqual([covered]);
+    expect(pending.accounting_ready).toBe(false);
+    expect(pending.gaps).toContainEqual(
+      expect.objectContaining({ reason: "owner-review-required" }),
+    );
+    const guarded = messageIntake(
+      {
+        ...context,
+        known: {
+          ...reviewed,
+          requests: reviewed.requests.map((request) => ({
+            ...request,
+            question: {
+              native: null,
+              options: null,
+              text: null,
+              status: "unknown" as const,
+              resolutionRef: null,
+            },
+          })),
+        },
+      },
+      input,
+    );
+    expect(guarded.accounting_ready).toBe(false);
+    expect(guarded.gaps).toContainEqual(
+      expect.objectContaining({ reason: "protected-question-unresolved" }),
+    );
   });
 
   it("retains Claude references with unavailable native history and local-message visibility", () => {

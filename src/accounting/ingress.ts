@@ -38,6 +38,8 @@ export interface IngressIntake {
   readonly pendingCandidateIds: readonly string[];
   readonly coverage: readonly LedgerCoverage[];
   readonly gaps: readonly IngressGap[];
+  /** Raw capability diagnostics do not revoke explicit reconciliation of an unchanged window. */
+  readonly observedGaps: readonly IngressGap[];
   readonly accounting_ready: boolean;
 }
 
@@ -166,23 +168,39 @@ function finish(
     .filter((request) => !context.known?.requests.some((known) => known.id === request.id))
     .map((request) => ({ request, type: "register" }));
   const previous = context.known?.coverage.find((entry) => entry.id === coverage.id);
-  if (!isDeepStrictEqual(previous, coverage)) {
+  const reconciled =
+    previous !== undefined &&
+    previous.ownerRole === context.ownerRole &&
+    previous.state === "covered" &&
+    previous.gaps.length === 0 &&
+    previous.source.origin === "owner-attested" &&
+    token(previous.source.reference) &&
+    isDeepStrictEqual(previous.range, range);
+  const effective = reconciled ? structuredClone(previous) : coverage;
+  const actionable = reconciled
+    ? gaps.filter(
+        (gap) =>
+          gap.reason === "owner-review-required" || gap.reason === "protected-question-unresolved",
+      )
+    : gaps;
+  if (!reconciled && !isDeepStrictEqual(previous, coverage)) {
     commands.push({ coverage, type: "coverage" });
   }
+  const projectGap = (gap: LedgerCoverage["gaps"][number]): IngressGap => ({
+    nextBoundary: context.nextBoundary,
+    range: { from: gap.from, through: gap.through },
+    reason: gap.reason,
+    requiredOwner: context.ownerRole,
+    source: observed,
+  });
   return immutable({
-    accounting_ready: coverage.state === "covered" && pendingCandidateIds.length === 0,
+    accounting_ready:
+      effective.state === "covered" && pendingCandidateIds.length === 0 && !protectedQuestion,
     candidateIds: Object.freeze(unique.map((request) => request.id)),
     commands: Object.freeze(commands),
-    coverage: Object.freeze([coverage]),
-    gaps: Object.freeze(
-      gaps.map((gap) => ({
-        nextBoundary: context.nextBoundary,
-        range: { from: gap.from, through: gap.through },
-        reason: gap.reason,
-        requiredOwner: context.ownerRole,
-        source: observed,
-      })),
-    ),
+    coverage: Object.freeze([effective]),
+    gaps: Object.freeze(actionable.map(projectGap)),
+    observedGaps: Object.freeze(reconciled ? gaps.map(projectGap) : []),
     pendingCandidateIds: Object.freeze(pendingCandidateIds),
   });
 }
@@ -319,6 +337,7 @@ function combine(intakes: readonly IngressIntake[]): IngressIntake {
     ],
     coverage: intakes.flatMap((intake) => intake.coverage),
     gaps: intakes.flatMap((intake) => intake.gaps),
+    observedGaps: intakes.flatMap((intake) => intake.observedGaps),
     pendingCandidateIds: [
       ...new Set(intakes.flatMap((intake) => intake.pendingCandidateIds)),
     ].sort(),
@@ -421,6 +440,7 @@ function workerIntakes(
     immutable({
       ...intake,
       gaps: intake.gaps.map((gap) => ({ ...gap, requiredParent })),
+      observedGaps: intake.observedGaps.map((gap) => ({ ...gap, requiredParent })),
     }),
   );
 }
