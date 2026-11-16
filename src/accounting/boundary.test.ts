@@ -89,6 +89,41 @@ describe("accounting at existing ingress boundaries (isolated fixtures)", () => 
       coverageState: "declared-complete",
       missingOwners: [],
     });
+    const foreignSource = { ...source, origin: "unknown" as const, reference: "foreign-question" };
+    await store.apply({
+      actor: "archies-dog-walks/tech",
+      at: new Date().toISOString(),
+      command: {
+        request: {
+          assignment: null,
+          dependencies: [],
+          id: "foreign-question",
+          kind: "unknown",
+          parentId: null,
+          question: {
+            native: null,
+            options: null,
+            resolutionRef: null,
+            status: "unknown",
+            text: null,
+          },
+          reviewed: false,
+          source: foreignSource,
+          summary: "Another owner's unconfirmed question",
+          targets: [],
+        },
+        type: "register",
+      },
+      commandId: "foreign-question-intake",
+      expectedRevision: store.read().revision,
+      schema: 1,
+      source: foreignSource,
+    });
+    const scoped = await captureAccounting(fixture.layout, {}, "resume", "message", [
+      "game-coordinator",
+    ]);
+    expect(JSON.stringify(scoped.gaps)).not.toContain("protected-question-unresolved");
+    expect(accountingStatus(fixture.layout).protectedQuestions).toContain("foreign-question");
     const lock = holdLock(join(fixture.layout.varDir, "accounting", "ledger.lock"));
     try {
       expect(await captureAccounting(fixture.layout, {})).toMatchObject({

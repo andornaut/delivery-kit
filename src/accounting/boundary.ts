@@ -224,9 +224,15 @@ export async function captureAccounting(
     for (const ownerRole of [...new Set(selectedRoles)].sort()) {
       const harness = resolveHarness(registry, ownerRole);
       const nativeId = resolveConversation(registry, ownerRole);
+      const projection = store.read();
       const context = {
         harness,
-        known: store.read(),
+        known: {
+          coverage: projection.coverage.filter((entry) => entry.ownerRole === ownerRole),
+          requests: projection.requests.filter(
+            (request) => (request.assignment?.ownerRole ?? request.createdBy) === ownerRole,
+          ),
+        },
         nativeId,
         nextBoundary: "next supported owner startup, resume or scheduled review",
         ownerRole,
