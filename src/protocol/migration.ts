@@ -782,6 +782,7 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
     }
   }
   const lease = await holdLockAsync(paths.lock);
+  let registryLease: Awaited<ReturnType<typeof holdLockAsync>> | undefined;
   try {
     validatePlan(layout, input.plan);
     demand(input.expectedGeneration === 0, "migration-generation-conflict");
@@ -831,6 +832,7 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
         input.backup.inventory.fingerprint,
       "migration-backup-required",
     );
+    registryLease = await holdLockAsync(layout.registryLock);
     participants(layout, input);
     if (input.plan.required !== undefined) {
       const checked = enrollmentStatus(layout, new ProtocolStore({ directory: config.stateRoot }), {
@@ -869,6 +871,7 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
     writeJsonDurable(paths.config, config);
     return resolveProtocolLayout(layout);
   } finally {
+    registryLease?.release();
     lease.release();
   }
 }

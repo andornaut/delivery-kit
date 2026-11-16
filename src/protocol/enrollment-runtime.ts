@@ -19,7 +19,7 @@ import {
   EnrollmentStore,
 } from "./enrollment.ts";
 import type { ArtifactRef, Binding } from "./types.ts";
-import { WorkStore } from "./work.ts";
+import { type WorkEvaluation, type WorkPublication, WorkStore } from "./work.ts";
 /** Already collected supported census metadata. This adapter performs no native requests. */
 export interface EnrollmentWorkerCensus {
   readonly parentRole: string;
@@ -294,6 +294,51 @@ export const PROTOCOL_LIFECYCLE_PHASES = [
   "review",
 ] as const;
 export type ProtocolLifecyclePhase = (typeof PROTOCOL_LIFECYCLE_PHASES)[number];
+/** Historical completion permits evidence cleanup, never renewed execution authority. */
+function completedWork(
+  requests: ReadonlyMap<string, LedgerRequest>,
+  evaluation: WorkEvaluation,
+  publication: WorkPublication,
+): boolean {
+  const linked = publication.definition.requestIds.map((id) => requests.get(id));
+  if (
+    evaluation.guarded ||
+    !evaluation.criteriaSatisfied ||
+    linked.length === 0 ||
+    !linked.every(
+      (request) =>
+        request !== undefined &&
+        request.state === "completed" &&
+        request.reviewed &&
+        ["request", "approval"].includes(request.kind) &&
+        [request.source, ...request.sources.map((link) => link.source)].some(
+          (source) => source.origin === "owner-attested" && source.reference !== null,
+        ),
+    )
+  ) {
+    return false;
+  }
+  return publication.definition.criteria.every((criterion) => {
+    const matches = linked.flatMap((request) =>
+      request!.targets
+        .filter((target) => target.id === criterion.targetId)
+        .flatMap((target) =>
+          target.criteria
+            .filter((entry) => entry.id === criterion.id)
+            .map((entry) => ({ entry, target })),
+        ),
+    );
+    return (
+      matches.length === 1 &&
+      matches.every(
+        ({ entry, target }) =>
+          criterion.phases.every((phase) =>
+            entry.requiredEvidence.includes(phase === "execution" ? "implementation" : phase),
+          ) && criterion.consumers.every((consumer) => target.consumers.includes(consumer)),
+      )
+    );
+  });
+}
 export function evaluateEnrollmentBoundary(
   layout: Layout,
   protocol: ProtocolStore,
@@ -354,9 +399,13 @@ export function evaluateEnrollmentBoundary(
     const work = new WorkStore({ protocol, readRequest: (id) => requests.get(id) });
     const role = input.workRole ?? input.role;
     const value = input.workId === undefined ? undefined : work.read(role, input.workId);
+    const evaluation = value === undefined ? null : work.evaluate(role, input.workId!);
     if (
       value === undefined ||
-      (value.definition.retention === null && !work.evaluate(role, input.workId!).closureReady)
+      evaluation === null ||
+      (value.definition.retention === null &&
+        !evaluation.closureReady &&
+        !completedWork(requests, evaluation, value))
     ) {
       reason = "essential-evidence-required";
     }

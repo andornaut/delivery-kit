@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import * as durable from "../durable.ts";
 import { loadLayout } from "../layout.ts";
+import { LockBusy } from "../lock.ts";
 import { messageEnvelope } from "../messages/envelope.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
@@ -512,13 +513,48 @@ describe("explicit initial protocol migration", () => {
     expect(JSON.parse(readFileSync(join(backup.backupRoot, "backup.json"), "utf8"))).toEqual(
       backup,
     );
-    const active = await activateProtocol(t.layout, final);
+    let blockedWriters = 0;
+    const guard = vi
+      .spyOn(durable, "writeJsonDurable")
+      .mockImplementation((path, value, options) => {
+        if (path === join(t.layout.varDir, "work-protocol.json")) {
+          expect(() =>
+            updateRegistry(
+              t.layout,
+              t.registry.revision,
+              (draft) => {
+                draft.roles["game-coordinator"]!.conversations.claude =
+                  "00000000-0000-4000-8000-000000000007";
+              },
+              { timeoutSeconds: 0 },
+            ),
+          ).toThrow(LockBusy);
+          blockedWriters++;
+        }
+        return write(path, value, options);
+      });
+    let active: Awaited<ReturnType<typeof activateProtocol>>;
+    try {
+      active = await activateProtocol(t.layout, final);
+    } finally {
+      guard.mockRestore();
+    }
+    expect(blockedWriters).toBe(1);
     expect(store.history("coordinator")).toEqual(historyBefore);
     expect(active?.stateRoot).toBe(t.stateRoot);
     expect(readFileSync(join(t.layout.varDir, "work-protocol-fence.json"))).toEqual(
       readFileSync(join(t.layout.varDir, "work-protocol.json")),
     );
     expect(await activateProtocol(t.layout, final)).toEqual(active);
+    const registryAfter = updateRegistry(
+      t.layout,
+      t.registry.revision,
+      (draft) => {
+        draft.roles["game-coordinator"]!.branch = "after-cutover";
+      },
+      { timeoutSeconds: 0 },
+    );
+    expect(registryAfter.roles["game-coordinator"]!.branch).toBe("after-cutover");
     expect(() =>
       planProtocolMigration(t.layout, {
         expectedGeneration: 1,
