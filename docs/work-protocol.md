@@ -8,8 +8,14 @@ Discovery is read-only; it does not deliver native input, acknowledge queues or 
 
 `var/work-protocol.json` names `schema: 1`, `workspaceId`, `stateRoot` and `generation`. The root
 must be outside known source checkouts and task worktrees, including resolved symlink ancestors.
-There is no inferred default root. Missing configuration reports protocol unavailable and keeps
-the legacy compatibility path; it does not enable a second writable backend.
+There is no inferred default root. Missing configuration keeps the legacy compatibility path
+only when no cutover fence exists. A retained fence with a missing configuration pointer fails
+closed as `protocol-fenced`; invalid configuration or generation disagreement also fails closed.
+Deleting the pointer does not roll back activation or enable a second writable backend.
+
+Import the public SDK APIs and types from `@andornaut/delivery-kit/build/protocol`, including
+`runtimeProtocolStore`, `ProtocolMessages` and `protocolNamespace`. See the
+[public build API list](../README.md#public-build-apis) for canonical subpaths and compatibility aliases.
 
 Stable namespaces are `coordinator`, `kits/<kit>` and `games/<game>/<role>`.
 The core registry-key mapper, exported publicly as `protocolNamespace(registryRole)`, maps those

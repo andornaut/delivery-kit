@@ -3,8 +3,9 @@
 Local scheduled trunk-based Git delivery. Each departure gates the game's local `main` HEAD in an
 isolated container, pushes that exact commit, watches its CI and deploys the already-gated build
 on a pass. The kit owns the mechanisms. Each game owns its repository, `delivery-kit.json`,
-credentials and schedule; `game-coordinator` owns `config.json`, the registry and all mutable state under
-`var/`.
+credentials and schedule; `game-coordinator` owns `config.json`, the registry and mutable state.
+The legacy default is `var/`; an explicitly activated work protocol stores its publications,
+accounting and message transport state under an external `stateRoot`.
 
 The `game-coordinator` role coordinates from the `game-coordinator` repository.
 
@@ -360,7 +361,9 @@ channel, acceptance or handling. Reports contain normalized codes and nonsecret 
 never message bodies, raw errors, environments or authentication material.
 
 `messageChannelStateDir(layout, conversationId)` returns
-`<reviewDir>/messages/recipients/<conversationId>/unblock` without creating state. An already
+`<reviewDir>/messages/recipients/<conversationId>/unblock` on the legacy path, or
+`<stateRoot>/transport/messages/recipients/<conversationId>/unblock` with an active work protocol,
+without creating state. An already
 active Claude session's existing channel process includes its exact conversation's generic bus
 alongside game bus directories by default. Explicit `--state-dir` is exclusive: configure
 `claude channel --conversation UUID --state-dir DIR` with existing absolute directories only.
@@ -449,6 +452,12 @@ Reconciliation has two exclusive forms:
   assertion. Retained requires `--reason TEXT --next-boundary TEXT`; optional `--owner-role ROLE`
   defaults to the recipient. Retention options are exclusive to `retained`.
 
+With an active work protocol, `handled`, `superseded` and `retained` additionally require an
+already-published matching recipient-owned receipt. Its evidence anchor is exactly
+`protocol-receipt:<receipt.reference.hash>`; retention metadata must match that receipt.
+Caller-supplied evidence alone retains its legacy meaning only without protocol configuration.
+Native acceptance remains a transport observation, not handling.
+
 There is no `not-delivered` reconciliation authority. Stale revisions fail closed. Review
 and retain ambiguous work until exact supported evidence establishes its outcome.
 
@@ -464,6 +473,21 @@ help and package behaviour for that exact artifact. These commands do not activa
 Track requested outcomes separately from message delivery and recipient handling. The
 [request-accounting guide](docs/request-accounting.md) describes provenance, per-target closure,
 protected questions and capture limits.
+
+## Filesystem work protocol
+
+The optional [work protocol](docs/work-protocol.md) provides fenced role publications,
+canonical message originals and separate recipient handling receipts. Discover supported
+commands with `delivery-kit --help`; `protocol status` reports configuration and
+`protocol inbox --role kits/game-kit --sender kits/delivery-kit` reads an explicit filesystem
+scope without native delivery. Bodies require `--include-body`.
+
+Activation requires an explicit external `stateRoot`, reviewed readers and writers, an
+independent backup and verified restore. Missing configuration retains legacy compatibility
+only when no cutover fence exists; invalid configuration, a missing pointer after cutover or
+generation disagreement fails closed. `--state-root DIR` selects a prepared root before
+activation, not a second active backend. Registry, route, checkpoints, review snapshots and
+game bus state stay under `var/`.
 
 ## Review route
 
@@ -530,7 +554,8 @@ accepts them; the first refusal stops a flush and the next flush resumes there.
 
 ## State
 
-All mutable state lives in game-coordinator's ignored `var/`:
+The legacy default is game-coordinator's ignored `var/`. These paths remain there even when
+the work protocol is active:
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
@@ -545,8 +570,13 @@ All mutable state lives in game-coordinator's ignored `var/`:
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 
+An active work protocol uses its external `stateRoot` for publications and artifacts,
+`<stateRoot>/accounting` for the request ledger and intake, and
+`<stateRoot>/transport/messages` for derived message transport state and recipient spools.
+The configuration pointer and cutover fence remain under `var/`.
+
 Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
-files under `var/`. Runners read `<game>/delivery-kit.json` and write only to their own
+files under the selected state directories. Runners read `<game>/delivery-kit.json` and write only to their own
 `var/games/<g>/bus/`. delivery-kit writes nothing under any `.claude/` directory.
 
 ### Desired and observed delivery control
@@ -800,11 +830,13 @@ Two environment variables are test-only overrides for the contract harness, neve
 All library APIs are Node build/operations tools, not APIs for the running game. Import their
 explicit canonical subpaths:
 
-| Canonical subpath                               | Purpose                                                           | Deprecated compatibility alias            |
-| ----------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
-| `@andornaut/delivery-kit/build/registry`        | Registry configuration, routing and guarded updates.              | `@andornaut/delivery-kit/registry`        |
-| `@andornaut/delivery-kit/build/transport`       | Read-only endpoint selection and message channel path references. | `@andornaut/delivery-kit/transport`       |
-| `@andornaut/delivery-kit/build/source-identity` | Exact Git identity capture and isolated restoration.              | `@andornaut/delivery-kit/source-identity` |
+| Canonical subpath                               | Purpose                                                                                            | Deprecated compatibility alias            |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `@andornaut/delivery-kit/build/registry`        | Registry configuration, routing and guarded updates.                                               | `@andornaut/delivery-kit/registry`        |
+| `@andornaut/delivery-kit/build/transport`       | Read-only endpoint selection and message channel path references.                                  | `@andornaut/delivery-kit/transport`       |
+| `@andornaut/delivery-kit/build/source-identity` | Exact Git identity capture and isolated restoration.                                               | `@andornaut/delivery-kit/source-identity` |
+| `@andornaut/delivery-kit/build/accounting`      | Request ledger, intake retention and closure evidence ([guide](docs/request-accounting.md)).       | `@andornaut/delivery-kit/accounting`      |
+| `@andornaut/delivery-kit/build/protocol`        | Fenced filesystem work, message originals and recipient receipts ([guide](docs/work-protocol.md)). | `@andornaut/delivery-kit/protocol`        |
 
 Each alias resolves to the same bundle and declarations as its canonical path. Known consumers
 include game-coordinator's registry/transport imports and Ada the Navigator's source-identity
