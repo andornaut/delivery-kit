@@ -9,6 +9,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, constants, openSync } from "node:fs";
 
 export interface LockOptions {
+  /** Shared generation leases coexist; exclusive state transitions retain the default. */
+  readonly shared?: boolean;
   /** Fail with LockBusy instead of waiting when another holder has the lock. */
   readonly nonBlocking?: boolean;
   /** Fail with LockBusy after waiting this many seconds. Ignored when nonBlocking. */
@@ -58,7 +60,7 @@ const CONFLICT_EXIT = 75;
 const LOCK_FD = "3";
 
 function flockArgs(options: LockOptions): string[] {
-  const args = ["-x", "-E", String(CONFLICT_EXIT)];
+  const args = [options.shared === true ? "-s" : "-x", "-E", String(CONFLICT_EXIT)];
   if (options.nonBlocking === true) {
     args.push("-n");
   } else if (options.timeoutSeconds !== undefined) {

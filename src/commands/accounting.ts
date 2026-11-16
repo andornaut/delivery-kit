@@ -1,12 +1,12 @@
 // JSON transactions preserve the core's actor, provenance, command identity and revision.
 import { isUtf8 } from "node:buffer";
 import { readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
 import { captureAccounting } from "../accounting/boundary.ts";
 import { snapshotIntake } from "../accounting/ingress.ts";
-import { IntakeError, IntakeStore, type PendingIntake } from "../accounting/intake.ts";
+import { IntakeError, type PendingIntake } from "../accounting/intake.ts";
 import { projectOwnerBinding } from "../accounting/ownership.ts";
 import { LedgerError, LedgerStore } from "../accounting/store.ts";
 import type { LedgerEvent, LedgerTransaction } from "../accounting/types.ts";
@@ -16,6 +16,13 @@ import { connectControl } from "../adapters/codex/rpc.ts";
 import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type Layout, loadLayout } from "../layout.ts";
+import { ProtocolError } from "../protocol/core.ts";
+import {
+  accountingIntake,
+  ledgerStorageOptions,
+  offerAccounting,
+  protocolFailure,
+} from "../protocol/runtime.ts";
 import { resolveConversation, resolveHarness, resolveRole } from "../registry/resolve.ts";
 import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
@@ -50,6 +57,7 @@ const CORE_ERRORS = new Set([
   "stale-time",
   "unreviewed-source",
   "invalid-transaction",
+  "invalid-writer",
   "command-conflict",
   "stale-revision",
   "invalid-request",
@@ -90,10 +98,14 @@ function failure(
   code: string,
   exitCode = EXIT_INVALID,
   pendingIntake?: PendingIntake,
+  actionMayHaveCommitted = false,
 ): number {
-  io.err(
-    `${JSON.stringify({ error: { code }, ok: false, ...(pendingIntake === undefined ? {} : { pendingIntake }) })}\n`,
-  );
+  const record = {
+    error: { code, ...(actionMayHaveCommitted ? { actionMayHaveCommitted: true } : {}) },
+    ok: false,
+    ...(pendingIntake === undefined ? {} : { pendingIntake }),
+  };
+  io.err(`${JSON.stringify(record)}\n`);
   return exitCode;
 }
 
@@ -123,9 +135,13 @@ function required(values: Record<string, string | undefined>, name: string): str
   return value;
 }
 
-function store(io: Io, layout: Layout): LedgerStore {
+function store(
+  io: Io,
+  layout: Layout,
+  storage: ReturnType<typeof ledgerStorageOptions>,
+): LedgerStore {
   return new LedgerStore({
-    directory: join(layout.varDir, "accounting"),
+    ...storage,
     async resolveOwner(assignment) {
       try {
         const registry = readRegistry(layout);
@@ -181,7 +197,9 @@ async function operate(
 ) {
   try {
     const layout = loadLayout(root);
-    const result = await action(layout, store(io, layout));
+    const storage = ledgerStorageOptions(layout, io);
+    const result = await action(layout, store(io, layout, storage));
+    storage.checkRead?.();
     io.out(`${JSON.stringify(result)}\n`);
     return EXIT_OK;
   } catch (error) {
@@ -190,12 +208,13 @@ async function operate(
         ? error.code
         : error instanceof LedgerError && CORE_ERRORS.has(error.code)
           ? error.code
-          : "ledger-operation-failed";
+          : (protocolFailure(error) ?? "ledger-operation-failed");
     return failure(
       io,
       code,
       EXIT_INVALID,
       error instanceof ReadProjectionError ? error.pendingIntake : undefined,
+      error instanceof ProtocolError && error.actionMayHaveCommitted,
     );
   }
 }
@@ -343,7 +362,7 @@ function pendingSummary(
     return { offers: null, reason: "ledger-unavailable", status: "unavailable" };
   }
   try {
-    const store = new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") });
+    const store = accountingIntake(layout);
     const offers = store.pending(events, roles).map((offer) => ({
       commandId: `intake-${offer.id}`,
       id: offer.id,
@@ -464,7 +483,7 @@ async function boundarySnapshot(
     type: "capture" as const,
   };
   if (command.requests.length + command.coverage.length > 0) {
-    new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") }).offer({
+    await offerAccounting(layout, {
       actor: role,
       command,
       source: command.coverage[0]?.source ?? command.requests[0]!.source,

@@ -105,6 +105,27 @@ describe("read-only locks", () => {
 });
 
 describe("lock helpers", () => {
+  it("allows concurrent generation leases while excluding an exclusive cutover", async () => {
+    const path = lockPath();
+    const first = holdLock(path, { shared: true });
+    const second = await holdLockAsync(path, { nonBlocking: true, shared: true });
+    try {
+      expect(() => holdLock(path, { nonBlocking: true })).toThrow(LockBusy);
+      first.release();
+      await expect(holdLockAsync(path, { nonBlocking: true })).rejects.toBeInstanceOf(LockBusy);
+    } finally {
+      first.release();
+      second.release();
+    }
+    const cutover = await holdLockAsync(path, { nonBlocking: true });
+    try {
+      expect(() => holdLock(path, { nonBlocking: true, shared: true })).toThrow(LockBusy);
+    } finally {
+      cutover.release();
+    }
+    holdLock(path, { nonBlocking: true, shared: true }).release();
+  });
+
   it("times out a blocking wait with LockBusy", async () => {
     const path = lockPath();
     await startHolder("bash", path);

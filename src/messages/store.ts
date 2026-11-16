@@ -9,8 +9,20 @@ import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../adapters/types.ts";
 import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../durable.ts";
+import type { Layout } from "../layout.ts";
 import { holdLockAsync, type LockHandle } from "../lock.ts";
+import { protocolRole, ProtocolStore } from "../protocol/core.ts";
+import {
+  acquireProtocolLayout,
+  checkProtocolLayout,
+  type ProtocolLayout,
+  resolveProtocolLayout,
+} from "../protocol/layout.ts";
+import { ProtocolMessages } from "../protocol/messages.ts";
 import { ID_PATTERN } from "../validate.ts";
+import { messageEnvelope } from "./envelope.ts";
+import { MessageError } from "./errors.ts";
+import { messageLayout } from "./paths.ts";
 import type {
   MessageAttempt,
   MessageAttemptLease,
@@ -57,15 +69,8 @@ const REASONS = new Set([
 const ATTEMPT_STATES = new Set(["sending", "accepted", "blocked", "ambiguous", "parent-required"]);
 const EVIDENCE = new Set(["accepted", "not-delivered", "handled", "superseded", "retained"]);
 
-export class MessageError extends Error {
-  readonly code: string;
-
-  constructor(code: string) {
-    super(`message: ${code}`);
-    this.code = code;
-    this.name = "MessageError";
-  }
-}
+export { messageEnvelope } from "./envelope.ts";
+export { MessageError } from "./errors.ts";
 
 function requireThat(condition: unknown, code: string): asserts condition {
   if (!condition) {
@@ -91,46 +96,6 @@ function clone<T>(value: T): T {
 
 function hash(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-export function messageEnvelope(input: MessageInput): MessageEnvelope {
-  requireThat(
-    isRecord(input) &&
-      input.schema === 1 &&
-      typeof input.id === "string" &&
-      ID.test(input.id) &&
-      role(input.fromRole) &&
-      role(input.toRole) &&
-      (input.intent === "queue" || input.intent === "unblock") &&
-      typeof input.body === "string" &&
-      stamp(input.created),
-    "invalid-envelope",
-  );
-  const { body, created, fromRole, id, intent, schema, toRole } = input;
-  const { parentRole, workerId } = input;
-  const worker = parentRole !== undefined || workerId !== undefined;
-  let target: Pick<MessageInput, "parentRole" | "workerId"> = {};
-  if (worker) {
-    requireThat(
-      isCanonicalUuid(workerId) && role(parentRole) && toRole === parentRole,
-      "invalid-worker-target",
-    );
-    target = { parentRole, workerId };
-  }
-  const payloadHash = hash(
-    JSON.stringify([
-      schema,
-      id,
-      fromRole,
-      toRole,
-      intent,
-      body,
-      created,
-      workerId ?? null,
-      parentRole ?? null,
-    ]),
-  );
-  return { body, created, fromRole, id, intent, ...target, payloadHash, schema, toRole };
 }
 
 function ownerValid(owner: unknown): owner is MessageOwner {
@@ -304,10 +269,21 @@ export function messageSummary(layout: MessageContext["layout"]): MessageSummary
 export class MessageStore {
   private readonly context: MessageContext;
   private readonly directory: string;
+  private readonly layout: Layout | null;
+  private readonly protocol: ProtocolLayout | null;
+  private readonly canonicalMessages: ProtocolMessages | null;
 
   constructor(context: MessageContext) {
     this.context = context;
-    this.directory = join(context.layout.reviewDir, "messages");
+    this.layout = messageLayout(context.layout);
+    this.protocol = this.layout === null ? null : resolveProtocolLayout(this.layout);
+    this.directory = this.protocol?.messagesDir ?? join(context.layout.reviewDir, "messages");
+    this.canonicalMessages =
+      this.protocol === null
+        ? null
+        : new ProtocolMessages({
+            store: new ProtocolStore({ directory: this.protocol.stateRoot }),
+          });
   }
 
   private now(): string {
@@ -317,19 +293,41 @@ export class MessageStore {
   }
 
   private path(id: string): string {
+    if (this.layout !== null) {
+      checkProtocolLayout(this.layout, this.protocol);
+    }
     requireThat(typeof id === "string" && ID.test(id), "invalid-id");
     return join(this.directory, `${hash(id)}.json`);
   }
 
   private async lock(id: string): Promise<LockHandle> {
     this.path(id);
-    mkdirSync(this.directory, { mode: 0o700, recursive: true });
-    chmodSync(this.directory, 0o700);
-    fsyncDirectory(dirname(this.directory));
-    return holdLockAsync(join(this.directory, `${hash(id)}.lock`), { nonBlocking: true });
+    const generation =
+      this.layout === null
+        ? null
+        : await acquireProtocolLayout(this.layout, this.protocol, { nonBlocking: true });
+    try {
+      mkdirSync(this.directory, { mode: 0o700, recursive: true });
+      chmodSync(this.directory, 0o700);
+      fsyncDirectory(dirname(this.directory));
+      const message = await holdLockAsync(join(this.directory, `${hash(id)}.lock`), {
+        nonBlocking: true,
+      });
+      return {
+        path: message.path,
+        release() {
+          message.release();
+          generation?.release();
+        },
+      };
+    } catch (error) {
+      generation?.release();
+      throw error;
+    }
   }
 
   private save(record: MessageRecord): MessageRecord {
+    this.checkOriginal(record.envelope);
     const next = { ...record, revision: record.revision + 1 };
     validRecord(next);
     writeJsonDurable(this.path(next.envelope.id), next);
@@ -356,7 +354,36 @@ export class MessageStore {
     }
     validRecord(record);
     requireThat(record.envelope.id === id, "binding-conflict");
+    this.checkOriginal(record.envelope);
     return clone(record);
+  }
+
+  private originals(): ProtocolMessages | null {
+    if (this.layout !== null) {
+      checkProtocolLayout(this.layout, this.protocol);
+    }
+    return this.canonicalMessages;
+  }
+
+  private readView<T>(read: () => T): T {
+    const messages = this.originals();
+    return messages === null ? read() : messages.withReadView(read);
+  }
+
+  /** Transport records are projections of this original after explicit protocol activation. */
+  original(fromRole: string, id: string): MessageEnvelope | null {
+    const originals = this.originals();
+    if (originals === null) {
+      return null;
+    }
+    const ref = originals.find(protocolRole(fromRole), id);
+    requireThat(ref !== null, "protocol-original-required");
+    return originals.read(ref).envelope;
+  }
+
+  private checkOriginal(envelope: MessageEnvelope): void {
+    const canonical = this.original(envelope.fromRole, envelope.id);
+    requireThat(canonical === null || same(canonical, envelope), "protocol-original-conflict");
   }
 
   /** Explicit recipient inbox read returns full original payloads, never abbreviated bodies. */
@@ -366,6 +393,13 @@ export class MessageStore {
   }
 
   private records(): readonly MessageRecord[] {
+    return this.readView(() => this.readRecords());
+  }
+
+  private readRecords(): readonly MessageRecord[] {
+    if (this.layout !== null) {
+      checkProtocolLayout(this.layout, this.protocol);
+    }
     let names: string[];
     try {
       names = readdirSync(this.directory);
@@ -385,6 +419,7 @@ export class MessageStore {
           throw new MessageError("unreadable-record");
         }
         validRecord(record);
+        this.checkOriginal(record.envelope);
         requireThat(
           this.path(record.envelope.id) === join(this.directory, name),
           "binding-conflict",
@@ -403,20 +438,40 @@ export class MessageStore {
     if (record === undefined) {
       return undefined;
     }
-    return publicStatus(record);
+    return this.publicRecord(record);
+  }
+
+  private publicRecord(record: MessageRecord): MessageStatus {
+    const status = publicStatus(record);
+    const originals = this.originals();
+    if (originals === null) {
+      return status;
+    }
+    const ref = originals.find(protocolRole(record.envelope.fromRole), record.envelope.id);
+    requireThat(ref !== null, "protocol-original-required");
+    const receipt = originals.latestRecipientReceipt(ref);
+    return {
+      ...status,
+      protocol: {
+        disposition: receipt?.value.disposition ?? null,
+        handlingAttestation: receipt === null ? "unattested" : "attested",
+      },
+    };
   }
 
   summary(): MessageSummary {
     try {
-      const messages = this.records().map(publicStatus);
-      const counts = Object.fromEntries([...STATES].map((state) => [state, 0])) as Record<
-        MessageRecord["state"],
-        number
-      >;
-      for (const message of messages) {
-        counts[message.state]++;
-      }
-      return { counts, messages, schema: 1, status: "available" };
+      return this.readView(() => {
+        const messages = this.records().map((record) => this.publicRecord(record));
+        const counts = Object.fromEntries([...STATES].map((state) => [state, 0])) as Record<
+          MessageRecord["state"],
+          number
+        >;
+        for (const message of messages) {
+          counts[message.state]++;
+        }
+        return { counts, messages, schema: 1, status: "available" };
+      });
     } catch {
       return {
         counts: null,
@@ -430,6 +485,7 @@ export class MessageStore {
 
   async enqueue(input: MessageInput): Promise<MessageRecord> {
     const envelope = messageEnvelope(input);
+    this.checkOriginal(envelope);
     const existing = this.read(envelope.id);
     if (existing !== undefined) {
       requireThat(same(existing.envelope, envelope), "id-conflict");
@@ -656,6 +712,19 @@ export class MessageStore {
     const lock = await this.lock(expected.envelope.id);
     try {
       const record = this.existing(expected);
+      if (this.protocol !== null && ["handled", "superseded", "retained"].includes(evidence.kind)) {
+        const originals = this.originals()!;
+        const ref = originals.find(protocolRole(record.envelope.fromRole), record.envelope.id);
+        requireThat(ref !== null, "protocol-original-required");
+        const receipt = originals.latestRecipientReceipt(ref);
+        requireThat(
+          receipt !== null &&
+            receipt.value.disposition === evidence.kind &&
+            evidence.ref === `protocol-receipt:${receipt.reference.hash}` &&
+            same(receipt.value.retention, evidence.retention),
+          "protocol-recipient-receipt-required",
+        );
+      }
       requireThat(same(evidence.source, expected.source), "binding-conflict");
       if (same(record.evidence.at(-1), evidence)) {
         return record;

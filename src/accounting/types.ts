@@ -203,6 +203,12 @@ export type LedgerCommand =
     }
   | { readonly type: "coverage"; readonly coverage: LedgerCoverage };
 
+export interface LedgerWriter {
+  readonly harness: "codex" | "claude";
+  readonly nativeId: string;
+  readonly epoch: number;
+}
+
 export interface LedgerTransaction {
   readonly schema: 1;
   readonly commandId: string;
@@ -211,6 +217,8 @@ export interface LedgerTransaction {
   readonly at: string;
   readonly source: LedgerSource;
   readonly command: LedgerCommand;
+  /** Explicit current writer when the external workspace protocol is active. */
+  readonly writer?: LedgerWriter;
 }
 
 export interface LedgerEvent extends LedgerTransaction {
@@ -261,8 +269,14 @@ export interface LedgerReport extends LedgerProjection {
 }
 
 export interface LedgerStoreOptions {
-  /** Canonical caller supplies join(layout.varDir, 'accounting'). */
+  /** Canonical caller resolves the active generation's sole request-journal directory. */
   readonly directory: string;
+  readonly checkRead?: () => void;
+  /** Holds the role's fencing lock across the sole request-journal commit. */
+  readonly withWriter?: (
+    transaction: LedgerTransaction,
+    write: () => Promise<LedgerEvent>,
+  ) => Promise<LedgerEvent>;
   /** Automatic capture refuses contention without waiting; explicit transactions default to waiting. */
   readonly nonBlocking?: boolean;
   /** Required for any assignment. Return a fresh exact role/worker binding, null if unavailable. */

@@ -1,6 +1,5 @@
 // Existing ingress retains accounting references independently of native delivery and ACKs.
 import { createHash } from "node:crypto";
-import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
@@ -8,15 +7,25 @@ import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Layout } from "../layout.ts";
 import { messageSummary } from "../messages/store.ts";
 import type { MessageSummary } from "../messages/types.ts";
+import { resolveProtocolLayout } from "../protocol/layout.ts";
+import {
+  accountingIntake,
+  ledgerStorageOptions,
+  offerAccounting,
+  type ProtocolBoundaryStatus,
+  protocolBoundaryStatus,
+  protocolFailure,
+} from "../protocol/runtime.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type IntakeContext, messageIntake, snapshotIntake } from "./ingress.ts";
-import { IntakeError, IntakeStore } from "./intake.ts";
+import { IntakeError } from "./intake.ts";
 import { type OwnerBinding, projectOwnerBinding } from "./ownership.ts";
 import { LedgerError, LedgerStore } from "./store.ts";
 import type { LedgerCommand, LedgerSource } from "./types.ts";
 
 export interface AccountingBoundary {
+  readonly workProtocol?: ProtocolBoundaryStatus;
   readonly status: "available" | "unavailable";
   readonly accounting_ready: boolean;
   readonly revision?: number;
@@ -49,6 +58,10 @@ export interface AccountingBoundary {
 }
 
 function failureReason(error: unknown): string {
+  const protocol = protocolFailure(error);
+  if (protocol !== null) {
+    return protocol;
+  }
   const code = error instanceof LedgerError || error instanceof IntakeError ? error.code : null;
   return code !== null &&
     [
@@ -70,7 +83,8 @@ function failureReason(error: unknown): string {
 /** Readiness remains read-only. Unknown accounting coverage never becomes an empty ledger. */
 export function accountingStatus(layout: Layout, roles?: readonly string[]): AccountingBoundary {
   try {
-    const store = new LedgerStore({ directory: join(layout.varDir, "accounting") });
+    const storage = ledgerStorageOptions(layout);
+    const store = new LedgerStore(storage);
     const report = store.report({
       at: new Date().toISOString(),
     });
@@ -79,15 +93,17 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
     if (owners.some((owner) => !Object.hasOwn(registry.roles, owner))) {
       throw new Error("accounting-owner-unavailable");
     }
+    const offers = accountingIntake(layout).pending(store.history(), owners);
     const pendingIntake = {
-      offers: new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") })
-        .pending(store.history(), owners)
-        .map((offer) => ({
-          commandId: `intake-${offer.id}`,
-          id: offer.id,
-          requiredOwner: offer.actor,
-        })),
-      reason: null,
+      offers: offers.map((offer) => ({
+        commandId: `intake-${offer.id}`,
+        id: offer.id,
+        requiredOwner: offer.actor,
+      })),
+      reason:
+        offers.length > 0 && resolveProtocolLayout(layout) !== null
+          ? "protocol-writer-required"
+          : null,
       status: "available" as const,
     };
     const selected = new Set(owners);
@@ -127,6 +143,8 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
         : coverage.length === 0
           ? "unknown"
           : "declared-complete";
+    const workProtocol = protocolBoundaryStatus(layout, (id) => store.read(id), owners);
+    storage.checkRead?.();
     return {
       accounting_ready:
         missingOwners.length === 0 &&
@@ -139,6 +157,9 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
       assignments,
       coverageState,
       missingOwners,
+      observedGaps: offers.flatMap((offer) =>
+        offer.command.coverage.flatMap((entry) => entry.gaps),
+      ),
       open,
       pendingIntake,
       protectedQuestions,
@@ -148,6 +169,7 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
       unassigned,
       unknownSource,
       untriaged,
+      workProtocol,
     };
   } catch (error) {
     return {
@@ -245,10 +267,10 @@ export async function captureAccounting(
   try {
     const registry = readRegistry(layout);
     const store = new LedgerStore({
-      directory: join(layout.varDir, "accounting"),
+      ...ledgerStorageOptions(layout),
       nonBlocking: true,
     });
-    const input = new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") });
+    const input = accountingIntake(layout);
     let inventory: MessageSummary;
     try {
       inventory = messageSummary(layout);
@@ -311,7 +333,8 @@ export async function captureAccounting(
       }
       if (requests.length > 0 || coverage.length > 0) {
         // Persist immutable primitive references before reading or locking the event journal.
-        input.offer({
+        // eslint-disable-next-line no-await-in-loop
+        await offerAccounting(layout, {
           actor: ownerRole,
           command: { coverage, requests, type: "capture" },
           source: {
@@ -322,6 +345,11 @@ export async function captureAccounting(
           },
         });
       }
+    }
+    if (resolveProtocolLayout(layout) !== null) {
+      // Only the responsible fenced writer admits unknown offers to the request journal.
+      // Automatic capture retains them without claiming the owner's epoch or native identity.
+      return accountingStatus(layout, roles);
     }
     for (const offer of input.pending(store.history(), selectedRoles)) {
       // Replay only local accounting inputs, without native sends, ACKs or question operations.
@@ -372,14 +400,20 @@ export function accountingReview(value: unknown): string {
   }
   const record = value as Record<string, unknown>;
   const summary = Object.fromEntries(
-    ["status", "accounting_ready", "revision", "coverageState", "missingOwners"].map((key) => [
-      key,
-      record[key] ?? null,
-    ]),
+    [
+      "status",
+      "accounting_ready",
+      "revision",
+      "coverageState",
+      "missingOwners",
+      "workProtocol",
+    ].map((key) => [key, record[key] ?? null]),
   );
   return (
     `\nDurable request accounting: ${JSON.stringify(summary)}. ` +
     "Use ledger report and ledger coverage to reconcile open, stalled, unassigned and untriaged " +
-    "work. Native history gaps remain explicit; transport handling is not request completion."
+    "work. Use protocol boundary at startup, before work, parent review and cleanup to discover " +
+    "published work and recipient receipts. Native history gaps remain explicit; transport " +
+    "handling is not request completion."
   );
 }

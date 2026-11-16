@@ -275,9 +275,14 @@ export class MessageService {
       toRole = resolveRole(registry, input.recipient);
     }
     const prior = this.store.read(input.id);
+    const original = this.store.original(input.fromRole, input.id);
     const record = await this.store.enqueue({
       body: input.body,
-      created: prior?.envelope.created ?? this.context.now?.() ?? new Date().toISOString(),
+      created:
+        original?.created ??
+        prior?.envelope.created ??
+        this.context.now?.() ??
+        new Date().toISOString(),
       fromRole: input.fromRole,
       id: input.id,
       intent: input.intent ?? "queue",

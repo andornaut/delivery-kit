@@ -437,8 +437,12 @@ function validateCommand(command: unknown): asserts command is LedgerCommand {
 }
 
 function validate(transaction: unknown): asserts transaction is LedgerTransaction {
+  const keys =
+    transaction !== null && typeof transaction === "object" && "writer" in transaction
+      ? [...TX_KEYS, "writer"]
+      : TX_KEYS;
   demand(
-    object(transaction, TX_KEYS) &&
+    object(transaction, keys) &&
       transaction.schema === 1 &&
       id(transaction.commandId) &&
       Number.isSafeInteger(transaction.expectedRevision) &&
@@ -448,6 +452,17 @@ function validate(transaction: unknown): asserts transaction is LedgerTransactio
       source(transaction.source),
     "invalid-transaction",
   );
+  if ("writer" in transaction) {
+    const writer = transaction.writer;
+    demand(
+      object(writer, ["harness", "nativeId", "epoch"]) &&
+        (writer.harness === "codex" || writer.harness === "claude") &&
+        isCanonicalUuid(writer.nativeId) &&
+        Number.isSafeInteger(writer.epoch) &&
+        Number(writer.epoch) > 0,
+      "invalid-writer",
+    );
+  }
   validateCommand(transaction.command);
 }
 
@@ -944,6 +959,7 @@ export class LedgerStore {
   }
 
   #replay(): Replay {
+    this.#options.checkRead?.();
     const state: Replay = { coverage: new Map(), events: [], requests: new Map() };
     const directory = join(this.#options.directory, "events");
     try {
@@ -972,7 +988,16 @@ export class LedgerStore {
         const raw = readFileSync(path, "utf8");
         const value: unknown = JSON.parse(raw);
         demand(raw === `${JSON.stringify(value, null, 2)}\n`, "corrupt-ledger");
-        demand(object(value, [...TX_KEYS, "revision", "previousHash", "hash"]), "corrupt-ledger");
+        demand(
+          object(value, [
+            ...TX_KEYS,
+            ...(value !== null && typeof value === "object" && "writer" in value ? ["writer"] : []),
+            "revision",
+            "previousHash",
+            "hash",
+          ]),
+          "corrupt-ledger",
+        );
         const { hash, previousHash, revision: eventRevision, ...transaction } = value;
         validate(transaction);
         demand(
@@ -1106,6 +1131,13 @@ export class LedgerStore {
   async apply(input: LedgerTransaction): Promise<LedgerEvent> {
     validate(input);
     const transaction = structuredClone(input);
+    if (this.#options.withWriter !== undefined) {
+      return this.#options.withWriter(transaction, () => this.#apply(transaction));
+    }
+    return this.#apply(transaction);
+  }
+
+  async #apply(transaction: LedgerTransaction): Promise<LedgerEvent> {
     const root = this.#options.directory;
     mkdirSync(root, { mode: 0o700, recursive: true });
     demand(lstatSync(root).isDirectory() && !lstatSync(root).isSymbolicLink(), "invalid-directory");
@@ -1137,6 +1169,7 @@ export class LedgerStore {
           expectedRevision: previous.expectedRevision,
           schema: previous.schema,
           source: previous.source,
+          ...(previous.writer === undefined ? {} : { writer: previous.writer }),
         };
         demand(isDeepStrictEqual(original, transaction), "command-conflict");
         return structuredClone(previous);

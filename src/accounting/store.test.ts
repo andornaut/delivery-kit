@@ -123,6 +123,58 @@ function fixture(resolveOwner?: LedgerStoreOptions["resolveOwner"]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("request accounting journal", () => {
+  it("retains exact writer provenance and deduplication across reload without rewriting legacy events", async () => {
+    const f = fixture();
+    await f.register(request("legacy"));
+    const input = {
+      ...f.transaction({ request: request("fenced"), type: "register" }),
+      writer: { epoch: 1, harness: "codex" as const, nativeId: NATIVE.threadId },
+    };
+    const event = await f.store.apply(input);
+    const reloaded = new LedgerStore(f.options);
+    expect(reloaded.history().map((entry) => entry.writer)).toEqual([undefined, input.writer]);
+    expect(await reloaded.apply(input)).toEqual(event);
+    await expect(
+      reloaded.apply({ ...input, writer: { ...input.writer, epoch: 2 } }),
+    ).rejects.toMatchObject({ code: "command-conflict" });
+    expect(reloaded.read().revision).toBe(2);
+  });
+
+  it("refuses stale writer admission before creating a journal and rejects a stale read view", async () => {
+    const f = fixture();
+    let fenced = false;
+    const store = new LedgerStore({
+      ...f.options,
+      checkRead() {
+        if (fenced) {
+          throw new Error("stale-generation");
+        }
+      },
+      async withWriter(input, write) {
+        if (fenced || input.writer?.epoch !== 1) {
+          throw new Error("stale-writer");
+        }
+        return write();
+      },
+    });
+    const input = f.transaction({ request: request("only-current-owner"), type: "register" });
+    await expect(store.apply(input)).rejects.toThrow("stale-writer");
+    expect(f.store.history()).toEqual([]);
+    await store.apply({
+      ...input,
+      writer: { epoch: 1, harness: "codex", nativeId: NATIVE.threadId },
+    });
+    fenced = true;
+    expect(() => store.read()).toThrow("stale-generation");
+    await expect(
+      store.apply({
+        ...input,
+        writer: { epoch: 1, harness: "codex", nativeId: NATIVE.threadId },
+      }),
+    ).rejects.toThrow("stale-writer");
+    expect(f.store.history()).toHaveLength(1);
+  });
+
   it("deduplicates operations and retains original source through explicit triage", async () => {
     const f = fixture();
     expect(f.store.report({ at: AT })).toMatchObject({

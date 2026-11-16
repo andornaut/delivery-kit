@@ -103,6 +103,10 @@ export interface MessageRecord {
 
 /** Public diagnostics contain no payload, payload digest, evidence text or native binding. */
 export interface MessageStatus {
+  readonly protocol?: {
+    readonly handlingAttestation: "attested" | "unattested";
+    readonly disposition: "handled" | "superseded" | "retained" | null;
+  };
   readonly diagnostic?: DeliveryDiagnostic;
   readonly id: string;
   readonly revision: number;
@@ -141,7 +145,7 @@ export type MessageSummary =
     };
 
 export interface MessageContext {
-  readonly layout: Pick<Layout, "reviewDir">;
+  readonly layout: Pick<Layout, "reviewDir"> & Partial<Layout>;
   /** Must read current ownership on each call; unavailable ownership returns null. */
   readonly resolveOwner: (
     role: string,
