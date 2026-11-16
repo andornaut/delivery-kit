@@ -33,7 +33,10 @@ import {
   protocolBackup,
   protocolBoundary,
   protocolClaim,
+  protocolDeclare,
   protocolDryRun,
+  protocolEnroll,
+  protocolEnrollmentReport,
   protocolImport,
   protocolImportOriginals,
   protocolInbox,
@@ -43,6 +46,7 @@ import {
   protocolMessagePublish,
   protocolMessageReceipt,
   protocolMessageWithdraw,
+  protocolObserverAdoption,
   protocolOriginal,
   protocolRestore,
   protocolRoleRead,
@@ -64,12 +68,9 @@ import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.t
 import { gameLayout, type Layout, loadLayout } from "./layout.ts";
 import { resolveRole } from "./registry/resolve.ts";
 import { type Registry, validateRegistry } from "./registry/schema.ts";
-
 declare const __DK_VERSION__: string;
-
 export { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
-
 export const COMMANDS = [
   "run",
   "status",
@@ -99,6 +100,10 @@ export const COMMANDS = [
   "protocol status",
   "protocol inventory",
   "protocol dry-run",
+  "protocol declare",
+  "protocol enroll",
+  "protocol enrollment-report",
+  "protocol observer-adoption",
   "protocol import",
   "protocol import-originals",
   "protocol backup",
@@ -123,9 +128,7 @@ export const COMMANDS = [
   "protocol boundary",
 ] as const satisfies readonly Command[];
 export type { Command };
-
 const GROUP_ORDER = ["game", "inbox", "message", "ledger", "harness", "protocol"] as const;
-
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
   "usage: delivery-kit COMMAND [options] [--root COORDINATOR_ROOT]",
@@ -147,7 +150,6 @@ export const USAGE = [
   "game-coordinator is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
   "",
 ].join("\n");
-
 /** Removed 1.x command forms and the current form that replaces each. */
 const REMOVED: Readonly<Record<string, string>> = {
   channel: "delivery-kit claude channel",
@@ -155,13 +157,11 @@ const REMOVED: Readonly<Record<string, string>> = {
   "monitor-snapshot": "delivery-kit inbox snapshot",
   "resource-report": "delivery-kit status --game ID --resources",
 };
-
 /** Command forms removed in 3.0.0, with their replacements. */
 const REMOVED_3: Readonly<Record<string, string>> = {
   "monitor ack": "delivery-kit inbox ack",
   "monitor snapshot": "delivery-kit inbox snapshot",
 };
-
 /** The removed form a command line uses, with its replacement, or undefined. */
 function removedForm(args: readonly string[]): string | undefined {
   const [first, second] = args;
@@ -190,11 +190,9 @@ function removedForm(args: readonly string[]): string | undefined {
     ? undefined
     : `"${first}" was removed in 2.0.0; use "${replacement}"`;
 }
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 function checkGame(
   layout: Layout,
   registry: Registry | undefined,
@@ -226,7 +224,6 @@ function checkGame(
   }
   return problems;
 }
-
 /** var/route.json, when present, with its recipient resolved from the host game. */
 function checkRoute(layout: Layout): string[] {
   try {
@@ -239,7 +236,6 @@ function checkRoute(layout: Layout): string[] {
     return [`${layout.routeFile}: ${errorMessage(error)}`];
   }
 }
-
 function checkConfig(io: Io, root: string, args: string[]): number {
   const { values } = parseArgs({ args, options: SPECS["check-config"].options, strict: true });
   let layout: Layout;
@@ -280,7 +276,6 @@ function checkConfig(io: Io, root: string, args: string[]): number {
   );
   return EXIT_OK;
 }
-
 const HANDLERS: Readonly<Record<Command, Handler>> = {
   "check-config": checkConfig,
   "claude channel": channel,
@@ -310,7 +305,10 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol backup": protocolBackup,
   "protocol boundary": protocolBoundary,
   "protocol claim": protocolClaim,
+  "protocol declare": protocolDeclare,
   "protocol dry-run": protocolDryRun,
+  "protocol enroll": protocolEnroll,
+  "protocol enrollment-report": protocolEnrollmentReport,
   "protocol import": protocolImport,
   "protocol import-originals": protocolImportOriginals,
   "protocol inbox": protocolInbox,
@@ -321,6 +319,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol message-publish": protocolMessagePublish,
   "protocol message-receipt": protocolMessageReceipt,
   "protocol message-withdraw": protocolMessageWithdraw,
+  "protocol observer-adoption": protocolObserverAdoption,
   "protocol restore": protocolRestore,
   "protocol role": protocolRoleRead,
   "protocol status": protocolStatus,
@@ -333,9 +332,11 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   run,
   status,
 };
-
 /** Take every `--root DIR` out of the arguments; at most one is allowed. */
-function extractRoot(args: string[]): { root?: string; error?: string } {
+function extractRoot(args: string[]): {
+  root?: string;
+  error?: string;
+} {
   const at = args.indexOf("--root");
   if (at < 0) {
     return {};
@@ -350,9 +351,13 @@ function extractRoot(args: string[]): { root?: string; error?: string } {
   }
   return { root: value };
 }
-
 /** The command a line names: two words for a noun group, otherwise one. */
-function commandOf(args: readonly string[]): { command: Command; rest: string[] } | undefined {
+function commandOf(args: readonly string[]):
+  | {
+      command: Command;
+      rest: string[];
+    }
+  | undefined {
   const [first = "", second = ""] = args;
   const pair = `${first} ${second}`;
   if ((COMMANDS as readonly string[]).includes(pair)) {
@@ -363,7 +368,6 @@ function commandOf(args: readonly string[]): { command: Command; rest: string[] 
   }
   return undefined;
 }
-
 export async function main(io: Io, argv: readonly string[]): Promise<number> {
   const args = [...argv];
   const extracted = extractRoot(args);

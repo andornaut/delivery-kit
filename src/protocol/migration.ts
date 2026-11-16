@@ -21,13 +21,17 @@ import { holdLockAsync } from "../lock.ts";
 import { messageEnvelope } from "../messages/envelope.ts";
 import type { MessageEnvelope, MessageInput } from "../messages/types.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
-import { readRegistry } from "../registry/store.ts";
+import { readRegistry, updateRegistry } from "../registry/store.ts";
+import { unsafeArtifactPathComponent } from "./artifact-path.ts";
 import { ProtocolError, protocolRole, ProtocolStore } from "./core.ts";
+import { enrollmentStatus } from "./enrollment-runtime.ts";
 import {
   type ProtocolConfiguration,
   ProtocolLayoutError,
   protocolPaths,
+  type ProtocolRequirement,
   resolveProtocolLayout,
+  resolveProtocolManagement,
   validateProtocolRoot,
   withProtocolLayout,
 } from "./layout.ts";
@@ -50,7 +54,10 @@ export type MigrationErrorCode =
   | "migration-backup-required"
   | "migration-restore-required"
   | "migration-participants-incomplete"
-  | "migration-originals-required";
+  | "migration-originals-required"
+  | "migration-enrollment-required"
+  | "observer-adoption-conflict"
+  | "observer-adoption-invalid";
 export class MigrationError extends Error {
   readonly code: MigrationErrorCode;
   readonly details: {
@@ -80,6 +87,7 @@ export interface MigrationInventory {
   readonly fingerprint: string;
 }
 export interface ProtocolMigrationPlan {
+  readonly required?: ProtocolRequirement;
   readonly schema: 1;
   readonly id: string;
   readonly workspaceId: string;
@@ -114,6 +122,13 @@ export interface ProtocolParticipant {
   readonly quiescenceRef: string;
 }
 export interface ProtocolActivation {
+  readonly enrollment?: {
+    readonly registryRevision: number;
+    readonly participants: readonly {
+      readonly role: string;
+      readonly revision: number | null;
+    }[];
+  };
   readonly plan: ProtocolMigrationPlan;
   readonly expectedGeneration: 0;
   readonly backup: ProtocolBackup;
@@ -192,14 +207,12 @@ function metadata(path: string): unknown {
   }
 }
 function unsafe(name: string): boolean {
-  return (
-    name === ".git" ||
-    name === ".private" ||
-    name === ".ssh" ||
-    /^\.env(?:\.|$)/u.test(name) ||
-    /^(?:credentials|auth\.json|id_rsa|id_ed25519)(?:\.|$)/u.test(name) ||
-    /\.(?:pem|key|p12)$/u.test(name)
-  );
+  return unsafeArtifactPathComponent(name);
+}
+function migrationPointer(layout: Layout) {
+  return resolveProtocolManagement(layout).status === "pending"
+    ? null
+    : resolveProtocolLayout(layout);
 }
 function inventory(
   roots: readonly {
@@ -265,13 +278,18 @@ function planProtocolMigrationOperation(
     readonly expectedGeneration: number;
   },
 ): ProtocolMigrationPlan {
-  demand(resolveProtocolLayout(layout) === null, "migration-already-active");
+  const management = resolveProtocolManagement(layout);
+  demand(management.status !== "active", "migration-already-active");
+  if (management.status === "pending") {
+    demand(management.workspaceId === input.workspaceId, "migration-generation-conflict");
+  }
   demand(
     input.expectedGeneration === 0 && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(input.workspaceId),
   );
   const stateRoot = validateProtocolRoot(layout, input.stateRoot);
   const observed = inventoryProtocol(layout);
   const value = {
+    ...(management.status === "pending" ? { required: management.required } : {}),
     expectedGeneration: 0 as const,
     inventory: observed,
     schema: 1 as const,
@@ -288,15 +306,20 @@ function validatePlan(layout: Layout, plan: ProtocolMigrationPlan, checkSource =
       /^[a-f0-9]{64}$/u.test(plan.id),
   );
   demand(
-    isDeepStrictEqual(Object.keys(plan).sort(), [
-      "expectedGeneration",
-      "id",
-      "inventory",
-      "schema",
-      "stateRoot",
-      "workspaceId",
-    ]),
+    isDeepStrictEqual(
+      Object.keys(plan)
+        .filter((key) => key !== "required")
+        .sort(),
+      ["expectedGeneration", "id", "inventory", "schema", "stateRoot", "workspaceId"],
+    ),
   );
+  if (plan.required !== undefined) {
+    demand(
+      plan.required !== null &&
+        isDeepStrictEqual(Object.keys(plan.required), ["authorityRef"]) &&
+        token(plan.required.authorityRef),
+    );
+  }
   const { id, ...value } = plan;
   demand(
     hash(canonical(value)) === id &&
@@ -347,6 +370,7 @@ function imported(layout: Layout, root: string): ProtocolMigrationPlan {
       generation: 1,
       schema: 1,
       workspaceId: plan.workspaceId,
+      ...(plan.required === undefined ? {} : { required: plan.required }),
     }),
   );
   return plan;
@@ -356,6 +380,14 @@ async function importProtocolMigrationOperation(layout: Layout, plan: ProtocolMi
     layout,
     null,
     async () => {
+      const management = resolveProtocolManagement(layout);
+      if (management.status === "pending") {
+        demand(
+          isDeepStrictEqual(plan.required, management.required) &&
+            plan.workspaceId === management.workspaceId,
+          "migration-generation-conflict",
+        );
+      }
       validatePlan(layout, plan);
       const existing = metadata(join(plan.stateRoot, "migration", "import.json"));
       if (existing !== undefined) {
@@ -381,6 +413,7 @@ async function importProtocolMigrationOperation(layout: Layout, plan: ProtocolMi
           generation: 1,
           schema: 1,
           workspaceId: plan.workspaceId,
+          ...(plan.required === undefined ? {} : { required: plan.required }),
         });
         makeDirectory(join(plan.stateRoot, "migration"));
         writeJsonDurable(join(plan.stateRoot, "migration", "import.json"), plan);
@@ -397,7 +430,7 @@ async function importProtocolMigrationOperation(layout: Layout, plan: ProtocolMi
         status: "staged" as const,
       };
     },
-    { exclusive: true },
+    { allowPending: true, exclusive: true, expectedManagement: resolveProtocolManagement(layout) },
   );
 }
 function independent(layout: Layout, source: string, destination: string): string {
@@ -417,7 +450,7 @@ async function backupProtocolOperation(
     readonly destination: string;
   },
 ): Promise<ProtocolBackup> {
-  const expected = resolveProtocolLayout(layout);
+  const expected = migrationPointer(layout);
   return withProtocolLayout(
     layout,
     expected,
@@ -450,7 +483,7 @@ async function backupProtocolOperation(
       );
       return result;
     },
-    { exclusive: true },
+    { allowPending: true, exclusive: true, expectedManagement: resolveProtocolManagement(layout) },
   );
 }
 function verifiedBackup(layout: Layout, value: ProtocolBackup): void {
@@ -481,7 +514,7 @@ async function restoreProtocolOperation(
 ): Promise<ProtocolRestoreProof> {
   return withProtocolLayout(
     layout,
-    resolveProtocolLayout(layout),
+    migrationPointer(layout),
     async () => {
       verifiedBackup(layout, input.backup);
       const restoreRoot = independent(layout, input.backup.stateRoot, input.destination);
@@ -511,7 +544,7 @@ async function restoreProtocolOperation(
         schema: 1,
       };
     },
-    { exclusive: true },
+    { allowPending: true, exclusive: true, expectedManagement: resolveProtocolManagement(layout) },
   );
 }
 function legacyOriginals(plan: ProtocolMigrationPlan) {
@@ -579,7 +612,6 @@ async function importProtocolOriginalsOperation(
         // Each publication consumes its exact role revision before the next publication.
         // eslint-disable-next-line no-await-in-loop
         const artifact = await store.putArtifact(record.raw);
-
         published.push(
           // eslint-disable-next-line no-await-in-loop
           await messages.publish(item.writer, {
@@ -592,7 +624,7 @@ async function importProtocolOriginalsOperation(
       }
       return { pending: missingOriginals(plan, store), published };
     },
-    { exclusive: true },
+    { allowPending: true, exclusive: true, expectedManagement: resolveProtocolManagement(layout) },
   );
 }
 function missingOriginals(
@@ -660,6 +692,68 @@ function participants(layout: Layout, input: ProtocolActivation): void {
     }
   }
   for (const [id, operation] of Object.entries(registry.operations)) {
+    if (input.plan.required !== undefined) {
+      const reference = operation.lastAdoption?.evidenceRef;
+      demand(
+        typeof reference === "string" && /^protocol-artifact:[a-f0-9]{64}$/u.test(reference),
+        "migration-participants-incomplete",
+      );
+      const protocol = new ProtocolStore({ directory: input.plan.stateRoot });
+      let audit: {
+        context?: import("./enrollment.ts").EnrollmentContext;
+        resident?: ResidentAdoptionEvidence;
+        evidence?: import("./types.ts").ArtifactRef;
+        operation?: string;
+      };
+      try {
+        audit = JSON.parse(
+          Buffer.from(protocol.readArtifact(reference.slice("protocol-artifact:".length))).toString(
+            "utf8",
+          ),
+        ) as typeof audit;
+      } catch {
+        throw new MigrationError("migration-participants-incomplete");
+      }
+      demand(
+        audit.operation === id && audit.evidence && audit.resident,
+        "migration-participants-incomplete",
+      );
+      demand(
+        audit.context &&
+          audit.context.role === protocolRole(operation.busOwner) &&
+          protocol.history(audit.context.role).some(
+            (event) =>
+              event.type === "transaction" &&
+              event.transaction.id === audit.context!.id &&
+              event.transaction.mutations.some(
+                (mutation) =>
+                  mutation.collection === "intake" &&
+                  mutation.id === `observer-adoption:${hash(audit.context!.id)}` &&
+                  typeof mutation.value === "object" &&
+                  mutation.value !== null &&
+                  !Array.isArray(mutation.value) &&
+                  "audit" in mutation.value &&
+                  isDeepStrictEqual(mutation.value.audit, {
+                    hash: reference.slice("protocol-artifact:".length),
+                    size: protocol.readArtifact(reference.slice("protocol-artifact:".length))
+                      .length,
+                  }),
+              ),
+          ),
+        "migration-participants-incomplete",
+      );
+      const resident = residentEvidence(protocol, audit.evidence);
+      demand(
+        isDeepStrictEqual(resident, audit.resident) &&
+          resident.operation === id &&
+          resident.ownerRole === operation.busOwner &&
+          resident.binding.harness === resolveHarness(registry, operation.busOwner) &&
+          resident.binding.nativeId === resolveConversation(registry, operation.busOwner) &&
+          resident.version === operation.lastAdoption!.version &&
+          resident.cliSha256 === operation.lastAdoption!.cliSha256,
+        "migration-participants-incomplete",
+      );
+    }
     const item = input.participants.find(
       (value) => value.kind === "observer" && value.id === id && value.role === operation.busOwner,
     );
@@ -692,6 +786,7 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
     validatePlan(layout, input.plan);
     demand(input.expectedGeneration === 0, "migration-generation-conflict");
     const config: ProtocolConfiguration = {
+      ...(input.plan.required === undefined ? {} : { required: input.plan.required }),
       generation: 1,
       schema: 1,
       stateRoot: input.plan.stateRoot,
@@ -704,7 +799,16 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
     );
     const fence = metadata(paths.fence);
     demand(
-      fence === undefined || isDeepStrictEqual(fence, config),
+      fence === undefined ||
+        isDeepStrictEqual(fence, config) ||
+        (input.plan.required !== undefined &&
+          isDeepStrictEqual(fence, {
+            generation: 1,
+            kind: "required-pending",
+            required: input.plan.required,
+            schema: 1,
+            workspaceId: input.plan.workspaceId,
+          })),
       "migration-generation-conflict",
     );
     verifiedBackup(layout, input.backup);
@@ -728,6 +832,23 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
       "migration-backup-required",
     );
     participants(layout, input);
+    if (input.plan.required !== undefined) {
+      const checked = enrollmentStatus(layout, new ProtocolStore({ directory: config.stateRoot }), {
+        generation: 1,
+        phase: "prepared",
+        stateRoot: config.stateRoot,
+        workspaceId: config.workspaceId,
+      });
+      demand(
+        checked.report.allRepresented &&
+          input.enrollment?.registryRevision === checked.scope.registryRevision &&
+          isDeepStrictEqual(
+            input.enrollment.participants,
+            checked.report.participants.map(({ revision, role }) => ({ revision, role })),
+          ),
+        "migration-enrollment-required",
+      );
+    }
     const pending = missingOriginals(
       input.plan,
       new ProtocolStore({ directory: config.stateRoot }),
@@ -751,7 +872,6 @@ async function activateProtocolOperation(layout: Layout, input: ProtocolActivati
     lease.release();
   }
 }
-
 function migrationFailure(error: unknown): never {
   if (
     error instanceof MigrationError ||
@@ -762,7 +882,6 @@ function migrationFailure(error: unknown): never {
   }
   throw new MigrationError("migration-unavailable");
 }
-
 export function inventoryProtocol(
   ...args: Parameters<typeof inventoryProtocolOperation>
 ): ReturnType<typeof inventoryProtocolOperation> {
@@ -772,7 +891,6 @@ export function inventoryProtocol(
     return migrationFailure(error);
   }
 }
-
 export function planProtocolMigration(
   ...args: Parameters<typeof planProtocolMigrationOperation>
 ): ReturnType<typeof planProtocolMigrationOperation> {
@@ -782,7 +900,6 @@ export function planProtocolMigration(
     return migrationFailure(error);
   }
 }
-
 export async function importProtocolMigration(
   ...args: Parameters<typeof importProtocolMigrationOperation>
 ): ReturnType<typeof importProtocolMigrationOperation> {
@@ -792,7 +909,6 @@ export async function importProtocolMigration(
     return migrationFailure(error);
   }
 }
-
 export async function backupProtocol(
   ...args: Parameters<typeof backupProtocolOperation>
 ): ReturnType<typeof backupProtocolOperation> {
@@ -802,7 +918,6 @@ export async function backupProtocol(
     return migrationFailure(error);
   }
 }
-
 export async function restoreProtocol(
   ...args: Parameters<typeof restoreProtocolOperation>
 ): ReturnType<typeof restoreProtocolOperation> {
@@ -812,7 +927,6 @@ export async function restoreProtocol(
     return migrationFailure(error);
   }
 }
-
 export async function importProtocolOriginals(
   ...args: Parameters<typeof importProtocolOriginalsOperation>
 ): ReturnType<typeof importProtocolOriginalsOperation> {
@@ -822,7 +936,6 @@ export async function importProtocolOriginals(
     return migrationFailure(error);
   }
 }
-
 export async function activateProtocol(
   ...args: Parameters<typeof activateProtocolOperation>
 ): ReturnType<typeof activateProtocolOperation> {
@@ -832,7 +945,6 @@ export async function activateProtocol(
     return migrationFailure(error);
   }
 }
-
 /** Verify a staged migration without claiming that its legacy source is still current. */
 export function inspectProtocolMigration(layout: Layout, root: string): ProtocolMigrationPlan {
   try {
@@ -840,4 +952,215 @@ export function inspectProtocolMigration(layout: Layout, root: string): Protocol
   } catch (error) {
     return migrationFailure(error);
   }
+}
+export interface ResidentAdoptionEvidence {
+  readonly schema: 1;
+  readonly kind: "resident-adoption";
+  readonly origin: "owner-attested";
+  readonly operation: string;
+  readonly ownerRole: string;
+  readonly binding: import("./types.ts").Binding;
+  readonly observedAt: string;
+  readonly version: string;
+  readonly cliSha256: string;
+  readonly residentId: string;
+  readonly inspectionRef: string;
+  readonly readerProtocolSchema: 1;
+}
+export interface ObserverAdoptionInput {
+  readonly context: import("./enrollment.ts").EnrollmentContext;
+  readonly expectedRegistryRevision: number;
+  readonly reconcileRegistryRevision?: number;
+  readonly operation: string;
+  readonly evidence: import("./types.ts").ArtifactRef;
+}
+export class ObserverAdoptionError extends MigrationError {
+  readonly actionMayHaveCommitted = true;
+  readonly reconcileKey: string;
+  constructor(key: string) {
+    super("observer-adoption-conflict");
+    this.reconcileKey = key;
+  }
+}
+function residentEvidence(
+  protocol: ProtocolStore,
+  reference: import("./types.ts").ArtifactRef,
+): ResidentAdoptionEvidence {
+  const raw = protocol.readArtifact(reference.hash);
+  demand(raw.length === reference.size, "observer-adoption-invalid");
+  let value: ResidentAdoptionEvidence;
+  try {
+    value = JSON.parse(Buffer.from(raw).toString("utf8")) as ResidentAdoptionEvidence;
+  } catch {
+    throw new MigrationError("observer-adoption-invalid");
+  }
+  demand(
+    value &&
+      isDeepStrictEqual(Object.keys(value).sort(), [
+        "binding",
+        "cliSha256",
+        "inspectionRef",
+        "kind",
+        "observedAt",
+        "operation",
+        "origin",
+        "ownerRole",
+        "readerProtocolSchema",
+        "residentId",
+        "schema",
+        "version",
+      ]),
+    "observer-adoption-invalid",
+  );
+  demand(
+    value.schema === 1 &&
+      value.kind === "resident-adoption" &&
+      value.origin === "owner-attested" &&
+      value.readerProtocolSchema === 1 &&
+      [
+        value.operation,
+        value.ownerRole,
+        value.residentId,
+        value.inspectionRef,
+        value.version,
+      ].every(token) &&
+      /^[a-f0-9]{64}$/u.test(value.cliSha256) &&
+      value.observedAt.endsWith("Z") &&
+      Number.isFinite(Date.parse(value.observedAt)),
+    "observer-adoption-invalid",
+  );
+  return value;
+}
+/** Record an explicit resident inspection; a package pin alone is never resident adoption. */
+export async function recordObserverAdoption(
+  layout: Layout,
+  protocol: ProtocolStore,
+  input: ObserverAdoptionInput,
+) {
+  const management = resolveProtocolManagement(layout);
+  const expected = migrationPointer(layout);
+  return withProtocolLayout(
+    layout,
+    expected,
+    async () => {
+      const resident = residentEvidence(protocol, input.evidence);
+      const { context } = input;
+      demand(
+        Number.isSafeInteger(input.expectedRegistryRevision) &&
+          input.expectedRegistryRevision >= 1 &&
+          resident.operation === input.operation &&
+          protocolRole(resident.ownerRole) === context.role &&
+          isDeepStrictEqual(resident.binding, context.binding) &&
+          Date.parse(resident.observedAt) <= Date.parse(context.at),
+        "observer-adoption-invalid",
+      );
+      const audit = {
+        context,
+        evidence: input.evidence,
+        expectedRegistryRevision: input.expectedRegistryRevision,
+        kind: "observer-adoption",
+        operation: input.operation,
+        resident,
+        schema: 1,
+      };
+      const auditBytes = Buffer.from(canonical(audit));
+      const key = hash(auditBytes);
+      const initial = readRegistry(layout);
+      const registered = initial.operations[input.operation];
+      demand(
+        registered &&
+          registered.busOwner === resident.ownerRole &&
+          resolveHarness(initial, resident.ownerRole) === resident.binding.harness &&
+          resolveConversation(initial, resident.ownerRole) === resident.binding.nativeId,
+        "observer-adoption-invalid",
+      );
+      const artifact = await protocol.putArtifact(auditBytes);
+      const objectId = `observer-adoption:${hash(context.id)}`;
+      let committed: import("./types.ts").ProtocolEvent;
+      try {
+        committed = await protocol.transact({
+          ...context,
+          mutations: [
+            {
+              collection: "intake",
+              expectedRevision: 0,
+              id: objectId,
+              value: {
+                audit: { hash: artifact.hash, size: artifact.size },
+                kind: "observer-adoption",
+                operation: input.operation,
+                schema: 1,
+              },
+            },
+          ],
+        });
+      } catch (error) {
+        if (error instanceof ProtocolError && !error.actionMayHaveCommitted) {
+          throw error;
+        }
+        throw new ObserverAdoptionError(key);
+      }
+      try {
+        return await protocol.withWriter(
+          { binding: context.binding, epoch: context.epoch, role: context.role },
+          async () => {
+            demand(
+              protocol.history(context.role).some((event) => event.hash === committed.hash),
+              "observer-adoption-conflict",
+            );
+            const registry = readRegistry(layout);
+            const operation = registry.operations[input.operation];
+            demand(
+              operation &&
+                operation.busOwner === resident.ownerRole &&
+                resolveHarness(registry, resident.ownerRole) === resident.binding.harness &&
+                resolveConversation(registry, resident.ownerRole) === resident.binding.nativeId,
+              "observer-adoption-invalid",
+            );
+            const adoption = {
+              at: resident.observedAt,
+              cliSha256: resident.cliSha256,
+              evidenceRef: `protocol-artifact:${key}`,
+              version: resident.version,
+            };
+            if (isDeepStrictEqual(operation.lastAdoption, adoption)) {
+              return {
+                adoption,
+                reconcileKey: key,
+                registryRevision: registry.revision,
+                status: "already-recorded" as const,
+              };
+            }
+            const expectedRevision =
+              input.reconcileRegistryRevision ?? input.expectedRegistryRevision;
+            demand(
+              Number.isSafeInteger(expectedRevision) &&
+                expectedRevision >= input.expectedRegistryRevision,
+              "observer-adoption-invalid",
+            );
+            const next = updateRegistry(layout, expectedRevision, (draft) => {
+              const current = draft.operations[input.operation];
+              demand(
+                current &&
+                  current.busOwner === resident.ownerRole &&
+                  resolveHarness(draft, resident.ownerRole) === resident.binding.harness &&
+                  resolveConversation(draft, resident.ownerRole) === resident.binding.nativeId,
+                "observer-adoption-invalid",
+              );
+              current.lastAdoption = adoption;
+            });
+            return {
+              adoption,
+              reconcileKey: key,
+              registryRevision: next.revision,
+              status: "recorded" as const,
+            };
+          },
+        );
+      } catch {
+        throw new ObserverAdoptionError(key);
+      }
+    },
+    { allowPending: true, expectedManagement: management },
+  );
 }

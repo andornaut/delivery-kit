@@ -7,10 +7,12 @@ import { describe, expect, it, vi } from "vitest";
 import * as durable from "../durable.ts";
 import { loadLayout } from "../layout.ts";
 import { messageEnvelope } from "../messages/envelope.ts";
-import { createRegistry, type Registry } from "../registry/index.ts";
+import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
 import { ProtocolStore } from "./core.ts";
-import { resolveProtocolLayout } from "./layout.ts";
+import { EnrollmentStore } from "./enrollment.ts";
+import { enrollmentStatus, evaluateEnrollmentBoundary } from "./enrollment-runtime.ts";
+import { declareProtocolWorkspace, resolveProtocolLayout } from "./layout.ts";
 import { ProtocolMessages } from "./messages.ts";
 import {
   activateProtocol,
@@ -20,9 +22,10 @@ import {
   inventoryProtocol,
   planProtocolMigration,
   type ProtocolParticipant,
+  recordObserverAdoption,
   restoreProtocol,
 } from "./migration.ts";
-
+import { WorkStore } from "./work.ts";
 const AT = "2026-11-16T04:00:00.000Z";
 const BINDING = { harness: "claude" as const, nativeId: CLAUDE_COORDINATOR };
 function fixture() {
@@ -79,8 +82,344 @@ function fixture() {
   );
   return { ...test, bytes, envelope, layout, participants, plan, registry, stateRoot };
 }
-
 describe("explicit initial protocol migration", () => {
+  it("requires prepared representation and revalidation after managed cutover", async () => {
+    const t = makeFixture();
+    const layout = loadLayout(t.root);
+    const raw = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
+    const registry = createRegistry(layout, { ...raw, operations: {} });
+    await declareProtocolWorkspace(layout, {
+      authorityRef: "fixture:approval",
+      expectedGeneration: 0,
+      workspaceId: "fixture",
+    });
+    const stateRoot = join(t.base, "state");
+    const plan = planProtocolMigration(layout, {
+      expectedGeneration: 0,
+      stateRoot,
+      workspaceId: "fixture",
+    });
+    expect(plan.required).toEqual({ authorityRef: "fixture:approval" });
+    await importProtocolMigration(layout, plan);
+    const protocol = new ProtocolStore({ directory: stateRoot, resolveBinding: () => true });
+    await protocol.claim({
+      at: AT,
+      binding: BINDING,
+      evidence: "fixture:owner",
+      expectedEpoch: 0,
+      role: "coordinator",
+    });
+    const participants: ProtocolParticipant[] = Object.entries(registry.roles).flatMap(
+      ([role, value]) =>
+        (["reader", "writer"] as const).map((kind) => ({
+          artifactHash: "a".repeat(64),
+          compatibilityRef: "fixture:reader-qualified",
+          harness: "claude",
+          id: role + kind,
+          kind,
+          nativeId: value.conversations.claude!,
+          protocolSchema: 1,
+          quiescenceRef: "fixture:quiesced",
+          role,
+          version: "4.6.0",
+        })),
+    );
+    const backup = await backupProtocol(layout, {
+      destination: join(t.base, "backup-before"),
+      stateRoot,
+    });
+    const restore = await restoreProtocol(layout, {
+      backup,
+      destination: join(t.base, "restore-before"),
+    });
+    const activation = {
+      backup,
+      expectedGeneration: 0 as const,
+      participants,
+      plan,
+      registryRevision: registry.revision,
+      restore,
+    };
+    await expect(activateProtocol(layout, activation)).rejects.toMatchObject({
+      code: "migration-enrollment-required",
+    });
+    const base = { generation: 1, phase: "prepared" as const, stateRoot, workspaceId: "fixture" };
+    const { scope } = enrollmentStatus(layout, protocol, base);
+    const own = scope.participants.find((p) => p.role === "coordinator")!;
+    const evidence = await protocol.putArtifact(
+      Buffer.from("fixture parent retains unavailable scopes"),
+    );
+    const receipt = {
+      evidence: [evidence],
+      generation: 1,
+      inspectedAt: AT,
+      ledger: { hash: null, revision: 0 },
+      phase: "prepared" as const,
+      references: [],
+      registryRevision: registry.revision,
+      unknowns: [
+        ...own.requiredUnknownScopes.map((source, index) => ({
+          evidence: [evidence],
+          id: `unknown-${index}`,
+          nextBoundary: "next owner audit",
+          parentRole: "coordinator",
+          participantRole: "coordinator",
+          reason: "unavailable",
+          scope: source,
+        })),
+        {
+          evidence: [evidence],
+          id: "retained-owner",
+          nextBoundary: "next parent audit",
+          parentRole: "coordinator",
+          participantRole: "games/archies-dog-walks/tech",
+          reason: "unavailable",
+          scope: "participant",
+        },
+      ],
+      workspaceId: "fixture",
+    };
+    await new EnrollmentStore({ protocol }).publish(
+      {
+        at: AT,
+        binding: BINDING,
+        epoch: 1,
+        expectedRevision: 1,
+        id: "prepared-enrollment",
+        role: "coordinator",
+      },
+      receipt,
+      scope,
+    );
+    const checked = enrollmentStatus(layout, protocol, base);
+    expect(checked.report).toMatchObject({
+      allAdopted: false,
+      allRepresented: true,
+      coverageComplete: false,
+    });
+    const finalBackup = await backupProtocol(layout, {
+      destination: join(t.base, "backup-final"),
+      stateRoot,
+    });
+    const finalRestore = await restoreProtocol(layout, {
+      backup: finalBackup,
+      destination: join(t.base, "restore-final"),
+    });
+    await activateProtocol(layout, {
+      ...activation,
+      backup: finalBackup,
+      enrollment: {
+        participants: checked.report.participants.map(({ revision, role }) => ({ revision, role })),
+        registryRevision: registry.revision,
+      },
+      restore: finalRestore,
+    });
+    expect(resolveProtocolLayout(layout)?.required).toEqual(plan.required);
+    const active = { ...base, phase: "active" as const };
+    expect(enrollmentStatus(layout, protocol, active).report.allAdopted).toBe(false);
+    const activeScope = enrollmentStatus(layout, protocol, active).scope;
+    await new EnrollmentStore({ protocol }).publish(
+      {
+        at: AT,
+        binding: BINDING,
+        epoch: 1,
+        expectedRevision: 2,
+        id: "active-enrollment",
+        role: "coordinator",
+      },
+      { ...receipt, phase: "active" },
+      activeScope,
+    );
+    expect(
+      evaluateEnrollmentBoundary(layout, protocol, {
+        ...active,
+        boundary: "startup",
+        role: "coordinator",
+      }).admission.allowed,
+    ).toBe(true);
+    expect(
+      evaluateEnrollmentBoundary(layout, protocol, {
+        ...active,
+        boundary: "before-work",
+        role: "coordinator",
+      }).admission.reason,
+    ).toBe("approved-work-required");
+    expect(
+      evaluateEnrollmentBoundary(layout, protocol, {
+        ...active,
+        boundary: "cleanup",
+        role: "coordinator",
+      }).admission.reason,
+    ).toBe("essential-evidence-required");
+    expect(
+      evaluateEnrollmentBoundary(layout, protocol, {
+        ...active,
+        boundary: "worker-start",
+        role: "coordinator",
+      }).admission.reason,
+    ).toBe("approved-work-required");
+    const planArtifact = await protocol.putArtifact(Buffer.from("fixture retained work plan"));
+    const essential = await protocol.putArtifact(
+      Buffer.from("fixture essential source and handoff package"),
+    );
+    const work = new WorkStore({ protocol });
+    for (const [index, artifacts] of [[], [essential]].entries()) {
+      const id = `retained-${index}`;
+      // The next enrollment inspects the publication committed by this iteration.
+      // eslint-disable-next-line no-await-in-loop
+      await work.publish(
+        {
+          at: AT,
+          binding: BINDING,
+          epoch: 1,
+          expectedRevision: protocol.read("coordinator").revision,
+          id: `publish-${id}`,
+          role: "coordinator",
+        },
+        {
+          definition: {
+            artifacts,
+            clauseIds: [],
+            criteria: [{ consumers: [], id: "check", phases: ["check"], targetId: "target" }],
+            id,
+            messageIds: [],
+            plan: planArtifact,
+            requestIds: ["retained-request"],
+            retention: {
+              nextBoundary: "next parent review",
+              owner: "game-coordinator",
+              reason: "retained essential package",
+            },
+            source: null,
+          },
+          expectedWorkRevision: 0,
+          ready: false,
+          replaces: null,
+        },
+      );
+      const current = enrollmentStatus(layout, protocol, active).scope;
+      // eslint-disable-next-line no-await-in-loop
+      await new EnrollmentStore({ protocol }).publish(
+        {
+          at: AT,
+          binding: BINDING,
+          epoch: 1,
+          expectedRevision: protocol.read("coordinator").revision,
+          id: `enroll-${id}`,
+          role: "coordinator",
+        },
+        {
+          ...receipt,
+          phase: "active",
+          references: current.participants.find((p) => p.role === "coordinator")!.knownReferences,
+        },
+        current,
+      );
+      expect(
+        evaluateEnrollmentBoundary(layout, protocol, {
+          ...active,
+          boundary: "cleanup",
+          role: "coordinator",
+          workId: id,
+        }).admission.allowed,
+      ).toBe(index === 1);
+    }
+  });
+  it("records truthful resident evidence with CAS repair and a discoverable canonical audit", async () => {
+    const t = makeFixture();
+    const layout = loadLayout(t.root);
+    const registry = createRegistry(
+      layout,
+      registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
+    );
+    const protocol = new ProtocolStore({
+      directory: join(t.base, "state"),
+      resolveBinding: () => true,
+    });
+    await protocol.claim({
+      at: AT,
+      binding: BINDING,
+      evidence: "fixture:owner",
+      expectedEpoch: 0,
+      role: "coordinator",
+    });
+    const resident = {
+      binding: BINDING,
+      cliSha256: "a".repeat(64),
+      inspectionRef: "fixture:actual-resident-inspection",
+      kind: "resident-adoption",
+      observedAt: AT,
+      operation: "archies-dog-walks",
+      origin: "owner-attested",
+      ownerRole: "game-coordinator",
+      readerProtocolSchema: 1,
+      residentId: "fixture-resident",
+      schema: 1,
+      version: "4.6.0",
+    };
+    const evidence = await protocol.putArtifact(Buffer.from(JSON.stringify(resident)));
+    const input = {
+      context: {
+        at: AT,
+        binding: BINDING,
+        epoch: 1,
+        expectedRevision: 1,
+        id: "resident-adoption",
+        role: "coordinator",
+      },
+      evidence,
+      expectedRegistryRevision: registry.revision,
+      operation: "archies-dog-walks",
+    };
+    const wrong = await protocol.putArtifact(
+      Buffer.from(JSON.stringify({ ...resident, ownerRole: "archies-dog-walks/tech" })),
+    );
+    await expect(
+      recordObserverAdoption(layout, protocol, { ...input, evidence: wrong }),
+    ).rejects.toMatchObject({ code: "observer-adoption-invalid" });
+    updateRegistry(layout, 1, (draft) => {
+      draft.roles["archies-dog-walks/tech"]!.branch = "retained-branch";
+    });
+    const before = readRegistry(layout);
+    await expect(recordObserverAdoption(layout, protocol, input)).rejects.toMatchObject({
+      actionMayHaveCommitted: true,
+      code: "observer-adoption-conflict",
+      reconcileKey: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(readRegistry(layout)).toEqual(before);
+    const result = await recordObserverAdoption(layout, protocol, {
+      ...input,
+      reconcileRegistryRevision: 2,
+    });
+    const next = readRegistry(layout);
+    expect(next.roles).toEqual(before.roles);
+    expect(next.transfers).toEqual(before.transfers);
+    expect(next.operations["archies-dog-walks"]!.activation).toEqual(
+      before.operations["archies-dog-walks"]!.activation,
+    );
+    expect(next.operations["archies-dog-walks"]!.lastAdoption?.evidenceRef).toBe(
+      `protocol-artifact:${result.reconcileKey}`,
+    );
+    expect(
+      JSON.parse(Buffer.from(protocol.readArtifact(result.reconcileKey)).toString("utf8")).evidence,
+    ).toEqual(evidence);
+    expect((await recordObserverAdoption(layout, protocol, input)).status).toBe("already-recorded");
+    expect(readRegistry(layout)).toEqual(next);
+    const changed = await protocol.putArtifact(
+      Buffer.from(JSON.stringify({ ...resident, version: "4.6.1" })),
+    );
+    await expect(
+      recordObserverAdoption(layout, protocol, {
+        ...input,
+        evidence: changed,
+        reconcileRegistryRevision: next.revision,
+      }),
+    ).rejects.toMatchObject({ code: "transaction-conflict" });
+    expect(readRegistry(layout)).toEqual(next);
+    expect(
+      protocol.history("coordinator").filter((event) => event.type === "transaction"),
+    ).toHaveLength(1);
+  });
   it("requires original imports and audited participants before verified cutover", async () => {
     const t = fixture();
     await importProtocolMigration(t.layout, t.plan);
@@ -188,7 +527,6 @@ describe("explicit initial protocol migration", () => {
       }),
     ).toThrow("migration-already-active");
   });
-
   it("refuses changed source bytes, source aliases, overlapping backups, and corrupt restoration", async () => {
     const t = fixture();
     const ledger = join(t.layout.varDir, "accounting");

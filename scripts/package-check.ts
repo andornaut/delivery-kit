@@ -163,13 +163,13 @@ import {
   LedgerStore, LedgerError, snapshotIntake, accountingStatus,
   type LedgerTransaction, type LedgerState, type IntakeContext,
 } from "@andornaut/delivery-kit/build/accounting";
-import { ProtocolStore, WorkStore, ProtocolMessages, resolveProtocolLayout,
+import { ProtocolStore, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope,
  type ProtocolWriter, type WorkEvaluation, type ProtocolLayout } from "@andornaut/delivery-kit/build/protocol";
 const protocolClaim = (store: ProtocolStore, writer: ProtocolWriter) => store.withWriter(writer, () => 1);
 const protocolLayout: ProtocolLayout | null = null;
 // @ts-expect-error Writer epochs remain numeric.
 const invalidEpoch: ProtocolWriter["epoch"] = "1";
-export { protocolClaim, protocolLayout, invalidEpoch, WorkStore, ProtocolMessages, resolveProtocolLayout };
+export { protocolClaim, protocolLayout, invalidEpoch, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope };
 export type { WorkEvaluation };
 const ledgerState: LedgerState = "checked";
 const ledgerCommit = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);

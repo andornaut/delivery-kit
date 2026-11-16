@@ -3,12 +3,14 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { main } from "../cli.ts";
 import { loadLayout } from "../layout.ts";
+import { ProtocolStore, protocolWorkerRole } from "../protocol/core.ts";
+import type { EnrollmentInput } from "../protocol/enrollment.ts";
 import { importProtocolMigration, planProtocolMigration } from "../protocol/migration.ts";
-import { createRegistry, type Registry } from "../registry/index.ts";
-import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
-
+import { createRegistry, type Registry, updateRegistry } from "../registry/index.ts";
+import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 const AT = "2026-11-16T04:00:00.000Z";
 async function fixture() {
   const t = makeFixture();
@@ -20,6 +22,7 @@ async function fixture() {
     planProtocolMigration(layout, { expectedGeneration: 0, stateRoot, workspaceId: "fixture" }),
   );
   let sequence = 0;
+  const env = { CODEX_CONTROL_SOCKET: "/never/connect" };
   const file = (value: unknown) => {
     const path = join(t.base, `input-${sequence++}.json`);
     writeFileSync(path, JSON.stringify(value));
@@ -31,7 +34,7 @@ async function fixture() {
     const code = await main(
       {
         cwd: t.base,
-        env: { CODEX_CONTROL_SOCKET: "/never/connect" },
+        env,
         err: (value) => {
           err += value;
         },
@@ -43,10 +46,161 @@ async function fixture() {
     );
     return { code, err, out };
   }
-  return { ...t, file, run, stateRoot };
+  return { ...t, env, file, layout, run, stateRoot };
 }
-
 describe("supported protocol CLI", () => {
+  it("enrolls only its verified worker through exact parent reads, retaining partial census", async () => {
+    const t = await fixture();
+    const parentRole = "games/archies-dog-walks/tech";
+    updateRegistry(t.layout, 1, (draft) => {
+      draft.roles["archies-dog-walks/tech"]!.harness = "codex";
+    });
+    const protocol = new ProtocolStore({ directory: t.stateRoot, resolveBinding: () => true });
+    await protocol.claim({
+      at: AT,
+      binding: { harness: "codex", nativeId: CODEX_TECH },
+      evidence: "fixture:parent",
+      expectedEpoch: 0,
+      role: parentRole,
+    });
+    const id = "00000000-0000-4000-8000-000000000099";
+    const role = protocolWorkerRole(parentRole, id, 1);
+    const binding = { harness: "codex" as const, nativeId: id };
+    await protocol.claim({
+      at: AT,
+      binding,
+      evidence: "fixture:worker",
+      expectedEpoch: 0,
+      parent: { epoch: 1, role: parentRole, workerId: id },
+      role,
+    });
+    // Active pointer setup is synthetic; migration prerequisites have their own end-to-end fixture.
+    const config = {
+      generation: 1,
+      required: { authorityRef: "fixture:mandatory" },
+      schema: 1,
+      stateRoot: t.stateRoot,
+      workspaceId: "fixture",
+    };
+    writeFileSync(
+      join(t.stateRoot, "workspace.json"),
+      JSON.stringify({
+        generation: 1,
+        required: config.required,
+        schema: 1,
+        workspaceId: "fixture",
+      }),
+    );
+    for (const name of ["work-protocol-fence.json", "work-protocol.json"]) {
+      writeFileSync(join(t.layout.varDir, name), JSON.stringify(config));
+    }
+    const evidence = await protocol.putArtifact(
+      Buffer.from("fixture worker retains unknown source"),
+    );
+    const input: EnrollmentInput = {
+      evidence: [evidence],
+      generation: 1,
+      inspectedAt: AT,
+      ledger: { hash: null, revision: 0 },
+      phase: "active",
+      references: [],
+      registryRevision: 2,
+      unknowns: ["external-wip", "native-history"].map((scope, index) => ({
+        evidence: [evidence],
+        id: `worker-unknown-${index}`,
+        nextBoundary: "next parent review",
+        parentRole,
+        participantRole: role,
+        reason: "unavailable",
+        scope,
+      })),
+      workspaceId: "fixture",
+    };
+    let correct = false;
+    const server = await startFakeControl(t.base, (method, params) => {
+      expect(method).toBe("thread/read");
+      expect(params).toEqual({ includeTurns: false, threadId: id });
+      const parent = correct ? CODEX_TECH : "00000000-0000-4000-8000-000000000098";
+      return {
+        result: {
+          thread: {
+            id,
+            parentThreadId: parent,
+            source: { subAgent: { thread_spawn: { parent_thread_id: parent } } },
+          },
+        },
+      };
+    });
+    t.env.CODEX_CONTROL_SOCKET = server.path;
+    const file = t.file({
+      context: { at: AT, binding, epoch: 1, expectedRevision: 1, id: "worker-enrollment", role },
+      input,
+    });
+    try {
+      const rejected = await t.run(
+        "protocol",
+        "enroll",
+        "--state-root",
+        t.stateRoot,
+        "--input-file",
+        file,
+      );
+      expect(rejected.code).toBe(1);
+      expect(protocol.history(role)).toHaveLength(1);
+      correct = true;
+      const accepted = await t.run(
+        "protocol",
+        "enroll",
+        "--state-root",
+        t.stateRoot,
+        "--input-file",
+        file,
+      );
+      expect(accepted, accepted.err).toMatchObject({ code: 0 });
+      const value = JSON.parse(accepted.out);
+      expect(
+        value.report.participants.find((p: { role: string }) => p.role === role),
+      ).toMatchObject({ adopted: true, represented: true });
+      expect(
+        value.scope.participants.find((p: { role: string }) => p.role === parentRole)
+          .requiredUnknownScopes,
+      ).toContain("worker-census");
+      const boundary = await t.run(
+        "protocol",
+        "boundary",
+        "--role",
+        "archies-dog-walks/tech",
+        "--worker",
+        id,
+        "--phase",
+        "startup",
+        "--at",
+        AT,
+      );
+      expect(boundary, boundary.err).toMatchObject({ code: 0 });
+      const rows = JSON.parse(boundary.out).enrollment.report.participants;
+      expect(rows.find((p: { role: string }) => p.role === role).adopted).toBe(true);
+      expect(rows.find((p: { role: string }) => p.role === parentRole).adopted).toBe(false);
+      correct = false;
+      const staleBoundary = await t.run(
+        "protocol",
+        "boundary",
+        "--role",
+        "archies-dog-walks/tech",
+        "--worker",
+        id,
+        "--phase",
+        "startup",
+        "--at",
+        AT,
+      );
+      expect(staleBoundary.code).toBe(1);
+      expect(server.methods().length).toBeGreaterThan(1);
+      expect(server.methods().every((method) => method === "thread/read")).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
   it("publishes and reads an exact original with scoped unknown coverage", async () => {
     const t = await fixture();
     const binding = { harness: "claude", nativeId: CLAUDE_COORDINATOR };
@@ -93,7 +247,13 @@ describe("supported protocol CLI", () => {
     expect(published, published.err).toMatchObject({ code: 0 });
     const result = JSON.parse(published.out) as {
       result: unknown;
-      boundary: { after: { scope: { nativeHistory: string } } };
+      boundary: {
+        after: {
+          scope: {
+            nativeHistory: string;
+          };
+        };
+      };
     };
     expect(result.boundary.after.scope.nativeHistory).toBe("not-collected");
     const reference = t.file(result.result);
@@ -155,6 +315,26 @@ describe("supported protocol CLI", () => {
       artifactFile,
     );
     expect(stored.code).toBe(0);
+    const refused = await t.run(
+      "protocol",
+      "artifact-put",
+      "--state-root",
+      t.stateRoot,
+      "--file",
+      join(t.base, ".vitest-secret-token"),
+    );
+    expect(JSON.parse(refused.err).error.code).toBe("unsafe-artifact-path");
+    const refusedOutput = await t.run(
+      "protocol",
+      "artifact-read",
+      "--state-root",
+      t.stateRoot,
+      "--hash",
+      JSON.parse(stored.out).hash,
+      "--output-file",
+      join(t.base, ".credentials", "out"),
+    );
+    expect(JSON.parse(refusedOutput.err).error.code).toBe("unsafe-artifact-path");
     const target = join(t.base, "export.txt");
     const restored = await t.run(
       "protocol",
@@ -169,7 +349,6 @@ describe("supported protocol CLI", () => {
     expect(restored, restored.err).toMatchObject({ code: 0 });
     expect(readFileSync(target, "utf8")).toBe("fixture evidence\n");
   });
-
   it("keeps configuration absence distinct and sanitizes invalid source errors without raw file content", async () => {
     const t = await fixture();
     expect(JSON.parse((await t.run("protocol", "status")).out)).toMatchObject({

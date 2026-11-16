@@ -9,11 +9,70 @@ import { makeFixture } from "../testFixtures.ts";
 import {
   acquireProtocolLayout,
   checkProtocolLayout,
+  declareProtocolWorkspace,
   resolveProtocolLayout,
+  resolveProtocolManagement,
   validateProtocolRoot,
 } from "./layout.ts";
-
 describe("protocol layout selection", () => {
+  it("retains mandatory pending declaration and fences cached selections through cutover", async () => {
+    const t = makeFixture();
+    const layout = loadLayout(t.root);
+    const unmanaged = resolveProtocolManagement(layout);
+    const input = {
+      authorityRef: "fixture:approved-workspace",
+      expectedGeneration: 0 as const,
+      workspaceId: "fixture",
+    };
+    const pending = await declareProtocolWorkspace(layout, input);
+    expect(pending).toMatchObject({
+      required: { authorityRef: input.authorityRef },
+      status: "pending",
+    });
+    expect(await declareProtocolWorkspace(layout, input)).toEqual(pending);
+    expect(() => resolveProtocolLayout(layout)).toThrow("protocol-enrollment-pending");
+    await expect(
+      acquireProtocolLayout(layout, null, { allowPending: true, expectedManagement: unmanaged }),
+    ).rejects.toThrow("protocol-generation-conflict");
+    await expect(acquireProtocolLayout(layout, null)).rejects.toThrow(
+      "protocol-enrollment-pending",
+    );
+    (
+      await acquireProtocolLayout(layout, null, {
+        allowPending: true,
+        expectedManagement: pending,
+        nonBlocking: true,
+      })
+    ).release();
+    const stateRoot = join(t.base, "external");
+    mkdirSync(stateRoot);
+    const active = {
+      generation: 1,
+      required: { authorityRef: input.authorityRef },
+      schema: 1,
+      stateRoot,
+      workspaceId: "fixture",
+    };
+    writeFileSync(
+      join(stateRoot, "workspace.json"),
+      JSON.stringify({
+        generation: 1,
+        required: active.required,
+        schema: 1,
+        workspaceId: "fixture",
+      }),
+    );
+    writeFileSync(join(layout.varDir, "work-protocol-fence.json"), JSON.stringify(active));
+    expect(() => resolveProtocolManagement(layout)).toThrow("protocol-fenced");
+    await expect(
+      acquireProtocolLayout(layout, null, { allowPending: true, expectedManagement: pending }),
+    ).rejects.toThrow("protocol-fenced");
+    writeFileSync(join(layout.varDir, "work-protocol.json"), JSON.stringify(active));
+    expect(resolveProtocolManagement(layout).status).toBe("active");
+    await expect(
+      acquireProtocolLayout(layout, null, { allowPending: true, expectedManagement: pending }),
+    ).rejects.toThrow("protocol-generation-conflict");
+  });
   it("does not initialize an absent configuration and rejects invalid config or a fence without fallback", () => {
     const test = makeFixture();
     const layout = loadLayout(test.root);
@@ -28,7 +87,6 @@ describe("protocol layout selection", () => {
     writeFileSync(join(fenced.varDir, "work-protocol-fence.json"), "{}");
     expect(() => resolveProtocolLayout(fenced)).toThrow("protocol-fenced");
   });
-
   it("rejects source paths, alias descendants, and unrelated Git worktree ancestry", () => {
     const test = makeFixture();
     const layout = loadLayout(test.root);
@@ -50,7 +108,6 @@ describe("protocol layout selection", () => {
       join(test.base, "external", "new"),
     );
   });
-
   it("allows concurrent shared legacy leases, excludes cutover, then fences a stale selection", async () => {
     const test = makeFixture();
     const layout = loadLayout(test.root);

@@ -1,5 +1,5 @@
 // var/registry.json schema version 1, shared by delivery-kit and the game-sessions skills.
-// The skills own every field except operations.*.lastAdoption, a reserved field nothing writes.
+// The skills own every field except operations.*.lastAdoption, reserved for supported resident-adoption recording.
 // Registry state records ownership; it never proves activation on its own.
 import { type GameCoordinatorConfig, roleKeys } from "../layout.ts";
 import {
@@ -41,6 +41,8 @@ export interface RoleRecord {
 }
 
 export interface Adoption {
+  /** Canonical owner-attested resident audit, required for managed cutover. */
+  readonly evidenceRef?: string;
   readonly at: string;
   readonly version: string;
   /** sha256 of the loaded dist/cli.js. */
@@ -168,11 +170,22 @@ function checkOperation(issues: Issues, at: string, value: unknown): void {
     checkString(issues, `${at}/activation/marker`, TOKEN_PATTERN, value.activation.marker);
   }
   const adoption = value.lastAdoption;
-  const shape = { optional: ["integrity"], required: ["at", "version", "cliSha256"] };
+  const shape = {
+    optional: ["integrity", "evidenceRef"],
+    required: ["at", "version", "cliSha256"],
+  };
   if (adoption !== undefined && checkObject(issues, `${at}/lastAdoption`, shape, adoption)) {
     checkTimestamp(issues, `${at}/lastAdoption/at`, adoption.at);
     checkString(issues, `${at}/lastAdoption/version`, TOKEN_PATTERN, adoption.version);
     checkString(issues, `${at}/lastAdoption/cliSha256`, SHA256_PATTERN, adoption.cliSha256);
+    if (adoption.evidenceRef !== undefined) {
+      checkString(
+        issues,
+        `${at}/lastAdoption/evidenceRef`,
+        /^protocol-artifact:[a-f0-9]{64}$/u,
+        adoption.evidenceRef,
+      );
+    }
     if (adoption.integrity !== undefined) {
       checkString(
         issues,

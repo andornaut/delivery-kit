@@ -27,7 +27,6 @@ import {
   PROTOCOL_ROOT_OPTIONS,
 } from "./protocol.ts";
 export type Options = NonNullable<ParseArgsConfig["options"]>;
-
 export interface CommandSpec {
   readonly summary: string;
   readonly values?: Readonly<Record<string, string>>;
@@ -38,7 +37,6 @@ export interface CommandSpec {
    */
   readonly forms: readonly (readonly string[])[];
 }
-
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
   at: "ISO_TIMESTAMP",
@@ -69,7 +67,6 @@ const VALUES: Readonly<Record<string, string>> = {
   state: "enabled|paused",
   "state-dir": "STATE/unblock",
 };
-
 /** Help groups, in help order. */
 export const GROUPS = {
   game: "game operations",
@@ -79,11 +76,9 @@ export const GROUPS = {
   message: "durable role messages",
   protocol: "explicit filesystem work protocol",
 } as const;
-
 export interface GroupedSpec extends CommandSpec {
   readonly group: keyof typeof GROUPS;
 }
-
 const GAME = { game: { type: "string" } } as const;
 const SCOPE = {
   game: { multiple: true, type: "string" },
@@ -101,7 +96,6 @@ const READY = {
   summary:
     "probe whether this harness can deliver now; prints one JSON line, exits 0 when ready, 1 when not",
 } as const satisfies GroupedSpec;
-
 /** Commands by their words: a top-level game verb, or a noun group and its verb. */
 export const SPECS = {
   "check-config": {
@@ -259,8 +253,8 @@ export const SPECS = {
   },
   "message status": {
     forms: [
-      ["id", "include-body?"],
-      ["recipient", "include-body?"],
+      ["id", "include-body?", "include-retention?"],
+      ["recipient", "include-body?", "include-retention?"],
     ],
     group: "message",
     options: MESSAGE_STATUS_OPTIONS,
@@ -292,7 +286,7 @@ export const SPECS = {
     summary: "Explicit protocol backup operation; no native delivery or owner activation",
   },
   "protocol boundary": {
-    forms: [["role", "phase", "at", "state-root?"]],
+    forms: [["role", "phase", "at", "work-id?", "work-role?", "worker?", "state-root?"]],
     group: "protocol",
     options: PROTOCOL_BOUNDARY_OPTIONS,
     summary: "Explicit protocol boundary operation; no native delivery or owner activation",
@@ -304,11 +298,29 @@ export const SPECS = {
     options: PROTOCOL_INPUT_OPTIONS,
     summary: "Explicit protocol claim operation; no native delivery or owner activation",
   },
+  "protocol declare": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "declare supported canonical protocol evidence; no provider activation",
+  },
   "protocol dry-run": {
     forms: [["input-file", "state-root?"]],
     group: "protocol",
     options: PROTOCOL_INPUT_OPTIONS,
     summary: "Explicit protocol dry-run operation; no native delivery or owner activation",
+  },
+  "protocol enroll": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "enroll supported canonical protocol evidence; no provider activation",
+  },
+  "protocol enrollment-report": {
+    forms: [["state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ROOT_OPTIONS,
+    summary: "enrollment-report supported canonical protocol evidence; no provider activation",
   },
   "protocol import": {
     forms: [["input-file", "state-root?"]],
@@ -369,6 +381,12 @@ export const SPECS = {
     group: "protocol",
     options: PROTOCOL_INPUT_OPTIONS,
     summary: "Explicit protocol message-withdraw operation; no native delivery or owner activation",
+  },
+  "protocol observer-adoption": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "observer-adoption supported canonical protocol evidence; no provider activation",
   },
   "protocol restore": {
     forms: [["input-file", "state-root?"]],
@@ -438,9 +456,7 @@ export const SPECS = {
       "print the read-only runner and delivery status, or with --resources the resource report",
   },
 } as const satisfies Readonly<Record<string, GroupedSpec>>;
-
 export type Command = keyof typeof SPECS;
-
 function flag(spec: CommandSpec, token: string): string {
   const optional = token.endsWith("?");
   const name = optional ? token.slice(0, -1) : token;
@@ -453,13 +469,11 @@ function flag(spec: CommandSpec, token: string): string {
   const text = `--${name}${value}${option.multiple === true ? " ..." : ""}`;
   return optional ? `[${text}]` : text;
 }
-
 /** One `delivery-kit COMMAND ...` line per accepted form. */
 export function synopsis(command: Command): string[] {
   const spec: GroupedSpec = SPECS[command];
   return spec.forms.map((form) => [command, ...form.map((token) => flag(spec, token))].join(" "));
 }
-
 /** The usage line a command prints with a usage error. */
 export function commandUsage(command: Command): string {
   return synopsis(command)
