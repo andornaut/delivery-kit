@@ -4,6 +4,12 @@ Request accounting tracks requested outcomes separately from message delivery. A
 have several transport references, clauses and targets. A delivered or handled message does not
 prove that the requested work is complete.
 
+The [filesystem work protocol](work-protocol.md) adds role-owned publications and recipient-owned
+handling receipts under an explicitly configured external root. The request ledger remains the
+request-state authority. A reviewed migration changes storage location and writer generation;
+it does not create a second writable request ledger or turn old transport handling into a new
+recipient attestation. Without protocol configuration, the existing compatibility paths apply.
+
 ## CLI and reusable API
 
 Run the installed CLI with an explicit coordinator root, including from another working
@@ -33,7 +39,9 @@ The revision belongs to the whole ledger, including updates to other requests.
 
 The reusable `LedgerStore` and transaction types are exposed through
 `@andornaut/delivery-kit/build/accounting`. Its constructor accepts a `directory` and an optional
-`resolveOwner` callback. The CLI uses `<coordinator-root>/var/accounting`. Assignment requires
+`resolveOwner` callback. Without protocol configuration, the CLI uses
+`<coordinator-root>/var/accounting`; an active work protocol uses `<stateRoot>/accounting`,
+with intake offers in its `intake` child directory. Assignment requires
 fresh exact role, harness and native binding. The CLI verifies Codex workers through the existing
 read-only worker inbox port, matching both native parent references and rechecking the registered
 parent route. A worker verification reference supplied in JSON is insufficient. Unsupported or
@@ -138,7 +146,8 @@ owner's classification and history. This is per-owner atomicity, not one transac
 registered roles.
 
 Before reading the event journal, automatic boundary intake durably retains primitive offers in
-`<coordinator-root>/var/accounting/intake`. Construct `IntakeStore` with that `directory`; its
+the selected accounting directory's `intake` child (`<coordinator-root>/var/accounting/intake`
+without protocol configuration). Construct `IntakeStore` with that `directory`; its
 `offer({ actor, source, command })` method accepts an unknown-reference `capture` payload and
 returns an immutable content-addressed offer. Its
 fixed summaries and unknown-question metadata contain no native message body, question text or
