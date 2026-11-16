@@ -201,6 +201,63 @@ describe("accounting ingress", () => {
         expect.objectContaining({ reason: "protected-question-unresolved" }),
       ]),
     });
+    const parent = "00000000-0000-4000-8000-000000000020";
+    const observedChild = "00000000-0000-4000-8000-000000000021";
+    const unseenChild = "00000000-0000-4000-8000-000000000022";
+    const unverifiedChild = "00000000-0000-4000-8000-000000000023";
+    const workerSnapshot = {
+      harness: "codex",
+      queues: { [parent]: [], [observedChild]: [] },
+      history: {
+        [parent]: snapshot().history["thread-kit"],
+        [observedChild]: {
+          ...snapshot().history["thread-kit"],
+          user_reply_refs: [{ turn_id: "child-turn", item_id: "child-input" }],
+        },
+        [unverifiedChild]: snapshot().history["thread-kit"],
+      },
+      worker_health: {
+        [parent]: {
+          status: "partial",
+          complete: false,
+          counts: { omitted: 2 },
+          children: [
+            { child_id: observedChild, parent_id: parent, lineage_verified: true },
+            { child_id: unseenChild, parent_id: parent, lineage_verified: true },
+            { child_id: unverifiedChild, parent_id: parent, lineage_verified: false },
+          ],
+        },
+      },
+    };
+    const workers = snapshotIntake({ ...context, nativeId: parent }, workerSnapshot);
+    expect(workers.candidateIds).toHaveLength(2);
+    expect(workers.gaps).toContainEqual(
+      expect.objectContaining({
+        reason: "child-native-history-unavailable",
+        source: expect.objectContaining({
+          native: expect.objectContaining({ threadId: unseenChild }),
+        }),
+        requiredParent: { ownerRole: context.ownerRole, nativeId: parent },
+        range: { from: null, through: null },
+        requiredOwner: context.ownerRole,
+      }),
+    );
+    expect(workers.gaps).toContainEqual(
+      expect.objectContaining({ reason: "worker-inventory-omitted" }),
+    );
+    expect(workers.gaps).toContainEqual(
+      expect.objectContaining({ reason: "worker-inventory-incomplete" }),
+    );
+    expect(workers.gaps).toContainEqual(
+      expect.objectContaining({ reason: "worker-lineage-unavailable" }),
+    );
+    expect(
+      workers.commands
+        .filter((command) => command.type === "register")
+        .map((command) => command.request.source.native?.threadId)
+        .sort(),
+    ).toEqual([parent, observedChild]);
+    expect(workers.accounting_ready).toBe(false);
   });
 
   it("captures messages once for their owner without treating accepted or handled delivery as requests", () => {

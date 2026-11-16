@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { MessageSummary } from "../messages/types.ts";
 import type {
@@ -26,6 +27,7 @@ export interface IngressGap {
   readonly source: LedgerSource;
   readonly range: LedgerCoverage["range"];
   readonly requiredOwner: string;
+  readonly requiredParent?: { readonly ownerRole: string; readonly nativeId: string };
   readonly reason: string;
   readonly nextBoundary: string;
 }
@@ -221,12 +223,11 @@ function queueCandidates(
   return requests;
 }
 
-/** Existing snapshots already collected native references; this function performs no reads. */
-export function snapshotIntake(
+function nativeIntake(
   context: IntakeContext,
   snapshot: Readonly<Record<string, unknown>>,
+  observed = source(`native-history:${JSON.stringify([context.harness, context.nativeId])}`),
 ): IngressIntake {
-  const observed = source(`native-history:${JSON.stringify([context.harness, context.nativeId])}`);
   const reasons: string[] = [];
   const requests: LedgerRequestInput[] = [];
   const range = { from: null as string | null, through: null as string | null };
@@ -299,7 +300,137 @@ export function snapshotIntake(
   if (range.from === null || range.through === null) {
     reasons.push("native-range-unknown");
   }
+  if (history.status === "unavailable" && observed.reference?.startsWith("worker-history:")) {
+    reasons.push("child-native-history-unavailable");
+  }
   return finish(context, observed, range, requests, reasons, history.status === "unavailable");
+}
+
+function combine(intakes: readonly IngressIntake[]): IngressIntake {
+  return immutable({
+    accounting_ready: intakes.every((intake) => intake.accounting_ready),
+    candidateIds: [...new Set(intakes.flatMap((intake) => intake.candidateIds))].sort(),
+    commands: [
+      ...new Map(
+        intakes
+          .flatMap((intake) => intake.commands)
+          .map((command) => [JSON.stringify(command), command]),
+      ).values(),
+    ],
+    coverage: intakes.flatMap((intake) => intake.coverage),
+    gaps: intakes.flatMap((intake) => intake.gaps),
+    pendingCandidateIds: [
+      ...new Set(intakes.flatMap((intake) => intake.pendingCandidateIds)),
+    ].sort(),
+  });
+}
+
+/** Account for observed verified children without turning worker discovery into input reads. */
+function workerIntakes(
+  context: IntakeContext,
+  snapshot: Readonly<Record<string, unknown>>,
+): readonly IngressIntake[] {
+  if (context.harness !== "codex" || !token(context.nativeId)) {
+    return [];
+  }
+  const parent = context.nativeId;
+  const requiredParent = { nativeId: parent, ownerRole: context.ownerRole };
+  const health = isRecord(snapshot.worker_health) ? snapshot.worker_health[parent] : undefined;
+  const observed: LedgerSource = {
+    ...source(`worker-inventory:${JSON.stringify(["codex", parent])}`),
+    origin: "relay",
+  };
+  const range = { from: "observed-worker-inventory", through: "observed-worker-inventory" };
+  const reasons: string[] = [];
+  const children: IngressIntake[] = [];
+  if (!isRecord(health) || !Array.isArray(health.children)) {
+    reasons.push("worker-inventory-unavailable");
+  } else {
+    if (health.status !== "complete" || health.complete !== true) {
+      reasons.push("worker-inventory-incomplete");
+    }
+    const omitted = isRecord(health.counts) ? health.counts.omitted : undefined;
+    if (typeof omitted !== "number" || !Number.isSafeInteger(omitted) || omitted < 0) {
+      reasons.push("worker-inventory-count-unknown");
+    } else if (omitted > 0) {
+      reasons.push("worker-inventory-omitted");
+    }
+    const seen = new Set<string>();
+    for (const child of health.children as unknown[]) {
+      if (
+        !isRecord(child) ||
+        child.lineage_verified !== true ||
+        child.parent_id !== parent ||
+        !isCanonicalUuid(parent) ||
+        !isCanonicalUuid(child.child_id) ||
+        child.child_id === parent
+      ) {
+        reasons.push("worker-lineage-unavailable");
+        continue;
+      }
+      const id = child.child_id;
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      const childSource = source(`worker-history:${JSON.stringify([parent, id])}`, {
+        harness: "codex",
+        index: null,
+        itemId: null,
+        threadId: id,
+        turnId: null,
+      });
+      const childContext = { ...context, nativeId: id };
+      const history = isRecord(snapshot.history) ? snapshot.history[id] : undefined;
+      if (isRecord(history)) {
+        children.push(
+          nativeIntake(
+            childContext,
+            {
+              harness: "codex",
+              harnesses: snapshot.harnesses,
+              history: snapshot.history,
+              queues: snapshot.queues,
+            },
+            childSource,
+          ),
+        );
+      } else {
+        children.push(
+          finish(
+            childContext,
+            childSource,
+            { from: null, through: null },
+            [],
+            ["child-native-history-unavailable"],
+            true,
+          ),
+        );
+      }
+    }
+  }
+  const inventory = finish(
+    context,
+    observed,
+    range,
+    [],
+    reasons,
+    !isRecord(health) || health.status === "unavailable" || !Array.isArray(health.children),
+  );
+  return [inventory, ...children].map((intake) =>
+    immutable({
+      ...intake,
+      gaps: intake.gaps.map((gap) => ({ ...gap, requiredParent })),
+    }),
+  );
+}
+
+/** Existing snapshots already collected native references; this function performs no reads. */
+export function snapshotIntake(
+  context: IntakeContext,
+  snapshot: Readonly<Record<string, unknown>>,
+): IngressIntake {
+  return combine([nativeIntake(context, snapshot), ...workerIntakes(context, snapshot)]);
 }
 
 /** Delivery states and payloads never determine whether a transport contains a human request. */
