@@ -137,9 +137,30 @@ CAS; a conflicting source rejects the whole owner batch. Matching existing recor
 owner's classification and history. This is per-owner atomicity, not one transaction across all
 registered roles.
 
+Before reading the event journal, automatic boundary intake durably retains primitive offers in
+`<coordinator-root>/var/accounting/intake`. Construct `IntakeStore` with that `directory`; its
+`offer({ actor, source, command })` method accepts an unknown-reference `capture` payload and
+returns an immutable content-addressed offer. Its
+fixed summaries and unknown-question metadata contain no native message body, question text or
+choices. Offer presence proves input retention, not journal admission, approval or completion.
+Events remain the sole current projection; there is no separate mutable processed marker.
+
+Existing boundaries replay pending offers for their selected owners, including references no
+longer present in a later compacted snapshot. The store's `pending(events, ownerRoles?)` derives
+pending work from exact journal command-ID, actor, source and payload matches. Conflicting matches
+remain pending. Replayed observations preserve matching covered owner attestations instead of
+overwriting them. Replay changes local accounting only, never native queues or
+questions.
+
+`show` and `report` include `pendingIntake` metadata: `status`, `reason` and offers containing only
+`id`, `commandId` and `requiredOwner`. An unavailable backend reports `offers: null`, not an empty
+inbox. Pending or unavailable intake prevents accounting readiness; it grants no dispatch, ACK or
+blind retry authority.
+
 Automatic writes use nonblocking admission: contention reports `ledger-busy` rather than waiting
-for the ledger lock. The saved native snapshot remains available when accounting admission
-fails. A verified worker snapshot carries its exact worker and parent binding; it does not turn
+for the ledger lock. Saved native snapshots and immutable intake offers remain available when
+accounting admission fails. A verified worker snapshot carries its exact worker and parent
+binding; it does not turn
 native input into authenticated human approval. Accounting failure after durable local message
 enqueue retains that original ID and grants no native send or blind retry authority. Inspect the
 same original before reconciliation. Existing reviews include accounting summaries; no new timer
