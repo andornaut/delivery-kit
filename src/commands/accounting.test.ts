@@ -94,6 +94,7 @@ describe("ledger public CLI", () => {
     const shown = await run(test, "ledger", "show", "--id", "request-one");
     expect(JSON.parse(shown.out)).toMatchObject({
       kind: "unknown",
+      ownerBinding: { status: "unassigned" },
       reviewed: false,
       source: SOURCE,
       state: "open",
@@ -189,6 +190,33 @@ describe("ledger public CLI", () => {
       },
     });
     expect(registered).toMatchObject({ code: 0, err: "" });
+    const current = await run(test, "ledger", "show", "--id", "request-one");
+    expect(JSON.parse(current.out)).toMatchObject({
+      assignment,
+      ownerBinding: {
+        currentRole: { harness: "codex", nativeId: CODEX_TECH, role: ROLE },
+        registryRevision: 2,
+        status: "current",
+      },
+    });
+    registry.harness = "claude";
+    writeFixtureJson(test.layout.registryFile, { ...registry, revision: 3, updatedAt: AT });
+    const stale = await run(test, "ledger", "report", "--at", AT, "--owner", ROLE);
+    expect(JSON.parse(stale.out)).toMatchObject({
+      requests: [
+        {
+          assignment,
+          ownerBinding: {
+            currentRole: { harness: "claude", role: ROLE },
+            reason: "harness-changed",
+            registryRevision: 3,
+            status: "stale",
+          },
+        },
+      ],
+    });
+    registry.harness = "codex";
+    writeFixtureJson(test.layout.registryFile, { ...registry, revision: 4, updatedAt: AT });
     const workerInput: LedgerTransaction = {
       ...input,
       actor: ROLE,
@@ -243,8 +271,17 @@ describe("ledger public CLI", () => {
       expect(accepted).toMatchObject({ code: 0, err: "" });
       expect(JSON.parse(accepted.out)).toMatchObject({ revision: 2 });
       expect(server.methods()).toEqual(["thread/read", "thread/read", "thread/read"]);
+      const workerView = await run(test, "ledger", "show", "--id", "request-one");
+      expect(JSON.parse(workerView.out)).toMatchObject({
+        ownerBinding: {
+          reason: "worker-lineage-unverified",
+          status: "unavailable",
+          workerLineage: "not-checked",
+        },
+      });
+      expect(server.methods()).toHaveLength(3);
       registry.harness = "claude";
-      writeFixtureJson(test.layout.registryFile, { ...registry, revision: 3, updatedAt: AT });
+      writeFixtureJson(test.layout.registryFile, { ...registry, revision: 5, updatedAt: AT });
       const changed = await submit(test, "apply", {
         ...workerInput,
         command: {

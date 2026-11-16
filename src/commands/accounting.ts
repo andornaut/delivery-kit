@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
 import { captureAccounting } from "../accounting/boundary.ts";
+import { projectOwnerBinding } from "../accounting/ownership.ts";
 import { LedgerError, LedgerStore } from "../accounting/store.ts";
 import type { LedgerTransaction } from "../accounting/types.ts";
 import { codexAdapter } from "../adapters/codex/index.ts";
@@ -14,6 +15,7 @@ import { resolveCodexControlSocket } from "../adapters/shared/endpoints.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type Layout, loadLayout } from "../layout.ts";
 import { resolveConversation, resolveHarness, resolveRole } from "../registry/resolve.ts";
+import type { Registry } from "../registry/schema.ts";
 import { readRegistry } from "../registry/store.ts";
 
 export const LEDGER_INPUT_OPTIONS = { "input-file": { type: "string" } } as const;
@@ -29,6 +31,8 @@ export const LEDGER_BOUNDARY_OPTIONS = {
 } as const;
 
 const CORE_ERRORS = new Set([
+  "invalid-handoff",
+  "assignment-conflict",
   "ledger-busy",
   "actor-not-owner",
   "cancellation-scope-mismatch",
@@ -231,7 +235,7 @@ function selected(history: boolean): Handler {
     } catch {
       return failure(io, "invalid-ledger-options", EXIT_USAGE);
     }
-    return operate(io, root, (_layout, ledger) => {
+    return operate(io, root, (layout, ledger) => {
       if (history) {
         return ledger.history(id);
       }
@@ -239,7 +243,8 @@ function selected(history: boolean): Handler {
       if (record === undefined) {
         throw new CommandError("request-missing");
       }
-      return record;
+      const registry = currentRegistry(layout);
+      return { ...record, ownerBinding: projectOwnerBinding(registry, record) };
     });
   };
 }
@@ -265,12 +270,25 @@ export const ledgerReport: Handler = (io, root, args) => {
     return failure(io, "invalid-ledger-options", EXIT_USAGE);
   }
   return operate(io, root, (layout, ledger) => {
-    if (owner !== undefined) {
-      resolveRole(readRegistry(layout), owner);
-    }
-    return ledger.report({ at, ...(owner === undefined ? {} : { owner }) });
+    const registry = currentRegistry(layout);
+    const report = ledger.report({ at, ...(owner === undefined ? {} : { owner }) });
+    return {
+      ...report,
+      requests: report.requests.map((record) => ({
+        ...record,
+        ownerBinding: projectOwnerBinding(registry, record),
+      })),
+    };
   });
 };
+
+function currentRegistry(layout: Layout): Registry | null {
+  try {
+    return readRegistry(layout);
+  } catch {
+    return null;
+  }
+}
 
 export const ledgerCoverage: Handler = (io, root, args) => {
   let owner: string | undefined;

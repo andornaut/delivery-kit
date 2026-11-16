@@ -13,6 +13,12 @@ export {
   messageIntake,
   snapshotIntake,
 } from "./accounting/ingress.ts";
+export {
+  type OwnerBinding,
+  type OwnerBindingReason,
+  type OwnerBindingStatus,
+  projectOwnerBinding,
+} from "./accounting/ownership.ts";
 export { LedgerError, LedgerStore } from "./accounting/store.ts";
 export type {
   EvidenceKind,
