@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LedgerRequest } from "../accounting/types.ts";
 import { ProtocolStore, protocolWorkerRole } from "./core.ts";
@@ -410,6 +410,71 @@ describe("protocol work publications", () => {
     });
     expect(f.work.read(ROLE, f.definition.id)?.ready).toBe(false);
     expect(f.work.evaluate(ROLE, f.definition.id).criteriaSatisfied).toBe(false);
+  });
+
+  it("bounds report reads and refreshes role, request and artifact views between operations", async () => {
+    const f = await fixture(["check"]);
+    await f.publish();
+    await f.record("check");
+    await f.publish(true);
+    const second = { ...f.definition, id: "work-two" };
+    await f.work.publish(f.context(), {
+      definition: second,
+      expectedWorkRevision: 0,
+      ready: false,
+      replaces: null,
+    });
+    const publications = [f.work.read(ROLE, f.definition.id)!, f.work.read(ROLE, second.id)!];
+    const hashes = new Set([
+      f.definition.plan.hash,
+      f.evidence.hash,
+      ...publications.flatMap((work) => [work.definitionHash, work.publication.hash]),
+    ]);
+    let request: LedgerRequest | null = f.request;
+    const readRequest = vi.fn((id: string) => (id === f.request.id ? request : undefined));
+    const roleReads = vi.spyOn(f.protocol, "read");
+    const artifactReads = vi.spyOn(f.protocol, "readArtifact");
+    const reader = new WorkStore({ protocol: f.protocol, readRequest });
+    const options = { roles: [ROLE, "kits/art-kit"] };
+    const first = reader.report(options);
+    expect(first).toMatchObject({
+      status: "partial",
+      approvedUnstarted: [`${ROLE}:work-two`],
+      readyUnaccepted: [`${ROLE}:work-one`],
+      unavailable: [{ role: "kits/art-kit", reason: "role-unclaimed" }],
+    });
+    // Discovery reads the existing role once; its report view adds one read regardless of work count.
+    expect(roleReads.mock.calls).toEqual([[ROLE], ["kits/art-kit"], [ROLE]]);
+    expect(readRequest.mock.calls).toEqual([[f.request.id]]);
+    expect(artifactReads.mock.calls.map(([hash]) => hash).sort()).toEqual([...hashes].sort());
+
+    roleReads.mockClear();
+    artifactReads.mockClear();
+    request = null;
+    const secondReport = reader.report(options);
+    expect(secondReport.unknownRetained).toEqual([`${ROLE}:work-one`, `${ROLE}:work-two`]);
+    expect(secondReport.approvedUnstarted).toEqual([]);
+    expect(roleReads.mock.calls).toEqual([[ROLE], ["kits/art-kit"], [ROLE]]);
+    expect(readRequest).toHaveBeenCalledTimes(2);
+    expect(artifactReads.mock.calls.map(([hash]) => hash).sort()).toEqual([...hashes].sort());
+
+    const publication = publications[1]!.publication;
+    const file = join(
+      f.root,
+      "state",
+      "artifacts",
+      "sha256",
+      publication.hash.slice(0, 2),
+      publication.hash,
+    );
+    writeFileSync(file, "Changed canonical artifact");
+    expect(() => reader.index(ROLE)).toThrow(expect.objectContaining({ code: "artifact-corrupt" }));
+    expect(reader.report(options)).toMatchObject({
+      status: "partial",
+      unavailable: expect.arrayContaining([{ role: ROLE, reason: "protocol-unavailable" }]),
+    });
+    roleReads.mockRestore();
+    artifactReads.mockRestore();
   });
 
   it("retains immutable old evidence when a source publication is explicitly replaced", async () => {

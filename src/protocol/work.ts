@@ -9,6 +9,7 @@ import type {
   ArtifactRef,
   ProtocolEvent,
   ProtocolObject,
+  ProtocolState,
   ProtocolTransaction,
   ProtocolValue,
 } from "./types.ts";
@@ -107,6 +108,16 @@ export interface WorkerSubmission {
 export interface WorkStoreOptions {
   readonly protocol: ProtocolStore;
   readonly readRequest?: (id: string) => LedgerRequest | null | undefined;
+}
+
+interface WorkReadView {
+  readonly roles: Map<string, ProtocolState>;
+  readonly artifacts: Map<string, Uint8Array>;
+  readonly requests: Map<string, LedgerRequest | null | undefined>;
+}
+
+function readView(): WorkReadView {
+  return { artifacts: new Map(), requests: new Map(), roles: new Map() };
 }
 
 export interface WorkIndex {
@@ -343,12 +354,29 @@ export class WorkStore {
     this.#options = options;
   }
 
-  #verify(ref: ArtifactRef): void {
+  #state(view: WorkReadView | undefined, role: string): ProtocolState {
+    if (view === undefined) {
+      return this.#options.protocol.read(role);
+    }
+    if (!view.roles.has(role)) {
+      view.roles.set(role, this.#options.protocol.read(role));
+    }
+    return view.roles.get(role)!;
+  }
+
+  #bytes(view: WorkReadView | undefined, hash: string): Uint8Array {
+    if (view === undefined) {
+      return this.#options.protocol.readArtifact(hash);
+    }
+    if (!view.artifacts.has(hash)) {
+      view.artifacts.set(hash, this.#options.protocol.readArtifact(hash));
+    }
+    return view.artifacts.get(hash)!;
+  }
+
+  #verify(view: WorkReadView | undefined, ref: ArtifactRef): void {
     artifact(ref);
-    demand(
-      this.#options.protocol.readArtifact(ref.hash).byteLength === ref.size,
-      "artifact-size-mismatch",
-    );
+    demand(this.#bytes(view, ref.hash).byteLength === ref.size, "artifact-size-mismatch");
   }
 
   async #artifact(value: unknown): Promise<ArtifactRef> {
@@ -374,17 +402,22 @@ export class WorkStore {
   }
 
   #object(
+    view: WorkReadView | undefined,
     role: string,
     collection: "work" | "submissions",
     id: string,
   ): ProtocolObject | undefined {
-    return this.#options.protocol
-      .read(role)
-      .objects.find((object) => object.collection === collection && object.id === id);
+    return this.#state(view, role).objects.find(
+      (object) => object.collection === collection && object.id === id,
+    );
   }
 
   read(role: string, id: string): WorkPublication | undefined {
-    const object = this.#object(role, "work", id);
+    return this.#read(readView(), role, id);
+  }
+
+  #read(view: WorkReadView, role: string, id: string): WorkPublication | undefined {
+    const object = this.#object(view, role, "work", id);
     if (object === undefined) {
       return undefined;
     }
@@ -405,39 +438,44 @@ export class WorkStore {
       "invalid-publication",
     );
     demand(
-      Buffer.from(this.#options.protocol.readArtifact(value.definitionHash)).toString() ===
+      Buffer.from(this.#bytes(view, value.definitionHash)).toString() ===
         canonical(value.definition),
       "definition-mismatch",
     );
-    this.#verify(value.publication);
+    this.#verify(view, value.publication);
     const { publication, ...body } = value;
     demand(
-      Buffer.from(this.#options.protocol.readArtifact(publication.hash)).toString() ===
-        canonical(body),
+      Buffer.from(this.#bytes(view, publication.hash)).toString() === canonical(body),
       "publication-mismatch",
     );
     demand(
       new Set(value.receipts.map((receipt) => receipt.id)).size === value.receipts.length,
       "receipt-exists",
     );
+    this.#verify(view, value.definition.plan);
     value.receipts.forEach((receipt) =>
-      this.#receipt(value.definition, value.definitionHash, receipt),
+      this.#receipt(view, value.definition, value.definitionHash, receipt),
     );
     if (value.ready) {
-      this.#ready(value.definition, value.receipts);
+      this.#ready(view, value.definition, value.receipts);
     }
     return structuredClone(value);
   }
 
   #current(context: WorkContext, id: string, expected: number): WorkPublication {
     demand(!context.role.includes("/workers/"), "parent-publication-required");
-    demand(this.#object(context.role, "work", id)?.revision === expected, "stale-work");
+    demand(this.#object(undefined, context.role, "work", id)?.revision === expected, "stale-work");
     const value = this.read(context.role, id);
     demand(value !== undefined, "work-missing");
     return value;
   }
 
-  #receipt(work: WorkDefinition, hash: string, receipt: WorkReceipt): void {
+  #receipt(
+    view: WorkReadView | undefined,
+    work: WorkDefinition,
+    hash: string,
+    receipt: WorkReceipt,
+  ): void {
     fields(receipt, [
       "id",
       "workId",
@@ -469,12 +507,16 @@ export class WorkStore {
     if (work.source !== null && ["execution", "check"].includes(receipt.phase)) {
       demand(isDeepStrictEqual(receipt.source, work.source), "receipt-source-mismatch");
     }
-    this.#verify(receipt.artifact);
+    this.#verify(view, receipt.artifact);
   }
 
-  #ready(work: WorkDefinition, receipts: readonly WorkReceipt[]): void {
-    this.#verify(work.plan);
-    work.artifacts.forEach((ref) => this.#verify(ref));
+  #ready(
+    view: WorkReadView | undefined,
+    work: WorkDefinition,
+    receipts: readonly WorkReceipt[],
+  ): void {
+    this.#verify(view, work.plan);
+    work.artifacts.forEach((ref) => this.#verify(view, ref));
     demand(covered(work, receipts, ["execution", "check"]), "ready-evidence-missing");
   }
 
@@ -522,17 +564,17 @@ export class WorkStore {
     demand(!context.role.includes("/workers/"), "parent-publication-required");
     definition(input.definition);
     demand(typeof input.ready === "boolean");
-    const object = this.#object(context.role, "work", input.definition.id);
+    const object = this.#object(undefined, context.role, "work", input.definition.id);
     demand((object?.revision ?? 0) === input.expectedWorkRevision, "stale-work");
     const prior = this.read(context.role, input.definition.id);
     const definitionHash = (await this.#artifact(input.definition)).hash;
     if (prior !== undefined && prior.definitionHash !== definitionHash) {
       demand(input.replaces === prior.publication.hash, "explicit-replacement-required");
     }
-    this.#verify(input.definition.plan);
+    this.#verify(undefined, input.definition.plan);
     const receipts = prior?.definitionHash === definitionHash ? prior.receipts : [];
     if (input.ready) {
-      this.#ready(input.definition, receipts);
+      this.#ready(undefined, input.definition, receipts);
     }
     return this.#commit(
       context,
@@ -563,7 +605,7 @@ export class WorkStore {
       return replay;
     }
     const work = this.#current(context, input.workId, input.expectedWorkRevision);
-    this.#receipt(work.definition, work.definitionHash, input.receipt);
+    this.#receipt(undefined, work.definition, work.definitionHash, input.receipt);
     demand(!work.receipts.some((receipt) => receipt.id === input.receipt.id), "receipt-exists");
     const body = bodyOf(work);
     const receipts = [...work.receipts, structuredClone(input.receipt)];
@@ -620,7 +662,7 @@ export class WorkStore {
       "submission-scope-mismatch",
     );
     source(input.source);
-    input.artifacts.forEach((ref) => this.#verify(ref));
+    input.artifacts.forEach((ref) => this.#verify(undefined, ref));
     input.receipts.forEach((receipt) => {
       demand(
         input.criterionIds.includes(receipt.criterionId) &&
@@ -628,9 +670,10 @@ export class WorkStore {
         "submission-scope-mismatch",
       );
       demand(isDeepStrictEqual(receipt.source, input.source), "receipt-source-mismatch");
-      this.#receipt(work.definition, work.definitionHash, receipt);
+      this.#receipt(undefined, work.definition, work.definitionHash, receipt);
     });
     this.#ready(
+      undefined,
       {
         ...work.definition,
         criteria: work.definition.criteria.filter((criterion) =>
@@ -669,8 +712,13 @@ export class WorkStore {
       return replay;
     }
     const work = this.#current(context, input.workId, input.expectedWorkRevision);
-    this.#verify(input.evidence);
-    const object = this.#object(input.submission.role, "submissions", input.submission.id);
+    this.#verify(undefined, input.evidence);
+    const object = this.#object(
+      undefined,
+      input.submission.role,
+      "submissions",
+      input.submission.id,
+    );
     demand(object?.revision === input.submission.revision, "submission-changed");
     const value = object.value as unknown as WorkerSubmission;
     demand(
@@ -690,7 +738,7 @@ export class WorkStore {
         isDeepStrictEqual(value.publication, input.submission.artifact),
       "submission-scope-mismatch",
     );
-    this.#verify(value.publication);
+    this.#verify(undefined, value.publication);
     const { publication, ...submitted } = value;
     demand(
       Buffer.from(this.#options.protocol.readArtifact(publication.hash)).toString() ===
@@ -698,7 +746,7 @@ export class WorkStore {
       "submission-publication-mismatch",
     );
     value.receipts.forEach((receipt) =>
-      this.#receipt(work.definition, work.definitionHash, receipt),
+      this.#receipt(undefined, work.definition, work.definitionHash, receipt),
     );
     demand(
       new Set(value.receipts.map((receipt) => receipt.id)).size === value.receipts.length,
@@ -714,8 +762,9 @@ export class WorkStore {
       "submission-scope-mismatch",
     );
     source(value.source);
-    value.artifacts.forEach((ref) => this.#verify(ref));
+    value.artifacts.forEach((ref) => this.#verify(undefined, ref));
     this.#ready(
+      undefined,
       {
         ...work.definition,
         criteria: work.definition.criteria.filter((criterion) =>
@@ -743,20 +792,16 @@ export class WorkStore {
   }
 
   index(role: string): WorkIndex {
-    const state = this.#options.protocol.read(role);
+    return this.#index(readView(), role);
+  }
+
+  #index(view: WorkReadView, role: string): WorkIndex {
+    const state = this.#state(view, role);
     const items = state.objects
       .filter((object) => object.collection === "work")
       .map((object) => {
-        // Discovery carries committed pointers; reading work validates the referenced artifacts.
-        const work = object.value as unknown as WorkPublication;
-        demand(
-          isRecord(work) &&
-            work.schema === 1 &&
-            work.definition?.id === object.id &&
-            typeof work.ready === "boolean",
-          "invalid-publication",
-        );
-        artifact(work.publication);
+        // The index stays sparse after validating the canonical publication and evidence.
+        const work = this.#read(view, role, object.id)!;
         return {
           id: object.id,
           publication: { ...work.publication },
@@ -775,15 +820,23 @@ export class WorkStore {
   }
 
   evaluate(role: string, id: string): WorkEvaluation {
-    const work = this.read(role, id);
+    const view = readView();
+    const work = this.#read(view, role, id);
     demand(work !== undefined, "work-missing");
-    return this.#evaluate(work);
+    return this.#evaluate(view, work);
   }
 
-  #evaluate(work: WorkPublication): WorkEvaluation {
+  #evaluate(view: WorkReadView, work: WorkPublication): WorkEvaluation {
     let requests: readonly (LedgerRequest | null | undefined)[] = [];
     try {
-      requests = work.definition.requestIds.map((request) => this.#options.readRequest?.(request));
+      requests = work.definition.requestIds.map((id) => {
+        if (!view.requests.has(id)) {
+          // Failed lookups stay unknown throughout this operation and are retried by the next one.
+          view.requests.set(id, undefined);
+          view.requests.set(id, this.#options.readRequest?.(id));
+        }
+        return view.requests.get(id);
+      });
     } catch {
       // Missing authority remains unknown; it never turns a publication into approval.
     }
@@ -859,6 +912,7 @@ export class WorkStore {
   }
 
   report(options: { readonly roles?: readonly string[] } = {}): WorkReport {
+    const view = readView();
     const result = {
       acceptedUnintegrated: [] as string[],
       approvedUnstarted: [] as string[],
@@ -885,9 +939,9 @@ export class WorkStore {
     for (const role of roles) {
       try {
         if (role.includes("/workers/")) {
-          const submissions = this.#options.protocol
-            .read(role)
-            .objects.filter((object) => object.collection === "submissions");
+          const submissions = this.#state(view, role).objects.filter(
+            (object) => object.collection === "submissions",
+          );
           if (submissions.length === 0) {
             result.unavailable.push({ reason: "no-worker-submission", role });
           }
@@ -904,25 +958,25 @@ export class WorkStore {
                   ),
               "submission-scope-mismatch",
             );
-            this.#verify(submission.publication);
+            this.#verify(view, submission.publication);
             const { publication, ...body } = submission;
             demand(
-              Buffer.from(this.#options.protocol.readArtifact(publication.hash)).toString() ===
-                canonical(body),
+              Buffer.from(this.#bytes(view, publication.hash)).toString() === canonical(body),
               "submission-publication-mismatch",
             );
             observed += 1;
-            const parent = this.read(submission.parentRole, submission.workId);
+            const parent = this.#read(view, submission.parentRole, submission.workId);
             const id = `${role}:${object.id}`;
             if (parent?.definitionHash !== submission.definitionHash) {
               result.unknownRetained.push(id);
               continue;
             }
-            submission.artifacts.forEach((ref) => this.#verify(ref));
+            submission.artifacts.forEach((ref) => this.#verify(view, ref));
             submission.receipts.forEach((receipt) =>
-              this.#receipt(parent.definition, parent.definitionHash, receipt),
+              this.#receipt(view, parent.definition, parent.definitionHash, receipt),
             );
             this.#ready(
+              view,
               {
                 ...parent.definition,
                 criteria: parent.definition.criteria.filter((criterion) =>
@@ -945,18 +999,19 @@ export class WorkStore {
           }
           continue;
         }
-        const index = this.index(role);
-        if (index.status === "unknown") {
+        const state = this.#state(view, role);
+        const items = state.objects.filter((object) => object.collection === "work");
+        if (state.epoch === 0 || items.length === 0) {
           result.unavailable.push({
-            reason: index.epoch === 0 ? "role-unclaimed" : "no-work-publication",
+            reason: state.epoch === 0 ? "role-unclaimed" : "no-work-publication",
             role,
           });
         }
-        for (const entry of index.items) {
-          const work = this.read(role, entry.id)!;
+        for (const entry of items) {
+          const work = this.#read(view, role, entry.id)!;
           observed += 1;
           const id = `${role}:${entry.id}`;
-          const evaluation = this.#evaluate(work);
+          const evaluation = this.#evaluate(view, work);
           const authorized = evaluation.authorization === "reviewed";
           const phase = (value: WorkPhase) => covered(work.definition, work.receipts, [value]);
           const required = (value: WorkPhase) =>
