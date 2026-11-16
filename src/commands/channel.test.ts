@@ -4,9 +4,10 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { spoolReviewBrief } from "../adapters/claude/spool.ts";
+import { LOCK_FILE, spoolReviewBrief } from "../adapters/claude/spool.ts";
+import { slotRequestId } from "../adapters/shared/ids.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
-import { holdLock, LockBusy } from "../lock.ts";
+import { holdLock, holdLockAsync, LockBusy } from "../lock.ts";
 import { messageChannelStateDir, messageDirectory } from "../messages/paths.ts";
 import * as messageService from "../messages/service.ts";
 import { messageExpectation, MessageStore } from "../messages/store.ts";
@@ -121,6 +122,30 @@ describe("Claude channel generic feeds", () => {
     const fixture = claudeFixture();
     const legacy = messageDirectory(fixture.layout);
     const created = "2026-11-16T06:00:00.000Z";
+    const admissions: { slot: number; status: string }[] = [];
+    const review = async (slot: number) => {
+      const outcome = await vi.waitFor(() => {
+        const attempt = spoolReviewBrief(
+          fixture.env,
+          fixture.game.busDir,
+          activeRoute(fixture),
+          slot,
+        );
+        admissions.push({ slot, status: attempt.status });
+        expect(attempt.status).not.toBe("busy");
+        return attempt;
+      });
+      expect(
+        outcome.status === "sending" ||
+          (outcome.status === "deduplicated" &&
+            ["sending", "accepted"].includes(outcome.previousStatus ?? "")),
+      ).toBe(true);
+      const receipt = JSON.parse(
+        readFileSync(join(fixture.unblock, `${RECIPIENT}-${slot}.json`), "utf8"),
+      );
+      expect(receipt.requestId).toBe(slotRequestId(RECIPIENT, slot));
+      expect(["sending", "accepted"]).toContain(receipt.status);
+    };
     const queue = async (id: string, body: string) => {
       const store = new MessageStore({
         layout: fixture.layout,
@@ -177,7 +202,7 @@ describe("Claude channel generic feeds", () => {
         expectedGeneration: 0,
         workspaceId: "fixture",
       });
-      spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT);
+      await review(SLOT);
       fixture.clear("pending");
       const pending = await queue("resident-pending", "pending exact original\n");
       const busy = await acquireProtocolLayout(fixture.layout, null, {
@@ -250,7 +275,16 @@ describe("Claude channel generic feeds", () => {
       expect((await switching.transport.send(switching.path, switching.message)).status).toBe(
         "queued",
       );
-      spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT + 1);
+      const contention = await holdLockAsync(join(fixture.unblock, LOCK_FILE));
+      const admitted = review(SLOT + 1);
+      try {
+        await vi.waitFor(() =>
+          expect(admissions).toContainEqual({ slot: SLOT + 1, status: "busy" }),
+        );
+      } finally {
+        contention.release();
+      }
+      await admitted;
       await vi.waitFor(() => expect(lines).toHaveLength(5));
       expect(JSON.parse(lines[4]!).params.meta.kind).toBe("review");
       expect(
