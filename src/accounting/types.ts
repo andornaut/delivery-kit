@@ -136,6 +136,15 @@ export type LedgerCommand =
   | { readonly type: "link"; readonly id: string; readonly link: LedgerSourceLink }
   | { readonly type: "assign"; readonly id: string; readonly assignment: LedgerAssignment | null }
   | {
+      readonly type: "handoff";
+      readonly id: string;
+      readonly previousAssignment: LedgerAssignment;
+      readonly assignment: LedgerAssignment;
+      readonly sourceHoldRef: string;
+      readonly targetAcceptanceRef: string;
+      readonly activationRef: string;
+    }
+  | {
       readonly type: "amend";
       readonly id: string;
       readonly summary: string;

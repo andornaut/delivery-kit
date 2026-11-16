@@ -644,7 +644,8 @@ describe("request accounting journal", () => {
       type: "close",
     });
     expect(f.store.report({ at: AT }).protectedQuestions).toEqual([]);
-    await f.register({ ...request("route"), assignment: ASSIGNMENT });
+    const protectedQuestion = { ...input.question, status: "pending" as const };
+    await f.register({ ...request("route"), assignment: ASSIGNMENT, question: protectedQuestion });
     const revision = f.store.read().revision;
     changeDuringRead = true;
     await expect(
@@ -662,6 +663,26 @@ describe("request accounting journal", () => {
     await expect(
       f.send({ assignment: current, id: "route", type: "assign" }),
     ).rejects.toMatchObject({ code: "owner-changed" });
+    const handoff: LedgerCommand = {
+      activationRef: "registry:approved-activation",
+      assignment: current,
+      id: "route",
+      previousAssignment: ASSIGNMENT,
+      sourceHoldRef: "handoff:source-held",
+      targetAcceptanceRef: "handoff:target-accepted",
+      type: "handoff",
+    };
+    await expect(f.send({ ...handoff, previousAssignment: current })).rejects.toMatchObject({
+      code: "assignment-conflict",
+    });
+    await expect(f.send({ ...handoff, activationRef: "" })).rejects.toMatchObject({
+      code: "invalid-handoff",
+    });
+    await f.send(handoff);
+    expect(f.store.read("route")?.assignment).toEqual(current);
+    expect(f.store.read("route")?.question).toEqual(protectedQuestion);
+    expect(f.store.report({ at: AT }).protectedQuestions).toContain("route");
+    expect(f.store.history("route").at(-1)?.command).toEqual(handoff);
     const worker: LedgerAssignment = {
       ...ASSIGNMENT,
       nativeId: "00000000-0000-4000-8000-000000000002",

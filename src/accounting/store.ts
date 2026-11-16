@@ -304,6 +304,25 @@ function validateCommand(command: unknown): asserts command is LedgerCommand {
         "invalid-assignment",
       );
       break;
+    case "handoff":
+      demand(
+        object(c, [
+          "type",
+          "id",
+          "previousAssignment",
+          "assignment",
+          "sourceHoldRef",
+          "targetAcceptanceRef",
+          "activationRef",
+        ]) &&
+          assignment(c.previousAssignment) &&
+          assignment(c.assignment) &&
+          text(c.sourceHoldRef) &&
+          text(c.targetAcceptanceRef) &&
+          text(c.activationRef),
+        "invalid-handoff",
+      );
+      break;
     case "amend":
       demand(
         object(c, ["type", "id", "summary", "targets", "dependencies", "reason"]) &&
@@ -712,7 +731,7 @@ function project(state: Replay, event: LedgerEvent): void {
   const request = get(state, c.id);
   owned(request, event.actor);
   const next = { ...request, revision: event.revision, updatedAt: event.at };
-  if (!["reopen", "question", "cancel"].includes(c.type)) {
+  if (!["reopen", "question", "cancel", "handoff"].includes(c.type)) {
     mutable(request);
   }
   switch (c.type) {
@@ -721,6 +740,11 @@ function project(state: Replay, event: LedgerEvent): void {
       Object.assign(next, { kind: c.kind, reason: c.reason, reviewed: c.reviewed });
       break;
     case "assign":
+      Object.assign(next, { assignment: structuredClone(c.assignment) });
+      break;
+    case "handoff":
+      demand(attested(event.source), "unreviewed-source");
+      demand(isDeepStrictEqual(request.assignment, c.previousAssignment), "assignment-conflict");
       Object.assign(next, { assignment: structuredClone(c.assignment) });
       break;
     case "amend":
@@ -1131,6 +1155,9 @@ export class LedgerStore {
             bindings.push(parent);
           }
         }
+      } else if (command.type === "handoff") {
+        // Only this explicit attested reconciliation verifies the new owner without the stale binding.
+        bindings.push(command.assignment);
       } else if (command.type !== "coverage" && command.type !== "capture") {
         const owner = get(state, command.id).assignment;
         if (owner !== null) {
