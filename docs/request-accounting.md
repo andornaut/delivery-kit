@@ -55,6 +55,14 @@ Accounting readiness guards unassigned open work and stale or unavailable bindin
 or protected questions. Binding drift on other terminal records is informational. Neither view
 rewrites assignment history or performs an ownership transfer.
 
+After an externally approved ownership handoff, a `handoff` transaction reconciles ledger
+metadata. It carries `id`, the exact `previousAssignment`, the new `assignment`, `sourceHoldRef`,
+`targetAcceptanceRef` and `activationRef`. The recorded owner's actor and owner-attested source
+are required, with revision CAS and an exact previous-assignment match. This operation freshly
+verifies the new binding without requiring the stale old binding to resolve; ordinary `assign`
+remains strict. It preserves work state, evidence and protected questions. These references attest
+an external handoff: the transaction performs no native hold, acceptance, activation or transfer.
+
 `ledger boundary --role ROLE --phase startup|resume|review|handoff` captures the explicitly
 selected role's supported references and local-message metadata. Codex history reads are bounded;
 Claude history remains unavailable. The command returns its accounting summary and exits with a
