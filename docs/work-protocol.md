@@ -133,8 +133,18 @@ Use `protocol observer-adoption --input-file adoption.json` to record an actual 
 inspection. Its typed input carries `context`, `operation`, `expectedRegistryRevision` and an
 evidence artifact, with `reconcileRegistryRevision` available for explicit reconciliation.
 The evidence is owner-attested resident identity, installed CLI version/hash and inspection
-reference. A package pin or declared capability alone is not resident adoption. Reconcile the
-exact audit and registry revision after an ambiguous update; do not invent a fresh acceptance.
+reference. The producer durably stores a content-addressed audit and writes
+`operations.<game>.lastAdoption.evidenceRef: "protocol-artifact:<audit hash>"` under registry CAS.
+Managed activation resolves that pointer, verifies the audit and its referenced resident proof,
+and matches the current owner binding. A package pin, declared capability or returned-only
+result is not durable resident adoption evidence.
+
+If the audit is durable but the registry update or writer post-check fails, the error exposes
+`actionMayHaveCommitted: true` and `reconcileKey` identifying that same audit hash. Inspect the
+audit and current registry before retrying. Reconcile with the same command context, operation,
+evidence and original `expectedRegistryRevision`; supply `reconcileRegistryRevision` only for
+the explicitly observed current CAS revision. This preserves the audit identity and can return
+`already-recorded`; do not generate a new inspection or acceptance merely to retry a partial update.
 
 Migration still requires `protocol dry-run`, an independently located backup and verified
 restore, compatible readers before writers, participant/quiescence evidence and affected writer

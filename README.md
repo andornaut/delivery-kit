@@ -221,7 +221,7 @@ own: `transfers` carries the hold, acceptance and activation markers.
 | `harness`                         | `claude` or `codex`: the default harness for roles without an override.                                                                                                                               |
 | `host`                            | `nativeProjectId` and `root` (relative to game-coordinator).                                                                                                                                          |
 | `roles.<key>`                     | `ownership`, `worktree` (relative to game-coordinator), `conversations` (`claude` and `codex`, each an ID or null), and optional `harness`, `branch`, `phase`, `activation` (`marker`, `checkpoint`). |
-| `operations.<game>`               | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity`).                                                                        |
+| `operations.<game>`               | `busOwner` (a role key), optional `activation.marker` and `lastAdoption` (`at`, `version`, `cliSha256`, optional `integrity` and `evidenceRef: "protocol-artifact:<audit hash>"`).                    |
 | `transfers[]`                     | `marker`, `from`, `to`, `phase` (`source-held`, `accepted` or `active-confirmed`), `roles` and `checkpoint`.                                                                                          |
 
 - Every role key must be a role key in `config.json`, and every `operations` key a game.
@@ -231,8 +231,15 @@ own: `transfers` carries the hold, acceptance and activation markers.
 - Every writer holds `var/registry.lock`, rejects a changed `revision`, validates the result,
   writes durably and increments `revision`.
 - The skills own every field except `operations.*.lastAdoption`, which is reserved for
-  delivery-kit. The harness-selection CLI changes only selected roles' `harness` overrides and
+  supported resident-adoption recording. The harness-selection CLI changes only selected roles' `harness` overrides and
   registry revision metadata; it preserves all other fields, including `operations`.
+
+`protocol observer-adoption` durably records the owner's resident-inspection evidence and its
+audit before updating `lastAdoption` under registry revision CAS. Managed activation verifies
+the `evidenceRef` pointer, audit and referenced resident proof together. A package pin, matching
+version/hash or returned-only result is not that durable adoption evidence. See
+[declaration, enrollment and rollout](docs/work-protocol.md#declaration-enrollment-and-rollout)
+for the supported producer and partial-update reconciliation contract.
 
 ### Scoped harness selection
 
