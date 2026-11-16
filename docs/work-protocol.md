@@ -157,6 +157,9 @@ Migration still requires `protocol dry-run`, an independently located backup and
 restore, compatible readers before writers, participant/quiescence evidence and affected writer
 fencing. Managed activation checks the same prepared enrollment report and requires all
 participants represented, preserving UNKNOWNs. It does not claim all participants adopted.
+Activation acquires the exclusive generation lease, then the registry lock, and holds both
+through the final roster, enrollment and original checks and durable activation receipt,
+fence and configuration writes. It validates the registry without mutating it.
 The operator owns root and backup selection and actual consumer rollout; SDK publication performs
 none of those operations.
 
@@ -178,6 +181,13 @@ essential artifacts plus retained work or closure-ready evidence;
 `before-cleanup` and `cleanup` additionally require a nonempty essential artifact distinct from
 the plan. Worker completion additionally requires the parent's recorded acceptance. A sole
 temporary copy, UNKNOWN or successful boundary cannot authorize destructive cleanup or clear a question.
+
+Finish and cleanup may also use historical, actually completed reviewed requests when their
+owner-attested source, exact target/criteria, required evidence phases and consumers match the
+canonical work, its criteria are satisfied and guards remain clear. Essential artifacts and
+applicable parent acceptance are still required. Completed requests remain refused for
+`before-work` and `worker-start`; completion does not renew execution authority. Cancellation,
+supersession or a HOLD is not finish or cleanup permission.
 
 Missing local adoption, approved work or essential evidence produces a finite nonzero diagnostic:
 `enrollment-required`, `approved-work-required` or `essential-evidence-required`. Inactive or held
