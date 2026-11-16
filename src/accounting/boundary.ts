@@ -7,9 +7,11 @@ import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Layout } from "../layout.ts";
 import { messageSummary } from "../messages/store.ts";
+import type { MessageSummary } from "../messages/types.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
-import { messageIntake, snapshotIntake } from "./ingress.ts";
+import { type IntakeContext, messageIntake, snapshotIntake } from "./ingress.ts";
+import { IntakeError, IntakeStore } from "./intake.ts";
 import { type OwnerBinding, projectOwnerBinding } from "./ownership.ts";
 import { LedgerError, LedgerStore } from "./store.ts";
 import type { LedgerCommand, LedgerSource } from "./types.ts";
@@ -31,11 +33,23 @@ export interface AccountingBoundary {
     readonly ownerBinding: OwnerBinding;
   }[];
   readonly gaps?: readonly unknown[];
+  readonly observedGaps?: readonly unknown[];
+  readonly pendingIntake?: {
+    readonly status: "available" | "unavailable";
+    readonly offers:
+      | readonly {
+          readonly id: string;
+          readonly commandId: string;
+          readonly requiredOwner: string;
+        }[]
+      | null;
+    readonly reason: string | null;
+  };
   readonly reason?: string;
 }
 
 function failureReason(error: unknown): string {
-  const code = error instanceof LedgerError ? error.code : null;
+  const code = error instanceof LedgerError || error instanceof IntakeError ? error.code : null;
   return code !== null &&
     [
       "corrupt-ledger",
@@ -43,6 +57,11 @@ function failureReason(error: unknown): string {
       "owner-unavailable",
       "invalid-directory",
       "ledger-busy",
+      "corrupt-intake",
+      "intake-unavailable",
+      "intake-hash-conflict",
+      "invalid-intake-directory",
+      "invalid-intake",
     ].includes(code)
     ? code
     : "accounting-unavailable";
@@ -51,7 +70,8 @@ function failureReason(error: unknown): string {
 /** Readiness remains read-only. Unknown accounting coverage never becomes an empty ledger. */
 export function accountingStatus(layout: Layout, roles?: readonly string[]): AccountingBoundary {
   try {
-    const report = new LedgerStore({ directory: join(layout.varDir, "accounting") }).report({
+    const store = new LedgerStore({ directory: join(layout.varDir, "accounting") });
+    const report = store.report({
       at: new Date().toISOString(),
     });
     const registry = readRegistry(layout);
@@ -59,6 +79,17 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
     if (owners.some((owner) => !Object.hasOwn(registry.roles, owner))) {
       throw new Error("accounting-owner-unavailable");
     }
+    const pendingIntake = {
+      offers: new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") })
+        .pending(store.history(), owners)
+        .map((offer) => ({
+          commandId: `intake-${offer.id}`,
+          id: offer.id,
+          requiredOwner: offer.actor,
+        })),
+      reason: null,
+      status: "available" as const,
+    };
     const selected = new Set(owners);
     const ids = new Set(
       report.requests
@@ -103,11 +134,13 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
         coverageState === "declared-complete" &&
         protectedQuestions.length === 0 &&
         unassigned.length === 0 &&
-        !invalidBinding,
+        !invalidBinding &&
+        pendingIntake.offers.length === 0,
       assignments,
       coverageState,
       missingOwners,
       open,
+      pendingIntake,
       protectedQuestions,
       revision: report.revision,
       stalled: visible(report.stalled),
@@ -117,7 +150,12 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
       untriaged,
     };
   } catch (error) {
-    return { accounting_ready: false, reason: failureReason(error), status: "unavailable" };
+    return {
+      accounting_ready: false,
+      pendingIntake: { offers: null, reason: failureReason(error), status: "unavailable" },
+      reason: failureReason(error),
+      status: "unavailable",
+    };
   }
 }
 
@@ -127,10 +165,13 @@ async function captureCommand(
   actor: string,
   source: LedgerSource,
   command: LedgerCommand,
+  offeredCommandId?: string,
 ): Promise<void> {
-  const commandId = `boundary-${createHash("sha256")
-    .update(JSON.stringify([actor, source, command]))
-    .digest("hex")}`;
+  const commandId =
+    offeredCommandId ??
+    `boundary-${createHash("sha256")
+      .update(JSON.stringify([actor, source, command]))
+      .digest("hex")}`;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const prior = store.history().find((event) => event.commandId === commandId);
     if (prior !== undefined) {
@@ -207,7 +248,19 @@ export async function captureAccounting(
       directory: join(layout.varDir, "accounting"),
       nonBlocking: true,
     });
-    const inventory = messageSummary(layout);
+    const input = new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") });
+    let inventory: MessageSummary;
+    try {
+      inventory = messageSummary(layout);
+    } catch {
+      inventory = {
+        counts: null,
+        messages: null,
+        reason: "unreadable-inbox",
+        schema: 1,
+        status: "unavailable",
+      };
+    }
     const messages =
       inventory.status === "available" && typeof snapshot.message_id === "string"
         ? {
@@ -216,23 +269,16 @@ export async function captureAccounting(
           }
         : inventory;
     const worker = isRecord(snapshot.worker_binding) ? snapshot.worker_binding : null;
-    const gaps: unknown[] = [];
     const selectedRoles = roles ?? Object.keys(registry.roles);
     if (selectedRoles.some((role) => !Object.hasOwn(registry.roles, role))) {
       throw new Error("accounting-owner-unavailable");
     }
+    const contexts: { context: IntakeContext; nativeContext: IntakeContext }[] = [];
     for (const ownerRole of [...new Set(selectedRoles)].sort()) {
       const harness = resolveHarness(registry, ownerRole);
       const nativeId = resolveConversation(registry, ownerRole);
-      const projection = store.read();
-      const context = {
+      const context: IntakeContext = {
         harness,
-        known: {
-          coverage: projection.coverage.filter((entry) => entry.ownerRole === ownerRole),
-          requests: projection.requests.filter(
-            (request) => (request.assignment?.ownerRole ?? request.createdBy) === ownerRole,
-          ),
-        },
         nativeId,
         nextBoundary: "next supported owner startup, resume or scheduled review",
         ownerRole,
@@ -244,17 +290,17 @@ export async function captureAccounting(
         worker.parent === nativeId &&
         isCanonicalUuid(worker.worker) &&
         worker.worker !== nativeId;
-      const workerContext = workerMatches
+      const nativeContext = workerMatches
         ? { ...context, nativeId: worker.worker as string }
-        : null;
+        : context;
+      contexts.push({ context, nativeContext });
       const intakes = [
-        ...(sourceKind === "snapshot" ? [snapshotIntake(workerContext ?? context, snapshot)] : []),
+        ...(sourceKind === "snapshot" ? [snapshotIntake(nativeContext, snapshot)] : []),
         messageIntake(context, messages),
       ];
       const requests = [];
       const coverage = [];
       for (const intake of intakes) {
-        gaps.push(...intake.gaps);
         for (const command of intake.commands) {
           if (command.type === "register") {
             requests.push(command.request);
@@ -264,15 +310,41 @@ export async function captureAccounting(
         }
       }
       if (requests.length > 0 || coverage.length > 0) {
-        const source: LedgerSource = {
-          native: null,
-          origin: "unknown",
-          reference: `accounting-boundary:${JSON.stringify([ownerRole, harness, nativeId, phase])}`,
-          wordingHash: null,
-        };
-        // Each owner batch commits before the next owner reads the shared revision.
-        // eslint-disable-next-line no-await-in-loop
-        await captureCommand(store, ownerRole, source, { coverage, requests, type: "capture" });
+        // Persist immutable primitive references before reading or locking the event journal.
+        input.offer({
+          actor: ownerRole,
+          command: { coverage, requests, type: "capture" },
+          source: {
+            native: null,
+            origin: "unknown",
+            reference: `accounting-boundary:${JSON.stringify([ownerRole, harness, nativeId, phase])}`,
+            wordingHash: null,
+          },
+        });
+      }
+    }
+    for (const offer of input.pending(store.history(), selectedRoles)) {
+      // Replay only local accounting inputs, without native sends, ACKs or question operations.
+      // eslint-disable-next-line no-await-in-loop
+      await captureCommand(store, offer.actor, offer.source, offer.command, `intake-${offer.id}`);
+    }
+    const projection = store.read();
+    const gaps: unknown[] = [];
+    const observedGaps: unknown[] = [];
+    for (const { context, nativeContext } of contexts) {
+      const known = {
+        coverage: projection.coverage.filter((entry) => entry.ownerRole === context.ownerRole),
+        requests: projection.requests,
+      };
+      const intakes = [
+        ...(sourceKind === "snapshot"
+          ? [snapshotIntake({ ...nativeContext, known }, snapshot)]
+          : []),
+        messageIntake({ ...context, known }, messages),
+      ];
+      for (const intake of intakes) {
+        gaps.push(...intake.gaps);
+        observedGaps.push(...intake.observedGaps);
       }
     }
     const report = accountingStatus(layout, selectedRoles);
@@ -280,10 +352,16 @@ export async function captureAccounting(
       ...report,
       accounting_ready: report.accounting_ready && gaps.length === 0,
       gaps,
+      observedGaps,
     };
   } catch (error) {
-    // Accounting visibility cannot suppress monitor wakes or change live delivery controls.
-    return { accounting_ready: false, reason: failureReason(error), status: "unavailable" };
+    // Native snapshots and immutable intake offers remain available for the next boundary.
+    return {
+      ...accountingStatus(layout, roles),
+      accounting_ready: false,
+      reason: failureReason(error),
+      status: "unavailable",
+    };
   }
 }
 

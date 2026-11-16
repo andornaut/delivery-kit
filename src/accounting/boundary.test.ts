@@ -126,11 +126,21 @@ describe("accounting at existing ingress boundaries (isolated fixtures)", () => 
     expect(accountingStatus(fixture.layout).protectedQuestions).toContain("foreign-question");
     const lock = holdLock(join(fixture.layout.varDir, "accounting", "ledger.lock"));
     try {
-      expect(await captureAccounting(fixture.layout, {})).toMatchObject({
+      const busy = await captureAccounting(fixture.layout, {
+        harness: "claude",
+        queues: { [RECIPIENT]: [{ clientUserMessageId: "busy-original", id: "busy-original" }] },
+      });
+      expect(busy).toMatchObject({
         accounting_ready: false,
         reason: "ledger-busy",
         status: "unavailable",
       });
+      expect(busy.pendingIntake?.offers?.length).toBeGreaterThan(0);
+      expect(
+        JSON.stringify(
+          new LedgerStore({ directory: join(fixture.layout.varDir, "accounting") }).read(),
+        ),
+      ).not.toContain("busy-original");
     } finally {
       lock.release();
     }
@@ -142,6 +152,12 @@ describe("accounting at existing ingress boundaries (isolated fixtures)", () => 
     expect(result.status).toBe("available");
     expect(result.accounting_ready).toBe(false);
     expect(JSON.stringify(result.gaps)).toContain("claude-native-history-unsupported");
+    expect(result.pendingIntake?.offers).toEqual([]);
+    expect(
+      JSON.stringify(
+        new LedgerStore({ directory: join(fixture.layout.varDir, "accounting") }).read(),
+      ),
+    ).toContain("busy-original");
     const events = join(fixture.layout.varDir, "accounting", "events");
     const event = readdirSync(events).find((name) => name.endsWith(".json"));
     expect(event).toBeDefined();
