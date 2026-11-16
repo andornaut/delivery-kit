@@ -111,7 +111,15 @@ unselected roles. Full native human history remains unattested even when a retur
 complete.
 
 Existing snapshot and message-ingress hooks register unreviewed candidates and explicit coverage
-gaps. A verified worker snapshot carries its exact worker and parent binding; it does not turn
+gaps. Native snapshots are persisted before accounting admission. Automatic intake admits one
+owner's unknown references and coverage together as one atomic `capture` event under revision
+CAS; a conflicting source rejects the whole owner batch. Matching existing records retain their
+owner's classification and history. This is per-owner atomicity, not one transaction across all
+registered roles.
+
+Automatic writes use nonblocking admission: contention reports `ledger-busy` rather than waiting
+for the ledger lock. The saved native snapshot remains available when accounting admission
+fails. A verified worker snapshot carries its exact worker and parent binding; it does not turn
 native input into authenticated human approval. Accounting failure after durable local message
 enqueue retains that original ID and grants no native send or blind retry authority. Inspect the
 same original before reconciliation. Existing reviews include accounting summaries; no new timer
