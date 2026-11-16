@@ -346,6 +346,7 @@ describe("ledger public CLI", () => {
       const projection = JSON.parse(report.out) as {
         requests: { kind: string; reviewed: boolean; source: LedgerSource }[];
       };
+      expect(report.out).not.toContain("PRIVATE_SYNTHETIC_BODY");
       expect(projection.requests).toHaveLength(1);
       expect(projection.requests[0]).toMatchObject({
         kind: "unknown",

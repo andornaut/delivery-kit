@@ -147,7 +147,7 @@ export function inspectPackage(
   symlinkSync(pkg, join(scope, "delivery-kit"), "dir");
   const source = join(consumer, "consumer.mts");
   const consumerSource = `import {
-  readRegistry, updateRegistry, RevisionConflict, type Registry,
+  readRegistry, updateRegistry, RevisionConflict, type Registry, type Layout,
 } from "@andornaut/delivery-kit/build/registry";
 import {
   resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
@@ -164,7 +164,7 @@ import {
 const ledgerState: LedgerState = "checked";
 const ledgerCommit = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
 const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
-const ledgerReadiness = accountingStatus({ varDir: "/fixture/var" });
+const ledgerReadiness = (layout: Layout) => accountingStatus(layout);
 // @ts-expect-error Accounting states remain a finite union.
 const invalidLedgerState: LedgerState = "native-accepted-means-complete";
 // @ts-expect-error Ledger revisions must remain numbers, not untyped JSON.

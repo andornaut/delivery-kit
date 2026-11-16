@@ -29,6 +29,7 @@ export const LEDGER_BOUNDARY_OPTIONS = {
 } as const;
 
 const CORE_ERRORS = new Set([
+  "ledger-busy",
   "actor-not-owner",
   "cancellation-scope-mismatch",
   "evidence-exists",
