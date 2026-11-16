@@ -43,6 +43,18 @@ corroborates the binding; verification performs no queue or native lifecycle ope
 The CLI checks that the actor names a registered role. This is attribution, not authentication of
 the person invoking the command or independent verification of an approval reference.
 
+`show` and each `report.requests` entry add an `ownerBinding` view without changing the recorded
+assignment or native ID. `registryRevision` identifies the current registry read; `currentRole`
+is the permanent role, or the registered parent for a worker. `current` means registry agreement,
+not native availability. A worker with a matching parent still reports `unavailable` with reason
+`worker-lineage-unverified` and `workerLineage: "not-checked"`; this read-only projection performs
+no native verification. The reusable `projectOwnerBinding` helper exposes the same distinction.
+`report --at` selects the stalled-work cutoff, not a historical registry view.
+
+Accounting readiness guards unassigned open work and stale or unavailable bindings on open work
+or protected questions. Binding drift on other terminal records is informational. Neither view
+rewrites assignment history or performs an ownership transfer.
+
 `ledger boundary --role ROLE --phase startup|resume|review|handoff` captures the explicitly
 selected role's supported references and local-message metadata. Codex history reads are bounded;
 Claude history remains unavailable. The command returns its accounting summary and exits with a

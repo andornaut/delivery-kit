@@ -390,7 +390,15 @@ suite("request accounting", () => {
         { type: "assign", id: item.id, assignment: { ...assignment, nativeId: rerouted } },
         "owner-unavailable",
       );
-      expect(await ledger.show(item.id)).toEqual(beforeReroute);
+      const afterReroute = await ledger.show(item.id);
+      expect(afterReroute.ownerBinding).toEqual({
+        status: "stale",
+        reason: "worker-parent-changed",
+        registryRevision: 2,
+        currentRole: { role: OWNER, harness: "codex", nativeId: rerouted },
+        workerLineage: "not-checked",
+      });
+      expect({ ...afterReroute, ownerBinding: beforeReroute.ownerBinding }).toEqual(beforeReroute);
       writeFileSync(join(ws.coordinator, "var", "registry.json"), registry);
       await ledger.apply({
         type: "cancel",
