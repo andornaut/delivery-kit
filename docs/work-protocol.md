@@ -23,6 +23,16 @@ publishes all its mutations in one immutable manifest. Exact transaction replay 
 changed payloads or stale writers fail. There is no TTL takeover. These SDK fences coordinate
 cooperating writers, not adversarial filesystem access under the same OS account.
 
+Production coordinator callers use `runtimeProtocolStore(layout, io?)`, which returns null
+without protocol configuration. Its `claim`, `transact`, `withWriter` and `putArtifact` mutations
+share the configured generation lease; `read`, `history`, `listRoles` and `readArtifact` check
+the captured generation before and after reading. The raw `ProtocolStore({ directory })` is a
+directory primitive: it cannot discover a coordinator's configuration pointer or its changes.
+
+`withWriter` checks the writer before and after its action. A post-action failure carrying
+`actionMayHaveCommitted: true` is ambiguous: reconcile the exact journal command or publication
+before retrying. It is not a rollback guarantee or permission to repeat an external effect.
+
 Committed history is the publication authority. Sparse indexes are derived views. Canonical
 artifacts contain immutable bytes, addressed by lowercase SHA-256 and byte size; readers verify
 the bytes before use. A task or temporary path alone is insufficient essential evidence.

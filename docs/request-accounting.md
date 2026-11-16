@@ -37,6 +37,11 @@ at revision zero. Reuse the exact transaction to reconcile an uncertain result: 
 command replay returns its event, while conflicting reuse or a stale new command is refused.
 The revision belongs to the whole ledger, including updates to other requests.
 
+When the work protocol is active, every ledger mutation additionally requires
+`writer: { harness, nativeId, epoch }` from the actor's current protocol claim. The writer is
+audited in the committed event; it is optional only on the unconfigured compatibility path.
+Unknown or unsupported native bindings remain unknown, not permission to invent a writer.
+
 The reusable `LedgerStore` and transaction types are exposed through
 `@andornaut/delivery-kit/build/accounting`. Its constructor accepts a `directory` and an optional
 `resolveOwner` callback. Without protocol configuration, the CLI uses
@@ -47,6 +52,11 @@ read-only worker inbox port, matching both native parent references and rechecki
 parent route. A worker verification reference supplied in JSON is insufficient. Unsupported or
 unavailable lineage is refused. A reusable caller must supply a resolver that actually
 corroborates the binding; verification performs no queue or native lifecycle operation.
+
+Production callers construct `LedgerStore` with `ledgerStorageOptions(layout, io?)`, which
+captures the directory and generation guard together. Do not resolve a directory and its fence
+separately. A post-action writer error with `actionMayHaveCommitted: true` requires reading the
+journal for the exact command before retrying; failure does not prove the mutation was absent.
 
 The CLI checks that the actor names a registered role. This is attribution, not authentication of
 the person invoking the command or independent verification of an approval reference.
@@ -154,8 +164,15 @@ fixed summaries and unknown-question metadata contain no native message body, qu
 choices. Offer presence proves input retention, not journal admission, approval or completion.
 Events remain the sole current projection; there is no separate mutable processed marker.
 
-Existing boundaries replay pending offers for their selected owners, including references no
-longer present in a later compacted snapshot. The store's `pending(events, ownerRoles?)` derives
+Without protocol configuration, existing boundaries replay pending offers for selected owners,
+including references no longer present in a later compacted snapshot. With an active protocol,
+boundaries retain safe offers but do not assume a role's writer authority: pending offers report
+`pendingIntake.reason: "protocol-writer-required"`. The responsible role explicitly admits an
+offer with `ledger reconcile --input-file FILE`, using its exact intake `commandId`, actor,
+source and command payload, the current ledger revision, and `writer` from its protocol claim.
+This reconciles accounting only, not native input or recipient handling.
+
+The store's `pending(events, ownerRoles?)` derives
 pending work from exact journal command-ID, actor, source and payload matches. Conflicting matches
 remain pending. Replayed observations preserve matching covered owner attestations instead of
 overwriting them. Replay changes local accounting only, never native queues or
