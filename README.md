@@ -459,6 +459,12 @@ holds and retention boundaries remain protected; a warning grants no retry, wake
 Before rollout to all registered roles, gate the combined feature, then verify actual installed
 help and package behaviour for that exact artifact. These commands do not activate roles.
 
+## Request accounting
+
+Track requested outcomes separately from message delivery and recipient handling. The
+[request-accounting guide](docs/request-accounting.md) describes provenance, per-target closure,
+protected questions and capture limits.
+
 ## Review route
 
 `var/route.json` (schema 2) names the scheduled review's host game and its targets by role:
