@@ -7,7 +7,6 @@ import { isRecord } from "../adapters/shared/pyjson.ts";
 import type { Layout } from "../layout.ts";
 import { messageSummary } from "../messages/store.ts";
 import type { MessageSummary } from "../messages/types.ts";
-import { resolveProtocolLayout } from "../protocol/layout.ts";
 import {
   accountingIntake,
   ledgerStorageOptions,
@@ -15,7 +14,9 @@ import {
   type ProtocolBoundaryStatus,
   protocolBoundaryStatus,
   protocolFailure,
+  protocolRole,
 } from "../protocol/runtime.ts";
+import { captureProtocolSelection } from "../protocol/selection.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { type IntakeContext, messageIntake, snapshotIntake } from "./ingress.ts";
@@ -28,6 +29,7 @@ export interface AccountingBoundary {
   readonly workProtocol?: ProtocolBoundaryStatus;
   readonly status: "available" | "unavailable";
   readonly accounting_ready: boolean;
+  readonly enrollment?: { readonly required: boolean; readonly ready: boolean };
   readonly revision?: number;
   readonly coverageState?: string;
   readonly open?: readonly string[];
@@ -84,6 +86,9 @@ function failureReason(error: unknown): string {
 export function accountingStatus(layout: Layout, roles?: readonly string[]): AccountingBoundary {
   try {
     const storage = ledgerStorageOptions(layout);
+    const selection = captureProtocolSelection(layout);
+    const managedRequired =
+      selection.management.status !== "unmanaged" && selection.management.required !== null;
     const store = new LedgerStore(storage);
     const report = store.report({
       at: new Date().toISOString(),
@@ -101,9 +106,11 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
         requiredOwner: offer.actor,
       })),
       reason:
-        offers.length > 0 && resolveProtocolLayout(layout) !== null
-          ? "protocol-writer-required"
-          : null,
+        offers.length > 0 && selection.management.status === "pending"
+          ? "protocol-enrollment-pending"
+          : offers.length > 0 && selection.protocol !== null
+            ? "protocol-writer-required"
+            : null,
       status: "available" as const,
     };
     const selected = new Set(owners);
@@ -143,7 +150,17 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
         : coverage.length === 0
           ? "unknown"
           : "declared-complete";
-    const workProtocol = protocolBoundaryStatus(layout, (id) => store.read(id), owners);
+    const requests = new Map(report.requests.map((request) => [request.id, request]));
+    const workProtocol = protocolBoundaryStatus(layout, (id) => requests.get(id), owners);
+    const enrollmentReady =
+      managedRequired &&
+      selection.management.status === "active" &&
+      workProtocol.status !== "unavailable" &&
+      owners.every((owner) =>
+        workProtocol.enrollment?.participants.some(
+          (participant) => participant.role === protocolRole(layout, owner) && participant.adopted,
+        ),
+      );
     storage.checkRead?.();
     return {
       accounting_ready:
@@ -153,9 +170,11 @@ export function accountingStatus(layout: Layout, roles?: readonly string[]): Acc
         protectedQuestions.length === 0 &&
         unassigned.length === 0 &&
         !invalidBinding &&
-        pendingIntake.offers.length === 0,
+        pendingIntake.offers.length === 0 &&
+        (!managedRequired || enrollmentReady),
       assignments,
       coverageState,
+      enrollment: { ready: enrollmentReady, required: managedRequired },
       missingOwners,
       observedGaps: offers.flatMap((offer) =>
         offer.command.coverage.flatMap((entry) => entry.gaps),
@@ -267,7 +286,7 @@ export async function captureAccounting(
   try {
     const registry = readRegistry(layout);
     const store = new LedgerStore({
-      ...ledgerStorageOptions(layout),
+      ...ledgerStorageOptions(layout, undefined, { nonBlocking: true }),
       nonBlocking: true,
     });
     const input = accountingIntake(layout);
@@ -346,7 +365,7 @@ export async function captureAccounting(
         });
       }
     }
-    if (resolveProtocolLayout(layout) !== null) {
+    if (captureProtocolSelection(layout).management.status !== "unmanaged") {
       // Only the responsible fenced writer admits unknown offers to the request journal.
       // Automatic capture retains them without claiming the owner's epoch or native identity.
       return accountingStatus(layout, roles);

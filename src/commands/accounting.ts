@@ -421,7 +421,9 @@ export const ledgerBoundary: Handler = async (io, root, args) => {
     const snapshot = await boundarySnapshot(io, layout, role, phase);
     const result = await captureAccounting(layout, snapshot, phase, "snapshot", [role]);
     io.out(`${JSON.stringify(result)}\n`);
-    return result.accounting_ready ? EXIT_OK : EXIT_INVALID;
+    return (result.enrollment?.required ? result.enrollment.ready : result.accounting_ready)
+      ? EXIT_OK
+      : EXIT_INVALID;
   } catch {
     return failure(io, "ledger-operation-failed");
   }

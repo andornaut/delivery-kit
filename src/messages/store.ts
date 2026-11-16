@@ -12,13 +12,13 @@ import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../durable.t
 import type { Layout } from "../layout.ts";
 import { holdLockAsync, type LockHandle } from "../lock.ts";
 import { protocolRole, ProtocolStore } from "../protocol/core.ts";
-import {
-  acquireProtocolLayout,
-  checkProtocolLayout,
-  type ProtocolLayout,
-  resolveProtocolLayout,
-} from "../protocol/layout.ts";
+import { acquireProtocolLayout, type ProtocolLayout } from "../protocol/layout.ts";
 import { ProtocolMessages } from "../protocol/messages.ts";
+import {
+  captureProtocolSelection,
+  checkProtocolSelection,
+  type ProtocolSelection,
+} from "../protocol/selection.ts";
 import { ID_PATTERN } from "../validate.ts";
 import { messageEnvelope } from "./envelope.ts";
 import { MessageError } from "./errors.ts";
@@ -271,12 +271,14 @@ export class MessageStore {
   private readonly directory: string;
   private readonly layout: Layout | null;
   private readonly protocol: ProtocolLayout | null;
+  private readonly selection: ProtocolSelection | null;
   private readonly canonicalMessages: ProtocolMessages | null;
 
   constructor(context: MessageContext) {
     this.context = context;
     this.layout = messageLayout(context.layout);
-    this.protocol = this.layout === null ? null : resolveProtocolLayout(this.layout);
+    this.selection = this.layout === null ? null : captureProtocolSelection(this.layout);
+    this.protocol = this.selection?.protocol ?? null;
     this.directory = this.protocol?.messagesDir ?? join(context.layout.reviewDir, "messages");
     this.canonicalMessages =
       this.protocol === null
@@ -294,7 +296,7 @@ export class MessageStore {
 
   private path(id: string): string {
     if (this.layout !== null) {
-      checkProtocolLayout(this.layout, this.protocol);
+      checkProtocolSelection(this.layout, this.selection!);
     }
     requireThat(typeof id === "string" && ID.test(id), "invalid-id");
     return join(this.directory, `${hash(id)}.json`);
@@ -305,7 +307,11 @@ export class MessageStore {
     const generation =
       this.layout === null
         ? null
-        : await acquireProtocolLayout(this.layout, this.protocol, { nonBlocking: true });
+        : await acquireProtocolLayout(this.layout, this.protocol, {
+            allowPending: this.selection!.management.status === "pending",
+            expectedManagement: this.selection!.management,
+            nonBlocking: true,
+          });
     try {
       mkdirSync(this.directory, { mode: 0o700, recursive: true });
       chmodSync(this.directory, 0o700);
@@ -360,7 +366,7 @@ export class MessageStore {
 
   private originals(): ProtocolMessages | null {
     if (this.layout !== null) {
-      checkProtocolLayout(this.layout, this.protocol);
+      checkProtocolSelection(this.layout, this.selection!);
     }
     return this.canonicalMessages;
   }
@@ -398,7 +404,7 @@ export class MessageStore {
 
   private readRecords(): readonly MessageRecord[] {
     if (this.layout !== null) {
-      checkProtocolLayout(this.layout, this.protocol);
+      checkProtocolSelection(this.layout, this.selection!);
     }
     let names: string[];
     try {

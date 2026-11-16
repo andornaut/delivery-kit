@@ -23,6 +23,7 @@ export const MESSAGE_DISPATCH_OPTIONS = { id: { type: "string" } } as const;
 export const MESSAGE_STATUS_OPTIONS = {
   id: { type: "string" },
   "include-body": { type: "boolean" },
+  "include-retention": { type: "boolean" },
   recipient: { type: "string" },
 } as const;
 
@@ -141,6 +142,7 @@ export const messageStatus: Handler = (io, root, args) => {
     selection = {
       ...(values.id === undefined ? {} : { id: required(values, "id") }),
       includeBody: values["include-body"] === true,
+      includeRetention: values["include-retention"] === true,
       ...(values.recipient === undefined ? {} : { recipient: required(values, "recipient") }),
     };
   } catch {

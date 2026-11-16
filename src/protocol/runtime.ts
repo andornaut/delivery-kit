@@ -16,6 +16,8 @@ import { LockBusy } from "../lock.ts";
 import { resolveConversation, resolveHarness, resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { ProtocolError, ProtocolStore } from "./core.ts";
+import { type EnrollmentReport, EnrollmentStore } from "./enrollment.ts";
+import { resolveEnrollmentScope } from "./enrollment-runtime.ts";
 import {
   checkProtocolLayout,
   type ProtocolLayout,
@@ -23,6 +25,7 @@ import {
   resolveProtocolLayout,
   withProtocolLayout,
 } from "./layout.ts";
+import { captureProtocolSelection, checkProtocolSelection } from "./selection.ts";
 import type {
   ProtocolClaim,
   ProtocolRoleListOptions,
@@ -37,6 +40,8 @@ export interface ProtocolBoundaryStatus {
   readonly work?: WorkReport;
   readonly unattestedRoles?: readonly string[];
   readonly reason?: string;
+  readonly managedRequired?: boolean;
+  readonly enrollment?: EnrollmentReport;
 }
 
 /** This discovery projection never changes delivery readiness or grants work authority. */
@@ -46,7 +51,16 @@ export function protocolBoundaryStatus(
   roles?: readonly string[],
 ): ProtocolBoundaryStatus {
   try {
-    const expected = resolveProtocolLayout(layout);
+    const selection = captureProtocolSelection(layout);
+    const expected = selection.protocol;
+    if (selection.management.status === "pending") {
+      return {
+        generation: selection.management.generation,
+        managedRequired: true,
+        reason: "protocol-enrollment-pending",
+        status: "partial",
+      };
+    }
     if (expected === null) {
       return { reason: "explicit-migration-required", status: "not-configured" };
     }
@@ -56,9 +70,22 @@ export function protocolBoundaryStatus(
     );
     const unattestedRoles = selected.filter((role) => store.read(role).epoch === 0).sort();
     const work = new WorkStore({ protocol: store, readRequest }).report({ roles: selected });
+    const enrollment =
+      expected.required === undefined
+        ? undefined
+        : new EnrollmentStore({ protocol: store }).report(
+            resolveEnrollmentScope(layout, store, {
+              generation: expected.generation,
+              phase: "active",
+              stateRoot: expected.stateRoot,
+              workspaceId: expected.workspaceId,
+            }),
+          );
     checkProtocolLayout(layout, expected);
     return {
       generation: expected.generation,
+      managedRequired: expected.required !== undefined,
+      ...(enrollment === undefined ? {} : { enrollment }),
       status: unattestedRoles.length > 0 && work.status === "available" ? "partial" : work.status,
       unattestedRoles,
       work,
@@ -84,6 +111,7 @@ const PROTOCOL_FAILURES = new Set([
   "parent-fenced",
   "protocol-busy",
   "protocol-fenced",
+  "protocol-enrollment-pending",
   "protocol-generation-conflict",
   "protocol-root-excluded",
   "protocol-unavailable",
@@ -103,7 +131,9 @@ export function protocolFailure(error: unknown): string | null {
 }
 
 export function accountingDirectory(layout: Layout): string {
-  return resolveProtocolLayout(layout)?.accountingDir ?? join(layout.varDir, "accounting");
+  return (
+    captureProtocolSelection(layout).protocol?.accountingDir ?? join(layout.varDir, "accounting")
+  );
 }
 
 export function accountingIntake(layout: Layout): IntakeStore {
@@ -112,7 +142,8 @@ export function accountingIntake(layout: Layout): IntakeStore {
 
 /** Capture unclassified references even when no role writer is available for semantic intake. */
 export async function offerAccounting(layout: Layout, input: IntakeInput): Promise<IntakeOffer> {
-  const expected = resolveProtocolLayout(layout);
+  const selection = captureProtocolSelection(layout);
+  const expected = selection.protocol;
   try {
     return await withProtocolLayout(
       layout,
@@ -121,7 +152,11 @@ export async function offerAccounting(layout: Layout, input: IntakeInput): Promi
         new IntakeStore({
           directory: join(expected?.accountingDir ?? join(layout.varDir, "accounting"), "intake"),
         }).offer(input),
-      { nonBlocking: true },
+      {
+        allowPending: selection.management.status === "pending",
+        expectedManagement: selection.management,
+        nonBlocking: true,
+      },
     );
   } catch (error) {
     if (error instanceof LockBusy) {
@@ -277,32 +312,52 @@ export function runtimeProtocolStore(layout: Layout, io?: Pick<Io, "env">): Prot
 export function ledgerStorageOptions(
   layout: Layout,
   io?: Pick<Io, "env">,
+  options: { readonly nonBlocking?: boolean } = {},
 ): Pick<LedgerStoreOptions, "directory" | "withWriter" | "checkRead"> {
-  const expected = resolveProtocolLayout(layout);
+  const selection = captureProtocolSelection(layout);
+  const expected = selection.protocol;
   return {
-    checkRead: () => checkProtocolLayout(layout, expected),
+    checkRead: () => checkProtocolSelection(layout, selection),
     directory: expected?.accountingDir ?? join(layout.varDir, "accounting"),
-    withWriter: (transaction: LedgerTransaction, write: () => Promise<LedgerEvent>) =>
-      withProtocolLayout(layout, expected, async () => {
-        if (expected === null) {
-          return write();
+    withWriter: async (transaction: LedgerTransaction, write: () => Promise<LedgerEvent>) => {
+      try {
+        checkProtocolSelection(layout, selection);
+        if (selection.management.status === "pending") {
+          throw new ProtocolLayoutError("protocol-enrollment-pending");
         }
-        const writer = transaction.writer;
-        if (writer === undefined) {
-          throw new ProtocolRuntimeError();
-        }
-        const store = new ProtocolStore({
-          directory: expected.stateRoot,
-          resolveBinding: (role, binding) => resolveProtocolBinding(layout, io, role, binding),
-        });
-        return store.withWriter(
-          {
-            binding: { harness: writer.harness, nativeId: writer.nativeId },
-            epoch: writer.epoch,
-            role: protocolRole(layout, transaction.actor),
+        return await withProtocolLayout(
+          layout,
+          expected,
+          async () => {
+            if (expected === null) {
+              return write();
+            }
+            const writer = transaction.writer;
+            if (writer === undefined) {
+              throw new ProtocolRuntimeError();
+            }
+            const store = new ProtocolStore({
+              directory: expected.stateRoot,
+              nonBlocking: options.nonBlocking === true,
+              resolveBinding: (role, binding) => resolveProtocolBinding(layout, io, role, binding),
+            });
+            return store.withWriter(
+              {
+                binding: { harness: writer.harness, nativeId: writer.nativeId },
+                epoch: writer.epoch,
+                role: protocolRole(layout, transaction.actor),
+              },
+              write,
+            );
           },
-          write,
+          options,
         );
-      }),
+      } catch (error) {
+        if (error instanceof LockBusy) {
+          throw new ProtocolError("protocol-busy");
+        }
+        throw error;
+      }
+    },
   };
 }

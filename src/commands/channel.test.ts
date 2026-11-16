@@ -10,6 +10,7 @@ import { messageChannelStateDir } from "../messages/paths.ts";
 import * as messageService from "../messages/service.ts";
 import { messageExpectation, MessageStore } from "../messages/store.ts";
 import { claudeMessageTransport } from "../messages/transports.ts";
+import { declareProtocolWorkspace } from "../protocol/layout.ts";
 import { updateRegistry } from "../registry/store.ts";
 import { activeRoute, claudeFixture, RECIPIENT, SLOT } from "../review/fixtures.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
@@ -106,6 +107,34 @@ describe("claude channel options", () => {
 });
 
 describe("Claude channel generic feeds", () => {
+  it("delivers an existing scheduled review spool while required enrollment is pending", async () => {
+    const fixture = claudeFixture();
+    await declareProtocolWorkspace(fixture.layout, {
+      workspaceId: "pending-review-fixture",
+      authorityRef: "fixture-managed-authority",
+      expectedGeneration: 0,
+    });
+    expect(
+      spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT).status,
+    ).toBe("sending");
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      ["--conversation", RECIPIENT],
+    );
+    try {
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(lines).toHaveLength(1));
+    } finally {
+      input.end();
+      expect(await done).toBe(EXIT_OK);
+    }
+    expect(JSON.parse(lines[0]!).params.meta.kind).toBe("review");
+  });
+
   it("preserves game feeds and discovers a generic inbox created after startup", async () => {
     const fixture = claudeFixture();
     const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);

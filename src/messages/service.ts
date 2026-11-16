@@ -34,6 +34,7 @@ import type {
   MessageEnvelope,
   MessageOwner,
   MessageRecord,
+  MessageRetention,
   MessageStatus,
 } from "./types.ts";
 
@@ -219,6 +220,7 @@ export interface MessageServiceContext {
 
 export interface MessageView extends MessageStatus {
   readonly body?: string;
+  readonly retention?: MessageRetention | null;
 }
 
 /** Stable local inbox and explicit guarded dispatch. Construction never probes a provider. */
@@ -243,12 +245,16 @@ export class MessageService {
     return record;
   }
 
-  view(record: MessageRecord, includeBody = false): MessageView {
+  view(record: MessageRecord, includeBody = false, includeRetention = false): MessageView {
     const status = this.store.status(record.envelope.id);
     if (status === undefined || status.revision !== record.revision) {
       throw new MessageError("binding-conflict");
     }
-    return { ...status, ...(includeBody ? { body: record.envelope.body } : {}) };
+    return {
+      ...status,
+      ...(includeBody ? { body: record.envelope.body } : {}),
+      ...(includeRetention ? { retention: structuredClone(record.retention) } : {}),
+    };
   }
 
   async send(input: MessageSendInput): Promise<MessageRecord> {
@@ -307,15 +313,20 @@ export class MessageService {
     readonly id?: string;
     readonly recipient?: string;
     readonly includeBody?: boolean;
+    readonly includeRetention?: boolean;
   }): readonly MessageView[] {
     if ((selection.id === undefined) === (selection.recipient === undefined)) {
       throw new MessageError("invalid-selection");
     }
     if (selection.id !== undefined) {
-      return [this.view(this.record(selection.id), selection.includeBody)];
+      return [
+        this.view(this.record(selection.id), selection.includeBody, selection.includeRetention),
+      ];
     }
     const role = resolveRole(readRegistry(this.context.layout), selection.recipient!);
-    return this.store.inbox(role).map((record) => this.view(record, selection.includeBody));
+    return this.store
+      .inbox(role)
+      .map((record) => this.view(record, selection.includeBody, selection.includeRetention));
   }
 
   private receiptPath(source: MessageAttemptSource): string {

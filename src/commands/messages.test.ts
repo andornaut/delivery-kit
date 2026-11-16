@@ -221,6 +221,13 @@ describe("common message command handlers", () => {
       ownerRole: ROLE,
       nextBoundary: ":50 review",
     });
+    const privateStatus = await run(test, messageStatus, "--id", ID, "--include-retention");
+    expect(JSON.parse(privateStatus.out)[0]).toMatchObject({
+      retention: { reason: "waiting", ownerRole: ROLE, nextBoundary: ":50 review" },
+    });
+    expect(JSON.parse(privateStatus.out)[0]).not.toHaveProperty("body");
+    const metadata = await run(test, messageStatus, "--id", ID);
+    expect(JSON.parse(metadata.out)[0]).not.toHaveProperty("retention");
     const stale = await run(
       test,
       messageReconcile,
