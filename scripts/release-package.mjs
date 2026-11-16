@@ -11,7 +11,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const [staging, output] = process.argv.slice(2).map((path) => resolve(path));
 if (staging === undefined || output === undefined) {
@@ -29,7 +29,8 @@ if (!/^[0-9a-f]{40}\n$/.test(commit)) {
 
 mkdirSync(staging);
 cpSync("dist", join(staging, "dist"), { recursive: true });
-for (const file of ["README.md", "LICENSE", "SOURCE_COMMIT"]) {
+for (const file of ["README.md", "LICENSE", "SOURCE_COMMIT", "docs/request-accounting.md"]) {
+  mkdirSync(dirname(join(staging, file)), { recursive: true });
   copyFileSync(file, join(staging, file));
 }
 delete manifest.devDependencies;
