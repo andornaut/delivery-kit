@@ -17,6 +17,7 @@ import type {
   LedgerReport,
   LedgerReportOptions,
   LedgerRequest,
+  LedgerRequestInput,
   LedgerSource,
   LedgerStoreOptions,
   LedgerTransaction,
@@ -231,6 +232,30 @@ function validateCommand(command: unknown): asserts command is LedgerCommand {
   demand(command !== null && typeof command === "object", "invalid-transaction");
   const c = command as Record<string, unknown>;
   switch (c.type) {
+    case "capture": {
+      demand(object(c, ["type", "requests", "coverage"]), "invalid-capture");
+      demand(
+        list(c.requests, (value) => {
+          validateCommand({ request: value, type: "register" });
+          const request = value as LedgerRequestInput;
+          return (
+            request.kind === "unknown" &&
+            !request.reviewed &&
+            request.assignment === null &&
+            request.parentId === null &&
+            request.dependencies.length === 0 &&
+            request.targets.length === 0 &&
+            (request.question === null ||
+              (request.question.status === "unknown" && request.question.resolutionRef === null))
+          );
+        }) &&
+          unique(c.requests.map((value) => (value as LedgerRequestInput).id)) &&
+          list(c.coverage, coverage) &&
+          unique(c.coverage.map((value) => (value as LedgerCoverage).id)),
+        "invalid-capture",
+      );
+      return;
+    }
     case "register": {
       demand(object(c, ["type", "request"]), "invalid-request");
       const r = c.request;
@@ -610,6 +635,23 @@ function closeEvidence(request: LedgerRequest, selected: readonly string[]): voi
 /** Pure replay performs the same validation as an admitted transaction, without native reads. */
 function project(state: Replay, event: LedgerEvent): void {
   const c = event.command;
+  if (c.type === "capture") {
+    for (const request of c.requests) {
+      const existing = state.requests.get(request.id);
+      if (existing !== undefined) {
+        demand(
+          existing.createdBy === event.actor && isDeepStrictEqual(existing.source, request.source),
+          "source-binding-mismatch",
+        );
+      } else {
+        project(state, { ...event, command: { request, type: "register" } });
+      }
+    }
+    for (const coverage of c.coverage) {
+      project(state, { ...event, command: { coverage, type: "coverage" } });
+    }
+    return;
+  }
   if (c.type === "coverage") {
     demand(event.actor === c.coverage.ownerRole, "actor-not-owner");
     state.coverage.set(c.coverage.id, structuredClone(c.coverage));
@@ -932,6 +974,12 @@ export class LedgerStore {
         if (id === undefined) {
           return true;
         }
+        if (c.type === "capture") {
+          return (
+            c.requests.some((request) => request.id === id) ||
+            c.coverage.some((coverage) => coverage.id === id)
+          );
+        }
         if (c.type === "register") {
           return c.request.id === id || c.request.parentId === id;
         }
@@ -1065,7 +1113,11 @@ export class LedgerStore {
         "stale-time",
       );
       const command = transaction.command;
-      if (command.type !== "register" && command.type !== "coverage") {
+      if (
+        command.type !== "register" &&
+        command.type !== "coverage" &&
+        command.type !== "capture"
+      ) {
         owned(get(state, command.id), transaction.actor);
       }
       const bindings: LedgerAssignment[] = [];
@@ -1079,7 +1131,7 @@ export class LedgerStore {
             bindings.push(parent);
           }
         }
-      } else if (command.type !== "coverage") {
+      } else if (command.type !== "coverage" && command.type !== "capture") {
         const owner = get(state, command.id).assignment;
         if (owner !== null) {
           bindings.push(owner);

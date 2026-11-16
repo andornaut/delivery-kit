@@ -120,6 +120,11 @@ export interface LedgerCoverage {
 }
 
 export type LedgerCommand =
+  | {
+      readonly type: "capture";
+      readonly requests: readonly LedgerRequestInput[];
+      readonly coverage: readonly LedgerCoverage[];
+    }
   | { readonly type: "register"; readonly request: LedgerRequestInput }
   | {
       readonly type: "classify";

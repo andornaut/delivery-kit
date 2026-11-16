@@ -187,6 +187,62 @@ describe("request accounting journal", () => {
     });
     expect(readFileSync(join(f.directory, "events", "000000000001.json"))).toEqual(bytes);
     expect(f.store.history("candidate")).toHaveLength(4);
+    const nativeInput = { ...input, id: "native-observation" };
+    const capture: LedgerCommand = {
+      coverage: [
+        {
+          gaps: [
+            {
+              from: null,
+              reason: "History starts after an unknown interval",
+              through: "observed-item",
+            },
+          ],
+          id: "native-range",
+          nextBoundary: "review",
+          ownerRole: "delivery-kit",
+          range: { from: null, through: "observed-item" },
+          source: UNKNOWN,
+          state: "partial",
+        },
+      ],
+      requests: [input, nativeInput],
+      type: "capture",
+    };
+    const prior = f.store.read("candidate");
+    const beforeCapture = f.store.read().revision;
+    const captured = f.transaction(capture);
+    await f.store.apply(captured);
+    expect(f.store.read().revision).toBe(beforeCapture + 1);
+    expect(f.store.read("candidate")).toEqual(prior);
+    expect(f.store.read("native-observation")).toMatchObject({
+      kind: "unknown",
+      reviewed: false,
+      source: UNKNOWN,
+    });
+    expect(f.store.history("native-observation").map((event) => event.command.type)).toEqual([
+      "capture",
+    ]);
+    expect((await new LedgerStore(f.options).apply(captured)).revision).toBe(beforeCapture + 1);
+    const beforeInvalid = f.store.read();
+    await expect(
+      f.send({
+        ...capture,
+        requests: [
+          { ...nativeInput, id: "must-rollback" },
+          { ...input, source: SOURCE },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "source-binding-mismatch" });
+    expect(f.store.read()).toEqual(beforeInvalid);
+    await expect(
+      f.send({
+        ...capture,
+        coverage: [{ ...capture.coverage[0]!, ownerRole: "game-coordinator" }],
+        requests: [{ ...nativeInput, id: "owner-rollback" }],
+      }),
+    ).rejects.toMatchObject({ code: "actor-not-owner" });
+    expect(f.store.read()).toEqual(beforeInvalid);
   });
 
   it("serializes competing writers and recovers both sides of the atomic commit boundary by replay", async () => {
