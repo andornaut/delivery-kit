@@ -667,6 +667,17 @@ function project(state: Replay, event: LedgerEvent): void {
       }
     }
     for (const coverage of c.coverage) {
+      demand(event.actor === coverage.ownerRole, "actor-not-owner");
+      const current = state.coverage.get(coverage.id);
+      if (
+        current?.state === "covered" &&
+        current.gaps.length === 0 &&
+        attested(current.source) &&
+        current.ownerRole === coverage.ownerRole &&
+        isDeepStrictEqual(current.range, coverage.range)
+      ) {
+        continue;
+      }
       project(state, { ...event, command: { coverage, type: "coverage" } });
     }
     return;

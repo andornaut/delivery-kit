@@ -201,7 +201,7 @@ describe("request accounting journal", () => {
           id: "native-range",
           nextBoundary: "review",
           ownerRole: "delivery-kit",
-          range: { from: null, through: "observed-item" },
+          range: { from: "observed-start", through: "observed-item" },
           source: UNKNOWN,
           state: "partial",
         },
@@ -224,6 +224,24 @@ describe("request accounting journal", () => {
       "capture",
     ]);
     expect((await new LedgerStore(f.options).apply(captured)).revision).toBe(beforeCapture + 1);
+    const covered = {
+      ...capture.coverage[0]!,
+      gaps: [],
+      source: SOURCE,
+      state: "covered" as const,
+    };
+    await f.send({ coverage: covered, type: "coverage" });
+    await f.send(capture);
+    expect(new LedgerStore(f.options).coverage()).toEqual([covered]);
+    const fresh = {
+      ...capture.coverage[0]!,
+      id: "new-native-range",
+      range: { from: "later-start", through: "later-item" },
+    };
+    await f.send({ ...capture, coverage: [fresh] });
+    expect(f.store.coverage()).toEqual([covered, fresh]);
+    await f.send({ coverage: capture.coverage[0]!, type: "coverage" });
+    expect(f.store.coverage()[0]?.state).toBe("partial");
     const beforeInvalid = f.store.read();
     await expect(
       f.send({
