@@ -1,6 +1,7 @@
 // Readiness probes send nothing and change no registry or activation state.
 import { parseArgs } from "node:util";
 
+import { accountingStatus } from "../accounting/boundary.ts";
 import { pyJsonDumps } from "../adapters/shared/pyjson.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { type Layout, loadLayout } from "../layout.ts";
@@ -36,10 +37,11 @@ async function readiness(
     return EXIT_INVALID;
   }
   if (report.harness === "mixed") {
-    io.out(`${pyJsonDumps(report)}\n`);
+    io.out(`${pyJsonDumps({ ...report, accounting: accountingStatus(layout) })}\n`);
     return report.ready ? EXIT_OK : EXIT_INVALID;
   }
   const ordered = Object.fromEntries([
+    ["accounting", accountingStatus(layout)],
     ["harness", report.harness],
     [
       "adapter",

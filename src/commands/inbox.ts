@@ -2,6 +2,7 @@
 // Codex worker with one registered parent. Registered recipients default to reports.recipient.
 import { parseArgs } from "node:util";
 
+import { captureAccounting } from "../accounting/boundary.ts";
 import { listingOrNull } from "../adapters/claude/agents.ts";
 import { unblockDir } from "../adapters/claude/spool.ts";
 import { codexAdapter } from "../adapters/codex/index.ts";
@@ -240,6 +241,8 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
         );
         captured.worker_binding = workerSnapshotBinding(binding);
         persist(snapshotPath(unblock, captured.snapshot_id as string), captured);
+        captured.accounting = await captureAccounting(context.layout, captured);
+        persist(snapshotPath(unblock, captured.snapshot_id as string), captured);
         return captured;
       }),
     );
@@ -276,7 +279,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
     );
     const record = await locked(unblock, () =>
       captureMixed(
-        { busDir: context.game.busDir, unblock },
+        { accountingLayout: context.layout, busDir: context.game.busDir, unblock },
         adapters,
         context.harnesses,
         [recipient],
@@ -318,9 +321,18 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
       throw new Error("parent outside active route");
     }
     const listing = listingOrNull(io.env);
-    const record = locked(unblock, () =>
-      captureClaude({ busDir: context.game.busDir, unblock }, listing, route, recipient, parents),
-    );
+    const record = await locked(unblock, async () => {
+      const captured = captureClaude(
+        { accountingLayout: context.layout, busDir: context.game.busDir, unblock },
+        listing,
+        route,
+        recipient,
+        parents,
+      );
+      captured.accounting = await captureAccounting(context.layout, captured);
+      persist(snapshotPath(unblock, String(captured.snapshot_id)), captured);
+      return captured;
+    });
     const id = record.snapshot_id as string;
     const queue = (record.queues as Record<string, { id: string }[]>)[recipient] ?? [];
     const complete = Object.keys(record.errors as Record<string, unknown>).length === 0;
@@ -345,10 +357,16 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
   }
   const adapter = adapterFor(io.env, context.layout, context.game, context.harness);
   const record = await locked(unblock, () =>
-    captureCodex({ busDir: context.game.busDir, unblock }, adapter, [recipient], parents, {
-      historyCursor: historyCursor ?? null,
-      ...(context.members === undefined ? {} : { routeMembers: context.members }),
-    }),
+    captureCodex(
+      { accountingLayout: context.layout, busDir: context.game.busDir, unblock },
+      adapter,
+      [recipient],
+      parents,
+      {
+        historyCursor: historyCursor ?? null,
+        ...(context.members === undefined ? {} : { routeMembers: context.members }),
+      },
+    ),
   );
   const id = record.snapshot_id as string;
   const errors = record.errors as Record<string, unknown>;

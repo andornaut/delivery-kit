@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
 
+import { captureAccounting } from "../accounting/boundary.ts";
 import { recipientReady } from "../adapters/claude/agents.ts";
 import { clearanceUnchanged } from "../adapters/codex/guard.ts";
 import { connectControl, type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
@@ -274,7 +275,7 @@ export class MessageService {
       toRole = resolveRole(registry, input.recipient);
     }
     const prior = this.store.read(input.id);
-    return this.store.enqueue({
+    const record = await this.store.enqueue({
       body: input.body,
       created: prior?.envelope.created ?? this.context.now?.() ?? new Date().toISOString(),
       fromRole: input.fromRole,
@@ -284,6 +285,17 @@ export class MessageService {
       schema: 1,
       toRole,
     });
+    const accounting = await captureAccounting(
+      this.context.layout,
+      { message_id: record.envelope.id },
+      "review",
+      "message",
+    );
+    if (accounting.status !== "available") {
+      // The original is retained and the same message ID can safely retry local accounting.
+      throw new MessageError("accounting-unavailable");
+    }
+    return record;
   }
 
   status(selection: {

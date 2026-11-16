@@ -3,6 +3,13 @@ import { isRecord, unicodeDumps } from "./pyjson.ts";
 
 export const UNBLOCK_INSTRUCTIONS =
   "Review recent Art, Gameplay and Tech activity alongside the backlog. " +
+  "Reconcile the durable request ledger at this review boundary, including untriaged source " +
+  "references, assigned work, required targets, criteria, dependencies and coverage gaps. " +
+  "Request completion is separate from message handling, agent idle state and publication. " +
+  "Preserve unknown source ranges and native question references; ask the responsible owner " +
+  "to reconcile them without inventing provenance or repeating an already answered decision. " +
+  "A ledger classification or status never grants approval, clears a native question or " +
+  "changes delivery controls. Required consumer targets remain open until their evidence exists. " +
   "Resolve reciprocal waits with the smallest owner question. " +
   "At every caller-configured scheduled review, inventory ALL registered game, kit and " +
   "game-coordinator recipients and ready worker handoffs, including recipients outside the " +

@@ -4,6 +4,7 @@
 // and the slot receipt; their keys are persisted game state.
 import { join } from "node:path";
 
+import { accountingReview } from "../accounting/boundary.ts";
 import type { RpcClient } from "../adapters/codex/rpc.ts";
 import {
   CLEARANCE_MISSING,
@@ -304,6 +305,7 @@ export function questionBrief(notices: readonly QuestionNotice[]): [Json[], Json
 }
 
 export interface Brief {
+  readonly accounting?: unknown;
   readonly workerFailures: readonly unknown[];
   readonly questions: readonly Json[];
   readonly questionDiagnostics: readonly Json[];
@@ -351,7 +353,7 @@ export function reminder(
   return (
     `Scheduled review, slot ${slot}. ${UNBLOCK_INSTRUCTIONS}\n` +
     `Full local inventory: ${snapshotFile}\n${inventory}${workerReview}${questionReview}` +
-    `${diagnosticReview}${messages}`
+    `${diagnosticReview}${messages}${accountingReview(brief.accounting)}`
   );
 }
 
@@ -437,6 +439,7 @@ export async function reconcileSlot(
   state.question_notice_keys = noticeKeys;
   const qDiagnostics = questionDiagnostics(snapshot, snapshotFile);
   const text = reminder(slot, queues, snapshotFile, {
+    accounting: snapshot.accounting,
     messageHealth: snapshot.message_health,
     messageSummary: snapshot.message_summary,
     questionDiagnostics: qDiagnostics,

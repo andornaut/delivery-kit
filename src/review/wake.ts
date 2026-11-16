@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
+import { accountingReview, captureAccounting } from "../accounting/boundary.ts";
 import { claudeAdapter } from "../adapters/claude/index.ts";
 import { spoolReviewBrief, unblockDir } from "../adapters/claude/spool.ts";
 import { collectAll, unavailableCollected } from "../adapters/codex/collect.ts";
@@ -162,7 +163,7 @@ function snapshotAdapter(client: RpcClient | null, deadline: number): HarnessAda
 }
 
 interface Wake {
-  readonly layout: Pick<Layout, "reviewDir">;
+  readonly layout: Layout;
   readonly claude: HarnessAdapter;
   readonly harnesses: Readonly<Record<string, Harness>>;
   readonly unblock: string;
@@ -182,7 +183,12 @@ function capture(wake: Wake, client: RpcClient | null, deadline: number): Promis
   return locked(wake.unblock, async () => {
     const summary = captureMessageSummary(wake.layout);
     const snapshot = await captureMixed(
-      { busDir: wake.busDir, messageSummary: summary, unblock: wake.unblock },
+      {
+        accountingLayout: wake.layout,
+        busDir: wake.busDir,
+        messageSummary: summary,
+        unblock: wake.unblock,
+      },
       { claude: wake.claude, codex: snapshotAdapter(client, deadline) },
       wake.harnesses,
       recipients,
@@ -390,7 +396,7 @@ export async function deliverScheduledWake(
     }
     const unblock = unblockDir(game.busDir);
     const summary = captureMessageSummary(layout);
-    const snapshot = await locked(unblock, () => {
+    const snapshot = await locked(unblock, async () => {
       const captured = captureClaude(
         { busDir: game.busDir, messageSummary: summary, slot, unblock },
         null,
@@ -398,6 +404,7 @@ export async function deliverScheduledWake(
         scope.recipient,
         unique,
       );
+      captured.accounting = await captureAccounting(layout, captured);
       captured.message_health = recordMessageHealth({ unblock }, scope.recipient, slot, summary);
       persist(snapshotPath(unblock, String(captured.snapshot_id)), captured);
       return captured;
@@ -405,10 +412,9 @@ export async function deliverScheduledWake(
     const snapshotFile = snapshotPath(unblock, String(snapshot.snapshot_id));
     const diagnostics = [
       {
-        detail: messageReview(
-          { health: snapshot.message_health, snapshotPath: snapshotFile },
-          summary,
-        ),
+        detail:
+          messageReview({ health: snapshot.message_health, snapshotPath: snapshotFile }, summary) +
+          accountingReview(snapshot.accounting),
         kind: "durable_messages",
         snapshot_path: snapshotFile,
         status: summary.status,
