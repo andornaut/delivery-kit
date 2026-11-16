@@ -34,6 +34,7 @@ const CORE_ERRORS = new Set([
   "cancellation-scope-mismatch",
   "evidence-exists",
   "invalid-dependency",
+  "invalid-capture",
   "invalid-directory",
   "invalid-report",
   "reopen-dependent-first",
