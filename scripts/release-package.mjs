@@ -29,7 +29,13 @@ if (!/^[0-9a-f]{40}\n$/.test(commit)) {
 
 mkdirSync(staging);
 cpSync("dist", join(staging, "dist"), { recursive: true });
-for (const file of ["README.md", "LICENSE", "SOURCE_COMMIT", "docs/request-accounting.md"]) {
+for (const file of [
+  "README.md",
+  "LICENSE",
+  "SOURCE_COMMIT",
+  "docs/request-accounting.md",
+  "docs/work-protocol.md",
+]) {
   mkdirSync(dirname(join(staging, file)), { recursive: true });
   copyFileSync(file, join(staging, file));
 }

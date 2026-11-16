@@ -16,7 +16,16 @@ import {
   MESSAGE_SEND_OPTIONS,
   MESSAGE_STATUS_OPTIONS,
 } from "./messages.ts";
-
+import {
+  PROTOCOL_ARTIFACT_OPTIONS,
+  PROTOCOL_BOUNDARY_OPTIONS,
+  PROTOCOL_INBOX_OPTIONS,
+  PROTOCOL_INPUT_OPTIONS,
+  PROTOCOL_INTAKE_OPTIONS,
+  PROTOCOL_PHASES,
+  PROTOCOL_ROLE_OPTIONS,
+  PROTOCOL_ROOT_OPTIONS,
+} from "./protocol.ts";
 export type Options = NonNullable<ParseArgsConfig["options"]>;
 
 export interface CommandSpec {
@@ -68,6 +77,7 @@ export const GROUPS = {
   inbox: "inbox (recipient)",
   ledger: "request accounting",
   message: "durable role messages",
+  protocol: "explicit filesystem work protocol",
 } as const;
 
 export interface GroupedSpec extends CommandSpec {
@@ -256,6 +266,157 @@ export const SPECS = {
     options: MESSAGE_STATUS_OPTIONS,
     summary: "read local message metadata or the exact original body",
     values: { id: "UUID", recipient: "ROLE" },
+  },
+  "protocol activate": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol activate operation; no native delivery or owner activation",
+  },
+  "protocol artifact-put": {
+    forms: [["file", "hash?", "output-file?", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ARTIFACT_OPTIONS,
+    summary: "Explicit protocol artifact-put operation; no native delivery or owner activation",
+  },
+  "protocol artifact-read": {
+    forms: [["hash", "output-file", "file?", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ARTIFACT_OPTIONS,
+    summary: "Explicit protocol artifact-read operation; no native delivery or owner activation",
+  },
+  "protocol backup": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol backup operation; no native delivery or owner activation",
+  },
+  "protocol boundary": {
+    forms: [["role", "phase", "at", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_BOUNDARY_OPTIONS,
+    summary: "Explicit protocol boundary operation; no native delivery or owner activation",
+    values: { phase: PROTOCOL_PHASES.join("|") },
+  },
+  "protocol claim": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol claim operation; no native delivery or owner activation",
+  },
+  "protocol dry-run": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol dry-run operation; no native delivery or owner activation",
+  },
+  "protocol import": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol import operation; no native delivery or owner activation",
+  },
+  "protocol import-originals": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol import-originals operation; no native delivery or owner activation",
+  },
+  "protocol inbox": {
+    forms: [["role", "sender", "include-body?", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INBOX_OPTIONS,
+    summary: "Explicit protocol inbox operation; no native delivery or owner activation",
+  },
+  "protocol intake": {
+    forms: [["owner", "id?"]],
+    group: "protocol",
+    options: PROTOCOL_INTAKE_OPTIONS,
+    summary: "Explicit protocol intake operation; no native delivery or owner activation",
+  },
+  "protocol inventory": {
+    forms: [[]],
+    group: "protocol",
+    options: {},
+    summary: "Explicit protocol inventory operation; no native delivery or owner activation",
+  },
+  "protocol message-observe": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol message-observe operation; no native delivery or owner activation",
+  },
+  "protocol message-original": {
+    forms: [["input-file", "include-body?", "state-root?"]],
+    group: "protocol",
+    options: { ...PROTOCOL_INPUT_OPTIONS, "include-body": { type: "boolean" } },
+    summary: "Explicit protocol message-original operation; no native delivery or owner activation",
+  },
+  "protocol message-publish": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol message-publish operation; no native delivery or owner activation",
+  },
+  "protocol message-receipt": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol message-receipt operation; no native delivery or owner activation",
+  },
+  "protocol message-withdraw": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol message-withdraw operation; no native delivery or owner activation",
+  },
+  "protocol restore": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol restore operation; no native delivery or owner activation",
+  },
+  "protocol role": {
+    forms: [["role", "id?", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ROLE_OPTIONS,
+    summary: "Explicit protocol role operation; no native delivery or owner activation",
+  },
+  "protocol status": {
+    forms: [["state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ROOT_OPTIONS,
+    summary: "Explicit protocol status operation; no native delivery or owner activation",
+  },
+  "protocol work-accept": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol work-accept operation; no native delivery or owner activation",
+  },
+  "protocol work-publish": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol work-publish operation; no native delivery or owner activation",
+  },
+  "protocol work-read": {
+    forms: [["role", "id?", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_ROLE_OPTIONS,
+    summary: "Explicit protocol work-read operation; no native delivery or owner activation",
+  },
+  "protocol work-receipt": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol work-receipt operation; no native delivery or owner activation",
+  },
+  "protocol work-submit": {
+    forms: [["input-file", "state-root?"]],
+    group: "protocol",
+    options: PROTOCOL_INPUT_OPTIONS,
+    summary: "Explicit protocol work-submit operation; no native delivery or owner activation",
   },
   request: {
     forms: [["game", "id"]],

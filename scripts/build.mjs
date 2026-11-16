@@ -13,6 +13,7 @@ const ENTRIES = [
   { entry: "src/source-identity.ts", name: "source-identity" },
   { entry: "src/transport.ts", name: "transport" },
   { entry: "src/accounting.ts", name: "accounting" },
+  { entry: "src/protocol.ts", name: "protocol" },
 ];
 
 for (const [index, { entry, name }] of ENTRIES.entries()) {
@@ -54,3 +55,4 @@ writeFileSync("dist/registry.d.ts", 'export * from "./types/registry/index.js";\
 writeFileSync("dist/source-identity.d.ts", 'export * from "./types/source-identity.js";\n');
 writeFileSync("dist/transport.d.ts", 'export * from "./types/transport.js";\n');
 writeFileSync("dist/accounting.d.ts", 'export * from "./types/accounting.js";\n');
+writeFileSync("dist/protocol.d.ts", 'export * from "./types/protocol.js";\n');

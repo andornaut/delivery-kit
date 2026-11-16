@@ -14,6 +14,7 @@ const BUNDLES = [
   "dist/source-identity.js",
   "dist/transport.js",
   "dist/accounting.js",
+  "dist/protocol.js",
 ];
 const METADATA = [
   "LICENSE",
@@ -21,6 +22,7 @@ const METADATA = [
   "SOURCE_COMMIT",
   "package.json",
   "docs/request-accounting.md",
+  "docs/work-protocol.md",
 ];
 
 beforeAll(() => {
@@ -149,6 +151,8 @@ describe("packed package", () => {
       "dist/accounting.d.ts",
       "dist/accounting.js",
       "dist/cli.js",
+      "dist/protocol.d.ts",
+      "dist/protocol.js",
       "dist/registry.d.ts",
       "dist/registry.js",
       "dist/source-identity.d.ts",
@@ -163,6 +167,8 @@ describe("packed package", () => {
       "accounting.d.ts",
       "accounting.js",
       "cli.js",
+      "protocol.d.ts",
+      "protocol.js",
       "registry.d.ts",
       "registry.js",
       "source-identity.d.ts",

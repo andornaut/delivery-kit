@@ -13,6 +13,7 @@
     "src/registry/index.ts",
     "src/source-identity.ts",
     "src/transport.ts",
-    "src/accounting.ts"
+    "src/accounting.ts",
+    "src/protocol.ts"
   ]
 }

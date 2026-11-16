@@ -28,6 +28,10 @@
       "types": "./dist/accounting.d.ts",
       "import": "./dist/accounting.js"
     },
+    "./build/protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    },
     "./registry": {
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
@@ -43,12 +47,17 @@
     "./accounting": {
       "types": "./dist/accounting.d.ts",
       "import": "./dist/accounting.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
     }
   },
   "files": [
     "dist",
     "README.md",
     "docs/request-accounting.md",
+    "docs/work-protocol.md",
     "LICENSE",
     "SOURCE_COMMIT"
   ],

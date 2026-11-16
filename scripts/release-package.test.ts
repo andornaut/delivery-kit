@@ -31,7 +31,9 @@ function fixture(includeGuide: boolean) {
   writeFileSync(join(source, "SOURCE_COMMIT"), fixtureCommit);
   if (includeGuide) {
     mkdirSync(join(source, "docs"));
-    cpSync(join(root, "docs/request-accounting.md"), join(source, "docs/request-accounting.md"));
+    for (const guide of ["request-accounting.md", "work-protocol.md"]) {
+      cpSync(join(root, "docs", guide), join(source, "docs", guide));
+    }
   }
   return {
     base,
@@ -59,6 +61,9 @@ describe("actual release package", () => {
     expect(readFileSync(join(pkg, "docs/request-accounting.md"))).toEqual(
       readFileSync(join(root, "docs/request-accounting.md")),
     );
+    expect(readFileSync(join(pkg, "docs/work-protocol.md"))).toEqual(
+      readFileSync(join(root, "docs/work-protocol.md")),
+    );
     expect(readFileSync(join(pkg, "SOURCE_COMMIT"), "utf8")).toBe(fixtureCommit);
     execFileSync("sha256sum", ["--check", "SHA256SUMS"], { cwd: test.output, stdio: "pipe" });
     execFileSync(
@@ -69,6 +74,10 @@ describe("actual release package", () => {
         `
       const canonical = await import('@andornaut/delivery-kit/build/accounting');
       const alias = await import('@andornaut/delivery-kit/accounting');
+      const protocol = await import('@andornaut/delivery-kit/build/protocol');
+      const protocolAlias = await import('@andornaut/delivery-kit/protocol');
+      const required = ['ProtocolStore', 'WorkStore', 'ProtocolMessages', 'resolveProtocolLayout'];
+      if (protocol !== protocolAlias || !required.every(name => typeof protocol[name] === 'function')) process.exit(1);
       if (canonical !== alias || !['LedgerStore', 'IntakeStore', 'projectOwnerBinding']
         .every(name => typeof canonical[name] === 'function')) process.exit(1);
     `,

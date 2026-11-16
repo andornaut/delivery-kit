@@ -72,12 +72,14 @@ export function inspectPackage(
     throw new Error("package version differs from VERSION");
   if (!existsSync(join(pkg, "docs/request-accounting.md")))
     throw new Error("package request accounting guide is missing");
+  if (!existsSync(join(pkg, "docs/work-protocol.md")))
+    throw new Error("package work protocol guide is missing");
   const version = spawnSync(process.execPath, [join(pkg, "dist/cli.js"), "--version"], {
     encoding: "utf8",
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const modules = ["registry", "source-identity", "transport", "accounting"];
+  const modules = ["registry", "source-identity", "transport", "accounting", "protocol"];
   const expectedExports = [
     "./package.json",
     ...modules.flatMap((name) => [`./build/${name}`, `./${name}`]),
@@ -161,6 +163,14 @@ import {
   LedgerStore, LedgerError, snapshotIntake, accountingStatus,
   type LedgerTransaction, type LedgerState, type IntakeContext,
 } from "@andornaut/delivery-kit/build/accounting";
+import { ProtocolStore, WorkStore, ProtocolMessages, resolveProtocolLayout,
+ type ProtocolWriter, type WorkEvaluation, type ProtocolLayout } from "@andornaut/delivery-kit/build/protocol";
+const protocolClaim = (store: ProtocolStore, writer: ProtocolWriter) => store.withWriter(writer, () => 1);
+const protocolLayout: ProtocolLayout | null = null;
+// @ts-expect-error Writer epochs remain numeric.
+const invalidEpoch: ProtocolWriter["epoch"] = "1";
+export { protocolClaim, protocolLayout, invalidEpoch, WorkStore, ProtocolMessages, resolveProtocolLayout };
+export type { WorkEvaluation };
 const ledgerState: LedgerState = "checked";
 const ledgerCommit = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
 const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
