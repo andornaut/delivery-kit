@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { IntakeStore } from "../accounting/intake.ts";
 import type { LedgerSource, LedgerTransaction } from "../accounting/types.ts";
 import { startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { main } from "../cli.ts";
@@ -128,6 +129,57 @@ describe("ledger public CLI", () => {
     expect(coverage).toMatchObject({ code: 0, err: "" });
     const windows = await run(test, "ledger", "coverage", "--owner", "game-coordinator");
     expect(JSON.parse(windows.out)).toMatchObject([{ id: "history-gap", state: "unavailable" }]);
+    const offer = new IntakeStore({
+      directory: join(test.layout.varDir, "accounting", "intake"),
+    }).offer({
+      actor: "game-coordinator",
+      source: SOURCE,
+      command: {
+        type: "capture",
+        requests: [],
+        coverage: [
+          {
+            gaps: [{ from: null, reason: "history unavailable", through: null }],
+            id: "pending-gap",
+            nextBoundary: "next owner review",
+            ownerRole: "game-coordinator",
+            range: { from: null, through: null },
+            source: SOURCE,
+            state: "unavailable",
+          },
+        ],
+      },
+    });
+    const pending = {
+      status: "available",
+      reason: null,
+      offers: [
+        {
+          id: offer.id,
+          commandId: `intake-${offer.id}`,
+          requiredOwner: "game-coordinator",
+        },
+      ],
+    };
+    expect(JSON.parse((await run(test, "ledger", "report", "--at", AT)).out).pendingIntake).toEqual(
+      pending,
+    );
+    expect(
+      JSON.parse((await run(test, "ledger", "show", "--id", "request-one")).out).pendingIntake,
+    ).toEqual(pending);
+    writeFileSync(
+      join(test.layout.varDir, "accounting", "events", "000000000001.json"),
+      "PRIVATE_CORRUPT_FIXTURE",
+    );
+    const unavailable = await run(test, "ledger", "report", "--at", AT);
+    expect(unavailable.code).toBe(1);
+    expect(unavailable.out).toBe("");
+    expect(JSON.parse(unavailable.err)).toMatchObject({
+      error: { code: "corrupt-ledger" },
+      ok: false,
+      pendingIntake: { offers: null, reason: "ledger-unavailable", status: "unavailable" },
+    });
+    expect(unavailable.err).not.toContain("PRIVATE_CORRUPT_FIXTURE");
     expect(readFileSync(test.layout.registryFile)).toEqual(registry);
     expect(existsSync(join(test.layout.reviewDir, "messages"))).toBe(false);
   });
@@ -342,16 +394,25 @@ describe("ledger public CLI", () => {
     const registered = registryInput();
     registered.harness = "codex";
     writeFixtureJson(test.layout.registryFile, { ...registered, revision: 2, updatedAt: AT });
+    let reroute = false;
     const server = await startFakeControl(test.base, (method, params) => {
       expect(method).toBe("thread/items/list");
       expect(params).toEqual({ limit: 100, sortDirection: "desc", threadId: CODEX_TECH });
+      if (reroute) {
+        writeFixtureJson(test.layout.registryFile, {
+          ...registered,
+          harness: "claude",
+          revision: 3,
+          updatedAt: AT,
+        });
+      }
       return {
         result: {
           data: [
             {
               item: {
                 content: [{ text: "PRIVATE_SYNTHETIC_BODY", type: "inputText" }],
-                id: "observed-item",
+                id: reroute ? "observed-before-reroute" : "observed-item",
                 type: "userMessage",
               },
               turnId: "observed-turn",
@@ -361,9 +422,17 @@ describe("ledger public CLI", () => {
         },
       };
     });
-    test.env.CODEX_CONTROL_SOCKET = server.path;
+    const connected = { ...test, env: { ...test.env, CODEX_CONTROL_SOCKET: server.path } };
     try {
-      const captured = await run(test, "ledger", "boundary", "--role", ROLE, "--phase", "startup");
+      const captured = await run(
+        connected,
+        "ledger",
+        "boundary",
+        "--role",
+        ROLE,
+        "--phase",
+        "startup",
+      );
       expect(captured).toMatchObject({ code: 1, err: "" });
       expect(JSON.parse(captured.out)).toMatchObject({
         accounting_ready: false,
@@ -372,7 +441,7 @@ describe("ledger public CLI", () => {
       expect(captured.out).not.toContain("PRIVATE_SYNTHETIC_BODY");
       expect(server.methods()).toEqual(["thread/items/list"]);
       const report = await run(
-        test,
+        connected,
         "ledger",
         "report",
         "--at",
@@ -398,6 +467,19 @@ describe("ledger public CLI", () => {
           origin: "unknown",
         },
       });
+      reroute = true;
+      await run(connected, "ledger", "boundary", "--role", ROLE, "--phase", "resume");
+      const offers = new IntakeStore({
+        directory: join(test.layout.varDir, "accounting", "intake"),
+      }).pending([], [ROLE]);
+      expect(
+        offers.some((offer) =>
+          offer.command.requests.some(
+            (request) => request.source.native?.itemId === "observed-before-reroute",
+          ),
+        ),
+      ).toBe(true);
+      expect(server.methods()).toEqual(["thread/items/list", "thread/items/list"]);
     } finally {
       await server.close();
     }

@@ -5,9 +5,11 @@ import { join, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
 import { captureAccounting } from "../accounting/boundary.ts";
+import { snapshotIntake } from "../accounting/ingress.ts";
+import { IntakeError, IntakeStore, type PendingIntake } from "../accounting/intake.ts";
 import { projectOwnerBinding } from "../accounting/ownership.ts";
 import { LedgerError, LedgerStore } from "../accounting/store.ts";
-import type { LedgerTransaction } from "../accounting/types.ts";
+import type { LedgerEvent, LedgerTransaction } from "../accounting/types.ts";
 import { codexAdapter } from "../adapters/codex/index.ts";
 import { type HistoryRefs, historyRefs } from "../adapters/codex/inventory.ts";
 import { connectControl } from "../adapters/codex/rpc.ts";
@@ -74,8 +76,24 @@ class CommandError extends Error {
   }
 }
 
-function failure(io: Io, code: string, exitCode = EXIT_INVALID): number {
-  io.err(`${JSON.stringify({ error: { code }, ok: false })}\n`);
+class ReadProjectionError extends CommandError {
+  readonly pendingIntake: PendingIntake;
+
+  constructor(code: string, pendingIntake: PendingIntake) {
+    super(code);
+    this.pendingIntake = pendingIntake;
+  }
+}
+
+function failure(
+  io: Io,
+  code: string,
+  exitCode = EXIT_INVALID,
+  pendingIntake?: PendingIntake,
+): number {
+  io.err(
+    `${JSON.stringify({ error: { code }, ok: false, ...(pendingIntake === undefined ? {} : { pendingIntake }) })}\n`,
+  );
   return exitCode;
 }
 
@@ -173,7 +191,12 @@ async function operate(
         : error instanceof LedgerError && CORE_ERRORS.has(error.code)
           ? error.code
           : "ledger-operation-failed";
-    return failure(io, code);
+    return failure(
+      io,
+      code,
+      EXIT_INVALID,
+      error instanceof ReadProjectionError ? error.pendingIntake : undefined,
+    );
   }
 }
 
@@ -239,12 +262,23 @@ function selected(history: boolean): Handler {
       if (history) {
         return ledger.history(id);
       }
-      const record = ledger.read(id);
+      const pendingIntake = pendingSummary(layout, ledger);
+      let record;
+      try {
+        record = ledger.read(id);
+      } catch (error) {
+        throw new ReadProjectionError(
+          error instanceof LedgerError && CORE_ERRORS.has(error.code)
+            ? error.code
+            : "ledger-operation-failed",
+          pendingIntake,
+        );
+      }
       if (record === undefined) {
         throw new CommandError("request-missing");
       }
       const registry = currentRegistry(layout);
-      return { ...record, ownerBinding: projectOwnerBinding(registry, record) };
+      return { ...record, ownerBinding: projectOwnerBinding(registry, record), pendingIntake };
     });
   };
 }
@@ -271,9 +305,21 @@ export const ledgerReport: Handler = (io, root, args) => {
   }
   return operate(io, root, (layout, ledger) => {
     const registry = currentRegistry(layout);
-    const report = ledger.report({ at, ...(owner === undefined ? {} : { owner }) });
+    const pendingIntake = pendingSummary(layout, ledger, owner === undefined ? undefined : [owner]);
+    let report;
+    try {
+      report = ledger.report({ at, ...(owner === undefined ? {} : { owner }) });
+    } catch (error) {
+      throw new ReadProjectionError(
+        error instanceof LedgerError && CORE_ERRORS.has(error.code)
+          ? error.code
+          : "ledger-operation-failed",
+        pendingIntake,
+      );
+    }
     return {
       ...report,
+      pendingIntake,
       requests: report.requests.map((record) => ({
         ...record,
         ownerBinding: projectOwnerBinding(registry, record),
@@ -281,6 +327,37 @@ export const ledgerReport: Handler = (io, root, args) => {
     };
   });
 };
+
+function pendingSummary(
+  layout: Layout,
+  ledger: LedgerStore,
+  roles?: readonly string[],
+): PendingIntake {
+  let events: readonly LedgerEvent[] | null;
+  try {
+    events = ledger.history();
+  } catch {
+    events = null;
+  }
+  if (events === null) {
+    return { offers: null, reason: "ledger-unavailable", status: "unavailable" };
+  }
+  try {
+    const store = new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") });
+    const offers = store.pending(events, roles).map((offer) => ({
+      commandId: `intake-${offer.id}`,
+      id: offer.id,
+      requiredOwner: offer.actor,
+    }));
+    return { offers, reason: null, status: "available" };
+  } catch (error) {
+    return {
+      offers: null,
+      reason: error instanceof IntakeError ? error.code : "intake-unavailable",
+      status: "unavailable",
+    };
+  }
+}
 
 function currentRegistry(layout: Layout): Registry | null {
   try {
@@ -322,7 +399,7 @@ export const ledgerBoundary: Handler = async (io, root, args) => {
   try {
     const layout = loadLayout(root);
     resolveRole(readRegistry(layout), role);
-    const snapshot = await boundarySnapshot(io, layout, role);
+    const snapshot = await boundarySnapshot(io, layout, role, phase);
     const result = await captureAccounting(layout, snapshot, phase, "snapshot", [role]);
     io.out(`${JSON.stringify(result)}\n`);
     return result.accounting_ready ? EXIT_OK : EXIT_INVALID;
@@ -335,6 +412,7 @@ async function boundarySnapshot(
   io: Io,
   layout: Layout,
   role: string,
+  phase: "startup" | "resume" | "handoff" | "review",
 ): Promise<Record<string, unknown>> {
   const registry = readRegistry(layout);
   const harness = resolveHarness(registry, role);
@@ -365,9 +443,36 @@ async function boundarySnapshot(
   } catch {
     // Failed collection is an explicit coverage gap; supported local intake still persists.
   }
+  const snapshot = { harness, history: { [nativeId]: history } };
+  const observed = snapshotIntake(
+    {
+      harness,
+      nativeId,
+      nextBoundary: "next supported owner startup, resume or scheduled review",
+      ownerRole: role,
+      phase,
+    },
+    snapshot,
+  );
+  const command = {
+    coverage: observed.commands.flatMap((value) =>
+      value.type === "coverage" ? [value.coverage] : [],
+    ),
+    requests: observed.commands.flatMap((value) =>
+      value.type === "register" ? [value.request] : [],
+    ),
+    type: "capture" as const,
+  };
+  if (command.requests.length + command.coverage.length > 0) {
+    new IntakeStore({ directory: join(layout.varDir, "accounting", "intake") }).offer({
+      actor: role,
+      command,
+      source: command.coverage[0]?.source ?? command.requests[0]!.source,
+    });
+  }
   const fresh = readRegistry(layout);
   if (resolveHarness(fresh, role) !== harness || resolveConversation(fresh, role) !== nativeId) {
     return {};
   }
-  return { harness, history: { [nativeId]: history } };
+  return snapshot;
 }

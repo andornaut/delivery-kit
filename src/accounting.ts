@@ -14,6 +14,14 @@ export {
   snapshotIntake,
 } from "./accounting/ingress.ts";
 export {
+  IntakeError,
+  type IntakeErrorCode,
+  type IntakeInput,
+  type IntakeOffer,
+  IntakeStore,
+  type PendingIntake,
+} from "./accounting/intake.ts";
+export {
   type OwnerBinding,
   type OwnerBindingReason,
   type OwnerBindingStatus,
