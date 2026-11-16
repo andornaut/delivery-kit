@@ -8,7 +8,15 @@ The [filesystem work protocol](work-protocol.md) adds role-owned publications an
 handling receipts under an explicitly configured external root. The request ledger remains the
 request-state authority. A reviewed migration changes storage location and writer generation;
 it does not create a second writable request ledger or turn old transport handling into a new
-recipient attestation. Without protocol configuration, the existing compatibility paths apply.
+recipient attestation. Unmanaged callers without protocol configuration retain the existing
+compatibility paths. A required managed workspace cannot create a separate legacy accounting
+island while its external-root activation or enrollment remains pending.
+
+Managed coverage includes all current, upcoming and future work for registered owners and
+verified workers. Missing owner/native history or partial worker census remains an explicit
+parent-owned UNKNOWN with evidence, reason and next review boundary. Representation is not
+active adoption or complete capture; an empty manifest is not a completeness attestation.
+See [managed workspace coverage](work-protocol.md#managed-workspace-coverage).
 
 ## CLI and reusable API
 
@@ -44,7 +52,7 @@ Unknown or unsupported native bindings remain unknown, not permission to invent 
 
 The reusable `LedgerStore` and transaction types are exposed through
 `@andornaut/delivery-kit/build/accounting`. Its constructor accepts a `directory` and an optional
-`resolveOwner` callback. Without protocol configuration, the CLI uses
+`resolveOwner` callback. In unmanaged compatibility mode, the CLI uses
 `<coordinator-root>/var/accounting`; an active work protocol uses `<stateRoot>/accounting`,
 with intake offers in its `intake` child directory. Assignment requires
 fresh exact role, harness and native binding. The CLI verifies Codex workers through the existing
@@ -69,7 +77,7 @@ not native availability. A worker with a matching parent still reports `unavaila
 no native verification. The reusable `projectOwnerBinding` helper exposes the same distinction.
 `report --at` selects the stalled-work cutoff, not a historical registry view.
 
-Accounting readiness guards unassigned open work and stale or unavailable bindings on open work
+Accounting readiness diagnoses unassigned open work and stale or unavailable bindings on open work
 or protected questions. Binding drift on other terminal records is informational. Neither view
 rewrites assignment history or performs an ownership transfer.
 
@@ -83,8 +91,17 @@ an external handoff: the transaction performs no native hold, acceptance, activa
 
 `ledger boundary --role ROLE --phase startup|resume|review|handoff` captures the explicitly
 selected role's supported references and local-message metadata. Codex history reads are bounded;
-Claude history remains unavailable. The command returns its accounting summary and exits with a
-nonzero status when accounting is not ready. It is not a native dispatch or a delivery gate.
+Claude history remains unavailable. The command returns its accounting summary. Outside managed
+mode, its exit status follows `accounting_ready`. With required management, it instead follows
+`enrollment.ready` for the selected role; `enrollment.required` identifies that contract.
+
+Managed enrollment readiness requires an active declaration and the selected owner's own current
+active adopted receipt. An own receipt may explicitly retain UNKNOWN scopes without blocking
+startup or adoption. Another owner's missing receipt or a global `coverageComplete: false` is
+not a prerequisite for that owner's action. `accounting_ready` remains the strict coverage and
+protection diagnostic, including pending intake and missing owner coverage. Pending or stale
+enrollment fails closed while supported repair paths remain available. None of these views is
+a game departure gate or native dispatch authority.
 
 ## Provenance and authority
 
@@ -164,13 +181,16 @@ fixed summaries and unknown-question metadata contain no native message body, qu
 choices. Offer presence proves input retention, not journal admission, approval or completion.
 Events remain the sole current projection; there is no separate mutable processed marker.
 
-Without protocol configuration, existing boundaries replay pending offers for selected owners,
+In unmanaged compatibility mode, existing boundaries replay pending offers for selected owners,
 including references no longer present in a later compacted snapshot. With an active protocol,
 boundaries retain safe offers but do not assume a role's writer authority: pending offers report
 `pendingIntake.reason: "protocol-writer-required"`. The responsible role explicitly admits an
 offer with `ledger reconcile --input-file FILE`, using its exact intake `commandId`, actor,
 source and command payload, the current ledger revision, and `writer` from its protocol claim.
 This reconciles accounting only, not native input or recipient handling.
+While required management is pending, safe offers remain retained with
+`protocol-enrollment-pending` diagnostics; they are not admitted to a legacy journal. Repair
+declaration/enrollment and activate the prepared root before fenced journal admission.
 
 The store's `pending(events, ownerRoles?)` derives
 pending work from exact journal command-ID, actor, source and payload matches. Conflicting matches

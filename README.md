@@ -396,6 +396,11 @@ delivery-kit message status --recipient game-kit --include-body --root /path/to/
 Status requires exactly one of `--id UUID` or `--recipient ROLE`; `--include-body` opts into
 full original text. Reading does not acknowledge, dispatch or modify the message.
 
+For local blocker diagnosis, `message status --id UUID --include-retention` returns a cloned
+retention view, including its owner, reason and next review boundary, or null. This opt-in does
+not include the body or evidence. Default status and scheduled health remain metadata-only;
+retention detail grants no retry, ACK or question clearance.
+
 `message dispatch --id UUID` explicitly requests guarded delivery. It checks registered
 ownership, routing and supported recipient decision guards. It does not inspect frontend
 drafts or independently attest native HOLD state. Callers preserve known drafts and holds,
@@ -476,15 +481,21 @@ protected questions and capture limits.
 
 ## Filesystem work protocol
 
-The optional [work protocol](docs/work-protocol.md) provides fenced role publications,
+The [work protocol](docs/work-protocol.md) provides fenced role publications,
 canonical message originals and separate recipient handling receipts. Discover supported
 commands with `delivery-kit --help`; `protocol status` reports configuration and
 `protocol inbox --role kits/game-kit --sender kits/delivery-kit` reads an explicit filesystem
 scope without native delivery. Bodies require `--include-body`.
 
 Activation requires an explicit external `stateRoot`, reviewed readers and writers, an
-independent backup and verified restore. Missing configuration retains legacy compatibility
-only when no cutover fence exists; invalid configuration, a missing pointer after cutover or
+independent backup and verified restore. Unmanaged callers retain the optional protocol contract;
+a declared managed workspace covers all current, upcoming and future work for registered owners
+and verified workers, preserving explicit parent-owned UNKNOWN gaps. Representation, active
+adoption and coverage completeness are separate. Existing 4.5 pins do not enforce managed
+enrollment; publication alone does not establish rollout or adoption.
+
+Missing configuration retains legacy compatibility only outside required managed mode and
+when no cutover fence exists; invalid configuration, a missing pointer after cutover or
 generation disagreement fails closed. `--state-root DIR` selects a prepared root before
 activation, not a second active backend. Registry, route, checkpoints, review snapshots and
 game bus state stay under `var/`.
