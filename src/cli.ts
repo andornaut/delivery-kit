@@ -5,6 +5,16 @@ import { parseArgs } from "node:util";
 
 import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
 import { workerParentProblems } from "./bus/parents.ts";
+import {
+  ledgerApply,
+  ledgerBoundary,
+  ledgerCoverage,
+  ledgerHistory,
+  ledgerIntake,
+  ledgerReconcile,
+  ledgerReport,
+  ledgerShow,
+} from "./commands/accounting.ts";
 import { channel } from "./commands/channel.ts";
 import { control } from "./commands/control.ts";
 import { harnessDoctor } from "./commands/doctor.ts";
@@ -51,10 +61,18 @@ export const COMMANDS = [
   "message dispatch",
   "message status",
   "message reconcile",
+  "ledger intake",
+  "ledger apply",
+  "ledger show",
+  "ledger report",
+  "ledger history",
+  "ledger coverage",
+  "ledger reconcile",
+  "ledger boundary",
 ] as const satisfies readonly Command[];
 export type { Command };
 
-const GROUP_ORDER = ["game", "inbox", "message", "harness"] as const;
+const GROUP_ORDER = ["game", "inbox", "message", "ledger", "harness"] as const;
 
 /** Help text, generated from each command's parser options and grouped by audience. */
 export const USAGE = [
@@ -222,6 +240,14 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "harness select": harnessSelect,
   "inbox ack": inboxAck,
   "inbox snapshot": inboxSnapshot,
+  "ledger apply": ledgerApply,
+  "ledger boundary": ledgerBoundary,
+  "ledger coverage": ledgerCoverage,
+  "ledger history": ledgerHistory,
+  "ledger intake": ledgerIntake,
+  "ledger reconcile": ledgerReconcile,
+  "ledger report": ledgerReport,
+  "ledger show": ledgerShow,
   "message dispatch": messageDispatch,
   "message reconcile": messageReconcile,
   "message send": messageSend,

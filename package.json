@@ -24,6 +24,10 @@
       "types": "./dist/transport.d.ts",
       "import": "./dist/transport.js"
     },
+    "./build/accounting": {
+      "types": "./dist/accounting.d.ts",
+      "import": "./dist/accounting.js"
+    },
     "./registry": {
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
@@ -35,11 +39,16 @@
     "./transport": {
       "types": "./dist/transport.d.ts",
       "import": "./dist/transport.js"
+    },
+    "./accounting": {
+      "types": "./dist/accounting.d.ts",
+      "import": "./dist/accounting.js"
     }
   },
   "files": [
     "dist",
     "README.md",
+    "docs/request-accounting.md",
     "LICENSE",
     "SOURCE_COMMIT"
   ],

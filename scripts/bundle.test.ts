@@ -8,8 +8,20 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BUNDLES = ["dist/cli.js", "dist/registry.js", "dist/source-identity.js", "dist/transport.js"];
-const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json"];
+const BUNDLES = [
+  "dist/cli.js",
+  "dist/registry.js",
+  "dist/source-identity.js",
+  "dist/transport.js",
+  "dist/accounting.js",
+];
+const METADATA = [
+  "LICENSE",
+  "README.md",
+  "SOURCE_COMMIT",
+  "package.json",
+  "docs/request-accounting.md",
+];
 
 beforeAll(() => {
   for (const bundle of BUNDLES) {
@@ -33,7 +45,7 @@ describe("dist/cli.js", () => {
 });
 
 describe("dist/registry.js", () => {
-  it("exports registry and transport APIs with declarations a NodeNext consumer can type-check", async () => {
+  it("exports public APIs with declarations a NodeNext consumer can type-check", async () => {
     const registry = (await import(join(root, "dist/registry.js"))) as Record<string, unknown>;
     for (const name of [
       "RegistrySchema",
@@ -47,6 +59,16 @@ describe("dist/registry.js", () => {
     const transport = (await import(join(root, "dist/transport.js"))) as {
       messageChannelStateDir: (layout: { reviewDir: string }, id: string) => string;
     };
+    const accounting = (await import(join(root, "dist/accounting.js"))) as Record<string, unknown>;
+    for (const name of [
+      "LedgerStore",
+      "LedgerError",
+      "snapshotIntake",
+      "captureAccounting",
+      "accountingStatus",
+    ]) {
+      expect(typeof accounting[name]).toBe("function");
+    }
     expect(
       transport.messageChannelStateDir(
         { reviewDir: "/review" },
@@ -61,6 +83,17 @@ describe("dist/registry.js", () => {
 import {
   messageChannelStateDir, resolveCodexControlSocket, type CodexControlSocketEndpoint,
 } from ${JSON.stringify(join(root, "dist/transport.js"))};
+import {
+  LedgerStore, type LedgerState, type LedgerTransaction, type IntakeContext, snapshotIntake,
+} from ${JSON.stringify(join(root, "dist/accounting.js"))};
+const ledgerState: LedgerState = "checked";
+const ledgerApply = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
+const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
+// @ts-expect-error Accounting states do not widen to arbitrary strings.
+const badLedgerState: LedgerState = "transport-accepted";
+// @ts-expect-error Accounting revisions preserve numeric CAS values.
+const badLedgerRevision: LedgerTransaction["expectedRevision"] = "1";
+export { ledgerState, ledgerApply, ledgerIntake, badLedgerState, badLedgerRevision };
 const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
 // @ts-expect-error Endpoint sources are a finite union, not arbitrary strings.
 const source: "other" = endpoint.source;
@@ -113,6 +146,8 @@ describe("packed package", () => {
       [],
     );
     expect(dist.filter((path) => !path.startsWith("dist/types/"))).toEqual([
+      "dist/accounting.d.ts",
+      "dist/accounting.js",
       "dist/cli.js",
       "dist/registry.d.ts",
       "dist/registry.js",
@@ -125,6 +160,8 @@ describe("packed package", () => {
       dist.filter((path) => path.startsWith("dist/types/") && !path.endsWith(".d.ts")),
     ).toEqual([]);
     expect(readdirSync(join(root, "dist")).sort()).toEqual([
+      "accounting.d.ts",
+      "accounting.js",
       "cli.js",
       "registry.d.ts",
       "registry.js",

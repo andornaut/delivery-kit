@@ -70,12 +70,14 @@ export function inspectPackage(
   };
   if (manifest.version !== readFileSync(join(root, "VERSION"), "utf8").trim())
     throw new Error("package version differs from VERSION");
+  if (!existsSync(join(pkg, "docs/request-accounting.md")))
+    throw new Error("package request accounting guide is missing");
   const version = spawnSync(process.execPath, [join(pkg, "dist/cli.js"), "--version"], {
     encoding: "utf8",
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const modules = ["registry", "source-identity", "transport"];
+  const modules = ["registry", "source-identity", "transport", "accounting"];
   const expectedExports = [
     "./package.json",
     ...modules.flatMap((name) => [`./build/${name}`, `./${name}`]),
@@ -132,6 +134,13 @@ export function inspectPackage(
       "if (![snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError]" +
       ".every(value => typeof value === 'function')) process.exit(1);",
   ]);
+  node(pkg, "--input-type=module", [
+    "-e",
+    "import { LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
+      "captureAccounting, accountingStatus } from '@andornaut/delivery-kit/build/accounting'; " +
+      "if (![LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
+      "captureAccounting, accountingStatus].every(value => typeof value === 'function')) process.exit(1);",
+  ]);
   const consumer = join(proof, "consumer");
   const scope = join(consumer, "node_modules", "@andornaut");
   mkdirSync(scope, { recursive: true });
@@ -148,6 +157,20 @@ import {
   snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
   type SourceIdentityManifest, type SourceIdentityStatus,
 } from "@andornaut/delivery-kit/build/source-identity";
+import {
+  LedgerStore, LedgerError, snapshotIntake, accountingStatus,
+  type LedgerTransaction, type LedgerState, type IntakeContext,
+} from "@andornaut/delivery-kit/build/accounting";
+const ledgerState: LedgerState = "checked";
+const ledgerCommit = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
+const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
+const ledgerReadiness = accountingStatus({ varDir: "/fixture/var" });
+// @ts-expect-error Accounting states remain a finite union.
+const invalidLedgerState: LedgerState = "native-accepted-means-complete";
+// @ts-expect-error Ledger revisions must remain numbers, not untyped JSON.
+const invalidLedgerRevision: LedgerTransaction["expectedRevision"] = "1";
+export { LedgerStore, LedgerError, ledgerState, ledgerCommit, ledgerIntake, ledgerReadiness,
+  invalidLedgerState, invalidLedgerRevision };
 const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
 const channel: string = messageChannelStateDir(
   { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",

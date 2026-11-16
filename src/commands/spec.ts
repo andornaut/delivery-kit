@@ -2,6 +2,13 @@
 // command accepts always appears in `delivery-kit --help`.
 import type { ParseArgsConfig } from "node:util";
 
+import {
+  LEDGER_BOUNDARY_OPTIONS,
+  LEDGER_COVERAGE_OPTIONS,
+  LEDGER_ID_OPTIONS,
+  LEDGER_INPUT_OPTIONS,
+  LEDGER_REPORT_OPTIONS,
+} from "./accounting.ts";
 import { DOCTOR_OPTIONS } from "./doctor.ts";
 import {
   MESSAGE_DISPATCH_OPTIONS,
@@ -25,6 +32,7 @@ export interface CommandSpec {
 
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {
+  at: "ISO_TIMESTAMP",
   "body-file": "FILE",
   conversation: "UUID",
   disposition: "handled|superseded|retained",
@@ -35,10 +43,13 @@ const VALUES: Readonly<Record<string, string>> = {
   harness: "claude|codex|default",
   "history-cursor": "CURSOR",
   id: "SAFE_ID",
+  "input-file": "FILE",
   intent: "queue|unblock",
   "next-boundary": "TEXT",
+  owner: "ROLE",
   "owner-role": "ROLE",
   parent: "ROLE|UUID",
+  phase: "startup|resume|handoff|review",
   "poll-seconds": "SECONDS",
   "queue-id": "ID",
   reason: "TEXT",
@@ -55,6 +66,7 @@ export const GROUPS = {
   game: "game operations",
   harness: "harness (claude, codex)",
   inbox: "inbox (recipient)",
+  ledger: "request accounting",
   message: "durable role messages",
 } as const;
 
@@ -154,6 +166,54 @@ export const SPECS = {
     group: "inbox",
     options: { ...INBOX, "history-cursor": { type: "string" } },
     summary: "capture the recipient's inbox snapshot",
+  },
+  "ledger apply": {
+    forms: [["input-file"]],
+    group: "ledger",
+    options: LEDGER_INPUT_OPTIONS,
+    summary: "apply one explicit revision-checked request accounting transaction",
+  },
+  "ledger boundary": {
+    forms: [["role", "phase"]],
+    group: "ledger",
+    options: LEDGER_BOUNDARY_OPTIONS,
+    summary: "capture a scoped accounting boundary and report independent readiness",
+  },
+  "ledger coverage": {
+    forms: [["owner?"]],
+    group: "ledger",
+    options: LEDGER_COVERAGE_OPTIONS,
+    summary: "show declared accounting coverage and gaps",
+  },
+  "ledger history": {
+    forms: [["id"]],
+    group: "ledger",
+    options: LEDGER_ID_OPTIONS,
+    summary: "show immutable request accounting transitions",
+  },
+  "ledger intake": {
+    forms: [["input-file"]],
+    group: "ledger",
+    options: LEDGER_INPUT_OPTIONS,
+    summary: "register a request with explicit provenance and revision",
+  },
+  "ledger reconcile": {
+    forms: [["input-file"]],
+    group: "ledger",
+    options: LEDGER_INPUT_OPTIONS,
+    summary: "record an explicit accounting reconciliation transaction",
+  },
+  "ledger report": {
+    forms: [["at", "owner?"]],
+    group: "ledger",
+    options: LEDGER_REPORT_OPTIONS,
+    summary: "report accounting state at an explicit cutoff",
+  },
+  "ledger show": {
+    forms: [["id"]],
+    group: "ledger",
+    options: LEDGER_ID_OPTIONS,
+    summary: "show one current request accounting record",
   },
   "message dispatch": {
     forms: [["id"]],
