@@ -235,8 +235,9 @@ own: `transfers` carries the hold, acceptance and activation markers.
   registry revision metadata; it preserves all other fields, including `operations`.
 
 `protocol observer-adoption` durably records the owner's resident-inspection evidence and its
-audit before updating `lastAdoption` under registry revision CAS. Managed activation verifies
-the `evidenceRef` pointer, audit and referenced resident proof together. A package pin, matching
+audit, binds the command in the role journal, then updates `lastAdoption` under registry revision
+CAS. Managed activation verifies the committed command, `evidenceRef` pointer, audit and referenced
+resident proof together. A package pin, matching
 version/hash or returned-only result is not that durable adoption evidence. See
 [declaration, enrollment and rollout](docs/work-protocol.md#declaration-enrollment-and-rollout)
 for the supported producer and partial-update reconciliation contract.

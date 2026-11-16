@@ -102,7 +102,7 @@ adopted row, not global `allAdopted` or `coverageComplete`. Explicit UNKNOWNs in
 do not prevent startup or adoption. Missing participants elsewhere remain rollout blockers,
 not a new prerequisite for unrelated owners. The accounting boundary exposes this distinction
 as `enrollment: { required, ready }`; strict `accounting_ready` remains a separate diagnostic.
-Before-work checks still require a specific canonical approved work reference and its guards,
+Before-work and worker-start checks still require a specific canonical approved work reference and its guards,
 not merely an adopted conversation. Pending or stale rows fail closed without disabling the
 supported claim, intake-retention, enrollment, artifact-promotion or reconciliation repair paths.
 
@@ -133,13 +133,20 @@ Use `protocol observer-adoption --input-file adoption.json` to record an actual 
 inspection. Its typed input carries `context`, `operation`, `expectedRegistryRevision` and an
 evidence artifact, with `reconcileRegistryRevision` available for explicit reconciliation.
 The evidence is owner-attested resident identity, installed CLI version/hash and inspection
-reference. The producer durably stores a content-addressed audit and writes
-`operations.<game>.lastAdoption.evidenceRef: "protocol-artifact:<audit hash>"` under registry CAS.
-Managed activation resolves that pointer, verifies the audit and its referenced resident proof,
+reference. The producer durably stores a content-addressed audit, then commits the immutable
+`intake` object `observer-adoption:<sha256(context.id)>` in the owner's journal before a separate
+fenced registry CAS under the same generation lease. The command binds that ID to the audit
+reference; reusing the ID with a different payload is refused. Registry
+`operations.<game>.lastAdoption.evidenceRef` is `protocol-artifact:<audit hash>`.
+Managed activation verifies the committed command, pointer, audit and referenced resident proof,
 and matches the current owner binding. A package pin, declared capability or returned-only
 result is not durable resident adoption evidence.
 
-If the audit is durable but the registry update or writer post-check fails, the error exposes
+`protocol role --role CANONICAL_NAMESPACE --id OBSERVER_OBJECT_ID` retrieves that command object's
+audit reference without returning resident evidence bodies. It also accepts `--state-root` for
+the prepared root. The object ID uses the lowercase SHA-256 of the original `context.id`.
+
+If the command is committed but the registry update or writer post-check fails, the error exposes
 `actionMayHaveCommitted: true` and `reconcileKey` identifying that same audit hash. Inspect the
 audit and current registry before retrying. Reconcile with the same command context, operation,
 evidence and original `expectedRegistryRevision`; supply `reconcileRegistryRevision` only for
@@ -159,16 +166,22 @@ none of those operations.
 `startup`, `resume`, `before-work`, `worker-start`, `worker-publication`, `worker-finish`,
 `parent-review`, `integration`, `handoff`, `finish`, `before-cleanup`, `cleanup` and `review`.
 Use the registry role; `--worker UUID` selects a verified child under that parent's current epoch.
-This filesystem boundary reports `nativeHistory: "not-collected"`; it is not a native snapshot.
+Worker selection shares enrollment's supported exact read-only parent/child lineage verification;
+its census remains partial. This boundary reports `nativeHistory: "not-collected"`; it is not
+a full native snapshot or queue operation.
 
-For `before-work`, supply `--work-id ID` and, when needed, `--work-role CANONICAL_NAMESPACE`.
-The referenced work must be canonical, reviewed and unguarded. Finish, handoff and cleanup
-boundaries require canonical essential artifacts plus retained work or closure-ready evidence;
-worker completion additionally requires the parent's recorded acceptance. A sole temporary copy,
-UNKNOWN or successful boundary cannot authorize destructive cleanup or clear a question.
+For `before-work` and `worker-start`, supply `--work-id ID` and, when needed,
+`--work-role CANONICAL_NAMESPACE`. Work must belong to the selected namespace, or to the verified
+worker's parent; unrelated roles cannot supply its approval. The referenced work must be
+canonical, reviewed and unguarded. Finish, handoff and cleanup boundaries require canonical
+essential artifacts plus retained work or closure-ready evidence;
+`before-cleanup` and `cleanup` additionally require a nonempty essential artifact distinct from
+the plan. Worker completion additionally requires the parent's recorded acceptance. A sole
+temporary copy, UNKNOWN or successful boundary cannot authorize destructive cleanup or clear a question.
 
 Missing local adoption, approved work or essential evidence produces a finite nonzero diagnostic:
-`enrollment-required`, `approved-work-required` or `essential-evidence-required`. Repair through
+`enrollment-required`, `approved-work-required` or `essential-evidence-required`. Inactive or held
+owners remain guarded by `role-guarded` outside intake/review. Repair through
 the existing claim, safe intake retention, enrollment publication, artifact promotion and actual
 reconciliation paths, then recheck the exact boundary. Do not weaken guards or require global
 coverage completion to unblock an independently enrolled owner.
