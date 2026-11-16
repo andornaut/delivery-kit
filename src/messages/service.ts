@@ -129,12 +129,12 @@ function bindingCurrent(
 
 /** Generic channel consumption uses exact durable source and fresh supported guards. */
 export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv) {
-  const store = new MessageStore({
-    layout,
-    resolveOwner: (_role, envelope) => currentMessageOwner(layout, envelope),
-  });
   return async (message: MessageChannelInput): Promise<MessageClearance> => {
     try {
+      const store = new MessageStore({
+        layout,
+        resolveOwner: (_role, envelope) => currentMessageOwner(layout, envelope),
+      });
       if (!isCanonicalUuid(message.requestId) || !isCanonicalUuid(message.recipient)) {
         return { status: "blocked" };
       }

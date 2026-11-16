@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import * as durable from "../../durable.ts";
 import { gameLayout } from "../../layout.ts";
+import { holdLock } from "../../lock.ts";
 import {
   activeRoute,
   type ClaudeFixture,
@@ -23,7 +24,7 @@ import {
 } from "../../review/fixtures.ts";
 import { slotRequestId } from "../shared/ids.ts";
 import { deliverPending, handle, serve } from "./channel.ts";
-import { deliveredDir, spoolDir, spoolReviewBrief } from "./spool.ts";
+import { deliveredDir, LOCK_FILE, spoolDir, spoolMessage, spoolReviewBrief } from "./spool.ts";
 
 function spool(fixture: ClaudeFixture, busDir = fixture.game.busDir, slot = SLOT): void {
   const route = activeRoute(fixture);
@@ -153,6 +154,79 @@ describe("durable channel claims", () => {
 });
 
 describe("serve", () => {
+  it("holds a refreshed feed lease before claiming and releases after post-output failure without replay", async () => {
+    const fixture = claudeFixture();
+    const path = join(fixture.unblock, "generic-io-failure.json");
+    const message = {
+      recipient: RECIPIENT,
+      requestId: "generic-io-failure",
+      text: "exact queued body",
+    };
+    expect(spoolMessage(fixture.game.busDir, path, message).status).toBe("queued");
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const events: string[] = [];
+    let leased = false;
+    const original = durable.writeJsonDurable;
+    const write = vi.spyOn(durable, "writeJsonDurable").mockImplementation((target, value) => {
+      expect(leased).toBe(true);
+      if (target.startsWith(deliveredDir(fixture.game.busDir))) {
+        events.push("post-output-failure");
+        throw new Error("fixture disk write failed");
+      }
+      original(target, value);
+    });
+    const done = serve(
+      {
+        beforeMessage: () => {
+          expect(leased).toBe(true);
+          return { status: "clear" };
+        },
+        pollMs: 10,
+        refreshFeeds: () => [
+          {
+            busDir: fixture.game.busDir,
+            withLease: async (action) => {
+              const lock = holdLock(join(fixture.unblock, LOCK_FILE), { nonBlocking: true });
+              lock.release();
+              leased = true;
+              events.push("lease");
+              try {
+                return await action();
+              } finally {
+                leased = false;
+                events.push("release");
+              }
+            },
+          },
+        ],
+      },
+      input,
+      (line) => {
+        expect(leased).toBe(true);
+        events.push("output");
+        lines.push(line);
+      },
+      [],
+      RECIPIENT,
+    );
+    try {
+      input.write('{"method":"notifications/initialized"}\n');
+      expect(await done).toBe(1);
+      expect(events).toEqual(["lease", "output", "post-output-failure", "release"]);
+      expect(lines).toHaveLength(1);
+    } finally {
+      input.end();
+      write.mockRestore();
+    }
+    expect(readdirSync(spoolDir(fixture.game.busDir))).toContain("generic-io-failure.claimed");
+    expect(
+      await deliverPending((line) => void lines.push(line), fixture.game.busDir, RECIPIENT),
+    ).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8")).status).toBe("ambiguous");
+    expect(lines).toHaveLength(1);
+  });
+
   it("delivers nothing before initialization and each entry once across projects", async () => {
     const fixture = claudeFixture();
     spool(fixture);

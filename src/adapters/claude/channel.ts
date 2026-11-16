@@ -224,6 +224,9 @@ export async function deliverPending(
   const lock = await holdLockAsync(join(unblockDir(busDir), LOCK_FILE));
   try {
     return await deliverLocked(options, write, busDir, recipient);
+  } catch {
+    // A claim survives any post-output persistence failure. Reconciliation must never replay it.
+    return false;
   } finally {
     lock.release();
   }
@@ -255,6 +258,14 @@ export function handle(write: LineWriter, message: Message): boolean {
 
 export interface ServeOptions extends MessageChannelOptions {
   readonly pollMs: number;
+  /** Refreshed on the existing poll, after independent static game feeds. */
+  readonly refreshFeeds?: () => readonly ChannelFeed[];
+}
+
+export interface ChannelFeed {
+  readonly busDir: string;
+  /** Acquire the generation lease before the spool lock and retain it through all receipt writes. */
+  readonly withLease?: (action: () => Promise<boolean>) => Promise<boolean>;
 }
 
 /**
@@ -294,6 +305,25 @@ export function serve(
           // Projects are drained in order; a failed write stops the consumer.
           // eslint-disable-next-line no-await-in-loop
           if (!(await deliverPending(write, busDir, recipient, options))) {
+            finish(1);
+            return;
+          }
+        }
+        let feeds: readonly ChannelFeed[];
+        try {
+          feeds = options.refreshFeeds?.() ?? [];
+        } catch {
+          // An unavailable generic root cannot suppress independent scheduled game feeds.
+          return;
+        }
+        for (const feed of feeds) {
+          if (!isDirectory(spoolDir(feed.busDir))) {
+            continue;
+          }
+          const consume = () => deliverPending(write, feed.busDir, recipient, options);
+          // Each generation lease precedes its spool lock, including interrupted-claim reconciliation.
+          // eslint-disable-next-line no-await-in-loop
+          if (!(await (feed.withLease === undefined ? consume() : feed.withLease(consume)))) {
             finish(1);
             return;
           }

@@ -8,13 +8,20 @@ import { realpathSync, statSync, writeSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { parseArgs } from "node:util";
 
-import { type LineWriter, type MessageChannelGuard, serve } from "../adapters/claude/channel.ts";
+import {
+  type ChannelFeed,
+  type LineWriter,
+  type MessageChannelGuard,
+  serve,
+} from "../adapters/claude/channel.ts";
 import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { gameRecipients } from "../config.ts";
 import { EXIT_INVALID, EXIT_USAGE, type Handler, type Io } from "../io.ts";
 import { gameLayout, type Layout, loadLayout } from "../layout.ts";
 import { messageChannelStateDir } from "../messages/paths.ts";
 import { messageConsumeGuard } from "../messages/service.ts";
+import { acquireProtocolLayout } from "../protocol/layout.ts";
+import { captureProtocolSelection, checkProtocolSelection } from "../protocol/selection.ts";
 import { resolveConversation, resolveHarness } from "../registry/resolve.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { SPECS } from "./spec.ts";
@@ -37,13 +44,15 @@ function isDirectory(path: string): boolean {
   }
 }
 
+function sameDirectory(first: string, second: string): boolean {
+  return (
+    first === second ||
+    (isDirectory(first) && isDirectory(second) && realpathSync(first) === realpathSync(second))
+  );
+}
+
 /** Bus directories from explicit STATE/unblock paths, or from every (or each named) game. */
-function busDirectories(
-  root: string,
-  stateDirs: string[],
-  games: string[] | undefined,
-  conversation: string,
-): string[] {
+function busDirectories(root: string, stateDirs: string[], games: string[] | undefined): string[] {
   if (stateDirs.length > 0) {
     if (games !== undefined) {
       throw new ChannelUsage("--state-dir and --game are exclusive");
@@ -63,9 +72,44 @@ function busDirectories(
   if (selected.length !== new Set(selected).size) {
     throw new ChannelUsage("each --game may appear once");
   }
+  return selected.map((game) => gameLayout(layout, game).busDir);
+}
+
+function refreshFeed(
+  root: string,
+  conversation: string,
+  explicit?: { directory: string; generic: boolean },
+): ChannelFeed[] {
+  const layout = loadLayout(root);
+  const selection = captureProtocolSelection(layout);
+  const generic = dirname(messageChannelStateDir(layout, conversation));
+  if (explicit?.generic === true && !sameDirectory(explicit.directory, generic)) {
+    return [];
+  }
+  const busDir = explicit?.directory ?? generic;
   return [
-    ...selected.map((game) => gameLayout(layout, game).busDir),
-    dirname(messageChannelStateDir(layout, conversation)),
+    {
+      busDir,
+      withLease: async (action) => {
+        let lease;
+        try {
+          lease = await acquireProtocolLayout(layout, selection.protocol, {
+            allowPending: selection.management.status === "pending",
+            expectedManagement: selection.management,
+            nonBlocking: true,
+          });
+        } catch {
+          // A busy or changed generation retries only at the next existing poll.
+          return true;
+        }
+        try {
+          checkProtocolSelection(layout, selection);
+          return await action();
+        } finally {
+          lease.release();
+        }
+      },
+    },
   ];
 }
 
@@ -111,6 +155,7 @@ export async function runChannel(
   let busDirs: string[];
   let conversation: string;
   let pollSeconds: number;
+  let refreshFeeds: () => readonly ChannelFeed[];
   try {
     const { values } = parseArgs({
       args,
@@ -125,7 +170,21 @@ export async function runChannel(
       throw new ChannelUsage("--conversation must be a canonical session UUID");
     }
     conversation = values.conversation ?? recipientConversation(root, values.game);
-    busDirs = busDirectories(root, values["state-dir"] ?? [], values.game, conversation);
+    const explicit = values["state-dir"] ?? [];
+    busDirs = busDirectories(root, explicit, values.game);
+    if (explicit.length === 0) {
+      refreshFeeds = () => refreshFeed(root, conversation);
+    } else {
+      const generic = dirname(messageChannelStateDir(loadLayout(root), conversation));
+      const layout = loadLayout(root);
+      const games = Object.keys(layout.config.games).map((game) => gameLayout(layout, game).busDir);
+      const gameFeed = (directory: string) => games.some((game) => sameDirectory(directory, game));
+      const fixed = busDirs
+        .filter((directory) => !gameFeed(directory))
+        .map((directory) => ({ directory, generic: sameDirectory(directory, generic) }));
+      refreshFeeds = () => fixed.flatMap((feed) => refreshFeed(root, conversation, feed));
+      busDirs = busDirs.filter(gameFeed);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`delivery-kit: ${message}\n`);
@@ -138,6 +197,7 @@ export async function runChannel(
     {
       beforeMessage: streams.beforeMessage ?? messageConsumeGuard(loadLayout(root), io.env),
       pollMs: pollSeconds * 1000,
+      refreshFeeds,
     },
     streams.input,
     streams.write,

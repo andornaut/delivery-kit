@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 
@@ -6,12 +6,22 @@ import { describe, expect, it, vi } from "vitest";
 
 import { spoolReviewBrief } from "../adapters/claude/spool.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Io } from "../io.ts";
-import { messageChannelStateDir } from "../messages/paths.ts";
+import { holdLock, LockBusy } from "../lock.ts";
+import { messageChannelStateDir, messageDirectory } from "../messages/paths.ts";
 import * as messageService from "../messages/service.ts";
 import { messageExpectation, MessageStore } from "../messages/store.ts";
 import { claudeMessageTransport } from "../messages/transports.ts";
-import { declareProtocolWorkspace } from "../protocol/layout.ts";
-import { updateRegistry } from "../registry/store.ts";
+import { ProtocolStore } from "../protocol/core.ts";
+import {
+  acquireProtocolLayout,
+  declareProtocolWorkspace,
+  protocolPaths,
+} from "../protocol/layout.ts";
+import { ProtocolMessages } from "../protocol/messages.ts";
+import * as protocolSelection from "../protocol/selection.ts";
+import { activateProtocolFixture } from "../protocol/testFixtures.ts";
+import { resolveConversation } from "../registry/resolve.ts";
+import { readRegistry, updateRegistry } from "../registry/store.ts";
 import { activeRoute, claudeFixture, RECIPIENT, SLOT } from "../review/fixtures.ts";
 import { projectConfig, writeFixtureJson } from "../testFixtures.ts";
 import { runChannel } from "./channel.ts";
@@ -107,6 +117,214 @@ describe("claude channel options", () => {
 });
 
 describe("Claude channel generic feeds", () => {
+  it("refreshes a resident through cutover without replaying originals or starving reviews", async () => {
+    const fixture = claudeFixture();
+    const legacy = messageDirectory(fixture.layout);
+    const created = "2026-11-16T06:00:00.000Z";
+    const queue = async (id: string, body: string) => {
+      const store = new MessageStore({
+        layout: fixture.layout,
+        resolveOwner: (_role, envelope) =>
+          messageService.currentMessageOwner(fixture.layout, envelope),
+      });
+      const record = await store.enqueue({
+        schema: 1,
+        id,
+        fromRole: "archies-dog-walks/tech",
+        toRole: "game-coordinator",
+        intent: "queue",
+        body,
+        created,
+      });
+      const lease = await store.beginAttempt(messageExpectation(record));
+      const source = lease.source;
+      lease.close();
+      const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);
+      const path = join(stateDir, `${source.requestId}.json`);
+      const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+      const message = { requestId: source.requestId, recipient: RECIPIENT, text: body };
+      await vi.waitFor(async () =>
+        expect((await transport.send(path, message)).status).toBe("queued"),
+      );
+      return { message, path, record, source, transport };
+    };
+    const first = await queue("resident-first", "first exact original\n");
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const guard = messageService.messageConsumeGuard;
+    const factory = vi
+      .spyOn(messageService, "messageConsumeGuard")
+      .mockImplementation((layout, env) => {
+        const qualified = guard(layout, env);
+        return async (entry) => {
+          expect(() => holdLock(protocolPaths(layout).lock, { nonBlocking: true })).toThrow(
+            LockBusy,
+          );
+          return qualified(entry);
+        };
+      });
+    const done = runChannel(
+      { input, write: (line) => void lines.push(line) },
+      { ...io(), env: fixture.env },
+      fixture.layout.root,
+      ["--conversation", RECIPIENT, "--poll-seconds", "0.01"],
+    );
+    try {
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(lines).toHaveLength(1));
+      await declareProtocolWorkspace(fixture.layout, {
+        authorityRef: "fixture-required",
+        expectedGeneration: 0,
+        workspaceId: "fixture",
+      });
+      spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT);
+      fixture.clear("pending");
+      const pending = await queue("resident-pending", "pending exact original\n");
+      const busy = await acquireProtocolLayout(fixture.layout, null, {
+        allowPending: true,
+        exclusive: true,
+      });
+      fixture.clear();
+      try {
+        await vi.waitFor(() => expect(lines).toHaveLength(2));
+        expect(JSON.parse(lines[1]!).params.meta.kind).toBe("review");
+        expect(JSON.parse(readFileSync(pending.path, "utf8")).status).toBe("sending");
+      } finally {
+        busy.release();
+      }
+      await vi.waitFor(() => expect(lines).toHaveLength(3));
+      fixture.clear("pending");
+      const switching = await queue("resident-switching", "\uFEFFcanonical exact body\n");
+      const cutover = await acquireProtocolLayout(fixture.layout, null, {
+        allowPending: true,
+        exclusive: true,
+      });
+      let root: string;
+      try {
+        root = activateProtocolFixture(fixture.layout, { authorityRef: "fixture-required" });
+        cpSync(legacy, join(root, "transport", "messages"), { recursive: true });
+        const binding = {
+          harness: "claude" as const,
+          nativeId: resolveConversation(readRegistry(fixture.layout), "archies-dog-walks/tech")!,
+        };
+        const protocol = new ProtocolStore({ directory: root, resolveBinding: () => true });
+        await protocol.claim({
+          at: created,
+          binding,
+          evidence: "fixture-sender",
+          expectedEpoch: 0,
+          role: "games/archies-dog-walks/tech",
+        });
+        const originals = new ProtocolMessages({ store: protocol });
+        for (const queued of [first, pending, switching]) {
+          // eslint-disable-next-line no-await-in-loop
+          await originals.publish(
+            {
+              at: created,
+              binding,
+              epoch: 1,
+              expectedRevision: protocol.read("games/archies-dog-walks/tech").revision,
+              id: queued.record.envelope.id,
+              role: "games/archies-dog-walks/tech",
+            },
+            {
+              envelope: queued.record.envelope,
+              guards: { artifacts: [], hold: "unknown", question: "unknown", references: [] },
+              links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+            },
+          );
+        }
+      } finally {
+        cutover.release();
+      }
+      fixture.clear();
+      await vi.waitFor(() => expect(lines).toHaveLength(4));
+      expect(JSON.parse(lines[3]!).params.content).toBe(switching.message.text);
+      expect(JSON.parse(readFileSync(switching.path, "utf8")).status).toBe("sending");
+      const currentPath = join(
+        messageChannelStateDir(fixture.layout, RECIPIENT),
+        `${switching.source.requestId}.json`,
+      );
+      expect(currentPath).not.toBe(switching.path);
+      expect(JSON.parse(readFileSync(currentPath, "utf8")).status).toBe("accepted");
+      expect((await switching.transport.send(switching.path, switching.message)).status).toBe(
+        "queued",
+      );
+      spoolReviewBrief(fixture.env, fixture.game.busDir, activeRoute(fixture), SLOT + 1);
+      await vi.waitFor(() => expect(lines).toHaveLength(5));
+      expect(JSON.parse(lines[4]!).params.meta.kind).toBe("review");
+      expect(
+        lines
+          .filter((line) => JSON.parse(line).params.meta.kind === "message")
+          .map((line) => JSON.parse(line).params.content),
+      ).toEqual([first.message.text, pending.message.text, switching.message.text]);
+      expect(factory).toHaveBeenCalledTimes(1);
+    } finally {
+      input.end();
+      expect(await done).toBe(EXIT_OK);
+      factory.mockRestore();
+    }
+  });
+
+  it("keeps an explicit generic directory fixed and refuses it after the canonical root moves", async () => {
+    const fixture = claudeFixture();
+    const selections = vi.spyOn(protocolSelection, "captureProtocolSelection");
+    const stateDir = messageChannelStateDir(fixture.layout, RECIPIENT);
+    const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+    const first = { recipient: RECIPIENT, requestId: "explicit-first", text: "first" };
+    expect((await transport.send(join(stateDir, "explicit-first.json"), first)).status).toBe(
+      "queued",
+    );
+    const alias = join(fixture.base, "generic-alias");
+    symlinkSync(dirname(stateDir), alias);
+    const input = new PassThrough();
+    const lines: string[] = [];
+    const done = runChannel(
+      { beforeMessage: () => ({ status: "clear" }), input, write: (line) => void lines.push(line) },
+      io(),
+      fixture.layout.root,
+      [
+        "--conversation",
+        RECIPIENT,
+        "--state-dir",
+        join(alias, "unblock"),
+        "--poll-seconds",
+        "0.01",
+      ],
+    );
+    try {
+      input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(lines).toHaveLength(1));
+      const cutover = await acquireProtocolLayout(fixture.layout, null, { exclusive: true });
+      try {
+        activateProtocolFixture(fixture.layout);
+      } finally {
+        cutover.release();
+      }
+      const oldPath = join(stateDir, "explicit-old.json");
+      expect((await transport.send(oldPath, { ...first, requestId: "explicit-old" })).status).toBe(
+        "queued",
+      );
+      const current = messageChannelStateDir(fixture.layout, RECIPIENT);
+      const fresh = claudeMessageTransport({ messageChannelStateDir: current });
+      const newPath = join(current, "explicit-new.json");
+      expect((await fresh.send(newPath, { ...first, requestId: "explicit-new" })).status).toBe(
+        "queued",
+      );
+      const before = selections.mock.calls.length;
+      input.write('{"id":5,"method":"ping"}\n');
+      await vi.waitFor(() => expect(selections.mock.calls.length).toBeGreaterThan(before + 1));
+      await vi.waitFor(() => expect(lines).toHaveLength(2));
+      expect(JSON.parse(lines[1]!).id).toBe(5);
+      expect(JSON.parse(readFileSync(oldPath, "utf8")).status).toBe("sending");
+      expect(JSON.parse(readFileSync(newPath, "utf8")).status).toBe("sending");
+    } finally {
+      input.end();
+      expect(await done).toBe(EXIT_OK);
+      selections.mockRestore();
+    }
+  });
+
   it("delivers an existing scheduled review spool while required enrollment is pending", async () => {
     const fixture = claudeFixture();
     await declareProtocolWorkspace(fixture.layout, {
