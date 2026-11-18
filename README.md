@@ -126,7 +126,10 @@ the contract lockfile with native npm. Ordinary Git commits run serial local lin
 with direct Prettier and ESLint fixes that preserve Git's staged/unstaged workflow.
 
 CI runs the same native npm commands directly on the runner with the pinned Node version and
-the pinned ShellCheck step.
+the pinned ShellCheck step. Its `lint` job (types, Prettier, ESLint, Markdown lint and
+ShellCheck) runs for every push and pull request. The `build`, `test`, `contract` and `package`
+jobs run only when a path outside `docs/` changed, and otherwise report as skipped. A forced
+push, a new branch or a base the clone does not have runs every job.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native
