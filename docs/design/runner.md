@@ -17,9 +17,10 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 
 ## Work items
 
-| ID      | Title                                                   | Link                             |
-| ------- | ------------------------------------------------------- | -------------------------------- |
-| dk-0006 | Arm the contract runner before its review slot          | [dk-0006.md](../work/dk-0006.md) |
-| dk-0013 | Wake the review observer at the start of each minute    | [dk-0013.md](../work/dk-0013.md) |
-| dk-0016 | Supervise the runner with a generated systemd user unit | [dk-0016.md](../work/dk-0016.md) |
-| dk-0017 | Report resident identity changes                        | [dk-0017.md](../work/dk-0017.md) |
+| ID      | Title                                                                              | Link                             |
+| ------- | ---------------------------------------------------------------------------------- | -------------------------------- |
+| dk-0006 | Arm the contract runner before its review slot                                     | [dk-0006.md](../work/dk-0006.md) |
+| dk-0013 | Wake the review observer at the start of each minute                               | [dk-0013.md](../work/dk-0013.md) |
+| dk-0016 | Supervise the runner with a generated systemd user unit                            | [dk-0016.md](../work/dk-0016.md) |
+| dk-0017 | Report resident identity changes                                                   | [dk-0017.md](../work/dk-0017.md) |
+| dk-0022 | Call the coordinator-installed coordination-kit CLI for reviews and event delivery | [dk-0022.md](../work/dk-0022.md) |
