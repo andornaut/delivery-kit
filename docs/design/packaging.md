@@ -17,9 +17,10 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 
 ## Work items
 
-| ID      | Title                                                      | Link                             |
-| ------- | ---------------------------------------------------------- | -------------------------------- |
-| dk-0003 | Move design documentation from the README into docs        | [dk-0003.md](../work/dk-0003.md) |
-| dk-0014 | Run only attribution and lint checks for docs-only changes | [dk-0014.md](../work/dk-0014.md) |
-| dk-0015 | Adopt the work-file convention                             | [dk-0015.md](../work/dk-0015.md) |
-| dk-0018 | Split the coordination kit out of delivery-kit             | [dk-0018.md](../work/dk-0018.md) |
+| ID      | Title                                                       | Link                             |
+| ------- | ----------------------------------------------------------- | -------------------------------- |
+| dk-0003 | Move design documentation from the README into docs         | [dk-0003.md](../work/dk-0003.md) |
+| dk-0014 | Run only attribution and lint checks for docs-only changes  | [dk-0014.md](../work/dk-0014.md) |
+| dk-0015 | Adopt the work-file convention                              | [dk-0015.md](../work/dk-0015.md) |
+| dk-0018 | Split the coordination kit out of delivery-kit              | [dk-0018.md](../work/dk-0018.md) |
+| dk-0019 | Leave the event delivery contract cases to coordination-kit | [dk-0019.md](../work/dk-0019.md) |
