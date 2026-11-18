@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { packagedDocs } from "./package-check.ts";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BUNDLES = [
   "dist/cli.js",
@@ -16,13 +18,7 @@ const BUNDLES = [
   "dist/accounting.js",
   "dist/protocol.js",
 ];
-const METADATA = [
-  "LICENSE",
-  "README.md",
-  "SOURCE_COMMIT",
-  "package.json",
-  ...readdirSync(join(root, "docs")).map((doc) => `docs/${doc}`),
-];
+const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
 
 beforeAll(() => {
   for (const bundle of BUNDLES) {
@@ -149,6 +145,7 @@ describe("packed package", () => {
     expect(METADATA.filter((path) => path.startsWith("docs/") && !files.includes(path))).toEqual(
       [],
     );
+    expect(files.filter((path) => path.startsWith("docs/work/"))).toEqual([]);
     expect(dist.filter((path) => !path.startsWith("dist/types/"))).toEqual([
       "dist/accounting.d.ts",
       "dist/accounting.js",

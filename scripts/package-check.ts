@@ -47,6 +47,15 @@ export function inspectionContext(env: Readonly<Record<string, string | undefine
   };
 }
 
+// The package ships the topic docs and the design summaries; the work files stay in the repository.
+export function packagedDocs(root: string): string[] {
+  const topics = readdirSync(join(root, "docs"), { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => `docs/${entry.name}`);
+  const design = readdirSync(join(root, "docs", "design")).map((name) => `docs/design/${name}`);
+  return [...topics, ...design].sort();
+}
+
 export function inspectPackage(
   env: Readonly<Record<string, string | undefined>>,
   root: string,
@@ -71,8 +80,9 @@ export function inspectPackage(
   };
   if (manifest.version !== readFileSync(join(root, "VERSION"), "utf8").trim())
     throw new Error("package version differs from VERSION");
-  for (const doc of readdirSync(join(root, "docs")))
-    if (!existsSync(join(pkg, "docs", doc))) throw new Error(`package docs/${doc} is missing`);
+  for (const doc of packagedDocs(root))
+    if (!existsSync(join(pkg, doc))) throw new Error(`package ${doc} is missing`);
+  if (existsSync(join(pkg, "docs", "work"))) throw new Error("package must not contain docs/work");
   const version = spawnSync(process.execPath, [join(pkg, "dist/cli.js"), "--version"], {
     encoding: "utf8",
   });

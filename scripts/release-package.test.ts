@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { packagedDocs } from "./package-check.ts";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const helper = join(root, "scripts/release-package.mjs");
 const fixtureCommit = `${"1".repeat(40)}\n`;
@@ -30,10 +32,7 @@ function fixture(includeGuide: boolean) {
   }
   writeFileSync(join(source, "SOURCE_COMMIT"), fixtureCommit);
   if (includeGuide) {
-    mkdirSync(join(source, "docs"));
-    for (const guide of readdirSync(join(root, "docs"))) {
-      cpSync(join(root, "docs", guide), join(source, "docs", guide));
-    }
+    cpSync(join(root, "docs"), join(source, "docs"), { recursive: true });
   }
   return {
     base,
@@ -58,9 +57,10 @@ describe("actual release package", () => {
     const pkg = join(extracted, "package");
     const readme = readFileSync(join(pkg, "README.md"), "utf8");
     expect(readme).toMatch(/\]\((?:\.\/)?docs\/request-accounting\.md(?:#[^)]*)?\)/u);
-    for (const doc of readdirSync(join(root, "docs"))) {
-      expect(readFileSync(join(pkg, "docs", doc))).toEqual(readFileSync(join(root, "docs", doc)));
+    for (const doc of packagedDocs(root)) {
+      expect(readFileSync(join(pkg, doc))).toEqual(readFileSync(join(root, doc)));
     }
+    expect(existsSync(join(pkg, "docs", "work"))).toBe(false);
     expect(readFileSync(join(pkg, "SOURCE_COMMIT"), "utf8")).toBe(fixtureCommit);
     execFileSync("sha256sum", ["--check", "SHA256SUMS"], { cwd: test.output, stdio: "pipe" });
     execFileSync(

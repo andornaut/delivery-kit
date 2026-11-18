@@ -44,6 +44,13 @@ for (const file of [
   "docs/state.md",
   "docs/upgrading.md",
   "docs/work-protocol.md",
+  "docs/design/README.md",
+  "docs/design/messages.md",
+  "docs/design/packaging.md",
+  "docs/design/registry.md",
+  "docs/design/review.md",
+  "docs/design/runner.md",
+  "docs/design/work-protocol.md",
 ]) {
   mkdirSync(dirname(join(staging, file)), { recursive: true });
   copyFileSync(file, join(staging, file));

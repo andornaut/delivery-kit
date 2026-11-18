@@ -82,6 +82,8 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 | [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and recipient handling: provenance, per-target closure, protected questions and capture limits |
 | [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, canonical message originals, recipient handling receipts and external `stateRoot` activation                                     |
 | [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 4.0 and 3.0, and the removed command forms                                                                                                    |
+| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                             |
+| [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                    |
 
 ## Developing
 
@@ -149,7 +151,7 @@ the `migrate` command; a 0.9.x installation upgrades through 1.0.3 first.
 
 A release is three files from `pack`:
 
-- `delivery-kit-VERSION.tgz`, the npm package (`dist/`, `README.md`, `docs/`, `LICENSE`, `SOURCE_COMMIT`);
+- `delivery-kit-VERSION.tgz`, the npm package (`dist/`, `README.md`, the topic docs and `docs/design/`, `LICENSE`, `SOURCE_COMMIT`; not `docs/work/`);
 - `SOURCE_COMMIT`, the exact commit it was built from, also inside the archive;
 - `SHA256SUMS`, covering the archive and `SOURCE_COMMIT`.
 
