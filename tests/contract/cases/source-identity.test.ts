@@ -61,7 +61,18 @@ function environment(): NodeJS.ProcessEnv {
 function git(root: string, args: string[], input?: string): string {
   return execFileSync(
     "git",
-    ["-c", "core.hooksPath=/dev/null", "-c", "core.autocrlf=false", ...args],
+    // No detached auto-maintenance or gc: it writes .git files while a fingerprint walks them.
+    [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "core.autocrlf=false",
+      "-c",
+      "maintenance.auto=false",
+      "-c",
+      "gc.auto=0",
+      ...args,
+    ],
     {
       cwd: root,
       env: environment(),
