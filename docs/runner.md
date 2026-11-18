@@ -148,7 +148,7 @@ Neither the event nor the field records adoption, changes the registry or author
 The bundles inline the coordination-kit modules they use, so a game pins only
 `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The build
 embeds the bundled coordination-kit version. delivery-kit declares the coordination-kit releases
-it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`; delivery-kit 5.0.1 supports
+it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`; delivery-kit 5.0.2 supports
 `>=1.0.1 <2.0.0`. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
 `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.

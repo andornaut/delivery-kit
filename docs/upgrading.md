@@ -10,7 +10,7 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 4.7.0.
 
 - Pins: a game pins only delivery-kit, which bundles coordination-kit; delivery-kit 5 bundles
-  coordination-kit 1.x; 5.0.1 supports `>=1.0.1 <2.0.0` ([Pin guard](runner.md#pin-guard)).
+  coordination-kit 1.x; 5.0.2 supports `>=1.0.1 <2.0.0` ([Pin guard](runner.md#pin-guard)).
   game-coordinator pins coordination-kit directly for the roles' CLI and the channel MCP server,
   beside its delivery-kit pin for `check-config` and `status`. The two installs exchange data only
   through the on-disk formats, which stay compatible within coordination-kit 1.x. Pin each release
@@ -19,7 +19,7 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 
   ```json
   "devDependencies": {
-    "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.1/delivery-kit-5.0.1.tgz"
+    "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.2/delivery-kit-5.0.2.tgz"
   }
   ```
 
@@ -27,7 +27,7 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 
   ```json
   "devDependencies": {
-    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.1/coordination-kit-1.0.1.tgz"
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.2/coordination-kit-1.0.2.tgz"
   }
   ```
 
