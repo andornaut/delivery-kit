@@ -2,6 +2,50 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 6.0
+
+6.0.0 stops bundling scheduled review delivery and event delivery. The runner spawns the
+coordinator root's `coordination-kit review deliver` and `events flush` instead
+([Coordinator CLI seam](runner.md#coordinator-cli-seam)). State formats do not change, events are
+still recorded in-process, and delivery-kit's commands, options and exit codes are unchanged.
+
+1. game-coordinator installs coordination-kit 1.2.0 or later (inside `>=1.2.0 <2.0.0`) before any
+   6.0 runner starts, then runs `npm ci`:
+
+   ```json
+   "devDependencies": {
+     "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.2.0/coordination-kit-1.2.0.tgz"
+   }
+   ```
+
+   A 6.0 runner on a root without it still starts and departs, but defers every review and event
+   flush with `cli-unavailable` or `cli-version`.
+
+2. Each game pins delivery-kit 6.0.0, commits the lockfile integrity, runs `npm ci` and replaces
+   its runner while idle, after its own departure and outside a wake minute:
+
+   ```json
+   "devDependencies": {
+     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.0.0/delivery-kit-6.0.0.tgz"
+   }
+   ```
+
+3. Confirm with `status --game GAME_ID` that `coordinator_cli.supported` is `true` once the first
+   seam result arrives, and that `runner.log` shows the next slot's review line.
+
+- Pins: delivery-kit 6.0.0 bundles coordination-kit 1.2.0 for its utilities
+  (`COORDINATION_KIT_RANGE` `>=1.0.1 <2.0.0`), the same release the coordinator root installs; the
+  coordinator CLI range is separate.
+- Output: a delivered review reads `bus: scheduled review SLOT: DETAIL`, where `DETAIL` is the
+  CLI's free text, not a JSON object. A deferral reads `bus: review deferred: REASON: DETAIL`, a skip other than `nothing-due`
+  reads `bus: scheduled review SLOT: skipped REASON: DETAIL`, and the event flush logs
+  `bus: event flush deferred|held|failed`. Update any parser that read JSON after the slot.
+- Status: `status --game` adds `coordinator_cli`; every other field is unchanged.
+- The state directory gains `bus/seam.json`, written only by the runner.
+- Rollback: restore the 5.0.2 pin and lockfile in the game, run `npm ci` and replace the runner
+  while idle. A 5.0.2 runner delivers with its bundled coordination-kit and ignores the root's
+  install, so the root may keep coordination-kit 1.2.
+
 ## Upgrading to 5.0
 
 5.0.0 moves the coordination commands, libraries and docs to `@andornaut/coordination-kit` and

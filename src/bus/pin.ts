@@ -1,8 +1,9 @@
-// The pin guard. The bundles inline coordination-kit; the build embeds its version, and the package
-// check refuses a build whose bundled version is outside COORDINATION_KIT_RANGE. At startup the
-// runner records the loaded version, the bundled coordination-kit version, the game lockfile's
-// integrity for the package and the sha256 of the loaded dist/cli.js in runner.json. At each
-// departure it compares them with the installed copy; on a mismatch it logs, emits one
+// The pin guard. The bundles inline coordination-kit's utilities; the build embeds its version, and
+// the package check refuses a build whose bundled version is outside COORDINATION_KIT_RANGE.
+// COORDINATOR_CLI_RANGE is the runtime range of the coordinator-installed CLI the seam spawns. At
+// startup the runner records the loaded version, the bundled coordination-kit version, the game
+// lockfile's integrity for the package and the sha256 of the loaded dist/cli.js in runner.json. At
+// each departure it compares them with the installed copy; on a mismatch it logs, emits one
 // deduplicated pin-mismatch event and finishes on the loaded code.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -17,6 +18,11 @@ export const PACKAGE = "@andornaut/delivery-kit";
 export const COORDINATION_KIT = "@andornaut/coordination-kit";
 /** The coordination-kit releases this delivery-kit supports. The one place the range is declared. */
 export const COORDINATION_KIT_RANGE = ">=1.0.1 <2.0.0";
+/**
+ * The coordinator-installed coordination-kit CLI releases whose review and event results this
+ * runner accepts. A result from a CLI outside it defers reviews and event delivery.
+ */
+export const COORDINATOR_CLI_RANGE = ">=1.2.0 <2.0.0";
 declare const __DK_COORDINATION_KIT_VERSION__: string;
 /** The coordination-kit version the build inlined; source runs report "0.0.0-source". */
 export const COORDINATION_KIT_BUNDLED =

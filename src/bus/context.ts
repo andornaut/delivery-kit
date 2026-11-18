@@ -1,9 +1,8 @@
 // Everything a bus mechanism needs: the resolved game, its configuration, its state paths
-// and the injectable process, clock, event and log dependencies.
+// and the injectable process, clock, event, coordinator seam and log dependencies.
 import { appendFileSync } from "node:fs";
 import { loadavg } from "node:os";
 
-import { flushEvents } from "@andornaut/coordination-kit/build/events";
 import {
   type GameLayout,
   type Layout,
@@ -12,6 +11,7 @@ import {
 
 import { emitEvent } from "../events.ts";
 import { type Exec, spawnExec } from "./exec.ts";
+import { type Coordinator, CoordinatorCli } from "./seam.ts";
 import { type BusPaths, busPaths } from "./state.ts";
 
 export interface Clock {
@@ -38,6 +38,8 @@ export interface BusContext {
   readonly exec: Exec;
   readonly clock: Clock;
   readonly events: Events;
+  /** The coordinator-installed coordination-kit CLI: scheduled reviews and event delivery. */
+  readonly coordinator: Coordinator;
   /** One runner log line; the runner appends it to bus/runner.log. */
   readonly log: (line: string) => void;
   /** `<remote>/<main>`, the integration base. */
@@ -68,12 +70,19 @@ const systemClock: Clock = {
     }),
 };
 
-/** Events through events.ts. Persistence failures are logged and never stop a departure. */
-function busEvents(game: GameLayout, project: string, log: (line: string) => void): Events {
+/**
+ * Events recorded through events.ts and delivered by the coordinator CLI. Persistence failures are
+ * logged and never stop a departure; every recorded event requests a flush.
+ */
+function busEvents(
+  game: GameLayout,
+  options: { readonly coordinator: Coordinator; readonly project: string },
+  log: (line: string) => void,
+): Events {
   return {
     emit(kind, key, message) {
       try {
-        emitEvent(game, { project }, kind, key, message);
+        emitEvent(game, { project: options.project }, kind, key, message);
       } catch (error) {
         log(`bus: event persistence failed; operator review required (${String(error)})`);
         return;
@@ -81,7 +90,7 @@ function busEvents(game: GameLayout, project: string, log: (line: string) => voi
       this.flush();
     },
     flush() {
-      flushEvents(game).catch((error: unknown) => log(`bus: event flush failed: ${String(error)}`));
+      options.coordinator.flush();
     },
   };
 }
@@ -94,6 +103,9 @@ export interface ContextOptions {
   readonly exec?: Exec;
   readonly clock?: Clock;
   readonly events?: Events;
+  readonly coordinator?: Coordinator;
+  /** The seam's spawn deadline; tests shorten it. */
+  readonly seamTimeoutMs?: number;
   readonly log?: (line: string) => void;
   readonly loadAverage?: () => number;
   readonly startCi?: (sha: string) => void;
@@ -111,11 +123,25 @@ export function busContext(
     ...config.schedule,
     timezone: config.schedule.timezone ?? layout.config.timezone,
   };
+  const clock = options.clock ?? systemClock;
+  const coordinator =
+    options.coordinator ??
+    new CoordinatorCli({
+      game: game.id,
+      log,
+      now: () => clock.now(),
+      root: layout.root,
+      seamFile: paths.seam,
+      timezone: layout.config.timezone,
+      ...(options.seamTimeoutMs === undefined ? {} : { timeoutMs: options.seamTimeoutMs }),
+    });
   return {
     base: `${config.git.remote}/${config.git.main}`,
-    clock: options.clock ?? systemClock,
+    clock,
     config: { ...config, schedule },
-    events: options.events ?? busEvents(game, config.reports.project, log),
+    coordinator,
+    events:
+      options.events ?? busEvents(game, { coordinator, project: config.reports.project }, log),
     exec: options.exec ?? spawnExec,
     game,
     layout,

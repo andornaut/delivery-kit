@@ -19,6 +19,10 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   `observer_adoption` compares the running identity token with the last observer adoption; see
   [Observer adoption](runner.md#observer-adoption). `coordination_kit` reports the bundled
   coordination-kit version and the supported range; see [Pin guard](runner.md#pin-guard).
+  `coordinator_cli` reports the last coordinator CLI identity a seam result carried, from
+  `bus/seam.json`: `{version, distSha256, seenAt, supported}`, where `supported` tests `version`
+  against `>=1.2.0 <2.0.0`, and every field is null before the runner has seen one; see
+  [Coordinator CLI seam](runner.md#coordinator-cli-seam).
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of

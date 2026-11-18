@@ -17,8 +17,8 @@ when the work protocol is active:
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
   `events/` (coordination-kit's event outbox, with delivery-kit's per-commit `<sha>.state`),
   `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
-  `resources.log`, `runner.log`, `codex-bus.pid` (the runner's PID), `delivery-control.json` and
-  `control.lock`.
+  `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
+  `runner.log`, `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 

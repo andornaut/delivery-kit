@@ -14,7 +14,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { COORDINATION_KIT, COORDINATION_KIT_RANGE, satisfies } from "../src/bus/pin.ts";
+import {
+  COORDINATION_KIT,
+  COORDINATION_KIT_RANGE,
+  COORDINATOR_CLI_RANGE,
+  satisfies,
+} from "../src/bus/pin.ts";
 import { isMain, node, run } from "./check.ts";
 
 export interface CheckContext {
@@ -55,6 +60,29 @@ export function packagedDocs(root: string): string[] {
     .map((entry) => `docs/${entry.name}`);
   const design = readdirSync(join(root, "docs", "design")).map((name) => `docs/design/${name}`);
   return [...topics, ...design].sort();
+}
+
+/** The bundles the package ships; each must import only node: builtins. */
+export const BUNDLES = ["dist/cli.js", "dist/source-identity.js"];
+
+/** The module specifiers a bundle imports or re-exports, statically or dynamically. */
+export function bundleSpecifiers(text: string): string[] {
+  return [
+    ...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/gmu),
+    ...text.matchAll(/^\s*import\s*["']([^"']+)["']/gmu),
+    ...text.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/gu),
+  ].map((match) => match[1] ?? "");
+}
+
+/** The sorted distinct node: builtins a bundle imports; anything else fails the check. */
+export function nodeImports(path: string): string[] {
+  const specifiers = bundleSpecifiers(readFileSync(path, "utf8"));
+  const outside = specifiers.filter((specifier) => !specifier.startsWith("node:"));
+  if (specifiers.length === 0 || outside.length > 0)
+    throw new Error(
+      `${path} must import only node: builtins: ${outside.join(", ") || "none found"}`,
+    );
+  return [...new Set(specifiers)].sort();
 }
 
 /** The coordination-kit version the build inlines; it must be inside the supported range. */
@@ -129,6 +157,9 @@ export function inspectPackage(
       }
     }
   }
+  const imports = Object.fromEntries(
+    BUNDLES.map((bundle) => [bundle, nodeImports(join(pkg, bundle))]),
+  );
   // The bundles inline coordination-kit, so the package declares no runtime dependency on it.
   if (manifest.dependencies !== undefined)
     throw new Error("package must not declare runtime dependencies");
@@ -195,6 +226,8 @@ export { commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIde
     archiveSha256: createHash("sha256").update(readFileSync(archive)).digest("hex"),
     cliVersion: version.stdout.trim(),
     coordinationKit: { bundled: built.version, supported: COORDINATION_KIT_RANGE },
+    coordinatorCli: { supported: COORDINATOR_CLI_RANGE },
+    bundleImports: imports,
     nodeNextExports: {
       source: "extracted-package",
       canonicalSpecifiers: modules.map((name) => `@andornaut/delivery-kit/build/${name}`),

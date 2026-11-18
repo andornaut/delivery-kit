@@ -1,10 +1,10 @@
 // The resident runner for one game: singleton locks, identity, the
 // serialized scheduled and requested departure loop, the 60 s observer, the 1800 s resource
-// sampler and the in-runner CI watches. No timer outlives the process.
+// sampler and the in-runner CI watches. Scheduled reviews and event delivery go through the
+// coordinator CLI seam (seam.ts). No timer outlives the process.
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { DEFERRED_PREFIX, deliverScheduledReview } from "@andornaut/coordination-kit/build/review";
 import { holdLock, LockBusy, type LockHandle } from "@andornaut/coordination-kit/build/shared";
 
 import { unfinishedCi, watchCi } from "../ci.ts";
@@ -24,6 +24,7 @@ import { depart, reportScheduledTick, requestStore, slotDetail } from "./departu
 import { COORDINATION_KIT_BUNDLED, loadedIdentity, pinGuard, recordPin } from "./pin.ts";
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
+import { DEFERRED_PREFIX, type SeamOutcome } from "./seam.ts";
 import { ensureDir, truncate, writeLines } from "./state.ts";
 import { recordIdentity } from "./status.ts";
 import { currentMinuteSlot, minuteSlots, untilMinuteAfter, untilNext } from "./time.ts";
@@ -89,6 +90,33 @@ class CiTasks {
   }
 }
 
+/** The runner log line for a review outcome; undefined for a slot this runner does not dispatch. */
+export function reviewLine(
+  wake: number,
+  outcome: SeamOutcome,
+): { readonly line: string; readonly stderr: boolean } | undefined {
+  if (!outcome.claimed) {
+    return {
+      line: `bus: scheduled review ${wake} unavailable (${outcome.why}); no delivery claimed`,
+      stderr: false,
+    };
+  }
+  const detail = outcome.detail === "" ? "" : `: ${outcome.detail}`;
+  switch (outcome.status) {
+    case "delivered":
+      return { line: `bus: scheduled review ${wake}: ${outcome.detail}`, stderr: false };
+    case "deferred":
+      return { line: `${DEFERRED_PREFIX}${outcome.reason ?? "unknown"}${detail}`, stderr: true };
+    default:
+      return outcome.reason === "nothing-due"
+        ? undefined
+        : {
+            line: `bus: scheduled review ${wake}: skipped ${outcome.reason ?? "unknown"}${detail}`,
+            stderr: false,
+          };
+  }
+}
+
 /** One observer pass: scheduled reviews, scheduled-slot reports and an event flush. */
 async function observe(
   context: BusContext,
@@ -99,19 +127,17 @@ async function observe(
   const { config, layout } = context;
   const wake = currentMinuteSlot(layout.config.timezone, layout.config.wakeMinutes, after, now);
   if (wake !== undefined) {
+    let report: ReturnType<typeof reviewLine>;
     try {
-      // "" means this runner does not dispatch the slot; a deferral is its own line.
-      const outcome = await deliverScheduledReview(layout, context.game, wake, signal);
-      if (outcome.startsWith(DEFERRED_PREFIX)) {
-        context.log(outcome);
-        process.stderr.write(`${outcome}\n`);
-      } else if (outcome !== "") {
-        context.log(`bus: scheduled review ${wake}: ${outcome}`);
-      }
+      report = reviewLine(wake, await context.coordinator.review(wake, signal));
     } catch (error) {
-      context.log(
-        `bus: scheduled review ${wake} unavailable (${String(error)}); no delivery claimed`,
-      );
+      report = reviewLine(wake, { claimed: false, why: String(error) });
+    }
+    if (report !== undefined) {
+      context.log(report.line);
+      if (report.stderr) {
+        process.stderr.write(`${report.line}\n`);
+      }
     }
   }
   if (config.reports.scheduledTicks) {
@@ -322,7 +348,10 @@ export async function runRunner(
     for (const sha of unfinishedCi(context)) {
       tasks.start(context, sha);
     }
+    // The seam never delays startup or a departure: the probe only logs the CLI identity early.
+    signal.addEventListener("abort", () => context.coordinator.stop(), { once: true });
     const background = [
+      context.coordinator.probe(signal),
       sampleResources(context, signal),
       observer(context, signal, () => tasks.refresh(context)),
     ];
@@ -331,7 +360,12 @@ export async function runRunner(
       await departureLoop(context, { beforeDeparture: () => guard.check() }, signal);
     } finally {
       stop.abort();
-      const drained = await Promise.allSettled([...background, tasks.drain()]);
+      context.coordinator.stop();
+      const drained = await Promise.allSettled([
+        ...background,
+        tasks.drain(),
+        context.coordinator.drain(),
+      ]);
       backgroundFailure = drained.find((result) => result.status === "rejected");
     }
     if (backgroundFailure !== undefined) {

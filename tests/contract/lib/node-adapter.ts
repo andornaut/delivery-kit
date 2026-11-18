@@ -6,7 +6,9 @@
 // - DELIVERY_KIT_TEST_CLOCK: JSON file {epoch, realStartMs, speed}, plus optional
 //   `clock-offsets` lines in the same directory; virtual seconds = epoch + sum(offsets) +
 //   (Date.now() - realStartMs) * speed / 1000. Timers scale by the same speed.
-// - CODEX_CONTROL_SOCKET and CLAUDE_AGENTS_COMMAND: adapter overrides (plan: retired keys).
+// - The coordinator root holds the fake coordination-kit CLI (lib/fake-coordination-kit.mjs) at
+//   node_modules/@andornaut/coordination-kit/dist/cli.js; the runner spawns it for reviews and
+//   event delivery.
 // - PATH supplies fake git, docker, gh, wrangler, claude and codex.
 // - DELIVERY_KIT_TEST_LOADAVG: a decimal load reading. ws.hostLoad "ignore" sets it to 0;
 //   "real" leaves it unset, so the host's load applies.

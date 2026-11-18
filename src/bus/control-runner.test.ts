@@ -1,7 +1,6 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { deliverScheduledReview } from "@andornaut/coordination-kit/build/review";
 import { lockIsFree } from "@andornaut/coordination-kit/build/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +10,7 @@ import { readDeliveryControl, setDesiredDelivery } from "./control.ts";
 import { depart, requestStore } from "./departure.ts";
 import { captureRequest, claimRequest } from "./requests.ts";
 import { runRunner } from "./runner.ts";
+import { recordingCoordinator } from "./testCoordinator.ts";
 import {
   fakeExec,
   gateDocker,
@@ -25,9 +25,6 @@ import {
 vi.mock("../ci.ts", async (original) => ({
   ...(await original<typeof import("../ci.ts")>()),
   watchCi: vi.fn(() => Promise.resolve("success")),
-}));
-vi.mock("@andornaut/coordination-kit/build/review", () => ({
-  deliverScheduledReview: vi.fn(() => Promise.resolve("delivered")),
 }));
 vi.mock("./requests.ts", async (original) => {
   const actual = await original<typeof import("./requests.ts")>();
@@ -169,7 +166,8 @@ describe("paused resident runner", () => {
     desired(test.game.busDir, "paused");
     const clock = manualClock(Date.UTC(2026, 10, 9, 21, 19, 55) / 1000);
     const exec = fakeExec(gateDocker());
-    const context = testContext(test, { clock, exec });
+    const coordinator = recordingCoordinator();
+    const context = testContext(test, { clock, coordinator, exec });
     await captureRequest(requestStore(context), "pending");
     const path = join(context.paths.requestsDir, "pending.json");
     const initial = readFileSync(path, "utf8");
@@ -192,7 +190,7 @@ describe("paused resident runner", () => {
       }
       expect(readDeliveryControl({ dir: test.game.busDir }).observed?.state).toBe("stopped");
     }
-    expect(deliverScheduledReview).toHaveBeenCalled();
+    expect(coordinator.reviews.length).toBeGreaterThan(0);
     desired(test.game.busDir, "enabled");
     const stop = new AbortController();
     const running = runRunner({ cliPath, signal: stop.signal }, () => context);

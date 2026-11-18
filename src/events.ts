@@ -1,7 +1,7 @@
 // Bus events with per-commit tracking. emitEvent records an event once through coordination-kit's
 // outbox and, for a 40-hex key, tracks that commit's CI and deployment state under the same
 // events/state.lock, adding a `complete` event when a pushed commit has CI success and a finished
-// deployment. Delivery is coordination-kit's flushEvents.
+// deployment. Delivery is the coordinator CLI's `events flush`, through seam.ts.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 

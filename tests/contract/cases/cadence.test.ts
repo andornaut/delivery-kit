@@ -1,71 +1,63 @@
-// Wall-clock review cadence on a Codex route, independent of release ticks. The native boundary is
-// the fake control socket: one connection per dispatched slot, queue reads name the route members,
-// thread/list names parents.
+// Wall-clock review cadence, independent of release ticks. The seam is the fake coordination-kit CLI
+// at the coordinator root: the runner spawns `review deliver` once per due slot and prints the
+// line for its typed result. Route resolution, briefs and native delivery are coordination-kit's
+// contract.
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
-import { afterAll, expect } from "vitest";
+import { expect } from "vitest";
 
 import { cli, execute, impl, startRunnerAt } from "../lib/adapter.ts";
-import {
-  clearRecipient,
-  codexGame,
-  codexRoles,
-  HELD,
-  RECIPIENT,
-  role,
-  TARGET,
-  TECH,
-  cadenceRoute,
-} from "../lib/claude-codex.ts";
-import { threads, tick, virtualNow } from "../lib/claude-fixture.ts";
-import {
-  CASE_TIMEOUT_MS,
-  contract,
-  suite,
-  WORKER_PARENTS_ROUTE_MESSAGE,
-  workspaces,
-} from "../lib/cases.ts";
-import { CodexSocket } from "../lib/codex-socket.ts";
-import { otherGame, routeRole } from "../lib/routes.ts";
+import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
+import { iso, occurrences, reviewCalls, tick, virtualNow } from "../lib/review.ts";
 import { at } from "../lib/time.ts";
-import type { Workspace } from "../lib/workspace.ts";
+import { COORDINATOR_CLI, type Workspace } from "../lib/workspace.ts";
 
-function reviewLines(text: string): string[] {
-  return text.split("\n").filter((line) => /review|unblock/.test(line));
+const RECIPIENT = "00000000-0000-4000-8000-000000000002";
+const RANGE = ">=1.2.0 <2.0.0";
+
+/** A game with the observer at minutes 20 and 50 and departures at 00 and 10. */
+function cadenceGame(
+  ws: Workspace,
+  review: Record<string, unknown> = { status: "delivered" },
+): void {
+  ws.writeRegistry({
+    schema: 1,
+    revision: 1,
+    harness: "claude",
+    roles: { "game-coordinator": { conversations: { claude: RECIPIENT } } },
+  });
+  ws.config.git = { main: "main", remote: "origin", github: "" };
+  ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
+  ws.config.deploy = { mode: "none", skipPattern: "" };
+  ws.config.reports = { project: "Fixture", recipient: "game-coordinator", scheduledTicks: true };
+  ws.scriptCoordinator({ review });
+}
+
+function pushes(ws: Workspace): number {
+  return ws.calls("git").filter((call) => call.args.includes("push")).length;
 }
 
 suite("review cadence", () => {
   const workspace = workspaces();
-  const sockets: CodexSocket[] = [];
-  const game = async (ws: Workspace) => {
-    const socket = await codexGame(ws);
-    sockets.push(socket);
-    return socket;
-  };
-  afterAll(async () => {
-    for (const socket of sockets) await socket.close();
-  });
 
   contract(
     "only current wall minutes dispatch, missed startup slots are skipped and releases report separately",
     async () => {
       const ws = workspace();
-      const socket = await game(ws);
+      cadenceGame(ws);
       // Started after :20 has begun: that slot is not replayed.
       const late = await tick(ws, at(20), { lead: -30, settle: 120 });
       expect(late.review).toEqual([]);
-      expect(socket.connections).toHaveLength(0);
+      expect(reviewCalls(ws)).toEqual([]);
       const slots: number[] = [];
       for (const slot of [at(20), at(50)]) {
         const result = await tick(ws, slot);
         slots.push(...result.review.map((row) => row.slot));
       }
       expect(slots).toEqual([at(20), at(50)]);
-      expect(socket.connections).toHaveLength(2);
-      expect(threads(socket, "thread/queue/list")).toEqual([RECIPIENT, TARGET]);
-      expect(socket.callsOf("thread/queue/list")).toHaveLength(4);
-      expect(socket.callsOf("thread/list")).toEqual([]);
-      expect(socket.calls.some((call) => JSON.stringify(call.params).includes(TECH))).toBe(false);
-      expect(socket.calls.some((call) => JSON.stringify(call.params).includes(HELD))).toBe(false);
+      expect(reviewCalls(ws)).toEqual([iso(at(20)), iso(at(50))]);
       // Release ticks at the departure minutes report through the event outbox.
       const runner = await startRunnerAt(ws, at(-1, 50));
       try {
@@ -87,185 +79,212 @@ suite("review cadence", () => {
   );
 
   contract(
-    "scheduled parents use the full active route independently of the report recipient",
+    "the runner spawns the coordinator root's CLI with its own Node binary and reports its identity",
     async () => {
       const ws = workspace();
-      const socket = await game(ws);
-      const extra = Array.from(
-        { length: 8 },
-        (_, i) => `00000000-0000-0000-0000-${String(10 + i).padStart(12, "0")}`,
-      );
-      const parents = [RECIPIENT, TARGET, ...extra];
-      codexRoles(ws, extra);
-      ws.writeRoute(
-        cadenceRoute(ws, { targets: [TARGET, ...extra].map((id) => routeRole(ws, "codex", id)) }),
-      );
-      ws.config.reports = {
-        project: "Fixture",
-        recipient: "game-coordinator",
-        workerParents: ["game-coordinator", "target", ...extra.map(role)],
-      };
+      cadenceGame(ws, { detail: "brief r-1 sent", status: "delivered" });
       const result = await tick(ws, at(20));
-      expect(result.review.map((row) => row.slot)).toEqual([at(20)]);
-      expect(result.stderr).not.toContain("review deferred");
-      expect(result.stderr).not.toContain(WORKER_PARENTS_ROUTE_MESSAGE);
-      expect(threads(socket, "thread/list", "parentThreadId")).toEqual(parents);
-      expect(threads(socket, "thread/queue/list")[0]).toBe(RECIPIENT);
-      expect(threads(socket, "thread/queue/list")).not.toContain(TECH);
-      expect(threads(socket, "thread/queue/list")).not.toContain(HELD);
-    },
-  );
-
-  contract("a nonhost route with a parent list neither dispatches nor rejects", async () => {
-    const ws = workspace();
-    const socket = await game(ws);
-    ws.config.reports = {
-      project: "Fixture",
-      recipient: "game-coordinator",
-      workerParents: ["game-coordinator", "target"],
-    };
-    ws.writeRoute(cadenceRoute(ws, { host: otherGame(ws) }));
-    const result = await tick(ws, at(20));
-    expect(reviewLines(result.stdout + result.stderr)).toEqual([]);
-    expect(socket.calls).toEqual([]);
-  });
-
-  contract(
-    "held or unrelated parents defer before any native call",
-    async () => {
-      const ws = workspace();
-      const socket = await game(ws);
-      const unrelated = "00000000-0000-0000-0000-000000000099";
-      codexRoles(ws, [unrelated]);
-      for (const parent of ["held", "tech", role(unrelated)]) {
-        ws.config.reports = {
-          project: "Fixture",
-          recipient: "game-coordinator",
-          workerParents: ["game-coordinator", parent],
-        };
-        const result = await tick(ws, at(20), {
-          done: ({ stderr }) => stderr.includes(WORKER_PARENTS_ROUTE_MESSAGE),
-        });
-        expect(result.stderr, parent).toContain(WORKER_PARENTS_ROUTE_MESSAGE);
-        expect(socket.calls, parent).toEqual([]);
-      }
+      expect(result.review).toEqual([{ slot: at(20), text: "brief r-1 sent" }]);
+      const calls = ws.coordinatorCalls();
+      expect(calls[0]!.args).toEqual(["--version", "--json"]);
+      const review = calls.find((call) => call.args[0] === "review")!;
+      expect(review).toEqual({
+        args: ["review", "deliver", "--game", ws.game, "--slot", iso(at(20))],
+        cwd: ws.coordinator,
+        execPath: process.execPath,
+        root: ws.coordinator,
+      });
+      expect(calls.some((call) => call.args.join(" ") === `events flush --game ${ws.game}`)).toBe(
+        true,
+      );
+      const distSha256 = createHash("sha256")
+        .update(readFileSync(join(ws.coordinator, COORDINATOR_CLI)))
+        .digest("hex");
+      expect(result.stdout).toContain(
+        `bus: coordinator CLI 1.2.0 (dist sha256 ${distSha256}), inside ${RANGE}`,
+      );
+      const status = await cli(ws, ["status"]);
+      expect(status.code, status.stderr).toBe(0);
+      const report = JSON.parse(status.stdout) as Record<string, Record<string, unknown>>;
+      expect(report.coordinator_cli).toEqual({
+        distSha256,
+        seenAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/),
+        supported: true,
+        version: "1.2.0",
+      });
+      // runner.json keeps recording the bundled coordination-kit.
+      expect(ws.readJson("runner.json").coordinationKitVersion).toBe(
+        report.coordination_kit!.bundled,
+      );
     },
     CASE_TIMEOUT_MS,
   );
 
   contract(
-    "a parent list never reaches the native boundary through an invalid or held route",
+    "the released coordination-kit CLI answers the seam with typed results",
     async () => {
       const ws = workspace();
-      const socket = await game(ws);
-      ws.config.reports = {
-        project: "Fixture",
-        recipient: "game-coordinator",
-        workerParents: ["game-coordinator"],
-      };
-      for (const content of [
-        "",
-        "not json",
-        JSON.stringify(cadenceRoute(ws, { schema: 1 })),
-        JSON.stringify(cadenceRoute(ws, { state: "held" })),
-      ]) {
-        ws.writeRoute(content);
-        const result = await tick(ws, at(20));
-        expect(result.review, content).toEqual([]);
-        expect(socket.calls, content).toEqual([]);
-      }
+      cadenceGame(ws);
+      ws.installReleasedCoordinatorCli();
+      const cliPath = join(ws.coordinator, COORDINATOR_CLI);
+      const { version } = JSON.parse(
+        readFileSync(join(dirname(dirname(cliPath)), "package.json"), "utf8"),
+      ) as { version: string };
+      const distSha256 = createHash("sha256").update(readFileSync(cliPath)).digest("hex");
+      // No route names this game, so the slot is not this runner's to dispatch.
+      const result = await tick(ws, at(20));
+      const output = result.stdout + result.stderr;
+      expect(output).toContain(
+        `bus: coordinator CLI ${version} (dist sha256 ${distSha256}), inside ${RANGE}`,
+      );
+      expect(output).not.toMatch(/unavailable \(|no delivery claimed|is outside/);
+      const status = JSON.parse((await cli(ws, ["status"])).stdout) as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(status.coordinator_cli).toMatchObject({ distSha256, supported: true, version });
     },
     CASE_TIMEOUT_MS,
   );
 
   contract(
-    "route guards and disabled reviews do not depend on the reporting flag",
+    "each typed outcome prints its runner line and a deferral also goes to stderr",
     async () => {
       const ws = workspace();
-      const socket = await game(ws);
-      ws.config.reports = {
-        project: "Fixture",
-        recipient: "game-coordinator",
-        scheduledTicks: false,
-      };
-      await tick(ws, at(20));
-      expect(socket.connections).toHaveLength(1);
-      const updates: Array<Record<string, unknown>> = [
-        { host: otherGame(ws) },
-        { state: "held" },
-        { schema: 1 },
-        { recipient: "no-such-role" },
-        { harness: "codex" },
-        { targets: [] },
-        { targets: [RECIPIENT, TARGET].map((id) => routeRole(ws, "codex", id)) },
-        { targets: ["no-such-role"] },
+      cadenceGame(ws);
+      const cases: Array<{ review: Record<string, unknown>; line?: (slot: number) => string }> = [
+        {
+          review: { detail: "brief r-2 sent", status: "delivered" },
+          line: (slot) => `bus: scheduled review ${slot}: brief r-2 sent`,
+        },
+        {
+          review: { detail: "turn active", reason: "recipient-busy", status: "deferred" },
+          line: () => "bus: review deferred: recipient-busy: turn active",
+        },
+        {
+          review: { detail: "a new reason", reason: "brand-new-token", status: "skipped" },
+          line: () => "bus: review deferred: brand-new-token: a new reason",
+        },
+        {
+          review: { detail: "receipt r-2", reason: "already-delivered", status: "skipped" },
+          line: (slot) => `bus: scheduled review ${slot}: skipped already-delivered: receipt r-2`,
+        },
+        {
+          review: { exit: 1 },
+          line: (slot) =>
+            `bus: scheduled review ${slot} unavailable (exit 1: coordination-kit: internal failure); no delivery claimed`,
+        },
+        {
+          review: { stdout: "not json" },
+          line: (slot) =>
+            `bus: scheduled review ${slot} unavailable (the result is not JSON); no delivery claimed`,
+        },
+        { review: { reason: "nothing-due", status: "skipped" } },
       ];
-      for (const update of updates) {
-        ws.writeRoute(cadenceRoute(ws, update));
-        await tick(ws, at(20));
-        expect(socket.connections, JSON.stringify(update)).toHaveLength(1);
+      for (const [index, { line, review }] of cases.entries()) {
+        const slot = at(20, 0, index);
+        ws.scriptCoordinator({ review });
+        const result = await tick(ws, slot, {
+          done: ({ stdout }) => (line ? stdout.includes(line(slot)) : false),
+        });
+        const label = JSON.stringify(review);
+        expect(reviewCalls(ws).at(-1), label).toBe(iso(slot));
+        if (line === undefined) {
+          expect(result.stdout, label).not.toMatch(/review (deferred|\d+)/);
+          continue;
+        }
+        expect(occurrences(result.stdout, line(slot)), label).toBe(1);
+        // The log replays on both streams; a deferral is also written to stderr itself.
+        const deferred = line(slot).startsWith("bus: review deferred: ");
+        expect(occurrences(result.stderr, line(slot)), label).toBe(deferred ? 2 : 1);
       }
     },
     CASE_TIMEOUT_MS,
   );
 
   contract(
-    "the report recipient and route keep the Tech role distinct",
+    "a slow review spans the next wake minute, which is observed once and never replayed",
     async () => {
-      for (const host of [true, false]) {
-        const ws = workspace();
-        const socket = await game(ws);
-        ws.config.reports = {
-          project: "Fixture",
-          recipient: "game-coordinator",
-          scheduledTicks: true,
-        };
-        ws.config.schedule = { departures: ["00"], timezone: "America/Toronto" };
-        ws.updateCoordinatorConfig({ wakeMinutes: [1] });
-        ws.writeRoute(cadenceRoute(ws, { host: host ? ws.game : otherGame(ws) }));
-        const checked = await cli(ws, ["check-config"]);
-        expect(checked.code, checked.stderr).toBe(0);
-        expect(checked.stdout).toContain("configuration accepted");
-        expect(socket.calls).toEqual([]);
-        // The observer dispatches only the current wall minute. At speed 60 a slow host's
-        // notifier iteration can outlast the wake minute and miss it, so this case runs the
-        // clock at 6 (a virtual minute is ten real seconds).
-        const runner = await startRunnerAt(ws, at(-1, 30), 6);
-        const steered = () =>
-          socket
-            .callsOf("turn/steer")
-            .filter((call) => JSON.stringify(call.params).includes("scheduled slot"));
-        // The wake's slot comes from the runner's own report line, and its receipt is written
-        // after its native calls; wait for both rather than a precomputed slot or a time span.
-        const wake = () => {
-          const match = /bus: scheduled review (\d+): /.exec(runner.output().stdout);
-          return match ? Number(match[1]) : undefined;
-        };
-        try {
-          await runner.until(() => {
-            if (steered().length === 0) return false;
-            if (!host) return virtualNow(ws) > at(2, 30);
-            const slot = wake();
-            return slot !== undefined && ws.exists(`unblock/${RECIPIENT}-${slot}.json`);
-          });
-        } finally {
-          await runner.stop();
-        }
-        if (host) {
-          // The configured wake minute, in whichever hour the runner reached it.
-          expect(new Date(wake()! * 1000).getUTCMinutes()).toBe(1);
-        } else {
-          expect(wake()).toBeUndefined();
-        }
-        for (const call of steered()) {
-          expect(call.params.threadId).toBe(RECIPIENT);
-          expect(call.params.expectedTurnId).toBe("turn-one");
-        }
-        const dispatched = socket.callsOf("thread/queue/list").map((call) => call.params.threadId);
-        expect(dispatched.includes(TECH)).toBe(false);
-        expect(dispatched.includes(RECIPIENT)).toBe(host);
-        expect(ws.registry().roles.tech!.conversations.codex).toBe(TECH);
+      const ws = workspace();
+      cadenceGame(ws);
+      ws.updateCoordinatorConfig({ wakeMinutes: [20, 21] });
+      // At speed 20 a virtual minute is three real seconds; the :20 call takes about 80 virtual
+      // seconds, so its pass ends inside minute :21.
+      ws.scriptCoordinator({
+        review: { status: "delivered" },
+        reviews: { [iso(at(20))]: { delayMs: 4_000, status: "delivered" } },
+      });
+      const runner = await startRunnerAt(ws, at(19), 20);
+      try {
+        await runner.until(() => virtualNow(ws) > at(23, 30));
+      } finally {
+        await runner.stop();
       }
+      expect(reviewCalls(ws)).toEqual([iso(at(20)), iso(at(21))]);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  contract(
+    "a missing coordinator CLI defers reviews and event delivery, and the runner still departs",
+    async () => {
+      const ws = workspace();
+      cadenceGame(ws);
+      ws.config.schedule = { departures: ["20"], timezone: "America/Toronto" };
+      ws.updateCoordinatorConfig({ wakeMinutes: [20, 25] });
+      impl.offer(ws, ["bus/feature"]);
+      ws.removeCoordinatorCli();
+      const missing = join(ws.coordinator, COORDINATOR_CLI);
+      const deferral = `bus: review deferred: cli-unavailable: ${missing} is missing`;
+      const runner = await startRunnerAt(ws, at(19));
+      try {
+        await runner.until(() => runner.output().stderr.includes(deferral));
+        // npm ci at the root has finished: the next slot reaches the CLI again.
+        ws.installCoordinatorCli();
+        await runner.until(
+          () =>
+            pushes(ws) === 1 &&
+            runner.output().stdout.includes(`bus: scheduled review ${at(25)}: `),
+        );
+      } finally {
+        await runner.stop();
+      }
+      const { stdout } = runner.output();
+      expect(stdout).toContain(
+        `bus: coordinator CLI: ${missing} is missing; reviews and event delivery defer`,
+      );
+      expect(stdout).toContain(`bus: event flush deferred: cli-unavailable: ${missing} is missing`);
+      expect(reviewCalls(ws)).toEqual([iso(at(25))]);
+      expect(pushes(ws)).toBe(1);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  contract(
+    "an out-of-range coordinator CLI defers with cli-version, and the runner still departs",
+    async () => {
+      const ws = workspace();
+      cadenceGame(ws);
+      ws.config.schedule = { departures: ["20"], timezone: "America/Toronto" };
+      ws.scriptCoordinator({ review: { status: "delivered" }, version: "2.0.0" });
+      impl.offer(ws, ["bus/feature"]);
+      const deferral = `bus: review deferred: cli-version: coordinator CLI 2.0.0 is outside ${RANGE}`;
+      const result = await tick(ws, at(20), {
+        done: ({ stderr }) => pushes(ws) === 1 && stderr.includes(deferral),
+        // A departure under load can outlast the default settle; end on the condition.
+        settle: 1_200,
+      });
+      expect(result.stdout).toContain(`is outside ${RANGE}; reviews and event delivery defer`);
+      expect(result.stdout).toContain("bus: event flush deferred: cli-version: ");
+      // The startup probe found it out of range, so it is asked only for its version.
+      expect(reviewCalls(ws)).toEqual([]);
+      expect(ws.coordinatorCalls().every((call) => call.args[0] === "--version")).toBe(true);
+      expect(pushes(ws)).toBe(1);
+      const status = JSON.parse((await cli(ws, ["status"])).stdout) as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(status.coordinator_cli).toMatchObject({ supported: false, version: "2.0.0" });
     },
     CASE_TIMEOUT_MS,
   );
@@ -274,13 +293,13 @@ suite("review cadence", () => {
     "review minutes are validated at the observer without blocking or coupling to releases",
     async () => {
       const ws = workspace();
-      const socket = await game(ws);
-      // 1.0: an empty list is valid and schedules no wake; other invalid values are rejected
-      // when the configuration loads, naming /wakeMinutes.
+      cadenceGame(ws);
+      // An empty list is valid and schedules no wake; other invalid values are rejected when the
+      // configuration loads, naming /wakeMinutes.
       ws.updateCoordinatorConfig({ wakeMinutes: [] });
       const none = await tick(ws, at(20));
       expect(none.review).toEqual([]);
-      expect(socket.connections).toHaveLength(0);
+      expect(reviewCalls(ws)).toEqual([]);
       for (const value of [[60], ["20+1"]]) {
         ws.updateCoordinatorConfig({ wakeMinutes: value });
         ws.setClock(at(19, 30), 60);
@@ -291,17 +310,12 @@ suite("review cadence", () => {
         expect(result.stdout + result.stderr + log, JSON.stringify(value)).toContain(
           "/wakeMinutes",
         );
-        expect(socket.connections).toHaveLength(0);
+        expect(reviewCalls(ws)).toEqual([]);
       }
-
       ws.updateCoordinatorConfig({ wakeMinutes: [10] });
       const ten = await tick(ws, at(10));
       expect(ten.review.map((row) => row.slot)).toEqual([at(10)]);
-      // 1.0 delivers health events natively to the recipient on their own connections.
-      expect(
-        socket.ownConnections(),
-        JSON.stringify(socket.calls.filter(CodexSocket.isEvent).map((c) => c.params.input)),
-      ).toBe(1);
+      expect(reviewCalls(ws)).toEqual([iso(at(10))]);
     },
     CASE_TIMEOUT_MS,
   );
@@ -310,16 +324,15 @@ suite("review cadence", () => {
     "daylight-saving fold slots keep distinct epoch identities at the same wall minute",
     async () => {
       const ws = workspace();
-      await game(ws);
-      clearRecipient(ws);
+      cadenceGame(ws);
       const first = Date.UTC(2026, 10, 1, 5, 20) / 1000; // 01:20 EDT
       const second = Date.UTC(2026, 10, 1, 6, 20) / 1000; // 01:20 EST
       const slots: number[] = [];
       for (const slot of [first, second])
         slots.push(...(await tick(ws, slot)).review.map((row) => row.slot));
       expect(slots).toEqual([first, second]);
-      expect(ws.exists(`unblock/${RECIPIENT}-${first}.json`)).toBe(true);
-      expect(ws.exists(`unblock/${RECIPIENT}-${second}.json`)).toBe(true);
+      expect(reviewCalls(ws)).toEqual(["2026-11-01T01:20:00-04:00", "2026-11-01T01:20:00-05:00"]);
     },
+    CASE_TIMEOUT_MS,
   );
 });

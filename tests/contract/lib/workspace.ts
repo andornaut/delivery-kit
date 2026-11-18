@@ -1,10 +1,13 @@
-// Scratch workspace shared by both implementation adapters: a game-coordinator root, one or more
-// game checkouts, scratch HOME and XDG state, and fake external tools on PATH.
+// Scratch workspace shared by both implementation adapters: a game-coordinator root with a fake
+// coordinator-installed coordination-kit CLI, one or more game checkouts, scratch HOME and XDG
+// state, and fake external tools on PATH.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
+  copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -139,6 +142,23 @@ export interface Call {
   cwd: string;
 }
 
+/** The coordinator root's coordination-kit CLI, which the runner spawns for reviews and events. */
+export const COORDINATOR_CLI = join(
+  "node_modules",
+  "@andornaut",
+  "coordination-kit",
+  "dist",
+  "cli.js",
+);
+
+/** One call the fake coordination-kit CLI received. */
+export interface CoordinatorCall {
+  args: string[];
+  cwd: string;
+  execPath: string;
+  root: string;
+}
+
 export class Workspace {
   readonly root: string;
   readonly home: string;
@@ -157,7 +177,7 @@ export class Workspace {
    * against the actual load, which cases use with loadLimit 0 to force a load block.
    */
   hostLoad: HostLoad;
-  /** Extra environment for every CLI invocation (adapter overrides such as CODEX_CONTROL_SOCKET). */
+  /** Extra environment for every CLI invocation (test overrides and adapter variables). */
   env: Record<string, string> = {};
 
   constructor(options: GameOptions = {}) {
@@ -216,6 +236,50 @@ export class Workspace {
       sharedRoles: ["game-coordinator", "art-kit", "delivery-kit", "game-kit"],
     });
     this.writeRegistry({ schema: 1, revision: 1, harness: "claude", roles: {} });
+    this.installCoordinatorCli();
+  }
+
+  /**
+   * Install the fake coordination-kit CLI (lib/fake-coordination-kit.mjs) at the coordinator
+   * root. Unscripted, every review is skipped with nothing-due and every flush with no-events.
+   */
+  installCoordinatorCli(): void {
+    const cli = join(this.coordinator, COORDINATOR_CLI);
+    mkdirSync(dirname(cli), { recursive: true });
+    copyFileSync(join(HERE, "fake-coordination-kit.mjs"), cli);
+    writeJson(join(dirname(dirname(cli)), "package.json"), {
+      name: "@andornaut/coordination-kit",
+      type: "module",
+      version: "1.2.0",
+    });
+  }
+
+  /** Install the coordination-kit release this checkout builds against, its real CLI included. */
+  installReleasedCoordinatorCli(): void {
+    const target = join(this.coordinator, "node_modules", "@andornaut", "coordination-kit");
+    rmSync(target, { force: true, recursive: true });
+    cpSync(join(KIT_ROOT, "node_modules", "@andornaut", "coordination-kit"), target, {
+      recursive: true,
+    });
+  }
+
+  /** Remove the coordinator CLI, as `npm ci` at the root briefly does. */
+  removeCoordinatorCli(): void {
+    rmSync(join(this.coordinator, COORDINATOR_CLI), { force: true });
+  }
+
+  /** Script the fake coordination-kit CLI; the control fields are in its header. */
+  scriptCoordinator(control: Record<string, unknown>): void {
+    writeJson(join(this.coordinator, "fake-coordination-kit", "control.json"), control);
+  }
+
+  coordinatorCalls(): CoordinatorCall[] {
+    const path = join(this.coordinator, "fake-coordination-kit", "calls.jsonl");
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as CoordinatorCall);
   }
 
   /** Update game-coordinator `config.json` fields (for example `wakeMinutes`). */

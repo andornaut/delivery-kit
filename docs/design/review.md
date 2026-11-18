@@ -2,9 +2,11 @@
 
 The review route, the brief, the inbox inventory and the Claude and Codex adapters moved to
 coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md)). The dependency runs one way: the
-runner's observer decides when a `wakeMinutes` slot is due and calls `deliverScheduledReview`, and
-records its bus events through `recordEvent`, tracking each pushed commit under the outbox lock
-until its `complete` event. The work items below shipped in delivery-kit before the move.
+runner's observer decides when a `wakeMinutes` slot is due and, from 6.0, spawns the
+coordinator-installed `coordination-kit review deliver` and `events flush`
+([dk-0022](../work/dk-0022.md)). It still records its bus events through `recordEvent`, tracking
+each pushed commit under the outbox lock until its `complete` event. The work items below shipped
+in delivery-kit before the move.
 
 Reference: [review](../review.md), [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/design/review.md).
 

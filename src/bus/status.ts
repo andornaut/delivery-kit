@@ -21,6 +21,7 @@ import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.t
 import { lockHeld } from "./locks.ts";
 import { coordinationKitReport } from "./pin.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
+import { coordinatorCliReport } from "./seam.ts";
 import { type BusPaths, ciStatusFile, readText, readTrimmed, sortKeys } from "./state.ts";
 
 export interface IdentityInput {
@@ -358,6 +359,7 @@ export function statusReport(
     config_status: config,
     control: controlReport({ identity, identityStatus, loopHeld, running }, paths),
     coordination_kit: coordinationKitReport(),
+    coordinator_cli: coordinatorCliReport(paths.seam),
     drained: blockers.length === 0 && reporters.length === 0,
     gate_failed: gateFailed ?? [],
     identity,

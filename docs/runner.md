@@ -1,6 +1,6 @@
 # Resident runner
 
-The per-game resident runner: launch, supervision and replacement, the pin guard, status provenance, observer adoption, departures, the gate container and test-only overrides.
+The per-game resident runner: launch, supervision and replacement, the coordinator CLI seam, the pin guard, status provenance, observer adoption, departures, the gate container and test-only overrides.
 
 Launch one runner per game from that game's canonical checkout, in its own session, so it
 resolves the game's own `node_modules`:
@@ -21,17 +21,12 @@ The observer wakes at the start of each minute after its previous clock reading,
 runs past a minute boundary still reviews that minute's slot. A slot whose whole minute passes
 during one pass is skipped, not replayed.
 
-For each due slot the observer calls coordination-kit's `deliverScheduledReview`, logs the line it
-returns and flushes the event outbox ([Review and events](review.md)); coordination-kit composes
-and delivers the review. Each distinct scheduled review slot attempts a guarded review, including when queues are empty,
-unchanged since an accepted review, or explicitly retained. Accepted inventory signatures are
-health diagnostics, not permission to suppress later scheduled reviews. Repeated observations
-of the same slot use its persisted receipt without another send; an interrupted send becomes
-ambiguous and is never resent. An explicit stale-turn rejection permits one refreshed attempt.
-Queue inventory errors block the review, and recipient clearance and native question guards
-still apply. Worker failure and question notice deduplication remain independent of the review.
-Acceptance does not acknowledge queue work: acknowledgements still validate unchanged originals,
-and retention remains bound to the exact payload.
+For each due slot the observer calls the coordinator-installed `coordination-kit review deliver`,
+logs the line for its result, reports scheduled slots when `scheduledTicks` is set, then requests
+an event flush ([Coordinator CLI seam](#coordinator-cli-seam)). coordination-kit composes and
+delivers the review and owns the per-slot receipt: a repeated call for a slot returns the recorded
+outcome without another send. The runner keeps no slot receipt, calls at most once per due slot
+in each pass and never replays a missed slot.
 
 The recipient's instruction contract for every caller-configured scheduled review pass is:
 
@@ -63,6 +58,77 @@ deadline. A `pending` status, or a last push with no CI status, starts a watch w
 
 A second start while another runner holds `runner.lock` or `loop.lock` is refused with exit 3 and
 leaves the holder's identity intact.
+
+## Coordinator CLI seam
+
+The runner spawns the coordinator root's
+`node_modules/@andornaut/coordination-kit/dist/cli.js` with its own Node binary
+(`process.execPath`, never `npx`), the coordinator root it resolved from `--root` or
+`DELIVERY_KIT_ROOT` as `--root` and as the working directory, and its own environment:
+
+| Call                                        | When                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------------- |
+| `review deliver --game GAME_ID --slot SLOT` | Once per due `wakeMinutes` slot                                       |
+| `events flush --game GAME_ID`               | Once per observer pass and after each recorded event                  |
+| `--version --json`                          | At startup, and before a call while the last seen CLI is out of range |
+
+`SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
+`2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
+call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed `game` (and `slot`,
+which must equal the one sent), `status` (`delivered`, `deferred` or `skipped`), `reason`, free-text
+`detail` and `cli` `{version, distSha256}`; a flush adds `delivered` and `held` counts. The runner
+parses the JSON, not its key order, and never parses `detail`.
+
+`reason` is null when delivered, otherwise one of `route-unavailable`, `recipient-unavailable`,
+`recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`, `already-delivered`,
+`nothing-due`, `no-events`, `outbox-unreadable` or `cli-error`; an unknown token is a deferral.
+The runner adds `cli-unavailable` and `cli-version` for its own deferrals. coordination-kit
+records each review result under `bus/unblock/review-deliver/` and prints it again for a repeated
+call, except a `recipient-busy` lock contention, which it does not record. The runner never
+passes `--capture`.
+
+- **No delivery claimed:** a missing result, a nonzero exit (an internal failure exits 1 with no
+  stdout and one `coordination-kit:` stderr line, which the runner logs), a line that is not one
+  JSON object, a second stdout line, a wrong `schema`, `kind`, `game` or `slot`, a timeout and an
+  abort claim nothing. The runner logs them and continues; none stops a departure, prevents runner
+  start or ends the runner. The CLI checks for an abort before it writes a slot record, so killing
+  it never leaves a partial record.
+- **Timeout:** each spawn has 45 s, under the 60 s pass. On a timeout or an abort (runner
+  shutdown) the runner kills the child's whole process group. A spawn never holds
+  `departure.lock` and never delays a departure; departures never depend on the seam.
+- **Missing CLI:** while the file is missing, for example during `npm ci` at the root, reviews
+  and flushes defer with reason `cli-unavailable`. The next call after the install finishes
+  reaches the CLI again.
+- **Range:** the CLI version in each result must satisfy `COORDINATOR_CLI_RANGE` in
+  `src/bus/pin.ts`, `>=1.2.0 <2.0.0` in delivery-kit 6.0.0. A result from a CLI outside it defers
+  with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
+  its version until a supported install answers. Departures continue.
+- **Identity:** the runner logs `bus: coordinator CLI VERSION (dist sha256 SHA256), inside RANGE`
+  (or `is outside RANGE; reviews and event delivery defer`) at startup and whenever a result
+  carries a different identity, since `npm ci` can replace the CLI under a live runner. It records
+  the last identity and the time it saw it in `bus/seam.json`. `status --game ID` reports it,
+  read-only, as `coordinator_cli`: `{version, distSha256, seenAt, supported}`, all null before the
+  runner has seen a result. `runner.json` and `runner.identity.json` record the bundled
+  coordination-kit, not this CLI.
+
+Review lines in `runner.log`:
+
+| Result                          | Line                                                                |
+| ------------------------------- | ------------------------------------------------------------------- |
+| `delivered`                     | `bus: scheduled review WAKE: DETAIL`                                |
+| `deferred`, or an unknown token | `bus: review deferred: REASON: DETAIL`, also written to stderr      |
+| `skipped` with `nothing-due`    | none: this runner does not dispatch the slot                        |
+| `skipped`, other reasons        | `bus: scheduled review WAKE: skipped REASON: DETAIL`                |
+| no delivery claimed             | `bus: scheduled review WAKE unavailable (WHY); no delivery claimed` |
+
+`WAKE` is the slot start in epoch seconds. A flush logs `bus: event flush deferred: REASON:
+DETAIL`, `bus: event flush held N: DETAIL` or `bus: event flush failed: WHY; no delivery claimed`
+once until its outcome changes, and nothing for a delivered or skipped flush with nothing held.
+At most one flush runs at a time; a request during one runs one more after it.
+
+The runner still records events in-process: `events/` is coordination-kit's outbox format, and
+delivery-kit's per-commit tracking and `complete` event run under its lock. The CLI only delivers
+them.
 
 ## Supervision
 
@@ -145,18 +211,21 @@ Neither the event nor the field records adoption, changes the registry or author
 
 ## Pin guard
 
-The bundles inline the coordination-kit modules they use, so a game pins only
-`@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The build
-embeds the bundled coordination-kit version. delivery-kit declares the coordination-kit releases
-it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`; delivery-kit 5.0.2 supports
-`>=1.0.1 <2.0.0`. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
+The bundles inline the coordination-kit utilities they use (layout, registry reads, locks,
+durable writes, configuration validation, IDs, event recording and the protocol read), so a game
+pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
+build embeds the bundled coordination-kit version. delivery-kit declares the bundled
+coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`;
+delivery-kit 6.0.0 supports `>=1.0.1 <2.0.0` and bundles 1.2.0, the same release as the coordinator CLI it requires. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
 `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.
 
 `status` reports `coordination_kit` read-only: `bundled` (the inlined version) and `supported`
-(the range). game-coordinator pins coordination-kit directly for the roles' CLI and the channel
-MCP server. That install and each game's runner exchange data only through the on-disk formats,
-which stay compatible within coordination-kit 1.x.
+(the range). game-coordinator pins coordination-kit directly for the roles' CLI, the channel
+MCP server and the seam the runner spawns, whose own range is `COORDINATOR_CLI_RANGE`
+([Coordinator CLI seam](#coordinator-cli-seam)). Otherwise that install and each game's runner
+exchange data only through the on-disk formats, which stay compatible within coordination-kit
+1.x.
 
 At startup the runner writes `var/games/<g>/bus/runner.json`: `schema`, `pid`, `startedAt`,
 `version`, `coordinationKitVersion` (the bundled coordination-kit), `cliPath` (realpath of the
@@ -200,9 +269,10 @@ configuration, control, lock, idle and reporter/drain fields separately. Status 
 registry update, runner replacement or scheduling action.
 
 Reporter drain is separate from recipient inbox health. Use `status --game ID` to read
-`reporter_blockers` and `drained`; an idle runner can still have unsent events. There is no
-public reporter-event list, reconciliation or flush command. The resident observer processes
-event receipts in order and marks an event sent only after accepted delivery. Recipient inbox
+`reporter_blockers` and `drained`; an idle runner can still have unsent events. delivery-kit has
+no reporter-event list, reconciliation or flush command. The resident observer requests
+coordination-kit's `events flush`, which processes event receipts in order and marks an event
+sent only after accepted delivery. Recipient inbox
 acknowledgements and common-message reconciliation do not change reporter event state.
 Installing a newer CLI or adopting its generic inbox does not prove an older resident's
 reporters drained. Preserve event originals and ambiguous receipts for supported owner review.

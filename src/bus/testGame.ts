@@ -18,6 +18,8 @@ import { makeFixture, projectConfig } from "../testFixtures.ts";
 import { type BusContext, busContext, type Clock, type Events } from "./context.ts";
 import { setDesiredDelivery } from "./control.ts";
 import { type Exec, type ExecResult, type ExecSpec, spawnExec } from "./exec.ts";
+import type { Coordinator } from "./seam.ts";
+import { recordingCoordinator } from "./testCoordinator.ts";
 
 export const GAME = "archies-dog-walks";
 
@@ -307,6 +309,8 @@ export interface ContextParts {
   readonly exec?: Exec;
   readonly clock?: Clock;
   readonly events?: Events;
+  /** Defaults to a recording coordinator that delivers every review. */
+  readonly coordinator?: Coordinator;
   /** A fixed one-minute load, or a source read at every load check. */
   readonly load?: number | (() => number);
   readonly startCi?: (sha: string) => void;
@@ -321,6 +325,7 @@ export function testContext(
   const context = busContext(
     {
       clock: parts.clock ?? manualClock(1_800_000_000),
+      coordinator: parts.coordinator ?? recordingCoordinator(),
       events: parts.events ?? recordingEvents(),
       exec: parts.exec ?? fakeExec(() => ok()),
       loadAverage: typeof load === "function" ? load : () => load,

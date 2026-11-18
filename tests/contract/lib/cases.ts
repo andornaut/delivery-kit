@@ -19,14 +19,6 @@ export const contract = it;
  */
 export const CASE_TIMEOUT_MS = 600_000;
 
-/** The deferral for an unusable review route. */
-export const ROUTE_INVALID_MESSAGE =
-  "review route is unavailable or invalid; its owner must verify identities and ownership";
-
-/** The deferral for worker parents outside the active review route. */
-export const WORKER_PARENTS_ROUTE_MESSAGE =
-  "workerParents requires parents in the active review route";
-
 /** check-config's exit status for invalid configuration. */
 export const EXIT_INVALID = 1;
 

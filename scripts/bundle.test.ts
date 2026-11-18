@@ -15,10 +15,15 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { COORDINATION_KIT_RANGE } from "../src/bus/pin.ts";
-import { bundledCoordinationKit, packagedDocs } from "./package-check.ts";
+import {
+  bundledCoordinationKit,
+  BUNDLES,
+  bundleSpecifiers,
+  nodeImports,
+  packagedDocs,
+} from "./package-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BUNDLES = ["dist/cli.js", "dist/source-identity.js"];
 const METADATA = ["LICENSE", "README.md", "SOURCE_COMMIT", "package.json", ...packagedDocs(root)];
 
 beforeAll(() => {
@@ -45,17 +50,39 @@ describe("dist/cli.js", () => {
 describe("bundles", () => {
   it("inline coordination-kit and import only node: builtins", () => {
     for (const bundle of BUNDLES) {
-      const text = readFileSync(join(root, bundle), "utf8");
-      const specifiers = [
-        ...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/gmu),
-        ...text.matchAll(/^\s*import\s*["']([^"']+)["']/gmu),
-        ...text.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/gu),
-      ].map((match) => match[1] ?? "");
+      const specifiers = bundleSpecifiers(readFileSync(join(root, bundle), "utf8"));
       expect(specifiers.length, bundle).toBeGreaterThan(0);
       expect(
         specifiers.filter((specifier) => !specifier.startsWith("node:")),
         bundle,
       ).toEqual([]);
+      expect(nodeImports(join(root, bundle)).every((name) => name.startsWith("node:"))).toBe(true);
+    }
+  });
+
+  it("no longer bundle the review and event delivery the coordinator CLI performs", () => {
+    const text = readFileSync(join(root, "dist/cli.js"), "utf8");
+    for (const name of ["deliverScheduledReview", "flushEventsWith", "spoolReviewBrief"]) {
+      expect(text, name).not.toContain(`function ${name}(`);
+    }
+  });
+
+  it("refuses a bundle that imports anything but node: builtins", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "bundle-imports-"));
+    const good = join(fixture, "good.js");
+    writeFileSync(
+      good,
+      'import { a } from "node:fs";\nimport "node:path";\nimport { b } from "node:fs";\n',
+    );
+    expect(nodeImports(good)).toEqual(["node:fs", "node:path"]);
+    for (const text of [
+      'import x from "vite";\n',
+      'const m = await import("./x.js");\n',
+      "plain\n",
+    ]) {
+      const bad = join(fixture, "bad.js");
+      writeFileSync(bad, text);
+      expect(() => nodeImports(bad), text).toThrow("must import only node: builtins");
     }
   });
 });

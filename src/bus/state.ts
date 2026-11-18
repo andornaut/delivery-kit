@@ -29,6 +29,8 @@ export interface BusPaths {
   readonly gateLogsDir: string;
   readonly identity: string;
   readonly runnerJson: string;
+  /** The last coordinator CLI identity a seam result carried; see seam.ts. */
+  readonly seam: string;
   readonly resourcesLog: string;
   readonly runnerLog: string;
 }
@@ -59,6 +61,7 @@ export function busPaths(dir: string): BusPaths {
     runnerJson: at("runner.json"),
     runnerLock: at("runner.lock"),
     runnerLog: at("runner.log"),
+    seam: at("seam.json"),
   };
 }
 

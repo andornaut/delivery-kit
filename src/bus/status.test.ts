@@ -60,6 +60,38 @@ describe("status report", () => {
     }
   });
 
+  it("reports the last coordinator CLI identity the runner recorded, read-only", () => {
+    const { bus, lock } = controlledRunner();
+    try {
+      expect(statusReport(bus).coordinator_cli).toEqual({
+        distSha256: null,
+        seenAt: null,
+        supported: null,
+        version: null,
+      });
+      const distSha256 = "e".repeat(64);
+      for (const [version, supported] of [
+        ["1.2.0", true],
+        ["2.0.0", false],
+      ] as const) {
+        writeFileSync(
+          bus.seam,
+          JSON.stringify({ distSha256, schema: 1, seenAt: "2026-11-18T12:00:00Z", version }),
+        );
+        expect(statusReport(bus).coordinator_cli).toEqual({
+          distSha256,
+          seenAt: "2026-11-18T12:00:00Z",
+          supported,
+          version,
+        });
+      }
+      writeFileSync(bus.seam, "{");
+      expect(statusReport(bus).coordinator_cli).toMatchObject({ version: null });
+    } finally {
+      lock.release();
+    }
+  });
+
   it.each(["checking"] as const)(
     "does not attest live %s when only the runner lock is held",
     (state) => {
