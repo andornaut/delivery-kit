@@ -73,6 +73,10 @@ describe("watchCi", () => {
     expect(decide([lint, run(2, "Test", "in_progress", null)])).toBeUndefined();
     expect(decide([lint, run(2, "Test", "completed", "cancelled")])).toBe("failure");
     expect(decide([lint, run(2, "Test", "completed", "neutral")])).toBe("success");
+    // A job a docs-only change skips passes; a skipped run that is still queued does not decide.
+    expect(decide([lint, run(2, "Test", "completed", "skipped")])).toBe("success");
+    expect(decide([lint, run(2, "Test", "queued", "skipped")])).toBeUndefined();
+    expect(decide([lint, run(2, "Test", "completed", "timed_out")])).toBe("failure");
     expect(
       decide([lint, run(2, "Test", "completed", "failure"), run(3, "Test", "queued", null)]),
     ).toBe(undefined);

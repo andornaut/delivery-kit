@@ -103,6 +103,18 @@ describe("emitEvent", () => {
         .sort(),
     ).toEqual(["ci_success", "complete", "deploy_skipped", "push"]);
   });
+
+  it("reports a docs-only push as complete without claiming a gate", () => {
+    const game = setup();
+    emitEvent(game, OPTIONS, "gate_skipped", SHA, "gate skipped");
+    emitEvent(game, OPTIONS, "push", SHA, "pushed");
+    emitEvent(game, OPTIONS, "deploy_skipped", SHA, "docs only");
+    emitEvent(game, OPTIONS, "ci_success", SHA, "CI green");
+    expect(events(game).find((event) => event.kind === "complete")?.message).toBe(
+      `Archie bus: COMPLETE ${SHA}: docs-only, gate skipped; CI success; deployment skipped.`,
+    );
+    expect(events(game).map((event) => event.kind)).not.toContain("gate_skipped");
+  });
 });
 
 describe("deliveryMessage", () => {

@@ -33,6 +33,7 @@ const QUIET_KINDS: ReadonlySet<string> = new Set([
   "ci_running",
   "deploy_pending",
   "deploy_retry",
+  "gate_skipped",
 ]);
 
 /** Delivered text, suffix included, stays within this many UTF-8 bytes. */
@@ -54,6 +55,8 @@ interface CommitState {
   [key: string]: PyJson | undefined;
   ci: string;
   deploy: string;
+  /** "skipped" for a docs-only departure, pushed without a gate. */
+  gate?: string;
   pushed?: boolean;
 }
 
@@ -144,14 +147,18 @@ function trackCommit(directory: string, project: string, kind: string, key: stri
   if (kind === "push") {
     state.pushed = true;
   }
+  if (kind === "gate_skipped") {
+    state.gate = "skipped";
+  }
   writeState(path, state);
   if (state.pushed === true && state.ci === "success" && deployFinished(state)) {
+    const gate = state.gate === "skipped" ? "docs-only, gate skipped" : "full gate passed";
     enqueue(
       directory,
       project,
       "complete",
       key,
-      `COMPLETE ${key}: full gate passed; CI success; deployment ${state.deploy}.`,
+      `COMPLETE ${key}: ${gate}; CI success; deployment ${state.deploy}.`,
     );
   }
 }

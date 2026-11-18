@@ -101,6 +101,26 @@ suite("departure", () => {
   );
 
   contract(
+    "a range under docs/ pushes without a gate container, watches CI and never deploys",
+    async () => {
+      const ws = workspace();
+      bus(ws);
+      ws.updateControl((c) => (c.git = { files: "docs/runner.md\ndocs/guide/setup.md" }));
+      impl.offer(ws, ["bus/docs"]);
+      const runner = await departOnce(ws, () => kinds(ws).includes("complete"));
+      await runner.stop();
+      expect(pushes(ws)).toBe(1);
+      expect(containers(ws)).toEqual([]);
+      expect(deploys(ws)).toEqual([]);
+      expect(ws.exists("deploy-pending")).toBe(false);
+      expect(ws.read("last-deploy-skipped.sha").trim()).toBe(SHA);
+      expect(kinds(ws)).toEqual(expect.arrayContaining(["push", "deploy_skipped", "ci_success"]));
+      const complete = ws.events().find((event) => event.kind === "complete");
+      expect(String(complete?.message)).toContain("docs-only, gate skipped; CI success");
+    },
+  );
+
+  contract(
     "a failed deployment retains the gated build and retries without another gate or push",
     async () => {
       const ws = workspace();

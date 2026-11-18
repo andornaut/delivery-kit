@@ -11,6 +11,7 @@ import {
   readPending,
   removeWorktree,
   retryDeploy,
+  skipDeploy,
   stageDeploy,
   updateDeliveryWork,
   withDeliveryRunner,
@@ -22,7 +23,7 @@ import { assertNotInterrupted, git, Interrupted } from "./exec.ts";
 import { type RequestStore, validateRequest } from "./requests.ts";
 import { ensureDir, gateFailedFile, nonEmpty, readTrimmed, writeLines } from "./state.ts";
 import { latestScheduledSlot, stamp } from "./time.ts";
-import { mainHead, remoteMain, skipReason } from "./trunk.ts";
+import { changedPaths, DOCS_PREFIX, docsOnly, mainHead, remoteMain, skipReason } from "./trunk.ts";
 
 export function requestStore(context: BusContext): RequestStore {
   return {
@@ -266,7 +267,12 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       return nonFastForward(context, attempt, head, remote);
     }
   }
-  return gateAndPush(context, attempt, head, remote);
+  const changed = await changedPaths(context.exec, context.game.repo, remote, head);
+  // A pending deployment of an earlier push is superseded by a gated push of this range.
+  if (docsOnly(changed) && !deployPendingExists(context)) {
+    return pushDocs(context, attempt, head);
+  }
+  return gateAndPush(context, attempt, head, changed);
 }
 
 /**
@@ -323,11 +329,73 @@ function recordPush(context: BusContext, sha: string): void {
   writeLines(context.paths.lastPushSha, sha);
 }
 
+/** Push `head` to the remote main without force; undefined once pushed and recorded. */
+async function pushHead(
+  context: BusContext,
+  attempt: Attempt,
+  head: string,
+): Promise<number | undefined> {
+  const { config, game } = context;
+  const push = assertNotInterrupted(
+    "git push",
+    await context.exec({
+      args: [
+        "-C",
+        game.repo,
+        "push",
+        "--porcelain",
+        config.git.remote,
+        `${head}:refs/heads/${config.git.main}`,
+      ],
+      command: "git",
+    }),
+  );
+  if (push.status !== 0) {
+    const output = `${push.stdout}\n${push.stderr}`;
+    if (/\[rejected\]|non-fast-forward|fetch first/.test(output)) {
+      return nonFastForward(context, attempt, head, undefined);
+    }
+    return blocked(
+      context,
+      attempt,
+      "push",
+      `push of main ${head} failed: ${push.stderr.trim() || "no diagnostic"}`,
+      `${REMEDY.retry}; an operator fix is required if the push keeps failing`,
+    );
+  }
+  recordPush(context, head);
+  return undefined;
+}
+
+/** A range that changes only DOCS_PREFIX paths: push the exact SHA without a gate; never deploy. */
+async function pushDocs(context: BusContext, attempt: Attempt, head: string): Promise<number> {
+  const { config } = context;
+  const reason = `every changed path is under ${DOCS_PREFIX}`;
+  context.log(`${attempt.when} bus departs with main ${head}; ${reason}: no gate, no deployment`);
+  const failed = await pushHead(context, attempt, head);
+  if (failed !== undefined) {
+    return failed;
+  }
+  context.events.emit("gate_skipped", head, `Gate skipped for ${head}: ${reason}.`);
+  context.events.emit(
+    "push",
+    head,
+    [
+      `${stamp(config.schedule.timezone, context.clock.now())} departed exact pushed SHA ${head}: main;`,
+      "docs-only range, gate skipped; CI pending; no deployment.",
+    ].join(" "),
+  );
+  context.log(`${attempt.when} bus: pushed ${head}`);
+  skipDeploy(context, head, reason);
+  context.startCi(head);
+  return 0;
+}
+
 async function gateAndPush(
   context: BusContext,
   attempt: Attempt,
   head: string,
-  remote: string | undefined,
+  changed: readonly string[] | undefined,
 ): Promise<number> {
   const { config, game, paths } = context;
   const short = head.slice(0, 12);
@@ -379,35 +447,11 @@ async function gateAndPush(
     context.log(`${attempt.when}  ${line}`);
   }
   writeLines(join(work, ".bus-built.sha"), head);
-  const push = assertNotInterrupted(
-    "git push",
-    await context.exec({
-      args: [
-        "-C",
-        game.repo,
-        "push",
-        "--porcelain",
-        config.git.remote,
-        `${head}:refs/heads/${config.git.main}`,
-      ],
-      command: "git",
-    }),
-  );
-  if (push.status !== 0) {
+  const failed = await pushHead(context, attempt, head);
+  if (failed !== undefined) {
     await removeWorktree(context, work);
-    const output = `${push.stdout}\n${push.stderr}`;
-    if (/\[rejected\]|non-fast-forward|fetch first/.test(output)) {
-      return nonFastForward(context, attempt, head, undefined);
-    }
-    return blocked(
-      context,
-      attempt,
-      "push",
-      `push of main ${head} failed: ${push.stderr.trim() || "no diagnostic"}`,
-      `${REMEDY.retry}; an operator fix is required if the push keeps failing`,
-    );
+    return failed;
   }
-  recordPush(context, head);
   context.events.emit(
     "push",
     head,
@@ -418,7 +462,7 @@ async function gateAndPush(
   );
   context.log(`${attempt.when} bus: pushed ${head}`);
   try {
-    await stageDeploy(context, { sha: head, work }, await deployNeeded(context, remote, head));
+    await stageDeploy(context, { sha: head, work }, deployNeeded(context, changed));
   } catch (error) {
     rethrowInterrupted(error);
     // Never leave a pushed SHA undeployed without a report.

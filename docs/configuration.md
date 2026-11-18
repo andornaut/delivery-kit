@@ -44,8 +44,10 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
 - `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
   pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400).
 - `deploy`: `mode` is `wrangler` or `none`; the optional `skipPattern` is a regular expression
-  over the paths changed in the pushed range (the previous remote `main` to the pushed SHA). A push
-  whose every changed path matches it skips deployment.
+  over the paths changed in the pushed range (the previous remote `main` to the pushed SHA, both
+  sides of a rename). A push whose every changed path matches it skips deployment. A range that
+  changes only `docs/` paths departs without a gate or a deployment whatever this pattern says
+  (see [runner.md](runner.md#departures)).
 - `reports`: `project` (must equal the game's `name` in `config.json`), `scheduledTicks`, and
   `recipient` and `workerParents`, each a registered role key. `recipient` receives the game's
   events and, when the game hosts the route, its scheduled reviews.

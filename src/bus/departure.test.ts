@@ -205,6 +205,60 @@ describe("trunk-based departures", () => {
   });
 });
 
+function mergeDocs(test: TestGame, name: string): string {
+  mkdirSync(join(test.repo, "docs"), { recursive: true });
+  return mergeFastForward(test, name, `docs/${name}.md`);
+}
+
+describe("docs-only departures", () => {
+  it("pushes a range under docs/ without a gate, watches CI and never deploys", async () => {
+    const { context, creates, events, kinds, started, test } = setup("wrangler");
+    mergeDocs(test, "guide");
+    const head = mergeDocs(test, "notes");
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(0);
+    expect(originMain(test)).toBe(head);
+    expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
+    expect(started).toEqual([head]);
+    expect(kinds()).toEqual([
+      "scheduled-status",
+      "attempt",
+      "gate_skipped",
+      "push",
+      "deploy_skipped",
+    ]);
+    const push = events.list.find(([kind]) => kind === "push")?.[2] ?? "";
+    expect(push).toContain("docs-only range, gate skipped; CI pending; no deployment.");
+    expect(readFileSync(context.paths.lastDeploySkippedSha, "utf8")).toBe(`${head}\n`);
+    expect(existsSync(context.paths.deployPending)).toBe(false);
+    expect(existsSync(join(test.game.busDir, `gate-${head}`))).toBe(false);
+    ciStatus(test, head, "success");
+    expect(await deployAfterCi(context, head)).toBe(false);
+  });
+
+  it("gates a range that also changes a path outside docs/", async () => {
+    const { context, creates, kinds, test } = setup();
+    mergeDocs(test, "guide");
+    const head = mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(1);
+    expect(originMain(test)).toBe(head);
+    expect(kinds()).not.toContain("gate_skipped");
+  });
+
+  it("gates a docs-only range while an earlier deployment is pending, superseding it", async () => {
+    const { context, creates, kinds, test } = setup("wrangler");
+    const feature = mergeFastForward(test, "feature");
+    expect(await depart(context)).toBe(0);
+    expect(readFileSync(context.paths.deployPending, "utf8")).toContain(feature);
+    const head = mergeDocs(test, "guide");
+    expect(await depart(context)).toBe(0);
+    expect(creates()).toBe(2);
+    expect(kinds()).not.toContain("gate_skipped");
+    expect(readFileSync(context.paths.deployPending, "utf8").split("\n")[0]).toBe(head);
+  });
+});
+
 describe("departures at high load", () => {
   // 03:00 America/Toronto: the fixture's scheduled departure slot. The fixture loadLimit is 24.
   const SLOT = 1_800_000_000;

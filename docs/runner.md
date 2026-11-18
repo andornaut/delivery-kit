@@ -128,10 +128,11 @@ cherry-pick, rewrite or revert. Each scheduled or requested departure, under `de
    `blocked-load` and `main` retained. A runner shutdown ends the wait without a report.
 5. Stops with `blocked-push` when the remote `main` is known locally and is not an ancestor of
    HEAD. Nothing is gated or pushed; Tech merges the remote `main` into local `main`.
-6. Gates HEAD on a detached scratch worktree, so merge commits are gated as they are.
+6. Gates HEAD on a detached scratch worktree, so merge commits are gated as they are. A
+   docs-only range skips this step.
 7. Pushes with `git push <remote> <sha>:refs/heads/<main>`, never forced. A non-fast-forward
    rejection is reported as `blocked-push` and nothing is pushed.
-8. Stages the deployment, then watches CI for that exact SHA.
+8. Stages the deployment, then watches CI for that exact SHA. A docs-only range never deploys.
 
 The runner never fetches, checks out or moves a ref in the canonical checkout. Its only write there
 is the push of an exact SHA (and the scratch worktree's Git metadata).
@@ -140,6 +141,14 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   container) leaves `main` unpushed and records `gate-failed/<sha>`, so that SHA is never gated
   again; the next departure runs once Tech merges a fix. Red CI or a failed deployment is fixed the
   same way, with no automatic CI rerun.
+- **Docs-only range:** when every path changed from the remote `main` to HEAD starts with `docs/`
+  (both sides of a rename count) and no deployment is pending, the departure starts no gate
+  container. It pushes the exact SHA as in step 7, records `last-deploy-skipped.sha`, reports
+  `deploy_skipped` and watches CI as usual; that range is never deployed. The `push` and
+  `complete` reports say the gate was skipped. An unknown range (no remote `main`, or a remote
+  commit missing locally), an empty diff or a pending deployment of an earlier push departs with
+  the full gate, so the gated push supersedes the pending deployment. The prefix is fixed, not
+  configured.
 - **Gate infrastructure:** when Docker is unavailable, the image cannot be pulled, the container
   cannot be created or started, install fails with an npm network code (HTTP 5xx, `ETIMEDOUT`,
   `ECONNRESET`, `ECONNREFUSED`, `EAI_AGAIN`, `ENOTFOUND`, `ESOCKETTIMEDOUT`), the network cannot be

@@ -170,27 +170,16 @@ export function deployPendingExists(context: BusContext): boolean {
 }
 
 /**
- * The pushed range changes a file outside the configured skip pattern. A first push, or a
- * previous remote SHA this checkout does not have, always needs a deployment.
+ * The pushed range changes a file outside the configured skip pattern. An unknown range (a first
+ * push, or a previous remote SHA this checkout does not have) always needs a deployment.
  */
-export async function deployNeeded(
-  context: BusContext,
-  from: string | undefined,
-  to: string,
-): Promise<boolean> {
+export function deployNeeded(context: BusContext, changed: readonly string[] | undefined): boolean {
   const pattern = context.config.deploy.skipPattern;
-  if (pattern === undefined || pattern === "" || from === undefined) {
-    return true;
-  }
-  const diff = await context.exec({
-    args: ["-C", context.game.repo, "diff", "--name-only", from, to],
-    command: "git",
-  });
-  if (diff.status !== 0) {
+  if (pattern === undefined || pattern === "" || changed === undefined) {
     return true;
   }
   const skip = new RegExp(pattern);
-  return diff.stdout.split("\n").some((name) => name !== "" && !skip.test(name));
+  return changed.some((name) => !skip.test(name));
 }
 
 export async function removeWorktree(context: BusContext, work: string): Promise<void> {
@@ -376,6 +365,17 @@ async function supersede(context: BusContext, sha: string): Promise<void> {
   await removeWorktree(context, previous.work);
 }
 
+/** Record that the pushed `sha` is never deployed, with the reason. */
+export function skipDeploy(context: BusContext, sha: string, reason: string): void {
+  writeLines(context.paths.lastDeploySkippedSha, sha);
+  context.events.emit(
+    "deploy_skipped",
+    sha,
+    `Deployment skipped for pushed ${sha}: ${reason}; CI pending until verified.`,
+  );
+  context.log(`deploy skipped for ${sha}: ${reason}`);
+}
+
 /**
  * After a successful push: record the pending deployment, which runs once CI passes, or skip it
  * and drop the worktree. Never deploys before CI.
@@ -387,15 +387,7 @@ export async function stageDeploy(
 ): Promise<void> {
   const { sha } = pending;
   if (!needed) {
-    writeLines(context.paths.lastDeploySkippedSha, sha);
-    context.events.emit(
-      "deploy_skipped",
-      sha,
-      `Deployment skipped for pushed ${sha}: every changed path matches deploy.skipPattern; CI pending until verified.`,
-    );
-    context.log(
-      "deploy skipped: every path changed in the pushed range matches deploy.skipPattern",
-    );
+    skipDeploy(context, sha, "every changed path matches deploy.skipPattern");
     await removeWorktree(context, pending.work);
     return;
   }

@@ -15,5 +15,6 @@ Decisions the cases assert:
 - Invalid configuration: `check-config` exits 1 (`EXIT_INVALID`); usage errors exit 2.
 - Receive timeouts: a native reply that never arrives is classified and latched as a timeout (child health, question state and the review history transport failure).
 - CI decision: only the runs named in `ci.requiredNames` decide a watch.
+- Docs-only departures: departure "a range under docs/ pushes without a gate container, watches CI and never deploys" expects one push, no gate container, no deployment and a `complete` report that names the skipped gate.
 
 fsync calls themselves are not observable from outside the process without syscall tracing (the offline image has no `strace`). The durable-write cases assert the observable half of the durable primitive: replacement by rename (a new inode) and no leftover temporary files.
