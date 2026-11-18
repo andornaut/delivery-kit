@@ -74,7 +74,10 @@ explicit; it is never inferred from the working directory.
 - `inbox snapshot` and `inbox ack`: `--recipient` defaults to the game's `reports.recipient`.
   `--recipient` and `--parent` take a role name, or a canonical conversation UUID registered for
   the active harness, with the worker recipient exception below. With Claude the recipient must
-  be the active route's recipient and every parent a route member; with Codex every parent must
+  be the active route's recipient, whose parents may be any route member, or a registered route
+  target whose selected harness is Claude. A route target's snapshot and ACK cover only its own
+  delivered entries and retentions, with no peer or target rows, and its snapshot accepts no other
+  conversation as a parent. Any other Claude recipient is refused. With Codex every parent must
   belong to the active route. `--history-cursor` applies to Codex. An unreadable Claude channel
   spool is reported under the snapshot's `errors`, with
   `complete` false and exit 1; only a missing spool counts as empty.

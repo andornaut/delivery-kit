@@ -175,14 +175,30 @@ function scope(
   };
 }
 
-/** The recipient must be the active route's recipient, resolved for the active harness now. */
+/**
+ * The Claude recipient's scope, resolved through the registry now. The active route's recipient
+ * keeps the whole route. A registered route target whose selected harness is Claude is scoped to
+ * its own conversation: no peers and no target rows. Any other recipient is refused.
+ */
 function claudeRoute(layout: Layout, registry: Registry, recipient: string): ActiveScope {
   const route = readRoleRoute(layout);
   const active = route === null ? null : routeScope(registry, routeRecipient(layout, route), route);
-  if (active === null || active.recipient !== recipient) {
+  if (active !== null && active.recipient === recipient) {
+    return active;
+  }
+  const target = active?.targets.find((entry) => entry.sessionId === recipient);
+  if (target?.harness !== "claude") {
     throw new Error("recipient must be the active route's recipient");
   }
-  return active;
+  return {
+    harness: "claude",
+    harnesses: { [recipient]: "claude" },
+    peers: [],
+    recipient,
+    recipientRole: target.name,
+    status: "active",
+    targets: [],
+  };
 }
 
 /**
@@ -261,14 +277,15 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
     );
     return complete ? EXIT_OK : EXIT_INVALID;
   }
-  if (context.harness === "claude") {
-    const route = claudeRoute(context.layout, context.registry, recipient);
-    const members = new Set([recipient, ...route.peers]);
-    if (parents.some((parent) => !members.has(parent))) {
-      throw new Error("parent outside active route");
-    }
+  // A Claude recipient's route members come from its own scope, so a route target never
+  // collects the route recipient's or its peers' diagnostics.
+  const route =
+    context.harness === "claude" ? claudeRoute(context.layout, context.registry, recipient) : null;
+  const members = route === null ? context.members : [route.recipient, ...route.peers];
+  if (route !== null && parents.some((parent) => !members?.includes(parent))) {
+    throw new Error("parent outside active route");
   }
-  const endpoints = [...new Set([recipient, ...parents, ...(context.members ?? [])])];
+  const endpoints = [...new Set([recipient, ...parents, ...(members ?? [])])];
   const selected = new Set(endpoints.map((id) => context.harnesses[id]));
   if (selected.size > 1) {
     const adapters = Object.fromEntries(
@@ -286,7 +303,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
         parents,
         {
           historyCursor: historyCursor ?? null,
-          ...(context.members === undefined ? {} : { routeMembers: context.members }),
+          ...(members === undefined ? {} : { routeMembers: members }),
         },
       ),
     );
@@ -314,12 +331,7 @@ async function snapshot(io: Io, context: Scope, historyCursor?: string): Promise
     );
     return complete ? EXIT_OK : EXIT_INVALID;
   }
-  if (context.harness === "claude") {
-    const route = claudeRoute(context.layout, context.registry, recipient);
-    const members = new Set([recipient, ...route.peers]);
-    if (parents.some((parent) => !members.has(parent))) {
-      throw new Error("parent outside active route");
-    }
+  if (route !== null) {
     const listing = listingOrNull(io.env);
     const record = await locked(unblock, async () => {
       const captured = captureClaude(

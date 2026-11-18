@@ -7,6 +7,7 @@ import { cli } from "../lib/adapter.ts";
 import {
   agents,
   ARCHIE,
+  CHIBI,
   claudeGame,
   deliver,
   RECIPIENT,
@@ -108,9 +109,17 @@ suite("claude inbox inventory", () => {
     agents(ws, "fail");
     expect((await snapshot(ws)).session_status[RECIPIENT]).toBe("unavailable");
     agents(ws, "idle");
-    const other = await cli(ws, ["inbox", "snapshot", "--recipient", ARCHIE]);
+    // A Claude route target sees only its own delivered entries and diagnostics.
+    const target = await snapshot(ws, ARCHIE);
+    expect(target.queue_ids).toEqual([]);
+    expect(target.target_queue_status).toEqual({});
+    expect(Object.keys(stored(ws, target).queues)).toEqual([ARCHIE]);
+    expect(Object.keys(target.question_state_status)).toEqual([ARCHIE]);
+    // A registered Claude role outside the route is refused.
+    const other = await cli(ws, ["inbox", "snapshot", "--recipient", CHIBI]);
     expect(other.code).toBe(1);
     expect(JSON.parse(other.stdout).status).toBe("unavailable");
+    expect(other.stderr).toContain("recipient must be the active route's recipient");
   });
 
   contract("a handled acknowledgement removes the exact entry once", async () => {

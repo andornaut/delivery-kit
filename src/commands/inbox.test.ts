@@ -1,10 +1,15 @@
-import { readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { deliverPending } from "../adapters/claude/channel.ts";
-import { deliveredDir, spoolDir, spoolReviewBrief } from "../adapters/claude/spool.ts";
+import {
+  deliveredDir,
+  spoolDir,
+  spoolMessage,
+  spoolReviewBrief,
+} from "../adapters/claude/spool.ts";
 import { type FakeControl, startFakeControl } from "../adapters/codex/testControlSocket.ts";
 import { slotRequestId } from "../adapters/shared/ids.ts";
 import { digest } from "../adapters/shared/pyjson.ts";
@@ -362,6 +367,22 @@ async function delivered(): Promise<{ fixture: ClaudeFixture; requestId: string 
   return { fixture, requestId: slotRequestId(RECIPIENT, SLOT) };
 }
 
+/** Spool and deliver one generic channel message to `recipient`; returns its request ID. */
+async function deliveredTo(
+  fixture: ClaudeFixture,
+  recipient: string,
+  requestId: string,
+): Promise<string> {
+  const message = { recipient, requestId, text: `body for ${requestId}` };
+  const path = join(fixture.unblock, `${requestId}.json`);
+  expect(spoolMessage(fixture.game.busDir, path, message).status).toBe("queued");
+  await deliverPending(() => undefined, fixture.game.busDir, recipient, {
+    beforeMessage: async () => ({ status: "clear" }),
+  });
+  expect(readdirSync(deliveredDir(fixture.game.busDir))).toContain(`${requestId}.json`);
+  return requestId;
+}
+
 async function snapshot(fixture: ClaudeFixture): Promise<Record<string, unknown>> {
   const result = await run(fixture, "inbox", "snapshot", "--game", GAME);
   expect(result.code, result.err + result.out).toBe(EXIT_OK);
@@ -477,8 +498,9 @@ describe("inbox effective harness selection", () => {
 });
 
 describe("inbox snapshot (claude)", () => {
-  it("refuses a recipient that is not the route recipient", async () => {
-    const { fixture } = await delivered();
+  it("scopes a Claude route target to its own delivered entries for snapshot and ack", async () => {
+    const { fixture, requestId } = await delivered();
+    const techRequest = await deliveredTo(fixture, TECH, "tech-message");
     const result = await run(
       fixture,
       "inbox",
@@ -488,12 +510,79 @@ describe("inbox snapshot (claude)", () => {
       "--recipient",
       "archies-dog-walks/tech",
     );
+    expect(result.code, result.err).toBe(EXIT_OK);
+    const output = JSON.parse(result.out) as Record<string, unknown>;
+    expect(output).toMatchObject({
+      complete: true,
+      harness: "claude",
+      queue_ids: [techRequest],
+      target_queue_status: {},
+    });
+    const record = JSON.parse(readFileSync(output.path as string, "utf8")) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(Object.keys(record.queues!)).toEqual([TECH]);
+    expect(Object.keys(record.question_state!)).toEqual([TECH]);
+    expect(Object.keys(record.history!)).toEqual([TECH]);
+    const ackTech = (id: string) =>
+      run(
+        fixture,
+        "inbox",
+        "ack",
+        "--game",
+        GAME,
+        "--recipient",
+        "archies-dog-walks/tech",
+        "--snapshot",
+        output.snapshot_id as string,
+        "--queue-id",
+        id,
+        "--disposition",
+        "handled",
+      );
+    const foreign = await ackTech(requestId);
+    expect(foreign.code).toBe(EXIT_INVALID);
+    expect(foreign.err).toContain("queue ID not present in recipient snapshot");
+    const handled = await ackTech(techRequest);
+    expect(handled.code, handled.err).toBe(EXIT_OK);
+    expect(JSON.parse(handled.out)).toEqual({
+      results: [{ queue_id: techRequest, state: "deleted" }],
+    });
+    expect((await snapshot(fixture)).queue_ids).toEqual([requestId]);
+  });
+
+  it("refuses a recipient that is neither the route recipient nor a Claude route target", async () => {
+    const { fixture, requestId } = await delivered();
+    const outsider = "00000000-0000-4000-8000-000000000098";
+    select(fixture, (registry) => {
+      registry.roles["game-kit"] = {
+        conversations: { claude: outsider },
+        ownership: "active",
+        worktree: ".",
+      };
+    });
+    await deliveredTo(fixture, outsider, "outsider-message");
+    const result = await run(
+      fixture,
+      "inbox",
+      "snapshot",
+      "--game",
+      GAME,
+      "--recipient",
+      "game-kit",
+    );
     expect(result.code).toBe(EXIT_INVALID);
     expect(JSON.parse(result.out)).toEqual({
       reason: "inspect local inbox state and retry explicit reconciliation",
       status: "unavailable",
     });
     expect(result.err).toBe("delivery-kit: recipient must be the active route's recipient\n");
+    const id = (await snapshot(fixture)).snapshot_id as string;
+    const refused = await ack(fixture, requestId, "handled", "--recipient", "game-kit")(id);
+    expect(refused.code).toBe(EXIT_INVALID);
+    expect(refused.err).toBe("delivery-kit: recipient must be the active route's recipient\n");
+    expect((await snapshot(fixture)).queue_ids).toEqual([requestId]);
     expect((await run(fixture, "inbox", "snapshot")).code).toBe(EXIT_USAGE);
   });
 
