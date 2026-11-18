@@ -396,7 +396,13 @@ export function spoolMessage(
   }
   const lock = tryUnblockLock(busDir);
   if (lock === null) {
-    return outcome("busy");
+    // Another sender or the channel consumer holds the spool; nothing was written, so retry is safe.
+    return {
+      diagnostic: { category: "busy", classification: "unavailable", stage: "receipt" },
+      reason: "spool busy",
+      requestId,
+      status: "busy",
+    };
   }
   try {
     const stored = readJsonIfExists(path);

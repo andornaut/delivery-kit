@@ -58,6 +58,11 @@ that exact request: the transport reports it as `accepted` with a `deduplicated`
 sends nothing new. An `unchanged` receipt sent nothing and stays `blocked` with an `unchanged`
 diagnostic. Both use classification `guarded` and stage `receipt`.
 
+A Claude spool held by another sender or the channel consumer refuses the attempt before
+writing a receipt or spool entry. The message is `blocked` with reason `transport-busy` and a
+`busy` diagnostic (classification `unavailable`, stage `receipt`); a later `message dispatch`
+starts a new guarded attempt, as for `transport-unavailable`.
+
 The CLI creates receipt storage before delivery. A failure proven to occur before native
 admission sends nothing and permits a guarded retry of the same unchanged original. A failure
 after a possible native mutation, or an unknown or corrupt prior receipt, remains ambiguous:

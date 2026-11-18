@@ -22,6 +22,7 @@ const CATEGORIES = [
   "direct-input-not-allowed",
   "stale-turn",
   "transport-unavailable",
+  "busy",
   "binding-mismatch",
   "deduplicated",
   "unchanged",

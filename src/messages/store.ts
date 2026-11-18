@@ -59,6 +59,7 @@ const REASONS = new Set([
   "owner-unavailable",
   "guarded",
   "transport-unavailable",
+  "transport-busy",
   "transport-pending",
   "worker-parent-required",
   "refused",

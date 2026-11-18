@@ -709,6 +709,19 @@ export class MessageService {
           state: "ambiguous",
         });
       }
+      if (result.status === "busy") {
+        // A busy transport wrote nothing; the blocked attempt permits a guarded re-dispatch.
+        return lease.complete({
+          diagnostic: diagnostic ?? {
+            category: "busy",
+            classification: "unavailable",
+            stage: "receipt",
+          },
+          reason: "transport-busy",
+          source,
+          state: "blocked",
+        });
+      }
       return lease.complete({
         ...diagnosticFields,
         reason: result.status === "unavailable" ? "transport-unavailable" : "refused",

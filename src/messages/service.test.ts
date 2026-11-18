@@ -18,6 +18,7 @@ import { decisionClear } from "../adapters/shared/decisions.ts";
 import { safeDeliveryDiagnostic } from "../adapters/types.ts";
 import { writeJsonDurable } from "../durable.ts";
 import { gameLayout, loadLayout } from "../layout.ts";
+import { holdLock } from "../lock.ts";
 import { createRegistry, readRegistry, type Registry } from "../registry/index.ts";
 import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 import { messageChannelStateDir } from "./paths.ts";
@@ -563,6 +564,57 @@ describe("channel consumer guard cost", () => {
       "deliverable original\n",
     ]);
     expect((await live.transport.send(live.path, live.message)).status).toBe("accepted");
+  });
+});
+
+describe("busy Claude spool", () => {
+  it("records a busy spool as a retryable transport-busy refusal and re-dispatches it", async () => {
+    const test = fixture();
+    writeJsonDurable(test.layout.routeFile, {
+      schema: 2,
+      state: "active",
+      host: GAME,
+      targets: [ROLE],
+    });
+    marker(join(gameLayout(test.layout, GAME).busDir, "unblock"), CLAUDE_COORDINATOR);
+    const executable = join(test.base, "idle-listing.mjs");
+    const listing = JSON.stringify([{ sessionId: CLAUDE_COORDINATOR, status: "idle" }]);
+    writeFileSync(
+      executable,
+      `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(listing)});\n`,
+    );
+    chmodSync(executable, 0o700);
+    const service = new MessageService({ layout: test.layout, env: { CLAUDE_BIN: executable } });
+    await service.send(input("game-coordinator"));
+    const stateDir = messageChannelStateDir(test.layout, CLAUDE_COORDINATOR);
+    mkdirSync(stateDir, { recursive: true });
+    const held = holdLock(join(stateDir, "unblock.lock"));
+    let busy;
+    try {
+      busy = await service.dispatch(ID);
+    } finally {
+      held.release();
+    }
+    const diagnostic = { category: "busy", classification: "unavailable", stage: "receipt" };
+    expect(busy).toMatchObject({ reason: "transport-busy", state: "blocked", diagnostic });
+    expect(busy.attempts).toHaveLength(1);
+    expect(busy.attempts[0]).toMatchObject({ reason: "transport-busy", state: "blocked" });
+    expect(service.status({ id: ID })[0]).toMatchObject({
+      diagnostic,
+      outbox: [{ diagnostic, state: "blocked" }],
+      reason: "transport-busy",
+    });
+    const first = busy.attempts[0]!.source.requestId;
+    expect(existsSync(join(stateDir, `${first}.json`))).toBe(false);
+    expect(existsSync(join(spoolDir(dirname(stateDir)), `${first}.json`))).toBe(false);
+    const retried = await service.dispatch(ID);
+    // The queued spool leaves its receipt at sending, so the attempt stays ambiguous until consumed.
+    expect(retried.state).toBe("ambiguous");
+    expect(retried.reason).not.toBe("transport-busy");
+    expect(retried.attempts).toHaveLength(2);
+    const second = retried.attempts[1]!.source.requestId;
+    expect(second).not.toBe(first);
+    expect(existsSync(join(spoolDir(dirname(stateDir)), `${second}.json`))).toBe(true);
   });
 });
 
