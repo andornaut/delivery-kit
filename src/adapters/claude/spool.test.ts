@@ -171,12 +171,27 @@ describe("spoolReviewBrief", () => {
     expect(spooled(fixture)).toHaveLength(1);
   });
 
+  it.each(["shell", "waiting"])("spools a brief for a live %s recipient", (status) => {
+    const fixture = claudeFixture();
+    fixture.agents([{ kind: "interactive", sessionId: RECIPIENT, status }, idle(TECH)]);
+    expect(brief(fixture)).toMatchObject({
+      method: "claude-channel",
+      recipient_session_status: status,
+      status: "sending",
+    });
+    expect(spooled(fixture)).toEqual([`${slotRequestId(RECIPIENT, SLOT)}.json`]);
+  });
+
   it("defers a missing, blocked, unknown or unlisted recipient without spooling", () => {
     const fixture = claudeFixture();
     const cases: [number, Parameters<ClaudeFixture["agents"]>[0], string][] = [
       [SLOT, [], "missing"],
       [SLOT + 1, [{ kind: "background", sessionId: RECIPIENT, state: "blocked" }], "blocked"],
-      [SLOT + 2, [{ sessionId: RECIPIENT, status: "waiting" }], "unknown"],
+      [
+        SLOT + 2,
+        [{ sessionId: RECIPIENT, status: "starting" }],
+        "state unknown (reported: starting)",
+      ],
       [SLOT + 3, "fail", "listing unavailable"],
     ];
     for (const [slot, rows, reason] of cases) {

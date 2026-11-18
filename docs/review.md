@@ -31,6 +31,11 @@ The scheduled review route `var/route.json` and how the Claude and Codex adapter
   recipient session, records the delivery, marks the receipt `accepted`, then removes the entry. A
   `sending` receipt with no spool entry becomes `ambiguous` and is never resent. The channel server
   is configured in the recipient session's MCP settings; see `examples/claude-channel.mcp.json`.
+  A brief or event is spooled only while `claude agents --json` lists the recipient as an
+  interactive session with status `idle`, `busy`, `shell` or `waiting` and no `state`; the brief
+  queues in the channel until the session reads it. A missing or blocked session, or any other
+  reported status or state, defers delivery, and the deferral reason names the reported token
+  (`unknown` when it is not a plain lowercase token).
 - **Codex:** turns are steered through the control socket at `CODEX_CONTROL_SOCKET`, which must be
   set to an absolute path, with the same receipt rules. Without it Codex delivery is deferred.
 

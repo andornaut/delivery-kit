@@ -1,6 +1,8 @@
 // Session-reported Claude state from `claude agents --json`.
-// Interactive sessions report `status` (idle or busy); background sessions report `state`.
-// This is session-reported state only: it never proves question or queue state.
+// Interactive sessions report `status` (idle, busy, shell or waiting) with no `state`; background
+// sessions report `state`. A listed interactive session with one of those statuses is live, so a
+// channel brief queues for it. This is session-reported state only: it never proves question or
+// queue state.
 import { spawnSync } from "node:child_process";
 
 export type AgentEntry = Readonly<Record<string, unknown>>;
@@ -8,9 +10,26 @@ export type AgentEntry = Readonly<Record<string, unknown>>;
 const TIMEOUT_MS = 15_000;
 const REPORTED = /^[a-z_]{1,32}$/;
 
+/** Interactive statuses of a live session: `shell` and `waiting` deliver like `busy`. */
+export const LIVE_STATUSES = ["idle", "busy", "shell", "waiting"] as const;
+export type LiveStatus = (typeof LIVE_STATUSES)[number];
+
+export const MISSING_REASON = "recipient session missing from claude agents listing";
+export const BLOCKED_REASON = "recipient session blocked";
+
 export type Availability =
-  | { readonly status: "busy" | "idle"; readonly reason?: undefined }
+  | { readonly status: LiveStatus; readonly reason?: undefined }
   | { readonly status: null; readonly reason: string };
+
+function isLive(value: unknown): value is LiveStatus {
+  return (LIVE_STATUSES as readonly unknown[]).includes(value);
+}
+
+/** The entry's reported state or status when it is a plain token, else `unknown`. */
+function reportedToken(entry: AgentEntry): string {
+  const reported = entry.state || entry.status;
+  return typeof reported === "string" && REPORTED.test(reported) ? reported : "unknown";
+}
 
 /** `CLAUDE_BIN` overrides the executable for fixtures; the arguments are fixed. */
 function claudeExecutable(env: NodeJS.ProcessEnv): string {
@@ -52,18 +71,19 @@ export function recipientAvailability(
 ): Availability {
   const matches = entries.filter((entry) => entry.sessionId === sessionId);
   if (matches.length === 0) {
-    return { reason: "recipient session missing from claude agents listing", status: null };
+    return { reason: MISSING_REASON, status: null };
   }
   if (matches.some((entry) => entry.state === "blocked")) {
-    return { reason: "recipient session blocked", status: null };
+    return { reason: BLOCKED_REASON, status: null };
   }
-  const ready = matches.find(
-    (entry) => (entry.status === "idle" || entry.status === "busy") && entry.state == null,
-  );
+  const ready = matches.find((entry) => isLive(entry.status) && entry.state == null);
   if (ready !== undefined) {
-    return { status: ready.status as "busy" | "idle" };
+    return { status: ready.status as LiveStatus };
   }
-  return { reason: "recipient session state unknown", status: null };
+  return {
+    reason: `recipient session state unknown (reported: ${reportedToken(matches[0]!)})`,
+    status: null,
+  };
 }
 
 export function recipientReady(
@@ -82,17 +102,14 @@ export function sessionStatus(entries: readonly AgentEntry[] | null, sessionId: 
   if (entries === null) {
     return "unavailable";
   }
-  const reported = entries
-    .filter((entry) => entry.sessionId === sessionId)
-    .map((entry) => entry.state || entry.status);
-  if (reported.length === 0) {
+  const matches = entries.filter((entry) => entry.sessionId === sessionId);
+  if (matches.length === 0) {
     return "missing";
   }
-  if (reported.includes("blocked")) {
+  if (matches.some((entry) => (entry.state || entry.status) === "blocked")) {
     return "blocked";
   }
-  const first = reported[0];
-  return typeof first === "string" && REPORTED.test(first) ? first : "unknown";
+  return reportedToken(matches[0]!);
 }
 
 export interface RoleDiagnostic {

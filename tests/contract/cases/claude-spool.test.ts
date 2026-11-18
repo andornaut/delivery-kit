@@ -52,16 +52,18 @@ suite("claude review slots", () => {
   const workspace = workspaces();
 
   contract(
-    "idle and busy recipients spool one brief per slot with the slot request ID",
+    "idle, busy, shell and waiting recipients spool one brief per slot with the slot request ID",
     async () => {
       const ws = workspace();
       claudeGame(ws);
       for (const [slot, mode] of [
         [SLOT, "idle"],
         [NEXT, "busy"],
+        [at(20, 0, 1), "shell"],
+        [at(50, 0, 1), "waiting"],
       ] as const) {
         claimAll(ws);
-        agents(ws, mode);
+        agents(ws, [{ sessionId: RECIPIENT, kind: "interactive", status: mode }]);
         const result = await tick(ws, slot);
         expect(result.review.map((row) => row.slot)).toEqual([slot]);
         expect(result.review[0]!.result.status).toBe("sending");
@@ -77,7 +79,7 @@ suite("claude review slots", () => {
       }
       expect(spooled(ws)).toHaveLength(1);
       agents(ws, "idle");
-      const rerun = await tick(ws, NEXT);
+      const rerun = await tick(ws, at(50, 0, 1));
       expect(rerun.review[0]!.result).toEqual({
         status: "deduplicated",
         previousStatus: "sending",
@@ -119,8 +121,8 @@ suite("claude review slots", () => {
         [at(20, 0, 1), "fail", "listing unavailable"],
         [
           at(50, 0, 1),
-          [{ sessionId: RECIPIENT, status: "waiting" }],
-          "recipient session state unknown",
+          [{ sessionId: RECIPIENT, status: "starting" }],
+          "recipient session state unknown (reported: starting)",
         ],
       ] as const;
       for (const [slot, mode, reason] of cases) {

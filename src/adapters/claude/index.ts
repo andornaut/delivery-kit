@@ -15,7 +15,7 @@ import type {
   Inventory,
   InventoryEntry,
 } from "../types.ts";
-import { listingOrNull, recipientAvailability } from "./agents.ts";
+import { BLOCKED_REASON, listingOrNull, MISSING_REASON, recipientAvailability } from "./agents.ts";
 import { deliveredDir, type Json, readEntry, spoolEvent } from "./spool.ts";
 
 const STATUSES: readonly DeliveryStatus[] = [
@@ -184,10 +184,10 @@ export function claudeAdapter(env: NodeJS.ProcessEnv, game: GameLayout): Harness
       if (availability.status !== null) {
         return Promise.resolve({ status: availability.status === "idle" ? "available" : "busy" });
       }
-      if (availability.reason.includes("missing")) {
+      if (availability.reason === MISSING_REASON) {
         return Promise.resolve({ reason: availability.reason, status: "missing" });
       }
-      if (availability.reason.includes("blocked")) {
+      if (availability.reason === BLOCKED_REASON) {
         return Promise.resolve({ reason: availability.reason, status: "blocked" });
       }
       return Promise.resolve({ reason: availability.reason, status: "unavailable" });
