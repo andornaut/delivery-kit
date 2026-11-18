@@ -11,15 +11,20 @@
 // - DELIVERY_KIT_TEST_LOADAVG: a decimal load reading. ws.hostLoad "ignore" sets it to 0;
 //   "real" leaves it unset, so the host's load applies.
 // - The built package is installed into the game's node_modules with a package-lock entry, so
-//   the pin guard sees the installed identity equal to the loaded one.
+//   the pin guard sees the installed identity equal to the loaded one. The coordination-kit
+//   manifest this checkout builds against is installed beside it, inside the supported range.
+// - The Claude channel consumer is coordination-kit's CLI from this checkout's node_modules.
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Command, Implementation } from "./adapter.ts";
 import { KIT_ROOT, SHA, type Workspace, writeJson } from "./workspace.ts";
 
 const CLI = join(KIT_ROOT, "dist", "cli.js");
+const COORDINATION_KIT = "@andornaut/coordination-kit";
+const COORDINATION_ROOT = join(KIT_ROOT, "node_modules", COORDINATION_KIT);
+const COORDINATION_CLI = join(COORDINATION_ROOT, "dist", "cli.js");
 
 /**
  * Complete the 1.0 required fields a case leaves out with neutral defaults. Fields a case sets,
@@ -48,10 +53,30 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
 
 const PACKAGE = "@andornaut/delivery-kit";
 
+/**
+ * Install a coordination-kit manifest in the game's node_modules: `version`, or the version this
+ * checkout builds against when omitted; null removes the package.
+ */
+export function coordinationKitManifest(ws: Workspace, version?: string | null): void {
+  const installed = join(ws.repo, "node_modules", COORDINATION_KIT);
+  rmSync(installed, { force: true, recursive: true });
+  if (version === null) return;
+  const built = JSON.parse(readFileSync(join(COORDINATION_ROOT, "package.json"), "utf8")) as {
+    version: string;
+  };
+  mkdirSync(installed, { recursive: true });
+  writeJson(join(installed, "package.json"), {
+    name: COORDINATION_KIT,
+    type: "module",
+    version: version ?? built.version,
+  });
+}
+
 /** Install the built bundle as the game's pinned package, once per workspace. */
 function installPackage(ws: Workspace): void {
   const installed = join(ws.repo, "node_modules", PACKAGE);
   if (existsSync(join(installed, "dist", "cli.js"))) return;
+  coordinationKitManifest(ws);
   const manifest = JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as {
     version: string;
   };
@@ -175,8 +200,8 @@ function command(ws: Workspace, words: string[]): Command {
   ensureRecipient(ws);
   ensureRouteRoles(ws);
   registerUsedConversations(ws, words);
-  // A noun group (inbox, harness, claude, codex) takes a verb; the other commands are one word.
-  const width = ["inbox", "harness", "claude", "codex"].includes(words[0] ?? "") ? 2 : 1;
+  // The runner group takes a verb; the other commands are one word.
+  const width = words[0] === "runner" ? 2 : 1;
   const verb = words.slice(0, width);
   const rest = words.slice(width);
   return {
@@ -210,7 +235,7 @@ export const nodeImplementation: Implementation = {
   request: (ws, id) => command(ws, ["request", "--id", id]),
   run: (ws) => ({ ...command(ws, ["run"]), logFile: join(ws.state, "runner.log") }),
   channel: (ws, args) => ({
-    argv: [process.execPath, CLI, "claude", "channel", ...args],
+    argv: [process.execPath, COORDINATION_CLI, "claude", "channel", ...args],
     cwd: ws.coordinator,
     env: env(ws),
   }),

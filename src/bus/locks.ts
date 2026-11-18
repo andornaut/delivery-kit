@@ -1,6 +1,6 @@
 // The status probe's lock test on files that must not be created. lock.ts opens them read-only,
 // so probing never needs write access.
-import { holdLock, LockBusy, LockMissing } from "../lock.ts";
+import { holdLock, LockBusy, LockMissing } from "@andornaut/coordination-kit/build/shared";
 
 /** True when another holder has the lock; never creates the file, and a missing file is free. */
 export function lockHeld(path: string): boolean {

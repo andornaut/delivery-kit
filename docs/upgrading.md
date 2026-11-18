@@ -2,6 +2,69 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 5.0
+
+5.0.0 moves the coordination commands, libraries and docs to `@andornaut/coordination-kit` and
+keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-config` and
+`request`. State does not move: both kits read and write the `var/` layout and byte formats of
+4.7.0.
+
+- Pins: every game and game-coordinator installs both pins. delivery-kit 5 requires
+  coordination-kit 1.x, exactly `>=1.0.0 <2.0.0`. Pin both release assets as devDependencies,
+  commit the lockfile integrity, run `npm ci`, then replace the runner while idle:
+
+  ```json
+  "devDependencies": {
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz",
+    "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.0/delivery-kit-5.0.0.tgz"
+  }
+  ```
+
+  `run` refuses to start, and `status` reports `coordination_kit` as `unsupported`, while the
+  game's installed coordination-kit is missing or outside the range
+  ([Pin guard](runner.md#pin-guard)).
+
+- Commands: each moved command keeps its options, JSON output and exit codes under
+  `coordination-kit`. delivery-kit 5 refuses the old form with exit 2 and a one-line hint naming
+  the new one. Update scripts and agent instructions:
+
+  | delivery-kit 4.x command                           | coordination-kit 1.x command            |
+  | -------------------------------------------------- | --------------------------------------- |
+  | `delivery-kit inbox snapshot`                      | `coordination-kit inbox snapshot`       |
+  | `delivery-kit inbox ack`                           | `coordination-kit inbox ack`            |
+  | `delivery-kit message send`                        | `coordination-kit message send`         |
+  | `delivery-kit message dispatch`                    | `coordination-kit message dispatch`     |
+  | `delivery-kit message status`                      | `coordination-kit message status`       |
+  | `delivery-kit message reconcile`                   | `coordination-kit message reconcile`    |
+  | `delivery-kit message retire-spool`                | `coordination-kit message retire-spool` |
+  | `delivery-kit ledger intake`                       | `coordination-kit ledger intake`        |
+  | `delivery-kit ledger apply`                        | `coordination-kit ledger apply`         |
+  | `delivery-kit ledger show`                         | `coordination-kit ledger show`          |
+  | `delivery-kit ledger report`                       | `coordination-kit ledger report`        |
+  | `delivery-kit ledger history`                      | `coordination-kit ledger history`       |
+  | `delivery-kit ledger coverage`                     | `coordination-kit ledger coverage`      |
+  | `delivery-kit ledger reconcile`                    | `coordination-kit ledger reconcile`     |
+  | `delivery-kit ledger boundary`                     | `coordination-kit ledger boundary`      |
+  | `delivery-kit harness doctor`                      | `coordination-kit harness doctor`       |
+  | `delivery-kit harness ready`                       | `coordination-kit harness ready`        |
+  | `delivery-kit harness select`                      | `coordination-kit harness select`       |
+  | `delivery-kit claude ready`                        | `coordination-kit claude ready`         |
+  | `delivery-kit claude channel`                      | `coordination-kit claude channel`       |
+  | `delivery-kit codex ready`                         | `coordination-kit codex ready`          |
+  | `delivery-kit protocol VERB` (every protocol verb) | `coordination-kit protocol VERB`        |
+
+- Channel MCP configuration: run `coordination-kit ... claude channel` in place of
+  `delivery-kit ... claude channel`. The server still identifies itself as
+  `delivery-kit-channel`, so an existing server key needs no change.
+- Root: delivery-kit resolves `--root`, then `DELIVERY_KIT_ROOT`. coordination-kit also accepts
+  both and prefers a nonempty `COORDINATION_KIT_ROOT`.
+- Library imports: delivery-kit no longer exports `/build/registry`, `/build/transport`,
+  `/build/accounting` or `/build/protocol`, nor their unprefixed aliases `/registry`,
+  `/transport`, `/accounting` and `/protocol`, under `@andornaut/delivery-kit`. Import the same
+  symbols from `@andornaut/coordination-kit/build/registry`, `/build/transport`,
+  `/build/accounting` and `/build/protocol`; coordination-kit has no unprefixed aliases.
+  `@andornaut/delivery-kit/build/source-identity` and its alias are unchanged.
+
 ## Upgrading to 4.7
 
 `run --game` now exits 3, not 1, when another runner holds `runner.lock` or `loop.lock`.
@@ -49,16 +112,17 @@ game and game-coordinator) moves to 3.0.0 in the same idle replacement window.
 
 A removed form exits 2 with a one-line hint naming its replacement; there are no aliases.
 
-| Removed form                             | Removed in | Current form                         |
-| ---------------------------------------- | ---------- | ------------------------------------ |
-| `channel ...`                            | 2.0.0      | `claude channel ...`                 |
-| `monitor-snapshot ...`                   | 2.0.0      | `inbox snapshot ...`                 |
-| `monitor-ack ...`                        | 2.0.0      | `inbox ack ...`                      |
-| `resource-report --game ID`              | 2.0.0      | `status --game ID --resources`       |
-| `status --harness claude`                | 2.0.0      | `claude ready`                       |
-| `status --harness codex`                 | 2.0.0      | `codex ready`                        |
-| `request --game ID --request-id ID`      | 2.0.0      | `request --game ID --id ID`          |
-| `migrate ...`, `migrate --remove-legacy` | 2.0.0      | removed; upgrade 0.9.x through 1.0.3 |
-| `monitor snapshot ...`                   | 3.0.0      | `inbox snapshot ...`                 |
-| `monitor ack ...`                        | 3.0.0      | `inbox ack ...`                      |
-| `claude channel --monitor UUID`          | 3.0.0      | `claude channel --conversation UUID` |
+| Removed form                                                                       | Removed in | Current form                                                                 |
+| ---------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------- |
+| `channel ...`                                                                      | 2.0.0      | `coordination-kit claude channel ...`                                        |
+| `monitor-snapshot ...`                                                             | 2.0.0      | `coordination-kit inbox snapshot ...`                                        |
+| `monitor-ack ...`                                                                  | 2.0.0      | `coordination-kit inbox ack ...`                                             |
+| `resource-report --game ID`                                                        | 2.0.0      | `status --game ID --resources`                                               |
+| `status --harness claude`                                                          | 2.0.0      | `coordination-kit claude ready`                                              |
+| `status --harness codex`                                                           | 2.0.0      | `coordination-kit codex ready`                                               |
+| `request --game ID --request-id ID`                                                | 2.0.0      | `request --game ID --id ID`                                                  |
+| `migrate ...`, `migrate --remove-legacy`                                           | 2.0.0      | removed; upgrade 0.9.x through 1.0.3                                         |
+| `monitor snapshot ...`                                                             | 3.0.0      | `coordination-kit inbox snapshot ...`                                        |
+| `monitor ack ...`                                                                  | 3.0.0      | `coordination-kit inbox ack ...`                                             |
+| `claude channel --monitor UUID`                                                    | 3.0.0      | `coordination-kit claude channel --conversation UUID`                        |
+| `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` commands | 5.0.0      | `coordination-kit GROUP VERB ...` (see [Upgrading to 5.0](#upgrading-to-50)) |

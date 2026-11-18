@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { createRegistry, type Registry } from "@andornaut/coordination-kit/build/registry";
+import { gameLayout, loadLayout } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import { readDeliveryControl } from "../bus/control.ts";
 import { main } from "../cli.ts";
-import { gameLayout, loadLayout } from "../layout.ts";
-import { createRegistry, type Registry } from "../registry/index.ts";
 import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
 
 const GAME = "archies-dog-walks";

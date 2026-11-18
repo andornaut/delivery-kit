@@ -10,10 +10,13 @@ import { plugins, sourceRules, toolingRules } from "./eslint.config.base.mjs";
 const KIT_FILES = ["src/**/*.ts"];
 const TEST_FILES = ["src/**/*.test.ts", "scripts/**/*.test.ts"];
 
-// The bundles load nothing from disk after startup: only node: builtins and the kit's own modules.
+// The bundles load nothing from disk after startup: only node: builtins, the kit's own modules and
+// coordination-kit's public build/ subpaths, which the build inlines.
+const COORDINATION_KIT = "@andornaut/coordination-kit/build/";
+const COORDINATION_KIT_APIS = "accounting|events|protocol|registry|review|shared|transport";
 const OUTSIDE_NODE = {
-  message: "src/ imports only node: builtins and its own modules by relative path.",
-  regex: "^(?!node:|\\.{1,2}/)",
+  message: `src/ imports only node: builtins, its own modules by relative path and ${COORDINATION_KIT} subpaths.`,
+  regex: `^(?!node:|\\.{1,2}/|${COORDINATION_KIT}(?:${COORDINATION_KIT_APIS})$)`,
 };
 
 export default defineConfig(

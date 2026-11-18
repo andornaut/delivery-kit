@@ -1,8 +1,11 @@
 // Desired control and token-bound runner activities share one short atomic update lock.
 import { join } from "node:path";
 
-import { readJsonIfExists, writeJsonDurable } from "../durable.ts";
-import { withLock } from "../lock.ts";
+import {
+  readJsonIfExists,
+  withLock,
+  writeJsonDurable,
+} from "@andornaut/coordination-kit/build/shared";
 
 export type DesiredDeliveryState = "enabled" | "paused";
 export type DeliveryActivityState = "checking" | "deploying" | "failed";

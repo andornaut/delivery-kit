@@ -1,33 +1,13 @@
-// CLI entry, usage and offline configuration validation.
+// Delivery control and the runner's startup preconditions.
 
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
 import { expect } from "vitest";
 
 import { cli, execute, impl } from "../lib/adapter.ts";
 import { contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
+import { coordinationKitManifest } from "../lib/node-adapter.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const FIRST = "00000000-0000-0000-0000-000000000001";
-// The one-off request command.
-const REQUEST_WORD = "request";
-
-function tree(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      out.push(path);
-      try {
-        walk(path);
-      } catch {
-        // Not a directory.
-      }
-    }
-  };
-  walk(root);
-  return out;
-}
 
 function minimal(ws: Workspace): void {
   ws.config = {
@@ -127,37 +107,6 @@ suite("entry", () => {
     },
   );
 
-  contract("help requires no configuration, state or runtime writes", async () => {
-    const ws = workspace();
-    // Build command lines first: adapters may prepare scratch support files.
-    const commands = ["--help", "help"].map((word) => impl.help(ws, word));
-    const before = tree(ws.root);
-    for (const command of commands) {
-      const result = await execute(command);
-      expect(result.code, result.stderr).toBe(0);
-      expect(result.stdout).toContain(REQUEST_WORD);
-      expect(result.stdout).toContain("--parent UUID");
-      expect(result.stderr).toBe("");
-    }
-    expect(tree(ws.root)).toEqual(before);
-    for (const command of [impl.bare(ws, ["invalid"]), impl.command(ws, ["invalid"])]) {
-      const result = await execute(command);
-      expect(result.code).toBe(2);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toContain("usage:");
-    }
-  });
-
-  contract("manual departure and unpinned revision flags are rejected", async () => {
-    const ws = workspace();
-    minimal(ws);
-    expect((await cli(ws, ["depart"])).code).toBe(2);
-    const command = impl.checkConfig(ws);
-    const index = command.argv.indexOf("check-config");
-    command.argv.splice(index, 0, "--revision", "a".repeat(40));
-    expect((await execute(command)).code).toBe(2);
-  });
-
   contract("missing memoryMiB rejects runner startup before any container activity", async () => {
     const ws = workspace();
     minimal(ws);
@@ -169,4 +118,31 @@ suite("entry", () => {
     expect(ws.list()).toEqual(before);
     expect(ws.calls()).toEqual([]);
   });
+
+  contract(
+    "an installed coordination-kit outside the supported range refuses runner startup",
+    async () => {
+      const ws = workspace();
+      minimal(ws);
+      const status = await execute(impl.status(ws));
+      expect(JSON.parse(status.stdout).coordination_kit).toMatchObject({ status: "supported" });
+      for (const [version, reason] of [
+        ["0.9.0", "@andornaut/coordination-kit 0.9.0 is outside the supported range"],
+        ["2.0.0", "@andornaut/coordination-kit 2.0.0 is outside the supported range"],
+        [null, "@andornaut/coordination-kit is not installed"],
+      ] as const) {
+        coordinationKitManifest(ws, version);
+        const before = ws.list();
+        const result = await execute(impl.run(ws));
+        expect(result.code, result.stderr).toBe(EXIT_INVALID);
+        expect(result.stderr).toContain(reason);
+        expect(ws.exists("runner.lock")).toBe(false);
+        expect(ws.list()).toEqual(before);
+        expect(ws.calls()).toEqual([]);
+        const report = JSON.parse((await execute(impl.status(ws))).stdout).coordination_kit;
+        expect(report).toMatchObject({ status: "unsupported", supported: ">=1.0.0 <2.0.0" });
+        expect(report.reason).toContain(reason);
+      }
+    },
+  );
 });

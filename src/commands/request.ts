@@ -1,11 +1,17 @@
 // request --game ID --id SAFE_ID: an operator-authorized one-off departure of the
 // current local main HEAD. It records the request only; the resident runner departs it under
 // the same rules as a scheduled departure.
+import {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_USAGE,
+  type Handler,
+} from "@andornaut/coordination-kit/build/shared";
+
 import { resolveGame } from "../bus/command.ts";
 import { spawnExec } from "../bus/exec.ts";
 import { captureRequest } from "../bus/requests.ts";
 import { busPaths } from "../bus/state.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../io.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("request");

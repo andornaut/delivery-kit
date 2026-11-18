@@ -2,9 +2,9 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { EXIT_REFUSED } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { EXIT_REFUSED } from "../io.ts";
 import {
   renderRunnerUnit,
   resolveTools,

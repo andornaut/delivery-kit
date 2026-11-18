@@ -8,9 +8,10 @@ resource sampler and the CI watches run in-process. A missed slot is never repla
 Each departure gates local `main` HEAD in an isolated container, pushes that exact SHA without
 force, watches CI for it and deploys on a pass. Fixes go forward: a red gate records
 `gate-failed/<sha>` and the next departure waits for a new commit. Only the one-minute load
-admits a departure; CPU and memory settings cap execution. The pin guard compares the loaded
-package with the installed one before each departure and finishes on the loaded code until an
-idle replacement. Desired delivery control is a persistent record that the runner observes.
+admits a departure; CPU and memory settings cap execution. The pin guard refuses a runner
+start, and `status` reports unsupported, while the game's installed coordination-kit is outside
+the supported range; before each departure it compares the loaded package with the installed one
+and finishes on the loaded code until an idle replacement. Desired delivery control is a persistent record that the runner observes.
 
 Reference: [runner](../runner.md), [configuration](../configuration.md), [state](../state.md).
 

@@ -4,6 +4,9 @@
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { DEFERRED_PREFIX, deliverScheduledReview } from "@andornaut/coordination-kit/build/review";
+import { holdLock, LockBusy, type LockHandle } from "@andornaut/coordination-kit/build/shared";
+
 import { unfinishedCi, watchCi } from "../ci.ts";
 import {
   beginDeliveryWork,
@@ -15,8 +18,6 @@ import {
   unbindDeliveryRunner,
   updateDeliveryWork,
 } from "../deploy.ts";
-import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
-import { DEFERRED_PREFIX, deliverScheduledWake } from "../review/wake.ts";
 import { reportResidentIdentity } from "./adoption.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
@@ -100,7 +101,7 @@ async function observe(
   if (wake !== undefined) {
     try {
       // "" means this runner does not dispatch the slot; a deferral is its own line.
-      const outcome = await deliverScheduledWake(layout, context.game, wake, signal);
+      const outcome = await deliverScheduledReview(layout, context.game, wake, signal);
       if (outcome.startsWith(DEFERRED_PREFIX)) {
         context.log(outcome);
         process.stderr.write(`${outcome}\n`);

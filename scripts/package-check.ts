@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { COORDINATION_KIT, COORDINATION_KIT_RANGE, satisfies } from "../src/bus/pin.ts";
 import { isMain, node, run } from "./check.ts";
 
 export interface CheckContext {
@@ -77,6 +78,7 @@ export function inspectPackage(
   const manifest = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")) as {
     version: string;
     exports: Record<string, string | { types: string; import: string }>;
+    dependencies?: unknown;
   };
   if (manifest.version !== readFileSync(join(root, "VERSION"), "utf8").trim())
     throw new Error("package version differs from VERSION");
@@ -88,7 +90,7 @@ export function inspectPackage(
   });
   if (version.status !== 0 || version.stdout.trim() !== manifest.version)
     throw new Error("package CLI version differs from package.json");
-  const modules = ["registry", "source-identity", "transport", "accounting", "protocol"];
+  const modules = ["source-identity"];
   const expectedExports = [
     "./package.json",
     ...modules.flatMap((name) => [`./build/${name}`, `./${name}`]),
@@ -115,6 +117,16 @@ export function inspectPackage(
       }
     }
   }
+  // The bundles inline coordination-kit, so the package declares no runtime dependency on it.
+  if (manifest.dependencies !== undefined)
+    throw new Error("package must not declare runtime dependencies");
+  const built = JSON.parse(
+    readFileSync(join(root, "node_modules", COORDINATION_KIT, "package.json"), "utf8"),
+  ) as { version: string };
+  if (!satisfies(COORDINATION_KIT_RANGE, built.version))
+    throw new Error(
+      `bundled ${COORDINATION_KIT} ${built.version} is outside the supported range ${COORDINATION_KIT_RANGE}`,
+    );
   node(pkg, "--input-type=module", [
     "-e",
     `for (const name of ${JSON.stringify(modules)}) {
@@ -125,32 +137,10 @@ export function inspectPackage(
   ]);
   node(pkg, "--input-type=module", [
     "-e",
-    "import { readRegistry, resolveConversation, updateRegistry } from '@andornaut/delivery-kit/build/registry'; " +
-      "if (![readRegistry, resolveConversation, updateRegistry].every(value => typeof value === 'function')) process.exit(1);",
-  ]);
-  node(pkg, "--input-type=module", [
-    "-e",
-    "import * as transport from '@andornaut/delivery-kit/build/transport'; " +
-      "if (JSON.stringify(Object.keys(transport).sort()) !== JSON.stringify(['messageChannelStateDir', 'resolveCodexControlSocket'])) process.exit(1); " +
-      "const { resolveCodexControlSocket, messageChannelStateDir } = transport; " +
-      "const endpoint = resolveCodexControlSocket({ env: {}, home: '/fixture' }); " +
-      "const channel = messageChannelStateDir({ reviewDir: '/review' }, '00000000-0000-4000-8000-000000000001'); " +
-      "if (channel !== '/review/messages/recipients/00000000-0000-4000-8000-000000000001/unblock') process.exit(1); " +
-      "if (endpoint.source !== 'managed' || endpoint.path !== '/fixture/.codex/app-server-control/app-server-control.sock') process.exit(1);",
-  ]);
-  node(pkg, "--input-type=module", [
-    "-e",
     "import { snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError } " +
       "from '@andornaut/delivery-kit/build/source-identity'; " +
       "if (![snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError]" +
       ".every(value => typeof value === 'function')) process.exit(1);",
-  ]);
-  node(pkg, "--input-type=module", [
-    "-e",
-    "import { LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
-      "captureAccounting, accountingStatus } from '@andornaut/delivery-kit/build/accounting'; " +
-      "if (![LedgerStore, LedgerError, snapshotIntake, messageIntake, auditIntake, " +
-      "captureAccounting, accountingStatus].every(value => typeof value === 'function')) process.exit(1);",
   ]);
   const consumer = join(proof, "consumer");
   const scope = join(consumer, "node_modules", "@andornaut");
@@ -158,79 +148,16 @@ export function inspectPackage(
   symlinkSync(pkg, join(scope, "delivery-kit"), "dir");
   const source = join(consumer, "consumer.mts");
   const consumerSource = `import {
-  readRegistry, updateRegistry, RevisionConflict, type Registry, type Layout,
-} from "@andornaut/delivery-kit/build/registry";
-import {
-  resolveCodexControlSocket, messageChannelStateDir, type CodexControlSocketEndpoint,
-  type DeliveryDiagnostic, type NativeRpcCode,
-} from "@andornaut/delivery-kit/build/transport";
-import {
   snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
   type SourceIdentityManifest, type SourceIdentityStatus,
 } from "@andornaut/delivery-kit/build/source-identity";
-import {
-  LedgerStore, LedgerError, snapshotIntake, accountingStatus,
-  type LedgerTransaction, type LedgerState, type IntakeContext,
-} from "@andornaut/delivery-kit/build/accounting";
-import { ProtocolStore, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope,
- type ProtocolWriter, type WorkEvaluation, type ProtocolLayout } from "@andornaut/delivery-kit/build/protocol";
-const protocolClaim = (store: ProtocolStore, writer: ProtocolWriter) => store.withWriter(writer, () => 1);
-const protocolLayout: ProtocolLayout | null = null;
-// @ts-expect-error Writer epochs remain numeric.
-const invalidEpoch: ProtocolWriter["epoch"] = "1";
-export { protocolClaim, protocolLayout, invalidEpoch, WorkStore, ProtocolMessages, resolveProtocolLayout, EnrollmentStore, resolveProtocolManagement, resolveEnrollmentScope };
-export type { WorkEvaluation };
-const ledgerState: LedgerState = "checked";
-const ledgerCommit = (store: LedgerStore, input: LedgerTransaction) => store.apply(input);
-const ledgerIntake = (context: IntakeContext) => snapshotIntake(context, {});
-const ledgerReadiness = (layout: Layout) => accountingStatus(layout);
-// @ts-expect-error Accounting states remain a finite union.
-const invalidLedgerState: LedgerState = "native-accepted-means-complete";
-// @ts-expect-error Ledger revisions must remain numbers, not untyped JSON.
-const invalidLedgerRevision: LedgerTransaction["expectedRevision"] = "1";
-export { LedgerStore, LedgerError, ledgerState, ledgerCommit, ledgerIntake, ledgerReadiness,
-  invalidLedgerState, invalidLedgerRevision };
-const endpoint: CodexControlSocketEndpoint = resolveCodexControlSocket({ env: {}, home: "/fixture" });
-const channel: string = messageChannelStateDir(
-  { reviewDir: "/review" }, "00000000-0000-4000-8000-000000000001",
-);
-const rpcCode: NativeRpcCode = -32000;
-const diagnostic: DeliveryDiagnostic = {
-  stage: "native-send", category: "rpc-refusal", classification: "native-rejected",
-  method: "thread/queue/add", rpcCode,
-};
-const localDiagnostic: DeliveryDiagnostic = {
-  stage: "local", category: "decision-clearance", classification: "guarded",
-};
-const diagnosticFields: Record<keyof DeliveryDiagnostic, true> = {
-  stage: true, category: true, classification: true, method: true, rpcCode: true,
-};
-// @ts-expect-error Public diagnostic stages remain a finite union, not any or string.
-const wrongStage: DeliveryDiagnostic["stage"] = "raw-native-stage";
-// @ts-expect-error Public diagnostic categories cannot expose arbitrary native messages.
-const wrongCategory: DeliveryDiagnostic["category"] = "raw-native-message";
-// @ts-expect-error Classifications retain the finite safe diagnostic contract.
-const wrongClassification: DeliveryDiagnostic["classification"] = "raw-native-classification";
-// @ts-expect-error Methods cannot expose arbitrary native method names.
-const wrongMethod: DeliveryDiagnostic["method"] = "private/native-method";
-// @ts-expect-error Unknown native codes are omitted, not widened to arbitrary numbers.
-const wrongRpcCode: NativeRpcCode = -31999;
-const revision: (registry: Registry) => number = registry => registry.revision;
-// @ts-expect-error Registry declarations must preserve the numeric revision type.
-const wrongRevision: (registry: Registry) => string = registry => registry.revision;
-// @ts-expect-error Endpoint sources must remain a finite union rather than any.
-const wrongSource: "other" = endpoint.source;
-// @ts-expect-error The named transport export requires a string conversation ID.
-messageChannelStateDir({ reviewDir: "/review" }, 42);
 const commit = (manifest: SourceIdentityManifest): string => manifest.commit;
 const dirty = (status: SourceIdentityStatus): boolean => status.dirty;
 // @ts-expect-error Source identity must preserve a string expected commit, not any.
 snapshotSourceIdentity({ sourceRoot: "/source", artifactDir: "/artifact" }, { expectedCommit: 42, approvedPaths: [] });
 // @ts-expect-error Restore requires an independently pinned digest.
 restoreSourceIdentity({ workRoot: "/work", artifactDir: "/artifact" }, { expectedCommit: "", expectedTree: "" });
-export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, updateRegistry, RevisionConflict,
-  commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError,
-  diagnostic, localDiagnostic, diagnosticFields, rpcCode };
+export { commit, dirty, snapshotSourceIdentity, restoreSourceIdentity, SourceIdentityError };
 `;
   writeFileSync(source, consumerSource);
   const aliasSource = join(consumer, "compatibility.mts");
@@ -261,6 +188,7 @@ export { channel, endpoint, revision, wrongRevision, wrongSource, readRegistry, 
     archive: metadata.filename,
     archiveSha256: createHash("sha256").update(readFileSync(archive)).digest("hex"),
     cliVersion: version.stdout.trim(),
+    coordinationKit: { bundled: built.version, supported: COORDINATION_KIT_RANGE },
     nodeNextExports: {
       source: "extracted-package",
       canonicalSpecifiers: modules.map((name) => `@andornaut/delivery-kit/build/${name}`),

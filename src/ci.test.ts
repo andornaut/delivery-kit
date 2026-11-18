@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import { makeGame, manualClock, recordingEvents, testContext } from "./bus/testGame.ts";
@@ -13,7 +14,6 @@ import {
   unfinishedCi,
   watchCi,
 } from "./ci.ts";
-import { holdLock } from "./lock.ts";
 
 const SHA = "c".repeat(40);
 

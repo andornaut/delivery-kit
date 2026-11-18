@@ -2,8 +2,10 @@
 
 Where delivery-kit keeps mutable state, how it writes it durably, and the persistent delivery control record.
 
-The legacy default is game-coordinator's ignored `var/`. These paths remain there even when
-the work protocol is active:
+The legacy default is game-coordinator's ignored `var/`. delivery-kit and coordination-kit share
+this layout and its byte formats: coordination-kit owns the registry, route, review, message,
+ledger and protocol state, and delivery-kit owns each game's bus. These paths remain there even
+when the work protocol is active:
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
@@ -13,7 +15,8 @@ the work protocol is active:
 - `games/<g>/bus/`: the bus. It holds `runner.lock`, `loop.lock`, `departure.lock`,
   `active-departure`, `gate-failed/`, the detached `gate-<sha>` worktree kept for a pending
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
-  `events/`, `requests/`, `unblock/` (the delivery spool), `runner.json`, `runner.identity.json`,
+  `events/` (coordination-kit's event outbox, with delivery-kit's per-commit `<sha>.state`),
+  `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
   `resources.log`, `runner.log`, `delivery-control.json` and `control.lock`.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.

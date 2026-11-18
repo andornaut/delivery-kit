@@ -1,8 +1,11 @@
 # Packaging
 
-The package is `@andornaut/delivery-kit`. `dist/cli.js` is the only runtime entry point and
-imports only `node:` builtins; the public build APIs are explicit canonical subpaths with
-deprecated compatibility aliases. The npm package ships `dist/`, the README, the topic docs, the
+The package is `@andornaut/delivery-kit`. `dist/cli.js` is the only runtime entry point; it
+inlines the coordination-kit modules it uses and imports only `node:` builtins. The one public
+build API is `build/source-identity`, with a deprecated compatibility alias. delivery-kit
+depends one way on `@andornaut/coordination-kit` through its `build/` subpaths, pinned as a
+devDependency on the release asset like a game pins delivery-kit, and declares the coordination-kit
+range it supports once. The npm package ships `dist/`, the README, the topic docs, the
 design summaries, `LICENSE` and `SOURCE_COMMIT`; work files are not packaged. The `make` targets
 run every check in stock containers with the checkout bound read-only, and CI runs the same npm
 commands natively. Releases are cut from `main` only after every

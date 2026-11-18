@@ -1,12 +1,12 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { deliverScheduledReview } from "@andornaut/coordination-kit/build/review";
+import { lockIsFree } from "@andornaut/coordination-kit/build/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { watchCi } from "../ci.ts";
 import { deployAfterCi } from "../deploy.ts";
-import { lockIsFree } from "../lock.ts";
-import { deliverScheduledWake } from "../review/wake.ts";
 import { readDeliveryControl, setDesiredDelivery } from "./control.ts";
 import { depart, requestStore } from "./departure.ts";
 import { captureRequest, claimRequest } from "./requests.ts";
@@ -26,8 +26,8 @@ vi.mock("../ci.ts", async (original) => ({
   ...(await original<typeof import("../ci.ts")>()),
   watchCi: vi.fn(() => Promise.resolve("success")),
 }));
-vi.mock("../review/wake.ts", () => ({
-  deliverScheduledWake: vi.fn(() => Promise.resolve("delivered")),
+vi.mock("@andornaut/coordination-kit/build/review", () => ({
+  deliverScheduledReview: vi.fn(() => Promise.resolve("delivered")),
 }));
 vi.mock("./requests.ts", async (original) => {
   const actual = await original<typeof import("./requests.ts")>();
@@ -192,7 +192,7 @@ describe("paused resident runner", () => {
       }
       expect(readDeliveryControl({ dir: test.game.busDir }).observed?.state).toBe("stopped");
     }
-    expect(deliverScheduledWake).toHaveBeenCalled();
+    expect(deliverScheduledReview).toHaveBeenCalled();
     desired(test.game.busDir, "enabled");
     const stop = new AbortController();
     const running = runRunner({ cliPath, signal: stop.signal }, () => context);

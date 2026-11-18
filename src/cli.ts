@@ -1,77 +1,46 @@
-// delivery-kit command dispatcher. Top-level verbs are game operations; the inbox, harness,
-// claude, codex and runner groups take a verb. Every command resolves game-coordinator from
-// --root (in any position, once), DELIVERY_KIT_ROOT or the working directory, in that order.
+// delivery-kit command dispatcher. Every verb is a game operation; the runner group takes a verb.
+// The coordination groups moved to coordination-kit and are refused with the equivalent command.
+// Every command resolves game-coordinator from --root (in any position, once), DELIVERY_KIT_ROOT or
+// the working directory, in that order.
 import { parseArgs } from "node:util";
 
-import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
+import {
+  type Registry,
+  resolveRole,
+  validateRegistry,
+} from "@andornaut/coordination-kit/build/registry";
+import { readRoleRoute, routeRecipient } from "@andornaut/coordination-kit/build/review";
+import {
+  addressedRoles,
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_USAGE,
+  gameLayout,
+  type Handler,
+  type Io,
+  type Layout,
+  loadLayout,
+  loadProjectConfig,
+  type ProjectConfig,
+  readJsonIfExists,
+} from "@andornaut/coordination-kit/build/shared";
+
 import { workerParentProblems } from "./bus/parents.ts";
-import {
-  ledgerApply,
-  ledgerBoundary,
-  ledgerCoverage,
-  ledgerHistory,
-  ledgerIntake,
-  ledgerReconcile,
-  ledgerReport,
-  ledgerShow,
-} from "./commands/accounting.ts";
-import { channel } from "./commands/channel.ts";
 import { control } from "./commands/control.ts";
-import { harnessDoctor } from "./commands/doctor.ts";
-import { harnessSelect } from "./commands/harness.ts";
-import { inboxAck, inboxSnapshot } from "./commands/inbox.ts";
-import {
-  messageDispatch,
-  messageReconcile,
-  messageRetireSpool,
-  messageSend,
-  messageStatus,
-} from "./commands/messages.ts";
-import {
-  protocolActivate,
-  protocolArtifactPut,
-  protocolArtifactRead,
-  protocolBackup,
-  protocolBoundary,
-  protocolClaim,
-  protocolDeclare,
-  protocolDryRun,
-  protocolEnroll,
-  protocolEnrollmentReport,
-  protocolImport,
-  protocolImportOriginals,
-  protocolInbox,
-  protocolIntake,
-  protocolInventory,
-  protocolMessageObserve,
-  protocolMessagePublish,
-  protocolMessageReceipt,
-  protocolMessageWithdraw,
-  protocolObserverAdoption,
-  protocolOriginal,
-  protocolRestore,
-  protocolRoleRead,
-  protocolStatus,
-  protocolWorkAccept,
-  protocolWorkPublish,
-  protocolWorkRead,
-  protocolWorkReceipt,
-  protocolWorkSubmit,
-} from "./commands/protocol.ts";
-import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
 import { runnerUnit } from "./commands/runner.ts";
-import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
+import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
-import { addressedRoles, loadProjectConfig, type ProjectConfig } from "./config.ts";
-import { readJsonIfExists } from "./durable.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
-import { gameLayout, type Layout, loadLayout } from "./layout.ts";
-import { resolveRole } from "./registry/resolve.ts";
-import { type Registry, validateRegistry } from "./registry/schema.ts";
 declare const __DK_VERSION__: string;
-export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
+export {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_REFUSED,
+  EXIT_USAGE,
+  type Handler,
+  type Io,
+} from "@andornaut/coordination-kit/build/shared";
 export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
 export const COMMANDS = [
   "run",
@@ -80,73 +49,60 @@ export const COMMANDS = [
   "control",
   "check-config",
   "request",
-  "inbox snapshot",
-  "inbox ack",
-  "claude ready",
-  "codex ready",
-  "harness doctor",
-  "harness ready",
-  "harness select",
-  "claude channel",
-  "message send",
-  "message dispatch",
-  "message status",
-  "message reconcile",
-  "message retire-spool",
-  "ledger intake",
-  "ledger apply",
-  "ledger show",
-  "ledger report",
-  "ledger history",
-  "ledger coverage",
-  "ledger reconcile",
-  "ledger boundary",
-  "protocol status",
-  "protocol inventory",
-  "protocol dry-run",
-  "protocol declare",
-  "protocol enroll",
-  "protocol enrollment-report",
-  "protocol observer-adoption",
-  "protocol import",
-  "protocol import-originals",
-  "protocol backup",
-  "protocol restore",
-  "protocol activate",
-  "protocol claim",
-  "protocol role",
-  "protocol artifact-put",
-  "protocol artifact-read",
-  "protocol work-publish",
-  "protocol work-read",
-  "protocol work-submit",
-  "protocol work-accept",
-  "protocol work-receipt",
-  "protocol message-publish",
-  "protocol message-original",
-  "protocol message-receipt",
-  "protocol message-withdraw",
-  "protocol message-observe",
-  "protocol inbox",
-  "protocol intake",
-  "protocol boundary",
 ] as const satisfies readonly Command[];
 export type { Command };
-const GROUP_ORDER = ["game", "inbox", "message", "ledger", "harness", "protocol"] as const;
-/** Help text, generated from each command's parser options and grouped by audience. */
+/** The command groups that moved to coordination-kit in 5.0.0, with their known verbs. */
+export const MOVED_GROUPS: Readonly<Record<string, readonly string[]>> = {
+  claude: ["channel", "ready"],
+  codex: ["ready"],
+  harness: ["doctor", "ready", "select"],
+  inbox: ["ack", "snapshot"],
+  ledger: ["apply", "boundary", "coverage", "history", "intake", "reconcile", "report", "show"],
+  message: ["dispatch", "reconcile", "retire-spool", "send", "status"],
+  protocol: [
+    "activate",
+    "artifact-put",
+    "artifact-read",
+    "backup",
+    "boundary",
+    "claim",
+    "declare",
+    "dry-run",
+    "enroll",
+    "enrollment-report",
+    "import",
+    "import-originals",
+    "inbox",
+    "intake",
+    "inventory",
+    "message-observe",
+    "message-original",
+    "message-publish",
+    "message-receipt",
+    "message-withdraw",
+    "observer-adoption",
+    "restore",
+    "role",
+    "status",
+    "work-accept",
+    "work-publish",
+    "work-read",
+    "work-receipt",
+    "work-submit",
+  ],
+};
+/** Help text, generated from each command's parser options. */
 export const USAGE = [
   "usage: delivery-kit COMMAND [options] [--root COORDINATOR_ROOT]",
-  ...GROUP_ORDER.flatMap((group) => [
-    "",
-    `${GROUPS[group][0]?.toUpperCase() ?? ""}${GROUPS[group].slice(1)}:`,
-    ...COMMANDS.filter((command) => SPECS[command].group === group).flatMap((command) => [
-      ...synopsis(command).map((line) => `  ${line}`),
-      `      ${SPECS[command].summary}`,
-    ]),
+  "",
+  "Game operations:",
+  ...COMMANDS.flatMap((command) => [
+    ...synopsis(command).map((line) => `  ${line}`),
+    `      ${SPECS[command].summary}`,
   ]),
   "",
-  "Inbox --recipient and --parent take a role name resolved through var/registry.json, or a",
-  "conversation UUID registered for the active harness. Repeat --parent UUID for each parent.",
+  "The inbox, message, ledger, harness, protocol, claude and codex groups moved to",
+  "coordination-kit: run `coordination-kit GROUP VERB ...` with the same options.",
   "",
   "  help, --help    print this text",
   "  --version       print the version",
@@ -156,15 +112,15 @@ export const USAGE = [
 ].join("\n");
 /** Removed 1.x command forms and the current form that replaces each. */
 const REMOVED: Readonly<Record<string, string>> = {
-  channel: "delivery-kit claude channel",
-  "monitor-ack": "delivery-kit inbox ack",
-  "monitor-snapshot": "delivery-kit inbox snapshot",
+  channel: "coordination-kit claude channel",
+  "monitor-ack": "coordination-kit inbox ack",
+  "monitor-snapshot": "coordination-kit inbox snapshot",
   "resource-report": "delivery-kit status --game ID --resources",
 };
 /** Command forms removed in 3.0.0, with their replacements. */
 const REMOVED_3: Readonly<Record<string, string>> = {
-  "monitor ack": "delivery-kit inbox ack",
-  "monitor snapshot": "delivery-kit inbox snapshot",
+  "monitor ack": "coordination-kit inbox ack",
+  "monitor snapshot": "coordination-kit inbox snapshot",
 };
 /** The removed form a command line uses, with its replacement, or undefined. */
 function removedForm(args: readonly string[]): string | undefined {
@@ -174,7 +130,7 @@ function removedForm(args: readonly string[]): string | undefined {
   }
   if (first === "monitor") {
     const form = `monitor ${second ?? ""}`.trim();
-    const replacement = REMOVED_3[form] ?? "delivery-kit inbox snapshot|ack";
+    const replacement = REMOVED_3[form] ?? "coordination-kit inbox snapshot|ack";
     return `"${form}" was removed in 3.0.0; use "${replacement}"`;
   }
   if (
@@ -182,17 +138,26 @@ function removedForm(args: readonly string[]): string | undefined {
     second === "channel" &&
     args.some((arg) => arg === "--monitor" || arg.startsWith("--monitor="))
   ) {
-    return '"claude channel --monitor" was removed in 3.0.0; use "delivery-kit claude channel --conversation UUID"';
+    return '"claude channel --monitor" was removed in 3.0.0; use "coordination-kit claude channel --conversation UUID"';
   }
   if (first === "status" && args.includes("--harness")) {
     const harness = args[args.indexOf("--harness") + 1];
     const word = harness === "codex" ? "codex" : "claude";
-    return `"status --harness" was removed in 2.0.0; use "delivery-kit ${word} ready"`;
+    return `"status --harness" was removed in 2.0.0; use "coordination-kit ${word} ready"`;
   }
-  const replacement = REMOVED[first];
-  return replacement === undefined
-    ? undefined
-    : `"${first}" was removed in 2.0.0; use "${replacement}"`;
+  return Object.hasOwn(REMOVED, first)
+    ? `"${first}" was removed in 2.0.0; use "${REMOVED[first] ?? ""}"`
+    : undefined;
+}
+/** The one-line hint for a command group that moved to coordination-kit, or undefined. */
+function movedForm(args: readonly string[]): string | undefined {
+  const [first = "", second = ""] = args;
+  if (!Object.hasOwn(MOVED_GROUPS, first)) {
+    return undefined;
+  }
+  const verbs = MOVED_GROUPS[first] ?? [];
+  const form = verbs.includes(second) ? `${first} ${second}` : first;
+  return `\`${form}\` moved to coordination-kit; run \`coordination-kit ${form} ...\``;
 }
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -282,57 +247,7 @@ function checkConfig(io: Io, root: string, args: string[]): number {
 }
 const HANDLERS: Readonly<Record<Command, Handler>> = {
   "check-config": checkConfig,
-  "claude channel": channel,
-  "claude ready": claudeReady,
-  "codex ready": codexReady,
   control,
-  "harness doctor": harnessDoctor,
-  "harness ready": harnessReady,
-  "harness select": harnessSelect,
-  "inbox ack": inboxAck,
-  "inbox snapshot": inboxSnapshot,
-  "ledger apply": ledgerApply,
-  "ledger boundary": ledgerBoundary,
-  "ledger coverage": ledgerCoverage,
-  "ledger history": ledgerHistory,
-  "ledger intake": ledgerIntake,
-  "ledger reconcile": ledgerReconcile,
-  "ledger report": ledgerReport,
-  "ledger show": ledgerShow,
-  "message dispatch": messageDispatch,
-  "message reconcile": messageReconcile,
-  "message retire-spool": messageRetireSpool,
-  "message send": messageSend,
-  "message status": messageStatus,
-  "protocol activate": protocolActivate,
-  "protocol artifact-put": protocolArtifactPut,
-  "protocol artifact-read": protocolArtifactRead,
-  "protocol backup": protocolBackup,
-  "protocol boundary": protocolBoundary,
-  "protocol claim": protocolClaim,
-  "protocol declare": protocolDeclare,
-  "protocol dry-run": protocolDryRun,
-  "protocol enroll": protocolEnroll,
-  "protocol enrollment-report": protocolEnrollmentReport,
-  "protocol import": protocolImport,
-  "protocol import-originals": protocolImportOriginals,
-  "protocol inbox": protocolInbox,
-  "protocol intake": protocolIntake,
-  "protocol inventory": protocolInventory,
-  "protocol message-observe": protocolMessageObserve,
-  "protocol message-original": protocolOriginal,
-  "protocol message-publish": protocolMessagePublish,
-  "protocol message-receipt": protocolMessageReceipt,
-  "protocol message-withdraw": protocolMessageWithdraw,
-  "protocol observer-adoption": protocolObserverAdoption,
-  "protocol restore": protocolRestore,
-  "protocol role": protocolRoleRead,
-  "protocol status": protocolStatus,
-  "protocol work-accept": protocolWorkAccept,
-  "protocol work-publish": protocolWorkPublish,
-  "protocol work-read": protocolWorkRead,
-  "protocol work-receipt": protocolWorkReceipt,
-  "protocol work-submit": protocolWorkSubmit,
   request,
   run,
   "runner unit": runnerUnit,
@@ -391,7 +306,7 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
     io.out(`${VERSION}\n`);
     return EXIT_OK;
   }
-  const removed = removedForm(args);
+  const removed = removedForm(args) ?? movedForm(args);
   if (removed !== undefined) {
     io.err(`delivery-kit: ${removed}\n`);
     return EXIT_USAGE;

@@ -1,11 +1,14 @@
 // The resident identity recorded by the bus owner's observer adoption, compared with the running
 // runner's identity token. Every read here is read-only; adoption is refreshed only through
 // `protocol observer-adoption`.
-import { isRecord } from "../adapters/shared/pyjson.ts";
-import type { Layout } from "../layout.ts";
-import { ProtocolStore } from "../protocol/core.ts";
-import { resolveProtocolLayout, resolveProtocolManagement } from "../protocol/layout.ts";
-import { readRegistry } from "../registry/store.ts";
+import {
+  ProtocolStore,
+  resolveProtocolLayout,
+  resolveProtocolManagement,
+} from "@andornaut/coordination-kit/build/protocol";
+import { readRegistry } from "@andornaut/coordination-kit/build/registry";
+import { isRecord, type Layout } from "@andornaut/coordination-kit/build/shared";
+
 import type { BusContext } from "./context.ts";
 
 export type AdoptionUnknown =

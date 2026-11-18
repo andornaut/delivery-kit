@@ -4,62 +4,64 @@ Local scheduled trunk-based Git delivery. Each departure gates the game's local 
 isolated container, pushes that exact commit, watches its CI and deploys the already-gated build
 on a pass. The kit owns the mechanisms. Each game owns its repository, `delivery-kit.json`,
 credentials and schedule; `game-coordinator` owns `config.json`, the registry and mutable state.
-The legacy default is `var/`; an explicitly activated work protocol stores its publications,
-accounting and message transport state under an external `stateRoot`.
+The legacy default is `var/`.
+
+The role registry, durable role messages, harness adapters, inbox review, the request ledger and
+the work protocol are [coordination-kit](https://github.com/andornaut/coordination-kit), which delivery-kit
+builds on. The resident runner decides when a scheduled review slot is due and hands it to
+coordination-kit, and records its bus events in coordination-kit's event outbox.
 
 The `game-coordinator` role coordinates from the `game-coordinator` repository.
 
 The package is `@andornaut/delivery-kit`. Its operator build tool is the `delivery-kit` CLI,
-bundled into `dist/cli.js`. The bundle imports only `node:` builtins, has no dynamic `import()`,
+bundled into `dist/cli.js` with the coordination-kit modules it uses. The bundle imports only
+`node:` builtins, has no dynamic `import()`,
 relative `require`, worker threads or source maps, never spawns its own files, and reads nothing
 from disk after startup except configuration and state. Its child processes are `git`, `docker`,
 `gh`, `flock`, `claude agents --json` and the game's own Wrangler run by the same Node binary.
 
 ## Install and pin
 
-Games and game-coordinator pin the release asset as a devDependency and commit the lockfile integrity:
+Games and game-coordinator pin both release assets as devDependencies and commit the lockfile
+integrity. delivery-kit 5 requires coordination-kit `>=1.0.0 <2.0.0`; the runner refuses to start
+outside that range ([Pin guard](docs/runner.md#pin-guard)):
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v4.0.0/delivery-kit-4.0.0.tgz"
+  "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz",
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.0/delivery-kit-5.0.0.tgz"
 }
 ```
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
-runner runs from that game's own `node_modules`; game-coordinator's copy runs `check-config`, `status`,
-`claude channel`, the readiness probes and the inbox commands.
+runner runs from that game's own `node_modules`; game-coordinator's copy runs `check-config` and
+`status`, and its coordination-kit copy runs the coordination commands.
 
 ## Commands
 
-Top-level verbs are game operations; `inbox`, `harness`, `claude`, `codex` and `runner` are noun
-groups that take a verb. Every command resolves game-coordinator from `--root DIR`, else
+Every verb is a game operation; `runner` is a noun group that takes a verb. Every command resolves game-coordinator from `--root DIR`, else
 `DELIVERY_KIT_ROOT`, else the working directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
 explicit; it is never inferred from the working directory.
 
-| Command                                                                                                                                                  | Purpose                                                                                                                                                          |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run --game ID`                                                                                                                                          | Game operation: the resident runner for one game.                                                                                                                |
-| `runner unit --game ID`                                                                                                                                  | Game operation: print the optional systemd user unit for the game's resident runner; installs nothing.                                                           |
-| `status --game ID [--resources]`                                                                                                                         | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information.       |
-| `control --game ID --state enabled\|paused --reason TEXT --requester ROLE`                                                                               | Game operation: persist desired delivery control with its reason and requesting role.                                                                            |
-| `check-config [--game ID]`                                                                                                                               | Game operation: validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
-| `request --game ID --id SAFE_ID`                                                                                                                         | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
-| `inbox snapshot --game ID [--recipient ROLE] [--parent ROLE]... [--history-cursor CURSOR]`                                                               | Inbox (recipient): capture the recipient's inbox snapshot.                                                                                                       |
-| `inbox ack --game ID --snapshot UUID --queue-id ID... --disposition handled\|superseded\|retained [--reason TEXT] [--recipient ROLE] [--parent ROLE]...` | Inbox (recipient): acknowledge queue items from that snapshot. `retained` requires a reason.                                                                     |
-| `claude ready`, `codex ready`                                                                                                                            | Harness: the handoff readiness probe (see [Readiness probe](docs/registry.md#readiness-probe)).                                                                  |
-| `claude ready [--game ID]... [--role ROLE]...`, `codex ready [--game ID]... [--role ROLE]...`                                                            | Harness: probe the requested target adapter and conversations for an explicit subset.                                                                            |
-| `harness ready [--game ID]... [--role ROLE]...`                                                                                                          | Harness: read-only readiness using each selected role's effective harness.                                                                                       |
-| `harness select --harness claude\|codex\|default --expected-revision N [--game ID]... [--role ROLE]...`                                                  | Harness: atomic selection for at least one explicit game or role, without activation.                                                                            |
-| `claude channel [--game ID]... [--conversation UUID] [--state-dir DIR]... [--poll-seconds N]`                                                            | Harness: the stdio MCP server the Claude recipient session starts.                                                                                               |
-| `help`, `--help`, `--version`                                                                                                                            | Usage and version.                                                                                                                                               |
+| Command                                                                    | Purpose                                                                                                                                                          |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run --game ID`                                                            | Game operation: the resident runner for one game.                                                                                                                |
+| `runner unit --game ID`                                                    | Game operation: print the optional systemd user unit for the game's resident runner; installs nothing.                                                           |
+| `status --game ID [--resources]`                                           | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information.       |
+| `control --game ID --state enabled\|paused --reason TEXT --requester ROLE` | Game operation: persist desired delivery control with its reason and requesting role.                                                                            |
+| `check-config [--game ID]`                                                 | Game operation: validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
+| `request --game ID --id SAFE_ID`                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
+| `help`, `--help`, `--version`                                              | Usage and version.                                                                                                                                               |
 
-Per-command semantics and worker inbox reconciliation are in [docs/commands.md](docs/commands.md).
+The `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` groups moved to
+coordination-kit in 5.0: each exits 2 with a one-line hint naming the `coordination-kit` command
+([Upgrading to 5.0](docs/upgrading.md#upgrading-to-50)). Per-command semantics are in
+[docs/commands.md](docs/commands.md).
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition or an unavailable
 read, 2 for a usage error or an unexpected failure, and 3 for a refused runner start (another runner
 holds `runner.lock` or `loop.lock`). `run` exits 130 on `SIGINT` and 143 on `SIGTERM`. Errors, a
-refused runner start and a refused request go to stderr prefixed `delivery-kit:`. `inbox snapshot`
-and `inbox ack` keep their JSON result on stdout and also name the error on stderr. `--help` is
+refused runner start and a refused request go to stderr prefixed `delivery-kit:`. `--help` is
 generated from each command's parser options, so it lists every flag a command accepts.
 
 ## Configuration
@@ -70,21 +72,21 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 
 ## Documentation
 
-| Doc                                                      | Covers                                                                                                                                                     |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [docs/commands.md](docs/commands.md)                     | Per-command semantics and worker inbox reconciliation                                                                                                      |
-| [docs/configuration.md](docs/configuration.md)           | `config.json` and `delivery-kit.json`: schedule, gate, resources, CI, deployment and reports                                                               |
-| [docs/registry.md](docs/registry.md)                     | `var/registry.json`, scoped harness selection, send-time resolution, the readiness probe and the harness doctor                                            |
-| [docs/messages.md](docs/messages.md)                     | Common message send, status, dispatch, delivery guards and reconciliation                                                                                  |
-| [docs/review.md](docs/review.md)                         | The review route `var/route.json`, the Claude and Codex adapters, mixed inbox snapshots and event remedies                                                 |
-| [docs/state.md](docs/state.md)                           | The state layout, durable writes, desired and observed delivery control, and adopting persistent control                                                   |
-| [docs/runner.md](docs/runner.md)                         | Launching, supervising and replacing the resident runner, the pin guard, status and observer adoption, departures, the gate container and test overrides   |
-| [docs/libraries.md](docs/libraries.md)                   | Public build API subpaths and aliases, the registry library, transport endpoint selection and the source identity library                                  |
-| [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and recipient handling: provenance, per-target closure, protected questions and capture limits |
-| [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, canonical message originals, recipient handling receipts and external `stateRoot` activation                                     |
-| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 4.0 and 3.0, and the removed command forms                                                                                                    |
-| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                             |
-| [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                    |
+| Doc                                                      | Covers                                                                                                                                                                              |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [docs/commands.md](docs/commands.md)                     | Per-command semantics and the commands that moved to coordination-kit                                                                                                               |
+| [docs/configuration.md](docs/configuration.md)           | `config.json` and `delivery-kit.json`: schedule, gate, resources, CI, deployment and reports                                                                                        |
+| [docs/registry.md](docs/registry.md)                     | Pointer: the registry moved to coordination-kit; what delivery-kit still reads from it                                                                                              |
+| [docs/messages.md](docs/messages.md)                     | Pointer: common role messages moved to coordination-kit                                                                                                                             |
+| [docs/review.md](docs/review.md)                         | The scheduled review seam the runner calls and the bus events it records, with their remedies                                                                                       |
+| [docs/state.md](docs/state.md)                           | The state layout, durable writes, desired and observed delivery control, and adopting persistent control                                                                            |
+| [docs/runner.md](docs/runner.md)                         | Launching, supervising and replacing the resident runner, the pin guard and coordination-kit range, status and observer adoption, departures, the gate container and test overrides |
+| [docs/libraries.md](docs/libraries.md)                   | The public build API subpath and alias and the source identity library; the subpaths that moved                                                                                     |
+| [docs/request-accounting.md](docs/request-accounting.md) | Pointer: the request ledger moved to coordination-kit                                                                                                                               |
+| [docs/work-protocol.md](docs/work-protocol.md)           | Pointer: the work protocol moved to coordination-kit                                                                                                                                |
+| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 5.0, 4.7, 4.0 and 3.0, and the removed command forms                                                                                                                   |
+| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                                                      |
+| [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                                             |
 
 ## Developing
 
@@ -149,8 +151,9 @@ volume from the lockfile, then invokes this controller after the checks.
 ## Compatibility and releases
 
 `VERSION` and `package.json` carry the version, and `pack` refuses a mismatch. The CLI,
-`delivery-kit.json`, `config.json`, the registry schema, the route schema, the registry module API
-and the `var/` layout follow semver: an incompatible change needs a major version. 2.0.0 removes
+`delivery-kit.json`, `config.json`, the source identity module API, the supported
+coordination-kit range and the `var/` layout follow semver: an incompatible change needs a major
+version. The registry and route schemas are coordination-kit's and follow its versions. 2.0.0 removes
 the `migrate` command; a 0.9.x installation upgrades through 1.0.3 first.
 
 A release is three files from `pack`:

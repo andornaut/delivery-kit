@@ -14,9 +14,10 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
+import { type GateStep } from "@andornaut/coordination-kit/build/shared";
+
 import type { BusContext } from "./bus/context.ts";
 import { assertNotInterrupted, type ExecResult, Interrupted } from "./bus/exec.ts";
-import type { GateStep } from "./config.ts";
 import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
 import {
   approvedGateConfigBlob,

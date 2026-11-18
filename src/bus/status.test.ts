@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { holdLock } from "../lock.ts";
 import {
   beginDeliveryActivity,
   claimDeliveryRunner,

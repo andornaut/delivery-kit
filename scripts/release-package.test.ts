@@ -56,7 +56,8 @@ describe("actual release package", () => {
     execFileSync("tar", ["-xzf", archive, "-C", extracted]);
     const pkg = join(extracted, "package");
     const readme = readFileSync(join(pkg, "README.md"), "utf8");
-    expect(readme).toMatch(/\]\((?:\.\/)?docs\/request-accounting\.md(?:#[^)]*)?\)/u);
+    expect(readme).toMatch(/\]\((?:\.\/)?docs\/runner\.md(?:#[^)]*)?\)/u);
+    expect(readme).toMatch(/\]\((?:\.\/)?docs\/upgrading\.md(?:#[^)]*)?\)/u);
     for (const doc of packagedDocs(root)) {
       expect(readFileSync(join(pkg, doc))).toEqual(readFileSync(join(root, doc)));
     }
@@ -69,14 +70,12 @@ describe("actual release package", () => {
         "--input-type=module",
         "-e",
         `
-      const canonical = await import('@andornaut/delivery-kit/build/accounting');
-      const alias = await import('@andornaut/delivery-kit/accounting');
-      const protocol = await import('@andornaut/delivery-kit/build/protocol');
-      const protocolAlias = await import('@andornaut/delivery-kit/protocol');
-      const required = ['ProtocolStore', 'WorkStore', 'ProtocolMessages', 'resolveProtocolLayout'];
-      if (protocol !== protocolAlias || !required.every(name => typeof protocol[name] === 'function')) process.exit(1);
-      if (canonical !== alias || !['LedgerStore', 'IntakeStore', 'projectOwnerBinding']
+      const canonical = await import('@andornaut/delivery-kit/build/source-identity');
+      const alias = await import('@andornaut/delivery-kit/source-identity');
+      if (canonical !== alias || !['snapshotSourceIdentity', 'restoreSourceIdentity']
         .every(name => typeof canonical[name] === 'function')) process.exit(1);
+      const manifest = JSON.parse((await import('node:fs')).readFileSync('package.json', 'utf8'));
+      if ('devDependencies' in manifest || 'dependencies' in manifest) process.exit(1);
     `,
       ],
       { cwd: pkg, stdio: "pipe" },

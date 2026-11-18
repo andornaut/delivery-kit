@@ -2,11 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { gameLayout, holdLock, loadLayout } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
-import { gameLayout, loadLayout } from "../layout.ts";
-import { holdLock } from "../lock.ts";
 import { makeFixture } from "../testFixtures.ts";
 import {
   beginDeliveryActivity,

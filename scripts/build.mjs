@@ -1,5 +1,6 @@
-// Build self-contained CLI and public API bundles with declarations. Each imports only node:
-// builtins, so a running process never reads its package again after startup.
+// Build self-contained CLI and public API bundles with declarations. Each inlines the
+// coordination-kit modules it uses and imports only node: builtins, so a running process never
+// reads its package, or coordination-kit's, again after startup.
 import { execFileSync } from "node:child_process";
 import { chmodSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,11 +10,7 @@ import { build } from "vite";
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 const ENTRIES = [
   { entry: "src/bin.ts", name: "cli" },
-  { entry: "src/registry/index.ts", name: "registry" },
   { entry: "src/source-identity.ts", name: "source-identity" },
-  { entry: "src/transport.ts", name: "transport" },
-  { entry: "src/accounting.ts", name: "accounting" },
-  { entry: "src/protocol.ts", name: "protocol" },
 ];
 
 for (const [index, { entry, name }] of ENTRIES.entries()) {
@@ -51,8 +48,4 @@ for (const name of readdirSync("dist/types", { recursive: true })) {
     writeFileSync(path, readFileSync(path, "utf8").replace(/"(\.{1,2}\/[^"]+)\.ts"/g, '"$1.js"'));
   }
 }
-writeFileSync("dist/registry.d.ts", 'export * from "./types/registry/index.js";\n');
 writeFileSync("dist/source-identity.d.ts", 'export * from "./types/source-identity.js";\n');
-writeFileSync("dist/transport.d.ts", 'export * from "./types/transport.js";\n');
-writeFileSync("dist/accounting.d.ts", 'export * from "./types/accounting.js";\n');
-writeFileSync("dist/protocol.d.ts", 'export * from "./types/protocol.js";\n');

@@ -5,8 +5,15 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { type ProjectConfig, validateProjectConfig } from "../config.ts";
-import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
+import {
+  type GameLayout,
+  gameLayout,
+  type Layout,
+  loadLayout,
+  type ProjectConfig,
+  validateProjectConfig,
+} from "@andornaut/coordination-kit/build/shared";
+
 import { makeFixture, projectConfig } from "../testFixtures.ts";
 import { type BusContext, busContext, type Clock, type Events } from "./context.ts";
 import { setDesiredDelivery } from "./control.ts";

@@ -21,7 +21,9 @@ The observer wakes at the start of each minute after its previous clock reading,
 runs past a minute boundary still reviews that minute's slot. A slot whose whole minute passes
 during one pass is skipped, not replayed.
 
-Each distinct scheduled review slot attempts a guarded review, including when queues are empty,
+For each due slot the observer calls coordination-kit's `deliverScheduledReview`, logs the line it
+returns and flushes the event outbox ([Review and events](review.md)); coordination-kit composes
+and delivers the review. Each distinct scheduled review slot attempts a guarded review, including when queues are empty,
 unchanged since an accepted review, or explicitly retained. Accepted inventory signatures are
 health diagnostics, not permission to suppress later scheduled reviews. Repeated observations
 of the same slot use its persisted receipt without another send; an interrupted send becomes
@@ -121,7 +123,7 @@ Upgrade or replace a supervised runner in a quiet window:
 
 ## Observer adoption
 
-Under an active work protocol, the bus owner's `protocol observer-adoption` records the resident it
+Under an active work protocol, the bus owner's `coordination-kit protocol observer-adoption` records the resident it
 inspected. The adopted identity is `resident.residentId` in the audit artifact that registry
 `operations.<game>.lastAdoption.evidenceRef` names; the audit must name the operation and match the
 registry's bus owner, adopted version and CLI digest. Every runner start writes a new identity
@@ -143,6 +145,22 @@ token, so a start leaves the previous adoption stale until the bus owner refresh
 Neither the event nor the field records adoption, changes the registry or authorises replacement.
 
 ## Pin guard
+
+A game installs both pins: `@andornaut/delivery-kit` and `@andornaut/coordination-kit`.
+delivery-kit declares the coordination-kit releases it supports in one place,
+`COORDINATION_KIT_RANGE` in `src/bus/pin.ts`; delivery-kit 5 supports `>=1.0.0 <2.0.0`. The
+range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`, `=`), and a prerelease
+or build-metadata version never satisfies it.
+
+`run` reads `node_modules/@andornaut/coordination-kit/package.json` in the game's checkout before
+any lock, state or container activity. A missing, unreadable or differently named package, or a
+version outside the range, refuses the start with exit 1 and one stderr line naming the installed
+version (or its absence) and the supported range. `status` reports the same check as
+`coordination_kit`: `installed` (the version or null), `supported` (the range), `status`
+(`supported` or `unsupported`) and `reason` (null when supported). A report never claims support
+it cannot read. The running bundle inlines the coordination-kit it was built with; the installed
+package is the consumer's declared pin, and the package check verifies that the bundled version is
+inside the range.
 
 At startup the runner writes `var/games/<g>/bus/runner.json`: `schema`, `pid`, `startedAt`,
 `version`, `cliPath` (realpath of the loaded `dist/cli.js`), `cliSha256` and the lockfile

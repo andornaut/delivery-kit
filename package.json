@@ -12,45 +12,13 @@
   },
   "exports": {
     "./package.json": "./package.json",
-    "./build/registry": {
-      "types": "./dist/registry.d.ts",
-      "import": "./dist/registry.js"
-    },
     "./build/source-identity": {
       "types": "./dist/source-identity.d.ts",
       "import": "./dist/source-identity.js"
     },
-    "./build/transport": {
-      "types": "./dist/transport.d.ts",
-      "import": "./dist/transport.js"
-    },
-    "./build/accounting": {
-      "types": "./dist/accounting.d.ts",
-      "import": "./dist/accounting.js"
-    },
-    "./build/protocol": {
-      "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js"
-    },
-    "./registry": {
-      "types": "./dist/registry.d.ts",
-      "import": "./dist/registry.js"
-    },
     "./source-identity": {
       "types": "./dist/source-identity.d.ts",
       "import": "./dist/source-identity.js"
-    },
-    "./transport": {
-      "types": "./dist/transport.d.ts",
-      "import": "./dist/transport.js"
-    },
-    "./accounting": {
-      "types": "./dist/accounting.d.ts",
-      "import": "./dist/accounting.js"
-    },
-    "./protocol": {
-      "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js"
     }
   },
   "files": [
@@ -93,6 +61,7 @@
     "package:check": "node scripts/package-check.ts"
   },
   "devDependencies": {
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "eslint": "^10.14.0",

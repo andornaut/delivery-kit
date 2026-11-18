@@ -2,6 +2,8 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
+import { holdLockAsync } from "@andornaut/coordination-kit/build/shared";
+
 import { resumeStoppedCi } from "../ci.ts";
 import {
   beginDeliveryWork,
@@ -17,7 +19,6 @@ import {
   withDeliveryRunner,
 } from "../deploy.ts";
 import { runGate, treeFingerprint } from "../gate.ts";
-import { holdLockAsync } from "../lock.ts";
 import { type BusContext, loadOk } from "./context.ts";
 import { assertNotInterrupted, git, Interrupted } from "./exec.ts";
 import { type RequestStore, validateRequest } from "./requests.ts";

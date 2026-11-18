@@ -1,10 +1,17 @@
 // run --game ID: the resident delivery runner for one game.
+import { readRegistry, RegistryMissing } from "@andornaut/coordination-kit/build/registry";
+import {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_REFUSED,
+  type Handler,
+} from "@andornaut/coordination-kit/build/shared";
+
 import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
+import { coordinationKitPin } from "../bus/pin.ts";
 import { RunnerRefused, runRunner } from "../bus/runner.ts";
 import { testOptions } from "../bus/testOverrides.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, type Handler } from "../io.ts";
-import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("run");
@@ -15,6 +22,13 @@ export const run: Handler = async (io, root, args) => {
     return resolved;
   }
   const { config, game, layout } = resolved;
+  // The pin guard: an installed coordination-kit outside the supported range refuses the start
+  // before any lock, state or container activity.
+  const pin = coordinationKitPin(game.repo);
+  if (pin.status !== "supported") {
+    io.err(`delivery-kit: ${pin.reason ?? "coordination-kit is unsupported"}\n`);
+    return EXIT_INVALID;
+  }
   // A registry with non-canonical conversation IDs stops the runner before any native call;
   // every send still resolves the registry again at send time.
   try {

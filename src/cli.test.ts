@@ -1,11 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { createRegistry, type Registry } from "@andornaut/coordination-kit/build/registry";
+import { loadLayout } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "./cli.ts";
-import { loadLayout } from "./layout.ts";
-import { createRegistry, type Registry } from "./registry/index.ts";
 import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
 
 async function run(
@@ -85,75 +85,39 @@ describe("check-config", () => {
 });
 
 describe("dispatcher", () => {
-  it("prints usage for help and rejects unknown commands", async () => {
+  it("prints the game operations for help and rejects unknown commands", async () => {
     const { root } = makeFixture();
     const help = await run(root, "--help");
     expect(help.code).toBe(EXIT_OK);
-    expect(help.out).toContain("message dispatch --id UUID");
-    expect(help.out).toContain("message reconcile --id UUID --receipt");
-    expect(help.out).toContain("message retire-spool --recipient ROLE|UUID [--dry-run]");
-    expect(help.out).toContain("harness doctor --game ID ... [--role ROLE ...]");
-    expect(help.out).toContain("harness doctor --role ROLE ...");
-    expect(help.out).not.toContain("harness doctor [");
-    expect(help.out).toContain("[--parent ROLE]");
-    expect(help.out).toContain("message status --recipient ROLE [--include-body]");
+    expect(help.out).toContain("control --game ID --state enabled|paused --reason TEXT");
+    expect(help.out).toContain("status --game ID [--resources]");
+    expect(help.out).not.toContain("message dispatch");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
     expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
   });
-});
 
-describe("cross-directory common messages", () => {
-  it("stores and pulls the exact body with root in different argument positions without native admission", async () => {
-    const { base, root } = makeFixture();
-    withRegistry(root);
-    const body = "Exact original payload.\n\n";
-    writeFileSync(join(base, "message.txt"), body);
-    const id = "00000000-0000-4000-8000-000000000001";
-    let out = "";
-    let err = "";
-    const io = {
-      cwd: base,
-      env: {},
-      err: (text: string) => (err += text),
-      out: (text: string) => (out += text),
-    };
-    expect(
-      await main(io, [
-        "message",
-        "send",
-        "--from",
-        "game-coordinator",
-        "--recipient",
-        "archies-dog-walks/tech",
-        "--root",
-        root,
-        "--id",
-        id,
-        "--body-file",
-        "message.txt",
-      ]),
-    ).toBe(EXIT_OK);
-    expect(JSON.parse(out)).toMatchObject({ id, state: "queued" });
-    expect(JSON.parse(out)).not.toHaveProperty("body");
-    out = "";
-    expect(
-      await main(io, ["message", "status", "--id", id, "--include-body", "--root", root]),
-    ).toBe(EXIT_OK);
-    expect(JSON.parse(out)).toMatchObject([{ id, body, state: "queued", attempts: 0 }]);
-    expect(err).toBe("");
-  });
-});
-
-describe("claude ready and codex ready", () => {
-  it("reports a missing registry or an unreadable layout as not ready, not as a usage error", async () => {
-    const { base, root } = makeFixture();
-    const absent = await run(root, "codex", "ready");
-    expect(absent.code).toBe(EXIT_INVALID);
-    expect(absent.out).toBe("");
-    expect(absent.err).toMatch(/^delivery-kit: /);
-    const missing = await run(join(base, "no-game-coordinator"), "claude", "ready");
-    expect(missing.code).toBe(EXIT_INVALID);
-    expect(missing.err).toMatch(/^delivery-kit: /);
-    expect((await run(root, "claude", "ready", "--extra")).code).toBe(EXIT_USAGE);
+  it("refuses every coordination verb with the equivalent coordination-kit command", async () => {
+    const { root } = makeFixture();
+    const cases = [
+      [["protocol"], "`protocol` moved to coordination-kit; run `coordination-kit protocol ...`"],
+      [["protocol", "status"], "run `coordination-kit protocol status ...`"],
+      [["inbox", "snapshot", "--game", "x"], "run `coordination-kit inbox snapshot ...`"],
+      [["message", "send"], "run `coordination-kit message send ...`"],
+      [["ledger", "apply"], "run `coordination-kit ledger apply ...`"],
+      [["harness", "select"], "run `coordination-kit harness select ...`"],
+      [["claude", "ready"], "run `coordination-kit claude ready ...`"],
+      [["claude", "channel"], "run `coordination-kit claude channel ...`"],
+      [["codex", "ready"], "run `coordination-kit codex ready ...`"],
+      [["codex", "unknown"], "`codex` moved to coordination-kit; run `coordination-kit codex ...`"],
+    ] as const;
+    const results = await Promise.all(cases.map(([argv]) => run(root, ...argv)));
+    cases.forEach(([, hint], index) => {
+      const result = results[index];
+      expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
+      expect(result?.err).toMatch(/^delivery-kit: /);
+      expect(result?.err).toContain(hint);
+      expect(result?.err.trim().split("\n")).toHaveLength(1);
+    });
+    expect((await run(root, "constructor")).err).toMatch(/^usage:/);
   });
 });

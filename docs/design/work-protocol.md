@@ -1,15 +1,12 @@
 # Work protocol
 
-An explicitly activated work protocol keeps fenced role publications, canonical message
-originals and recipient handling receipts under one external `stateRoot`, outside every source
-checkout. Each role writes only its own namespace under its claimed epoch. Enrollment receipts
-reference existing records rather than copying their state. Representation, active adoption
-and coverage completeness are reported separately, and runtime admission is role-local: a role
-needs its own current active receipt and the specific approved work reference. Request
-accounting tracks requested outcomes separately from message delivery and handling. Migration
-copies legacy state byte-exact after a verified backup and restore.
+The filesystem work protocol, enrollment, migration and request accounting moved to
+coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md)). delivery-kit reads an active
+protocol's observer adoption for `status` through coordination-kit's `build/protocol`. The work
+items below shipped in delivery-kit before the move.
 
-Reference: [work-protocol](../work-protocol.md), [request-accounting](../request-accounting.md).
+Reference: [work-protocol](../work-protocol.md),
+[coordination-kit work protocol](https://github.com/andornaut/coordination-kit/blob/main/docs/design/work-protocol.md).
 
 ## Work items
 

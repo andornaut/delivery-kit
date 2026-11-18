@@ -14,10 +14,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { writeDurable } from "../durable.ts";
+import { writeDurable } from "@andornaut/coordination-kit/build/shared";
+
 import { type AdoptedResident, observerAdoption } from "./adoption.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { lockHeld } from "./locks.ts";
+import { coordinationKitPin } from "./pin.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
 import { type BusPaths, ciStatusFile, readText, readTrimmed, sortKeys } from "./state.ts";
 
@@ -352,6 +354,7 @@ export function statusReport(
   return {
     config_status: config,
     control: controlReport({ identity, identityStatus, loopHeld, running }, paths),
+    coordination_kit: repo === undefined ? null : coordinationKitPin(repo),
     drained: blockers.length === 0 && reporters.length === 0,
     gate_failed: gateFailed ?? [],
     identity,

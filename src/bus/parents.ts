@@ -2,8 +2,7 @@
 // selected harness, to a canonical lowercase conversation UUID, and no two parents may
 // share one. Problems name the delivery-kit.json field, read from the raw registry so a registry
 // that fails its own validation still points at the parent that caused it.
-import { CANONICAL_UUID } from "../adapters/shared/ids.ts";
-import type { ProjectConfig } from "../config.ts";
+import { CANONICAL_UUID, type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 
 type Json = Record<string, unknown>;
 

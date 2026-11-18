@@ -2,9 +2,17 @@
 // committed delivery-kit.json. Every bus write goes under var/games/<g>/bus/.
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
-import { loadProjectConfig, type ProjectConfig } from "../config.ts";
-import { EXIT_INVALID, EXIT_USAGE, type Io } from "../io.ts";
-import { type GameLayout, gameLayout, type Layout, loadLayout } from "../layout.ts";
+import {
+  EXIT_INVALID,
+  EXIT_USAGE,
+  type GameLayout,
+  gameLayout,
+  type Io,
+  type Layout,
+  loadLayout,
+  loadProjectConfig,
+  type ProjectConfig,
+} from "@andornaut/coordination-kit/build/shared";
 
 export interface ResolvedGame {
   readonly layout: Layout;

@@ -4,9 +4,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { dumpsJson } from "../adapters/shared/pyjson.ts";
-import { fsyncDirectory, writeDurable } from "../durable.ts";
-import { holdLockAsync } from "../lock.ts";
+import {
+  dumpsJson,
+  fsyncDirectory,
+  holdLockAsync,
+  writeDurable,
+} from "@andornaut/coordination-kit/build/shared";
+
 import type { Exec } from "./exec.ts";
 import { type BusPaths, ensureDir } from "./state.ts";
 import { mainHead, skipReason } from "./trunk.ts";

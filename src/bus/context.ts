@@ -3,9 +3,14 @@
 import { appendFileSync } from "node:fs";
 import { loadavg } from "node:os";
 
-import type { ProjectConfig } from "../config.ts";
-import { emitEvent, flushEvents } from "../events.ts";
-import type { GameLayout, Layout } from "../layout.ts";
+import { flushEvents } from "@andornaut/coordination-kit/build/events";
+import {
+  type GameLayout,
+  type Layout,
+  type ProjectConfig,
+} from "@andornaut/coordination-kit/build/shared";
+
+import { emitEvent } from "../events.ts";
 import { type Exec, spawnExec } from "./exec.ts";
 import { type BusPaths, busPaths } from "./state.ts";
 

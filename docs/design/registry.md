@@ -1,13 +1,10 @@
 # Registry
 
-`var/registry.json` records each role's ownership, worktree and conversation ID per harness.
-Every writer holds `registry.lock`, rejects a changed revision and writes durably. Each send
-resolves the recipient's effective harness from its role override or the registry default, then
-that harness's conversation ID, and caches nothing. A missing ID is `unavailable`, never
-clearance. Harness selection changes only the explicitly selected roles' overrides; readiness
-probes and the harness doctor send nothing and activate nothing.
+The role registry, harness selection, send-time resolution and readiness moved to
+coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md)). delivery-kit reads the registry
+through coordination-kit's `build/registry` for `check-config`, `run` and `control`.
 
-Reference: [registry](../registry.md).
+Reference: [registry](../registry.md), [coordination-kit registry](https://github.com/andornaut/coordination-kit/blob/main/docs/design/registry.md).
 
 ## Work items
 

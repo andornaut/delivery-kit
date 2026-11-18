@@ -2,12 +2,17 @@
 // it is an attribution supplied by that caller, not an authentication mechanism.
 import { mkdirSync } from "node:fs";
 
-import { dumpsJson } from "../adapters/shared/pyjson.ts";
+import { readRegistry, resolveRole } from "@andornaut/coordination-kit/build/registry";
+import {
+  dumpsJson,
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_USAGE,
+  type Handler,
+} from "@andornaut/coordination-kit/build/shared";
+
 import { resolveGame } from "../bus/command.ts";
 import { setDesiredDelivery } from "../bus/control.ts";
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler } from "../io.ts";
-import { resolveRole } from "../registry/resolve.ts";
-import { readRegistry } from "../registry/store.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("control");

@@ -1,6 +1,7 @@
 # Configuration
 
 The committed configuration files: game-coordinator's `config.json` and each game's `delivery-kit.json`.
+coordination-kit reads the same files for the registry, the review route and message routing.
 
 Configuration never holds secret values. Use the operator's existing authentication and
 credential references.

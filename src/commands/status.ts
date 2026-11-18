@@ -1,6 +1,7 @@
 // status --game ID [--resources]: the read-only runner, idle and drain report as one JSON line, or
 // with --resources the reporting-only resource information.
-import { dumpsJson } from "../adapters/shared/pyjson.ts";
+import { dumpsJson, EXIT_OK, type Handler } from "@andornaut/coordination-kit/build/shared";
+
 import { adoptedResident } from "../bus/adoption.ts";
 import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
@@ -8,7 +9,6 @@ import { resourceReport } from "../bus/resources.ts";
 import { busPaths } from "../bus/state.ts";
 import { statusReport } from "../bus/status.ts";
 import { testOptions } from "../bus/testOverrides.ts";
-import { EXIT_OK, type Handler } from "../io.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("status");

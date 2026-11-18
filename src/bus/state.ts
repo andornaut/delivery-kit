@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeDurable } from "../durable.ts";
+import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
 export interface BusPaths {
   readonly dir: string;

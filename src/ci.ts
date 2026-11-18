@@ -4,11 +4,15 @@
 import { appendFileSync, readdirSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
-import { SHA_PATTERN } from "./adapters/shared/ids.ts";
+import {
+  holdLock,
+  LockBusy,
+  SHA_PATTERN,
+  writeDurable,
+} from "@andornaut/coordination-kit/build/shared";
+
 import type { BusContext } from "./bus/context.ts";
 import { ciStatusFile, ensureDir, readTrimmed, writeLines } from "./bus/state.ts";
-import { writeDurable } from "./durable.ts";
-import { holdLock, LockBusy } from "./lock.ts";
 
 export type CiResult = "busy" | "failure" | "success" | "timeout" | "unauthenticated";
 

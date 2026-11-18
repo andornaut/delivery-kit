@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { deliverScheduledReview } from "@andornaut/coordination-kit/build/review";
 import { describe, expect, it, vi } from "vitest";
 
-import { deliverScheduledWake } from "../review/wake.ts";
 import { requestStore } from "./departure.ts";
 import { captureRequest } from "./requests.ts";
 import { observer, RunnerRefused, runRunner } from "./runner.ts";
@@ -22,9 +22,9 @@ import {
 } from "./testGame.ts";
 import { zonedParts } from "./time.ts";
 
-vi.mock("../review/wake.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../review/wake.ts")>()),
-  deliverScheduledWake: vi.fn(() => Promise.resolve("delivered")),
+vi.mock("@andornaut/coordination-kit/build/review", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@andornaut/coordination-kit/build/review")>()),
+  deliverScheduledReview: vi.fn(() => Promise.resolve("delivered")),
 }));
 
 function holdWithBash(path: string): Promise<() => void> {
@@ -96,7 +96,7 @@ describe("runRunner", () => {
     await until(
       () =>
         readTrimmed(request)?.includes('"finished"') === true &&
-        vi.mocked(deliverScheduledWake).mock.calls.length > 0,
+        vi.mocked(deliverScheduledReview).mock.calls.length > 0,
     );
     controller.abort();
     await running;
@@ -119,7 +119,7 @@ describe("runRunner", () => {
     });
     expect(readFileSync(context.paths.activeDeparture, "utf8")).toBe("");
     expect(readFileSync(context.paths.resourcesLog, "utf8")).toContain("load average");
-    const slot = vi.mocked(deliverScheduledWake).mock.calls[0]?.[2] ?? 0;
+    const slot = vi.mocked(deliverScheduledReview).mock.calls[0]?.[2] ?? 0;
     expect(slot % 60).toBe(0);
     expect([20, 50]).toContain(zonedParts("America/Toronto", slot).minute);
   });
@@ -134,7 +134,7 @@ describe("observer", () => {
     const context = testContext(makeGame(), { clock });
     const controller = new AbortController();
     const slots: number[] = [];
-    vi.mocked(deliverScheduledWake).mockImplementation((_layout, _game, slot) => {
+    vi.mocked(deliverScheduledReview).mockImplementation((_layout, _game, slot) => {
       slots.push(slot);
       if (slots.length === 1) {
         // The :20 pass is still running when the clock reaches :50.
@@ -147,7 +147,7 @@ describe("observer", () => {
     try {
       await observer(context, controller.signal, () => undefined);
     } finally {
-      vi.mocked(deliverScheduledWake).mockImplementation(() => Promise.resolve("delivered"));
+      vi.mocked(deliverScheduledReview).mockImplementation(() => Promise.resolve("delivered"));
     }
     expect(slots).toEqual([twenty, fifty]);
   });

@@ -4,7 +4,8 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
-import { EXIT_REFUSED } from "../io.ts";
+import { EXIT_REFUSED } from "@andornaut/coordination-kit/build/shared";
+
 import { PACKAGE } from "./pin.ts";
 
 /** Host tools the runner's children need, in unit PATH order after the Node binary. */

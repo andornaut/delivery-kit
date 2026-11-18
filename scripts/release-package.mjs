@@ -29,29 +29,8 @@ if (!/^[0-9a-f]{40}\n$/.test(commit)) {
 
 mkdirSync(staging);
 cpSync("dist", join(staging, "dist"), { recursive: true });
-for (const file of [
-  "README.md",
-  "LICENSE",
-  "SOURCE_COMMIT",
-  "docs/commands.md",
-  "docs/configuration.md",
-  "docs/libraries.md",
-  "docs/messages.md",
-  "docs/registry.md",
-  "docs/request-accounting.md",
-  "docs/review.md",
-  "docs/runner.md",
-  "docs/state.md",
-  "docs/upgrading.md",
-  "docs/work-protocol.md",
-  "docs/design/README.md",
-  "docs/design/messages.md",
-  "docs/design/packaging.md",
-  "docs/design/registry.md",
-  "docs/design/review.md",
-  "docs/design/runner.md",
-  "docs/design/work-protocol.md",
-]) {
+// Every other packaged file, as package.json lists it.
+for (const file of manifest.files.filter((path) => path !== "dist")) {
   mkdirSync(dirname(join(staging, file)), { recursive: true });
   copyFileSync(file, join(staging, file));
 }

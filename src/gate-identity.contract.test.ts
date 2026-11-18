@@ -13,13 +13,16 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import {
+  gameLayout,
+  loadLayout,
+  validateProjectConfig,
+} from "@andornaut/coordination-kit/build/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { busContext } from "./bus/context.ts";
 import type { Exec, ExecResult, ExecSpec } from "./bus/exec.ts";
-import { validateProjectConfig } from "./config.ts";
 import { runGate } from "./gate.ts";
-import { gameLayout, loadLayout } from "./layout.ts";
 import { makeFixture, projectConfig } from "./testFixtures.ts";
 
 const roots: string[] = [];

@@ -1,14 +1,17 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { ProtocolStore } from "@andornaut/coordination-kit/build/protocol";
+import {
+  createRegistry,
+  type Registry,
+  updateRegistry,
+} from "@andornaut/coordination-kit/build/registry";
+import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import { emitEvent } from "../events.ts";
-import { holdLock } from "../lock.ts";
-import { ProtocolStore } from "../protocol/core.ts";
-import { activateProtocolFixture } from "../protocol/testFixtures.ts";
-import { createRegistry, type Registry, updateRegistry } from "../registry/index.ts";
-import { registryInput } from "../testFixtures.ts";
+import { activateProtocolFixture, registryInput } from "../testFixtures.ts";
 import { adoptedResident, observerAdoption, reportResidentIdentity } from "./adoption.ts";
 import type { Events } from "./context.ts";
 import { busPaths } from "./state.ts";

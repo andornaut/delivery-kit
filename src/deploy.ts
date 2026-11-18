@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { SHA_PATTERN } from "./adapters/shared/ids.ts";
+import { fsyncDirectory, holdLock, SHA_PATTERN } from "@andornaut/coordination-kit/build/shared";
+
 import type { BusContext } from "./bus/context.ts";
 import {
   beginDeliveryActivity,
@@ -19,8 +20,6 @@ import {
 import { gitOk, WRANGLER_ENTRY } from "./bus/exec.ts";
 import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "./bus/state.ts";
 import { remoteMain } from "./bus/trunk.ts";
-import { fsyncDirectory } from "./durable.ts";
-import { holdLock } from "./lock.ts";
 
 interface DeliverySession {
   readonly token: string;

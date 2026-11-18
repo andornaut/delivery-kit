@@ -1,6 +1,6 @@
+import { type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import type { ProjectConfig } from "../config.ts";
 import {
   CLAUDE_COORDINATOR,
   CLAUDE_TECH,

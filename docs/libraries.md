@@ -1,67 +1,29 @@
 # Libraries
 
-The public Node build APIs: their canonical subpaths and compatibility aliases, the registry library, transport endpoint selection and the source identity library.
+The public Node build API: its subpath and compatibility alias, and the source identity library.
 
-## Public build APIs
+## Public build API
 
-All library APIs are Node build/operations tools, not APIs for the running game. Import their
-explicit canonical subpaths:
+The library API is a Node build and operations tool, not an API for the running game. Import its
+explicit canonical subpath:
 
-| Canonical subpath                               | Purpose                                                                                       | Deprecated compatibility alias            |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `@andornaut/delivery-kit/build/registry`        | Registry configuration, routing and guarded updates.                                          | `@andornaut/delivery-kit/registry`        |
-| `@andornaut/delivery-kit/build/transport`       | Read-only endpoint selection and message channel path references.                             | `@andornaut/delivery-kit/transport`       |
-| `@andornaut/delivery-kit/build/source-identity` | Exact Git identity capture and isolated restoration.                                          | `@andornaut/delivery-kit/source-identity` |
-| `@andornaut/delivery-kit/build/accounting`      | Request ledger, intake retention and closure evidence ([guide](request-accounting.md)).       | `@andornaut/delivery-kit/accounting`      |
-| `@andornaut/delivery-kit/build/protocol`        | Fenced filesystem work, message originals and recipient receipts ([guide](work-protocol.md)). | `@andornaut/delivery-kit/protocol`        |
+| Canonical subpath                               | Purpose                                              | Deprecated compatibility alias            |
+| ----------------------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| `@andornaut/delivery-kit/build/source-identity` | Exact Git identity capture and isolated restoration. | `@andornaut/delivery-kit/source-identity` |
 
-Each alias resolves to the same bundle and declarations as its canonical path. Known consumers
-include game-coordinator's registry/transport imports and Ada the Navigator's source-identity
-integration. CLEANUP (added 2026-11-15): remove compatibility aliases only after the known
-consumer owners confirm migration to canonical paths. Publication alone changes no consumer
-imports or pins. Use canonical paths in new integrations.
+The alias resolves to the same bundle and declarations as its canonical path. Known consumers
+include Ada the Navigator's source-identity integration. CLEANUP (added 2026-11-15): remove the
+compatibility alias only after the known consumer owners confirm migration to the canonical path.
+Use the canonical path in new integrations.
+
+The registry, transport, accounting and protocol subpaths and their unprefixed aliases moved to
+`@andornaut/coordination-kit/build/registry`, `/build/transport`, `/build/accounting` and
+`/build/protocol` in 5.0 ([coordination-kit libraries](https://github.com/andornaut/coordination-kit/blob/main/docs/libraries.md),
+[upgrading to 5.0](upgrading.md#upgrading-to-50)). delivery-kit does not re-export them.
 
 There is no root barrel, wildcard export, public runtime API or public test API. Fixtures,
 harnesses and private modules are not exported. The `./package.json` export is package metadata,
-not a game API. The CLI remains the operator entry point with unchanged commands.
-
-## Registry library
-
-`@andornaut/delivery-kit/build/registry` (`exports["./build/registry"]`: `dist/registry.js` with
-`dist/registry.d.ts`) is the typed registry module the skills use. It uses only `node:` builtins
-and `flock(1)`; `dist/cli.js` embeds the same source. Context parameters come first and the
-subject last.
-
-The canonical source names `GameCoordinatorConfig` and `validateGameCoordinatorConfig` are
-unreleased additions. Published 4.0.0 exposes `GameDevConfig` and `validateGameDevConfig`;
-this source retains those names as identical compatibility aliases. Existing 4.0.0 readers do not
-use the new names, and the coordinator rename requires no kit publication or adoption.
-
-- `loadLayout(coordinatorRoot)` and `gameLayout(layout, game)`: `config.json` and the `var/` paths.
-  `roleKeys(config)` and `validateGameCoordinatorConfig(value)` use `GameCoordinatorConfig`.
-- `readRegistry(layout)`: a validated snapshot carrying its `revision`; `RegistryMissing` when
-  absent.
-- `updateRegistry(layout, expectedRevision, mutate, options)` and
-  `createRegistry(layout, initial, options)`: hold `var/registry.lock` (30 s by default), reject a
-  changed revision with `RevisionConflict` or an existing file with `RegistryExists`, validate,
-  write durably, increment `revision` and set `updatedAt`. An invalid result throws
-  `ValidationError` and leaves the file unchanged. Pass `options.held` when the caller already
-  holds the lock.
-- `resolveRole(registry, role)` and `resolveConversation(registry, role)`, which throw
-  `UnknownRole` for a name that is not a registered role key.
-- `resolveHarness(registry, role)` returns a registered role's override or the registry default.
-  `selectHarness(layout, expectedRevision, {harness, games?, roles?}, options?)` validates the
-  entire explicit selection and changes only those overrides under `registry.lock`.
-- `RegistrySchema`, `validateRegistry`, `HARNESSES` and `TRANSFER_PHASES`, with the record types.
-
-## Transport endpoint selection
-
-Import `resolveCodexControlSocket` from `@andornaut/delivery-kit/build/transport`.
-It returns `{ path, source }`, selecting the explicit `controlSocket` option, then
-`CODEX_CONTROL_SOCKET` from the supplied environment, then the managed socket under
-`home/.codex/app-server-control/app-server-control.sock`. Invalid explicit paths
-throw without fallback. Selection performs no connection or authentication probe.
-Existing runtime adapters and `codex ready` still require configured endpoints.
+not a game API. The CLI remains the operator entry point.
 
 ## Source identity library
 

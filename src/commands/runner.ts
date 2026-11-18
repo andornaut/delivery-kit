@@ -2,6 +2,8 @@
 // It only prints; installing, enabling and starting the unit stay operator actions.
 import { statSync } from "node:fs";
 
+import { EXIT_INVALID, EXIT_OK, type Handler } from "@andornaut/coordination-kit/build/shared";
+
 import { resolveGame } from "../bus/command.ts";
 import {
   installedCli,
@@ -11,7 +13,6 @@ import {
   unitPath,
   UnitUnavailable,
 } from "../bus/supervision.ts";
-import { EXIT_INVALID, EXIT_OK, type Handler } from "../io.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 declare const __DK_VERSION__: string;
