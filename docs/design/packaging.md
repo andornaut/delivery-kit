@@ -25,3 +25,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | dk-0018 | Split the coordination kit out of delivery-kit              | [dk-0018.md](../work/dk-0018.md) |
 | dk-0019 | Leave the event delivery contract cases to coordination-kit | [dk-0019.md](../work/dk-0019.md) |
 | dk-0020 | Check the bundled coordination-kit range at build time      | [dk-0020.md](../work/dk-0020.md) |
+| dk-0021 | Release 5.0.2 with coordination-kit 1.0.2                   | [dk-0021.md](../work/dk-0021.md) |
