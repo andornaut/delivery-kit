@@ -16,8 +16,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
   `observer_adoption` compares the running identity token with the last observer adoption; see
-  [Observer adoption](runner.md#observer-adoption). `coordination_kit` reports the game's
-  installed coordination-kit against the supported range; see [Pin guard](runner.md#pin-guard).
+  [Observer adoption](runner.md#observer-adoption). `coordination_kit` reports the bundled
+  coordination-kit version and the supported range; see [Pin guard](runner.md#pin-guard).
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of

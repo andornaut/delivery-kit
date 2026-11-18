@@ -9,20 +9,27 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 `request`. State does not move: both kits read and write the `var/` layout and byte formats of
 4.7.0.
 
-- Pins: every game and game-coordinator installs both pins. delivery-kit 5 requires
-  coordination-kit 1.x, exactly `>=1.0.0 <2.0.0`. Pin both release assets as devDependencies,
-  commit the lockfile integrity, run `npm ci`, then replace the runner while idle:
+- Pins: a game pins only delivery-kit, which bundles coordination-kit; delivery-kit 5 bundles
+  coordination-kit 1.x and supports `>=1.0.0 <2.0.0` ([Pin guard](runner.md#pin-guard)).
+  game-coordinator pins coordination-kit directly for the roles' CLI and the channel MCP server,
+  beside its delivery-kit pin for `check-config` and `status`. The two installs exchange data only
+  through the on-disk formats, which stay compatible within coordination-kit 1.x. Pin each release
+  asset as a devDependency, commit the lockfile integrity, run `npm ci`, then replace the runner
+  while idle:
 
   ```json
   "devDependencies": {
-    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz",
     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.0/delivery-kit-5.0.0.tgz"
   }
   ```
 
-  `run` refuses to start, and `status` reports `coordination_kit` as `unsupported`, while the
-  game's installed coordination-kit is missing or outside the range
-  ([Pin guard](runner.md#pin-guard)).
+  game-coordinator adds:
+
+  ```json
+  "devDependencies": {
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz"
+  }
+  ```
 
 - Commands: each moved command keeps its options, JSON output and exit codes under
   `coordination-kit`. delivery-kit 5 refuses the old form with exit 2 and a one-line hint naming

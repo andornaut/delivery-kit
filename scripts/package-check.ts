@@ -57,6 +57,18 @@ export function packagedDocs(root: string): string[] {
   return [...topics, ...design].sort();
 }
 
+/** The coordination-kit version the build inlines; it must be inside the supported range. */
+export function bundledCoordinationKit(root: string): string {
+  const { version } = JSON.parse(
+    readFileSync(join(root, "node_modules", COORDINATION_KIT, "package.json"), "utf8"),
+  ) as { version: string };
+  if (!satisfies(COORDINATION_KIT_RANGE, version))
+    throw new Error(
+      `bundled ${COORDINATION_KIT} ${version} is outside the supported range ${COORDINATION_KIT_RANGE}`,
+    );
+  return version;
+}
+
 export function inspectPackage(
   env: Readonly<Record<string, string | undefined>>,
   root: string,
@@ -120,13 +132,7 @@ export function inspectPackage(
   // The bundles inline coordination-kit, so the package declares no runtime dependency on it.
   if (manifest.dependencies !== undefined)
     throw new Error("package must not declare runtime dependencies");
-  const built = JSON.parse(
-    readFileSync(join(root, "node_modules", COORDINATION_KIT, "package.json"), "utf8"),
-  ) as { version: string };
-  if (!satisfies(COORDINATION_KIT_RANGE, built.version))
-    throw new Error(
-      `bundled ${COORDINATION_KIT} ${built.version} is outside the supported range ${COORDINATION_KIT_RANGE}`,
-    );
+  const built = { version: bundledCoordinationKit(root) };
   node(pkg, "--input-type=module", [
     "-e",
     `for (const name of ${JSON.stringify(modules)}) {

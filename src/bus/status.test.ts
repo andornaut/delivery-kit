@@ -48,6 +48,18 @@ function controlledRunner() {
 }
 
 describe("status report", () => {
+  it("reports the bundled coordination-kit and the supported range", () => {
+    const { bus, lock } = controlledRunner();
+    try {
+      expect(statusReport(bus).coordination_kit).toEqual({
+        bundled: "0.0.0-test",
+        supported: ">=1.0.0 <2.0.0",
+      });
+    } finally {
+      lock.release();
+    }
+  });
+
   it.each(["checking"] as const)(
     "does not attest live %s when only the runner lock is held",
     (state) => {

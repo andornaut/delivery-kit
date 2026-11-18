@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   define: {
+    __DK_COORDINATION_KIT_VERSION__: JSON.stringify("0.0.0-test"),
     __DK_VERSION__: JSON.stringify("0.0.0-test"),
   },
   test: {

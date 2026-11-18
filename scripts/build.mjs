@@ -8,6 +8,10 @@ import { join } from "node:path";
 import { build } from "vite";
 
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+// The coordination-kit the bundles inline; package-check refuses one outside the supported range.
+const coordinationKit = JSON.parse(
+  readFileSync("node_modules/@andornaut/coordination-kit/package.json", "utf8"),
+).version;
 const ENTRIES = [
   { entry: "src/bin.ts", name: "cli" },
   { entry: "src/source-identity.ts", name: "source-identity" },
@@ -31,7 +35,10 @@ for (const [index, { entry, name }] of ENTRIES.entries()) {
       target: "node24",
     },
     configFile: false,
-    define: { __DK_VERSION__: JSON.stringify(version) },
+    define: {
+      __DK_COORDINATION_KIT_VERSION__: JSON.stringify(coordinationKit),
+      __DK_VERSION__: JSON.stringify(version),
+    },
     logLevel: "warn",
     ssr: { noExternal: true, target: "node" },
   });

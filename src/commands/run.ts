@@ -9,7 +9,6 @@ import {
 
 import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
-import { coordinationKitPin } from "../bus/pin.ts";
 import { RunnerRefused, runRunner } from "../bus/runner.ts";
 import { testOptions } from "../bus/testOverrides.ts";
 import { commandUsage, SPECS } from "./spec.ts";
@@ -22,13 +21,6 @@ export const run: Handler = async (io, root, args) => {
     return resolved;
   }
   const { config, game, layout } = resolved;
-  // The pin guard: an installed coordination-kit outside the supported range refuses the start
-  // before any lock, state or container activity.
-  const pin = coordinationKitPin(game.repo);
-  if (pin.status !== "supported") {
-    io.err(`delivery-kit: ${pin.reason ?? "coordination-kit is unsupported"}\n`);
-    return EXIT_INVALID;
-  }
   // A registry with non-canonical conversation IDs stops the runner before any native call;
   // every send still resolves the registry again at send time.
   try {

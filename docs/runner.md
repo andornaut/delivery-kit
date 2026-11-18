@@ -146,25 +146,24 @@ Neither the event nor the field records adoption, changes the registry or author
 
 ## Pin guard
 
-A game installs both pins: `@andornaut/delivery-kit` and `@andornaut/coordination-kit`.
-delivery-kit declares the coordination-kit releases it supports in one place,
-`COORDINATION_KIT_RANGE` in `src/bus/pin.ts`; delivery-kit 5 supports `>=1.0.0 <2.0.0`. The
-range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`, `=`), and a prerelease
-or build-metadata version never satisfies it.
+The bundles inline the coordination-kit modules they use, so a game pins only
+`@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The build
+embeds the bundled coordination-kit version. delivery-kit declares the coordination-kit releases
+it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`; delivery-kit 5 supports
+`>=1.0.0 <2.0.0`. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
+`=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
+build whose bundled version is outside the range, so a release can only ship a supported one.
 
-`run` reads `node_modules/@andornaut/coordination-kit/package.json` in the game's checkout before
-any lock, state or container activity. A missing, unreadable or differently named package, or a
-version outside the range, refuses the start with exit 1 and one stderr line naming the installed
-version (or its absence) and the supported range. `status` reports the same check as
-`coordination_kit`: `installed` (the version or null), `supported` (the range), `status`
-(`supported` or `unsupported`) and `reason` (null when supported). A report never claims support
-it cannot read. The running bundle inlines the coordination-kit it was built with; the installed
-package is the consumer's declared pin, and the package check verifies that the bundled version is
-inside the range.
+`status` reports `coordination_kit` read-only: `bundled` (the inlined version) and `supported`
+(the range). game-coordinator pins coordination-kit directly for the roles' CLI and the channel
+MCP server. That install and each game's runner exchange data only through the on-disk formats,
+which stay compatible within coordination-kit 1.x.
 
 At startup the runner writes `var/games/<g>/bus/runner.json`: `schema`, `pid`, `startedAt`,
-`version`, `cliPath` (realpath of the loaded `dist/cli.js`), `cliSha256` and the lockfile
-`integrity` of `node_modules/@andornaut/delivery-kit`. Before each departure it compares the
+`version`, `coordinationKitVersion` (the bundled coordination-kit), `cliPath` (realpath of the
+loaded `dist/cli.js`), `cliSha256` and the lockfile `integrity` of
+`node_modules/@andornaut/delivery-kit`; `runner.identity.json` records the same bundled version as
+`coordination_kit_version`. Before each departure it compares the
 loaded version, `cliSha256` and integrity with the game's installed package and `package-lock.json`.
 On a mismatch, or a missing package, it logs, emits one `pin-mismatch` event deduplicated on the
 loaded and installed values, and finishes on the loaded code until a controlled idle replacement.

@@ -1,13 +1,21 @@
 // Static checks on the bundles built before the unit suite, and the packed file list.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { packagedDocs } from "./package-check.ts";
+import { COORDINATION_KIT_RANGE } from "../src/bus/pin.ts";
+import { bundledCoordinationKit, packagedDocs } from "./package-check.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BUNDLES = ["dist/cli.js", "dist/source-identity.js"];
@@ -48,6 +56,32 @@ describe("bundles", () => {
         specifiers.filter((specifier) => !specifier.startsWith("node:")),
         bundle,
       ).toEqual([]);
+    }
+  });
+});
+
+describe("bundled coordination-kit", () => {
+  it("is inside the supported range, and the package check refuses one outside it", () => {
+    expect(bundledCoordinationKit(root)).toMatch(/^1\.\d+\.\d+$/u);
+    expect(COORDINATION_KIT_RANGE).toBe(">=1.0.0 <2.0.0");
+    for (const [version, accepted] of [
+      ["1.0.0", true],
+      ["1.9.3", true],
+      ["0.9.0", false],
+      ["2.0.0", false],
+      ["1.1.0-rc.1", false],
+    ] as const) {
+      const fixture = mkdtempSync(join(tmpdir(), "bundled-coordination-kit-"));
+      const installed = join(fixture, "node_modules", "@andornaut", "coordination-kit");
+      mkdirSync(installed, { recursive: true });
+      writeFileSync(join(installed, "package.json"), JSON.stringify({ version }));
+      if (accepted) {
+        expect(bundledCoordinationKit(fixture)).toBe(version);
+      } else {
+        expect(() => bundledCoordinationKit(fixture)).toThrow(
+          `bundled @andornaut/coordination-kit ${version} is outside the supported range`,
+        );
+      }
     }
   });
 });

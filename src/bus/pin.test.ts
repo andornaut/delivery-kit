@@ -1,23 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-import { COORDINATION_KIT, COORDINATION_KIT_RANGE, coordinationKitPin, satisfies } from "./pin.ts";
-
-function repoWith(manifest: Record<string, unknown> | string | null): string {
-  const repo = mkdtempSync(join(tmpdir(), "delivery-kit-pin-"));
-  if (manifest !== null) {
-    const installed = join(repo, "node_modules", COORDINATION_KIT);
-    mkdirSync(installed, { recursive: true });
-    writeFileSync(
-      join(installed, "package.json"),
-      typeof manifest === "string" ? manifest : JSON.stringify(manifest),
-    );
-  }
-  return repo;
-}
+import {
+  COORDINATION_KIT_BUNDLED,
+  COORDINATION_KIT_RANGE,
+  coordinationKitReport,
+  satisfies,
+} from "./pin.ts";
 
 describe("satisfies", () => {
   it("applies every comparator to plain releases only", () => {
@@ -32,30 +20,13 @@ describe("satisfies", () => {
   });
 });
 
-describe("coordinationKitPin", () => {
-  it("declares the supported range once and accepts an installed release inside it", () => {
-    expect(COORDINATION_KIT_RANGE).toBe(">=1.0.0 <2.0.0");
-    expect(coordinationKitPin(repoWith({ name: COORDINATION_KIT, version: "1.4.2" }))).toEqual({
-      installed: "1.4.2",
-      reason: null,
-      status: "supported",
+describe("coordinationKitReport", () => {
+  it("reports the bundled coordination-kit and the supported range, read-only", () => {
+    expect(coordinationKitReport()).toEqual({
+      bundled: COORDINATION_KIT_BUNDLED,
       supported: COORDINATION_KIT_RANGE,
     });
-  });
-
-  it("fails closed for a missing, unreadable, foreign or out-of-range package", () => {
-    for (const manifest of [null, "{", { name: "other", version: "1.4.2" }]) {
-      expect(coordinationKitPin(repoWith(manifest))).toMatchObject({
-        installed: null,
-        reason: expect.stringContaining("is not installed") as unknown,
-        status: "unsupported",
-      });
-    }
-    expect(coordinationKitPin(repoWith({ name: COORDINATION_KIT, version: "2.0.0" }))).toEqual({
-      installed: "2.0.0",
-      reason: `${COORDINATION_KIT} 2.0.0 is outside the supported range ${COORDINATION_KIT_RANGE}`,
-      status: "unsupported",
-      supported: COORDINATION_KIT_RANGE,
-    });
+    // The unit configuration defines the embedded version as the build does.
+    expect(COORDINATION_KIT_BUNDLED).toBe("0.0.0-test");
   });
 });

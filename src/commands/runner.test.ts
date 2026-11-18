@@ -9,7 +9,6 @@ import { busPaths } from "../bus/state.ts";
 import { SUPERVISION_TOOLS } from "../bus/supervision.ts";
 import { GAME, makeGame } from "../bus/testGame.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, main } from "../cli.ts";
-import { installCoordinationKit } from "../testFixtures.ts";
 
 async function cli(env: NodeJS.ProcessEnv, root: string, ...argv: string[]) {
   let out = "";
@@ -86,7 +85,6 @@ describe("runner unit", () => {
 describe("run refusal", () => {
   it("exits with the distinct refusal status while another runner holds the lock", async () => {
     const test = makeGame();
-    installCoordinationKit(test.repo);
     const bus = busPaths(test.game.busDir);
     const holder = holdLock(bus.runnerLock);
     try {
@@ -99,26 +97,6 @@ describe("run refusal", () => {
       expect(EXIT_REFUSED).not.toBe(EXIT_INVALID);
     } finally {
       holder.release();
-    }
-  });
-});
-
-describe("run pin guard", () => {
-  it("refuses to start before any lock when coordination-kit is outside the supported range", async () => {
-    const test = makeGame();
-    const bus = busPaths(test.game.busDir);
-    for (const [version, reason] of [
-      [undefined, "@andornaut/coordination-kit is not installed in the game's node_modules"],
-      ["2.0.0", "@andornaut/coordination-kit 2.0.0 is outside the supported range >=1.0.0 <2.0.0"],
-    ] as const) {
-      if (version !== undefined) {
-        installCoordinationKit(test.repo, version);
-      }
-      // eslint-disable-next-line no-await-in-loop
-      const result = await cli({}, test.layout.root, "run", "--game", GAME);
-      expect(result).toMatchObject({ code: EXIT_INVALID, out: "" });
-      expect(result.err).toContain(reason);
-      expect(readdirSync(bus.dir)).not.toContain("runner.lock");
     }
   });
 });

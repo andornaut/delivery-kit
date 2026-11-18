@@ -124,10 +124,3 @@ export function activateProtocolFixture(layout: Layout): string {
   }
   return stateRoot;
 }
-
-/** A coordination-kit manifest in `repo`'s node_modules, as the pin guard reads it. */
-export function installCoordinationKit(repo: string, version = "1.0.0"): void {
-  const installed = join(repo, "node_modules", "@andornaut", "coordination-kit");
-  mkdirSync(installed, { recursive: true });
-  writeJson(join(installed, "package.json"), { name: "@andornaut/coordination-kit", version });
-}

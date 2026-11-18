@@ -11,11 +11,11 @@
 // - DELIVERY_KIT_TEST_LOADAVG: a decimal load reading. ws.hostLoad "ignore" sets it to 0;
 //   "real" leaves it unset, so the host's load applies.
 // - The built package is installed into the game's node_modules with a package-lock entry, so
-//   the pin guard sees the installed identity equal to the loaded one. The coordination-kit
-//   manifest this checkout builds against is installed beside it, inside the supported range.
+//   the pin guard sees the installed identity equal to the loaded one. The bundle inlines
+//   coordination-kit, so the game installs no coordination-kit package.
 // - The Claude channel consumer is coordination-kit's CLI from this checkout's node_modules.
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Command, Implementation } from "./adapter.ts";
@@ -53,30 +53,19 @@ export function nodeConfig(ws: Workspace): Record<string, unknown> {
 
 const PACKAGE = "@andornaut/delivery-kit";
 
-/**
- * Install a coordination-kit manifest in the game's node_modules: `version`, or the version this
- * checkout builds against when omitted; null removes the package.
- */
-export function coordinationKitManifest(ws: Workspace, version?: string | null): void {
-  const installed = join(ws.repo, "node_modules", COORDINATION_KIT);
-  rmSync(installed, { force: true, recursive: true });
-  if (version === null) return;
-  const built = JSON.parse(readFileSync(join(COORDINATION_ROOT, "package.json"), "utf8")) as {
-    version: string;
-  };
-  mkdirSync(installed, { recursive: true });
-  writeJson(join(installed, "package.json"), {
-    name: COORDINATION_KIT,
-    type: "module",
-    version: version ?? built.version,
-  });
+/** The coordination-kit version this checkout builds against, which the bundle inlines. */
+export function bundledCoordinationKit(): string {
+  return (
+    JSON.parse(readFileSync(join(COORDINATION_ROOT, "package.json"), "utf8")) as {
+      version: string;
+    }
+  ).version;
 }
 
 /** Install the built bundle as the game's pinned package, once per workspace. */
 function installPackage(ws: Workspace): void {
   const installed = join(ws.repo, "node_modules", PACKAGE);
   if (existsSync(join(installed, "dist", "cli.js"))) return;
-  coordinationKitManifest(ws);
   const manifest = JSON.parse(readFileSync(join(KIT_ROOT, "package.json"), "utf8")) as {
     version: string;
   };

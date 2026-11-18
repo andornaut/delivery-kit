@@ -1,7 +1,8 @@
-// The pin guard. Runner start and status require the game's installed coordination-kit to be
-// inside COORDINATION_KIT_RANGE. At startup the runner records the loaded version, the game
-// lockfile's integrity for the package and the sha256 of the loaded dist/cli.js in runner.json.
-// At each departure it compares them with the installed copy; on a mismatch it logs, emits one
+// The pin guard. The bundles inline coordination-kit; the build embeds its version, and the package
+// check refuses a build whose bundled version is outside COORDINATION_KIT_RANGE. At startup the
+// runner records the loaded version, the bundled coordination-kit version, the game lockfile's
+// integrity for the package and the sha256 of the loaded dist/cli.js in runner.json. At each
+// departure it compares them with the installed copy; on a mismatch it logs, emits one
 // deduplicated pin-mismatch event and finishes on the loaded code.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -16,6 +17,17 @@ export const PACKAGE = "@andornaut/delivery-kit";
 export const COORDINATION_KIT = "@andornaut/coordination-kit";
 /** The coordination-kit releases this delivery-kit supports. The one place the range is declared. */
 export const COORDINATION_KIT_RANGE = ">=1.0.0 <2.0.0";
+declare const __DK_COORDINATION_KIT_VERSION__: string;
+/** The coordination-kit version the build inlined; source runs report "0.0.0-source". */
+export const COORDINATION_KIT_BUNDLED =
+  typeof __DK_COORDINATION_KIT_VERSION__ === "string"
+    ? __DK_COORDINATION_KIT_VERSION__
+    : "0.0.0-source";
+
+/** The read-only status report of the bundled coordination-kit and the supported range. */
+export function coordinationKitReport(): { readonly bundled: string; readonly supported: string } {
+  return { bundled: COORDINATION_KIT_BUNDLED, supported: COORDINATION_KIT_RANGE };
+}
 
 export interface PinIdentity {
   readonly version: string | null;
@@ -83,6 +95,7 @@ export function recordPin(context: BusContext, loaded: PinIdentity, cliPath: str
     {
       cliPath,
       cliSha256: loaded.cliSha256,
+      coordinationKitVersion: COORDINATION_KIT_BUNDLED,
       integrity: loaded.integrity,
       pid: process.pid,
       schema: 1,
@@ -173,30 +186,4 @@ export function satisfies(range: string, version: string): boolean {
           return order === 0;
       }
     });
-}
-
-export interface CoordinationKitPin {
-  /** The installed version, or null when the game has no readable coordination-kit package. */
-  readonly installed: string | null;
-  readonly reason: string | null;
-  readonly status: "supported" | "unsupported";
-  readonly supported: string;
-}
-
-/** The game's installed coordination-kit against the supported range; anything unproven fails. */
-export function coordinationKitPin(repo: string): CoordinationKitPin {
-  const installed = jsonField(
-    join(repo, "node_modules", COORDINATION_KIT, "package.json"),
-    (manifest) => (manifest.name === COORDINATION_KIT ? manifest.version : null),
-  );
-  const supported = COORDINATION_KIT_RANGE;
-  if (installed === null) {
-    const reason = `${COORDINATION_KIT} is not installed in the game's node_modules; install a release in ${supported}`;
-    return { installed, reason, status: "unsupported", supported };
-  }
-  if (!satisfies(supported, installed)) {
-    const reason = `${COORDINATION_KIT} ${installed} is outside the supported range ${supported}`;
-    return { installed, reason, status: "unsupported", supported };
-  }
-  return { installed, reason: null, status: "supported", supported };
 }

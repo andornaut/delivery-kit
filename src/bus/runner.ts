@@ -21,7 +21,7 @@ import {
 import { reportResidentIdentity } from "./adoption.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
-import { loadedIdentity, pinGuard, recordPin } from "./pin.ts";
+import { COORDINATION_KIT_BUNDLED, loadedIdentity, pinGuard, recordPin } from "./pin.ts";
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
 import { ensureDir, truncate, writeLines } from "./state.ts";
@@ -303,6 +303,7 @@ export async function runRunner(
       const identity = recordIdentity(context.paths, {
         cliSha256: loaded.cliSha256,
         config: context.game.configFile,
+        coordinationKitVersion: COORDINATION_KIT_BUNDLED,
         pid: process.pid,
         sourceCommit: loaded.sourceCommit,
         toolRoot,

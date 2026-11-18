@@ -19,12 +19,14 @@ import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 import { type AdoptedResident, observerAdoption } from "./adoption.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { lockHeld } from "./locks.ts";
-import { coordinationKitPin } from "./pin.ts";
+import { coordinationKitReport } from "./pin.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
 import { type BusPaths, ciStatusFile, readText, readTrimmed, sortKeys } from "./state.ts";
 
 export interface IdentityInput {
   readonly cliSha256?: string | null;
+  /** The bundled coordination-kit version. */
+  readonly coordinationKitVersion?: string | null;
   readonly pid: number;
   readonly version: string;
   readonly sourceCommit: string | null;
@@ -56,6 +58,7 @@ export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<st
     cli_sha256: input.cliSha256 ?? null,
     config: input.config,
     config_sha256: fileSha256(input.config),
+    coordination_kit_version: input.coordinationKitVersion ?? null,
     pid: input.pid,
     source_commit: input.sourceCommit,
     started_at: startedAt,
@@ -354,7 +357,7 @@ export function statusReport(
   return {
     config_status: config,
     control: controlReport({ identity, identityStatus, loopHeld, running }, paths),
-    coordination_kit: repo === undefined ? null : coordinationKitPin(repo),
+    coordination_kit: coordinationKitReport(),
     drained: blockers.length === 0 && reporters.length === 0,
     gate_failed: gateFailed ?? [],
     identity,

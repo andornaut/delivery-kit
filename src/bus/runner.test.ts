@@ -108,6 +108,7 @@ describe("runRunner", () => {
     expect(context.lines).toContainEqual(expect.stringMatching(/scheduled review \d+: delivered/u));
     expect(JSON.parse(readFileSync(context.paths.identity, "utf8"))).toMatchObject({
       cli_sha256: createHash("sha256").update("loaded build").digest("hex"),
+      coordination_kit_version: "0.0.0-test",
       pid: process.pid,
     });
     expect(readTrimmed(context.paths.runnerLock)).toBe(
@@ -116,6 +117,7 @@ describe("runRunner", () => {
     expect(JSON.parse(readFileSync(context.paths.runnerJson, "utf8"))).toMatchObject({
       cliPath: expect.stringContaining("cli.js"),
       cliSha256: JSON.parse(readFileSync(context.paths.identity, "utf8")).cli_sha256,
+      coordinationKitVersion: "0.0.0-test",
     });
     expect(readFileSync(context.paths.activeDeparture, "utf8")).toBe("");
     expect(readFileSync(context.paths.resourcesLog, "utf8")).toContain("load average");

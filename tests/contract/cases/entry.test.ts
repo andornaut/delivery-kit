@@ -1,10 +1,12 @@
 // Delivery control and the runner's startup preconditions.
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { expect } from "vitest";
 
 import { cli, execute, impl } from "../lib/adapter.ts";
 import { contract, EXIT_INVALID, suite, workspaces } from "../lib/cases.ts";
-import { coordinationKitManifest } from "../lib/node-adapter.ts";
+import { bundledCoordinationKit } from "../lib/node-adapter.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 const FIRST = "00000000-0000-0000-0000-000000000001";
@@ -120,29 +122,20 @@ suite("entry", () => {
   });
 
   contract(
-    "an installed coordination-kit outside the supported range refuses runner startup",
+    "status reports the bundled coordination-kit, which the game does not install",
     async () => {
       const ws = workspace();
       minimal(ws);
       const status = await execute(impl.status(ws));
-      expect(JSON.parse(status.stdout).coordination_kit).toMatchObject({ status: "supported" });
-      for (const [version, reason] of [
-        ["0.9.0", "@andornaut/coordination-kit 0.9.0 is outside the supported range"],
-        ["2.0.0", "@andornaut/coordination-kit 2.0.0 is outside the supported range"],
-        [null, "@andornaut/coordination-kit is not installed"],
-      ] as const) {
-        coordinationKitManifest(ws, version);
-        const before = ws.list();
-        const result = await execute(impl.run(ws));
-        expect(result.code, result.stderr).toBe(EXIT_INVALID);
-        expect(result.stderr).toContain(reason);
-        expect(ws.exists("runner.lock")).toBe(false);
-        expect(ws.list()).toEqual(before);
-        expect(ws.calls()).toEqual([]);
-        const report = JSON.parse((await execute(impl.status(ws))).stdout).coordination_kit;
-        expect(report).toMatchObject({ status: "unsupported", supported: ">=1.0.0 <2.0.0" });
-        expect(report.reason).toContain(reason);
-      }
+      expect(status.code, status.stderr).toBe(0);
+      expect(JSON.parse(status.stdout).coordination_kit).toEqual({
+        bundled: bundledCoordinationKit(),
+        supported: ">=1.0.0 <2.0.0",
+      });
+      // Every runner case starts with no coordination-kit package in the game.
+      expect(existsSync(join(ws.repo, "node_modules", "@andornaut", "coordination-kit"))).toBe(
+        false,
+      );
     },
   );
 });
