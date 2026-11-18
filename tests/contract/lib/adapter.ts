@@ -210,8 +210,8 @@ export function startRunner(ws: Workspace): Runner {
 /**
  * Start the resident runner with the virtual clock held at `epoch` until it is armed, then run
  * the clock from `epoch` at `speed`. Process startup consumes no virtual time, so the observer's
- * first reading is exactly `epoch` and its first wakeup is one virtual minute later, however
- * slowly the host starts the runner.
+ * first reading is exactly `epoch` and its first wakeup is at the start of the next virtual
+ * minute, however slowly the host starts the runner.
  */
 export async function startRunnerAt(ws: Workspace, epoch: number, speed = 60): Promise<Runner> {
   ws.holdClock(epoch);

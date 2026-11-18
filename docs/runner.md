@@ -11,10 +11,14 @@ cd /absolute/path/to/game \
 ```
 
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
-and runs the scheduled and requested departure loop, the 60 s observer (scheduled reviews,
+and runs the scheduled and requested departure loop, the per-minute observer (scheduled reviews,
 scheduled-slot reports and event flushes), the 1800 s resource sampler and the CI watches
 in-process. No timer outlives it, and no systemd unit, cron entry or other timer is involved. A
 missed scheduled slot is never replayed.
+
+The observer wakes at the start of each minute after its previous clock reading, so a pass that
+runs past a minute boundary still reviews that minute's slot. A slot whose whole minute passes
+during one pass is skipped, not replayed.
 
 Each distinct scheduled review slot attempts a guarded review, including when queues are empty,
 unchanged since an accepted review, or explicitly retained. Accepted inventory signatures are

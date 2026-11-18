@@ -67,6 +67,14 @@ export function untilNext(timezone: string, departures: readonly string[], now: 
   return next === undefined ? 3600 - position + (sorted[0] ?? 0) : next - position;
 }
 
+/**
+ * Seconds from `now` until the minute after the one containing `reading`: 0 once that minute has
+ * begun, and at most 60 when the clock has stepped back.
+ */
+export function untilMinuteAfter(reading: number, now: number): number {
+  return Math.min(60, Math.max(0, reading - (reading % 60) + 60 - now));
+}
+
 /** The most recent departure slot at or before `now`. */
 export function latestScheduledSlot(
   timezone: string,

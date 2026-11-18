@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { deliverScheduledWake } from "../review/wake.ts";
 import { requestStore } from "./departure.ts";
 import { captureRequest } from "./requests.ts";
-import { RunnerRefused, runRunner } from "./runner.ts";
+import { observer, RunnerRefused, runRunner } from "./runner.ts";
 import { readTrimmed } from "./state.ts";
 import {
   fakeExec,
@@ -122,5 +122,33 @@ describe("runRunner", () => {
     const slot = vi.mocked(deliverScheduledWake).mock.calls[0]?.[2] ?? 0;
     expect(slot % 60).toBe(0);
     expect([20, 50]).toContain(zonedParts("America/Toronto", slot).minute);
+  });
+});
+
+describe("observer", () => {
+  it("observes a wake minute that begins while a pass is still running", async () => {
+    // 22:20 EST; the fixture's wake minutes are :20 and :50.
+    const twenty = Date.UTC(2026, 10, 4, 3, 20, 0) / 1000;
+    const fifty = twenty + 30 * 60;
+    const clock = manualClock(twenty - 60);
+    const context = testContext(makeGame(), { clock });
+    const controller = new AbortController();
+    const slots: number[] = [];
+    vi.mocked(deliverScheduledWake).mockImplementation((_layout, _game, slot) => {
+      slots.push(slot);
+      if (slots.length === 1) {
+        // The :20 pass is still running when the clock reaches :50.
+        clock.time = fifty;
+      } else {
+        controller.abort();
+      }
+      return Promise.resolve("delivered");
+    });
+    try {
+      await observer(context, controller.signal, () => undefined);
+    } finally {
+      vi.mocked(deliverScheduledWake).mockImplementation(() => Promise.resolve("delivered"));
+    }
+    expect(slots).toEqual([twenty, fifty]);
   });
 });

@@ -24,7 +24,7 @@ import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
 import { ensureDir, truncate, writeLines } from "./state.ts";
 import { recordIdentity } from "./status.ts";
-import { currentMinuteSlot, minuteSlots, untilNext } from "./time.ts";
+import { currentMinuteSlot, minuteSlots, untilMinuteAfter, untilNext } from "./time.ts";
 
 declare const __DK_VERSION__: string;
 const LOADED_VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
@@ -121,11 +121,20 @@ async function observe(
   context.events.flush();
 }
 
-async function observer(context: BusContext, signal: AbortSignal, tasks: CiTasks): Promise<void> {
+/**
+ * One observer pass per minute, each after `beforePass`. Each wakeup is at the start of the minute
+ * after the previous pass's reading, so a pass that runs past a minute boundary still observes
+ * that minute.
+ */
+export async function observer(
+  context: BusContext,
+  signal: AbortSignal,
+  beforePass: () => void,
+): Promise<void> {
   let previous = context.clock.now();
   while (!signal.aborted) {
     deliveryRunnerReady(context);
-    tasks.refresh(context);
+    beforePass();
     const now = context.clock.now();
     // The observer is sequential by design.
     // eslint-disable-next-line no-await-in-loop
@@ -134,7 +143,7 @@ async function observer(context: BusContext, signal: AbortSignal, tasks: CiTasks
     );
     previous = now;
     // eslint-disable-next-line no-await-in-loop
-    await context.clock.sleep(60, signal);
+    await context.clock.sleep(untilMinuteAfter(now, context.clock.now()), signal);
   }
 }
 
@@ -309,7 +318,10 @@ export async function runRunner(
     for (const sha of unfinishedCi(context)) {
       tasks.start(context, sha);
     }
-    const background = [sampleResources(context, signal), observer(context, signal, tasks)];
+    const background = [
+      sampleResources(context, signal),
+      observer(context, signal, () => tasks.refresh(context)),
+    ];
     let backgroundFailure: PromiseRejectedResult | undefined;
     try {
       await departureLoop(context, { beforeDeparture: () => guard.check() }, signal);
