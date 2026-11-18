@@ -347,6 +347,21 @@ export class Workspace {
   }
 
   /**
+   * Hold the virtual clock at `epoch` until the next setClock: speed 0.001 keeps the whole second
+   * unchanged for over 16 real minutes, and real sleeps of at most 50 ms let the runner see the
+   * release promptly.
+   */
+  holdClock(epoch: number): void {
+    rmSync(join(this.fakeDir, "clock-offsets"), { force: true });
+    writeJson(join(this.fakeDir, "clock.json"), {
+      epoch,
+      realStartMs: Date.now(),
+      speed: 0.001,
+      maxRealSleep: 0.05,
+    });
+  }
+
+  /**
    * The real-time cap on one runner sleep: control.maxRealSleep (seconds), written into
    * clock.json's optional maxRealSleep.
    */

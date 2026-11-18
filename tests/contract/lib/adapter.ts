@@ -1,6 +1,7 @@
 // The implementation adapter maps abstract CLI operations to command lines for the built CLI.
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 import { nodeImplementation } from "./node-adapter.ts";
 import type { Workspace } from "./workspace.ts";
@@ -175,9 +176,54 @@ export function start(command: Command): Resident {
   };
 }
 
-/** Start the resident runner. It reads its clock file once at startup. */
-export function startRunner(ws: Workspace): Resident {
-  return start(impl.run(ws));
+export interface Runner extends Resident {
+  /**
+   * Resolve once the runner is armed: its observer has taken its starting clock reading and its
+   * first sleep has begun, so a later clock change reaches the observer at its next wakeup.
+   */
+  armed(): Promise<void>;
+}
+
+const size = (path: string) => (existsSync(path) ? statSync(path).size : 0);
+
+/**
+ * Start the resident runner. It re-reads its clock file on every clock reading. Its first
+ * resource sample waits for a `docker ps` child to exit, an event-loop callback that runs only
+ * after every startup microtask, the observer's first pass and sleep among them. That sample,
+ * appended to resources.log or logged as failed, is the armed signal.
+ */
+export function startRunner(ws: Workspace): Runner {
+  const samples = join(ws.state, "resources.log");
+  const before = size(samples);
+  const runner = start(impl.run(ws));
+  return {
+    ...runner,
+    async armed() {
+      await runner.until(
+        () =>
+          size(samples) > before || runner.output().stdout.includes("bus: resource sample failed"),
+      );
+    },
+  };
+}
+
+/**
+ * Start the resident runner with the virtual clock held at `epoch` until it is armed, then run
+ * the clock from `epoch` at `speed`. Process startup consumes no virtual time, so the observer's
+ * first reading is exactly `epoch` and its first wakeup is one virtual minute later, however
+ * slowly the host starts the runner.
+ */
+export async function startRunnerAt(ws: Workspace, epoch: number, speed = 60): Promise<Runner> {
+  ws.holdClock(epoch);
+  const runner = startRunner(ws);
+  try {
+    await runner.armed();
+  } catch (error) {
+    await runner.stop();
+    throw error;
+  }
+  ws.setClock(epoch, speed);
+  return runner;
 }
 
 /** The least real time any condition wait allows; virtual-time conditions usually end sooner. */

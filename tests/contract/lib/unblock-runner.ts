@@ -102,9 +102,8 @@ export class Reviewed {
     runner.child.stdout.on("data", (chunk: Buffer) => (this.output += chunk.toString()));
     runner.child.stderr.on("data", (chunk: Buffer) => (this.output += chunk.toString()));
     this.runner = runner;
-    await runner.until(() => this.ws.exists("runner.identity.json"));
-    // The observer records its first `previous` time right after the identity record.
-    await sleep(500);
+    // The observer has recorded its first `previous` time before any jump.
+    await runner.armed();
   }
 
   async stop(): Promise<void> {

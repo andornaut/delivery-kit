@@ -4,7 +4,7 @@
 
 import { afterAll, expect } from "vitest";
 
-import { cli, execute, impl, startRunner } from "../lib/adapter.ts";
+import { cli, execute, impl, startRunnerAt } from "../lib/adapter.ts";
 import {
   clearRecipient,
   codexGame,
@@ -67,10 +67,7 @@ suite("review cadence", () => {
       expect(socket.calls.some((call) => JSON.stringify(call.params).includes(TECH))).toBe(false);
       expect(socket.calls.some((call) => JSON.stringify(call.params).includes(HELD))).toBe(false);
       // Release ticks at the departure minutes report through the event outbox.
-      ws.setClock(at(-1, 50), 60);
-      const runner = startRunner(ws);
-      let stdout = "";
-      runner.child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      const runner = await startRunnerAt(ws, at(-1, 50));
       try {
         // Wait for both release reports, not a fixed span of virtual time: a slow host may
         // still be writing the second one when the clock passes the window.
@@ -84,7 +81,7 @@ suite("review cadence", () => {
       }
       const reports = ws.events().filter((event) => event.kind === "scheduled-status");
       expect(reports.map((event) => event.key)).toEqual([String(at(0)), String(at(10))]);
-      expect(stdout).toContain("bus: scheduled 00 10 (America/Toronto)");
+      expect(runner.output().stdout).toContain("bus: scheduled 00 10 (America/Toronto)");
     },
     CASE_TIMEOUT_MS,
   );
@@ -233,8 +230,7 @@ suite("review cadence", () => {
         // The observer dispatches only the current wall minute. At speed 60 a slow host's
         // notifier iteration can outlast the wake minute and miss it, so this case runs the
         // clock at 6 (a virtual minute is ten real seconds).
-        ws.setClock(at(-1, 30), 6);
-        const runner = startRunner(ws);
+        const runner = await startRunnerAt(ws, at(-1, 30), 6);
         const steered = () =>
           socket
             .callsOf("turn/steer")

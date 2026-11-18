@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach } from "vitest";
 
-import { cli, type Result, startRunner } from "./adapter.ts";
+import { cli, type Result, startRunnerAt } from "./adapter.ts";
 import { CodexSocket, type RpcCall } from "./codex-socket.ts";
 import { sleep } from "./time.ts";
 import type { Workspace } from "./workspace.ts";
@@ -117,9 +117,8 @@ export async function scheduled(
     timezone: "America/Toronto",
   };
   ws.env.CODEX_CONTROL_SOCKET = socket.path;
-  // Start one virtual minute early so the runner's observer is polling before the slot.
-  ws.setClock(slot - 60, 60);
-  const runner = startRunner(ws);
+  // Arm the runner one virtual minute early: the observer's first wakeup lands on the slot.
+  const runner = await startRunnerAt(ws, slot - 60);
   const healthName = `unblock/health/${M}.json`;
   try {
     await runner.until(() => {

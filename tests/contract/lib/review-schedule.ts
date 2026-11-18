@@ -2,8 +2,8 @@
 // The virtual clock is effectively frozen (speed 0.001) and every minute is a wake minute,
 // so each advance of 60 seconds dispatches exactly one scheduled review slot. Real-time mode
 // runs the clock at wall speed for collectors that compare slots with the real time.
-import { type Resident, startRunner } from "./adapter.ts";
-import { at, sleep } from "./time.ts";
+import { type Runner, startRunner } from "./adapter.ts";
+import { at } from "./time.ts";
 import type { Workspace } from "./workspace.ts";
 
 export interface SlotOutput {
@@ -13,7 +13,7 @@ export interface SlotOutput {
 }
 
 export class ReviewSchedule {
-  private runner: Resident | undefined;
+  private runner: Runner | undefined;
   private lines: string[] = [];
   private now: number;
 
@@ -43,9 +43,8 @@ export class ReviewSchedule {
     };
     this.runner.child.stdout.on("data", collect);
     this.runner.child.stderr.on("data", collect);
-    await this.runner.until(() => this.ws.exists("runner.identity.json"));
-    // Let the observer record its first minute before time advances.
-    await sleep(800);
+    // The observer has recorded its first minute before time advances.
+    await this.runner.armed();
   }
 
   /** Advance one minute and wait for that slot's scheduled review result. */

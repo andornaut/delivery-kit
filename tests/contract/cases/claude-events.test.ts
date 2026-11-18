@@ -3,7 +3,7 @@
 import { rmSync } from "node:fs";
 import { expect } from "vitest";
 
-import { impl, type Resident, startRunner } from "../lib/adapter.ts";
+import { impl, type Resident, startRunnerAt } from "../lib/adapter.ts";
 import {
   agents,
   Channel,
@@ -51,7 +51,11 @@ function blockedDeparture(ws: Workspace): void {
   // No review wakes, so only bus events reach the spool.
   ws.updateCoordinatorConfig({ wakeMinutes: [] });
   impl.offer(ws, ["bus/queued"]);
-  ws.setClock(at(-1, 50));
+}
+
+/** Start the runner ten virtual seconds before the blocked departure at minute 00. */
+function startBlocked(ws: Workspace): Promise<Resident> {
+  return startRunnerAt(ws, at(-1, 50));
 }
 
 /**
@@ -80,7 +84,7 @@ suite("claude bus events", () => {
     async () => {
       const ws = workspace();
       blockedDeparture(ws);
-      const runner = startRunner(ws);
+      const runner = await startBlocked(ws);
       try {
         await runner.until(() => spooled(ws).length === 1);
         await loadWaitOver(ws, runner);
@@ -131,7 +135,7 @@ suite("claude bus events", () => {
     async () => {
       const ws = workspace();
       blockedDeparture(ws);
-      const runner = startRunner(ws);
+      const runner = await startBlocked(ws);
       try {
         await runner.until(() => spooled(ws).length === 1);
         await loadWaitOver(ws, runner);
@@ -160,7 +164,7 @@ suite("claude bus events", () => {
     async () => {
       const ws = workspace();
       blockedDeparture(ws);
-      const runner = startRunner(ws);
+      const runner = await startBlocked(ws);
       try {
         await runner.until(() => spooled(ws).length === 1);
         await loadWaitOver(ws, runner);
@@ -188,7 +192,7 @@ suite("claude bus events", () => {
       const ws = workspace();
       blockedDeparture(ws);
       agents(ws, "missing");
-      const runner = startRunner(ws);
+      const runner = await startBlocked(ws);
       try {
         await runner.until(() => ws.list("events", "native").length === 1);
         const [first] = events(ws);
@@ -221,7 +225,7 @@ suite("claude bus events", () => {
         const ws = workspace();
         blockedDeparture(ws);
         change(ws);
-        const runner = startRunner(ws);
+        const runner = await startBlocked(ws);
         try {
           await loadWaitOver(ws, runner);
           await flushes(runner);
