@@ -150,6 +150,34 @@ describe("message service", () => {
     expect(service.status({ id: ID, includeBody: true })[0]?.body).toBe(BODY);
   });
 
+  it("records a deduplicated transport result as accepted with its diagnostic and sends once", async () => {
+    const test = fixture();
+    codex(test);
+    marker(messageGuardDirectory(test.layout, ROLE)!, CODEX_TECH);
+    let sends = 0;
+    const service = new MessageService({
+      layout: test.layout,
+      env: {},
+      transport: () => ({
+        send: async (_path, message) => {
+          sends++;
+          return {
+            diagnostic: { category: "deduplicated", classification: "guarded", stage: "receipt" },
+            requestId: message.requestId,
+            status: "accepted",
+          };
+        },
+      }),
+    });
+    await service.send(input());
+    const accepted = await service.dispatch(ID);
+    const diagnostic = { category: "deduplicated", classification: "guarded", stage: "receipt" };
+    expect(accepted).toMatchObject({ diagnostic, reason: null, state: "accepted" });
+    expect(accepted.attempts.at(-1)).toMatchObject({ diagnostic, state: "accepted" });
+    expect((await service.dispatch(ID)).state).toBe("accepted");
+    expect(sends).toBe(1);
+  });
+
   it("prepares receipt storage before transport and blocks directory failures without sending", async () => {
     const test = fixture();
     codex(test);

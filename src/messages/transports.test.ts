@@ -129,4 +129,52 @@ describe("generic message transports", () => {
     });
     expect(calls).toEqual([["receipt", "id", RECIPIENT, "exact"]]);
   });
+
+  it("reports a deduplicated delivery as accepted with a deduplicated diagnostic", async () => {
+    const adapter = {
+      deliver: async () => ({ requestId: "id", status: "deduplicated" }),
+    } as unknown as HarnessAdapter;
+    const message = { requestId: "id", recipient: RECIPIENT, text: "exact" };
+    expect(await guardedMessageTransport(adapter).send("receipt", message)).toEqual({
+      diagnostic: { category: "deduplicated", classification: "guarded", stage: "receipt" },
+      requestId: "id",
+      status: "accepted",
+    });
+  });
+
+  it("keeps an unchanged delivery unaccepted and always names it in the diagnostic", async () => {
+    const message = { requestId: "id", recipient: RECIPIENT, text: "exact" };
+    const bare = {
+      deliver: async () => ({ requestId: "id", status: "unchanged" }),
+    } as unknown as HarnessAdapter;
+    expect(await guardedMessageTransport(bare).send("receipt", message)).toEqual({
+      diagnostic: { category: "unchanged", classification: "guarded", stage: "receipt" },
+      requestId: "id",
+      status: "blocked",
+    });
+    const native = {
+      deliver: async () => ({
+        diagnostic: {
+          category: "rpc-refusal",
+          classification: "native-rejected",
+          method: "turn/steer",
+          rpcCode: -32600,
+          stage: "native-send",
+        },
+        requestId: "id",
+        status: "unchanged",
+      }),
+    } as unknown as HarnessAdapter;
+    expect(await guardedMessageTransport(native).send("receipt", message)).toEqual({
+      diagnostic: {
+        category: "unchanged",
+        classification: "guarded",
+        method: "turn/steer",
+        rpcCode: -32600,
+        stage: "receipt",
+      },
+      requestId: "id",
+      status: "blocked",
+    });
+  });
 });

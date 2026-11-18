@@ -23,6 +23,7 @@ import { readRegistry } from "../registry/store.ts";
 import { messageChannelStateDir } from "./paths.ts";
 import { MessageError, messageExpectation, MessageStore } from "./store.ts";
 import {
+  adapterTransportReceipt,
   claudeMessageTransport,
   codexQueueTransport,
   type MessageTransport,
@@ -544,14 +545,7 @@ export class MessageService {
             message.recipient,
             message.text,
           );
-          const status = receipt.status === "sending" ? "ambiguous" : receipt.status;
-          return {
-            ...(safeDeliveryDiagnostic(receipt.diagnostic) === undefined
-              ? {}
-              : { diagnostic: safeDeliveryDiagnostic(receipt.diagnostic)! }),
-            requestId: message.requestId,
-            status: status === "deduplicated" || status === "unchanged" ? "blocked" : status,
-          };
+          return adapterTransportReceipt(message.requestId, receipt);
         } finally {
           client.close();
         }
@@ -662,7 +656,15 @@ export class MessageService {
         });
       }
       if (result.status === "accepted" || saved?.status === "accepted") {
-        return lease.complete({ reason: null, source, state: "accepted" });
+        // An accepted transport result keeps its diagnostic, such as a deduplicated delivery.
+        const accepted =
+          result.status === "accepted" ? safeDeliveryDiagnostic(result.diagnostic) : undefined;
+        return lease.complete({
+          ...(accepted === undefined ? {} : { diagnostic: accepted }),
+          reason: null,
+          source,
+          state: "accepted",
+        });
       }
       if (result.status === "ambiguous" || result.status === "queued") {
         return lease.complete({

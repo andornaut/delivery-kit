@@ -23,6 +23,8 @@ const CATEGORIES = [
   "stale-turn",
   "transport-unavailable",
   "binding-mismatch",
+  "deduplicated",
+  "unchanged",
   "unknown",
 ] as const;
 const CLASSIFICATIONS = ["guarded", "native-rejected", "outcome-unknown", "unavailable"] as const;

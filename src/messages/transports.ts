@@ -5,6 +5,7 @@ import { type QueueGuards, queueMessage } from "../adapters/codex/queue.ts";
 import { type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import {
   type DeliveryDiagnostic,
+  type DeliveryReceipt,
   type HarnessAdapter,
   safeDeliveryDiagnostic,
 } from "../adapters/types.ts";
@@ -100,6 +101,37 @@ export function claudeMessageTransport(ports: {
   };
 }
 
+/**
+ * Map an adapter delivery receipt to a transport receipt. `sending` is `ambiguous`.
+ * `deduplicated` means the recipient already holds this exact request, so it is `accepted` with
+ * a `deduplicated` diagnostic. `unchanged` sent nothing and stays `blocked` with an `unchanged`
+ * diagnostic. Known native `method` and `rpcCode` fields are kept.
+ */
+export function adapterTransportReceipt(
+  requestId: string,
+  receipt: DeliveryReceipt,
+): TransportReceipt {
+  const reported = safeDeliveryDiagnostic(receipt.diagnostic);
+  if (receipt.status === "deduplicated" || receipt.status === "unchanged") {
+    return {
+      diagnostic: {
+        ...(reported?.method === undefined ? {} : { method: reported.method }),
+        ...(reported?.rpcCode === undefined ? {} : { rpcCode: reported.rpcCode }),
+        category: receipt.status,
+        classification: "guarded",
+        stage: "receipt",
+      },
+      requestId,
+      status: receipt.status === "deduplicated" ? "accepted" : "blocked",
+    };
+  }
+  return {
+    ...(reported === undefined ? {} : { diagnostic: reported }),
+    requestId,
+    status: receipt.status === "sending" ? "ambiguous" : receipt.status,
+  };
+}
+
 /** Unblock uses the service's existing guarded adapter without duplicating its guards. */
 export function guardedMessageTransport(adapter: HarnessAdapter): MessageTransport {
   return {
@@ -111,14 +143,7 @@ export function guardedMessageTransport(adapter: HarnessAdapter): MessageTranspo
           message.recipient,
           message.text,
         );
-        const status = result.status === "sending" ? "ambiguous" : result.status;
-        return {
-          ...(safeDeliveryDiagnostic(result.diagnostic) === undefined
-            ? {}
-            : { diagnostic: safeDeliveryDiagnostic(result.diagnostic)! }),
-          requestId: message.requestId,
-          status: status === "unchanged" || status === "deduplicated" ? "blocked" : status,
-        };
+        return adapterTransportReceipt(message.requestId, result);
       } catch {
         return {
           reason: "guarded delivery unavailable",

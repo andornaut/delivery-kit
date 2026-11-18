@@ -428,7 +428,10 @@ codes are not exposed. Older receipts without diagnostics remain readable; absen
 no historical cause or clearance. `DeliveryDiagnostic` and `NativeRpcCode` are type-only
 exports from `@andornaut/delivery-kit/build/transport` and its compatibility alias.
 A `pending-question` diagnostic means clearance was not proved, not that a user question is
-necessarily unanswered.
+necessarily unanswered. An adapter receipt of `deduplicated` means the recipient already holds
+that exact request: the transport reports it as `accepted` with a `deduplicated` diagnostic and
+sends nothing new. An `unchanged` receipt sent nothing and stays `blocked` with an `unchanged`
+diagnostic. Both use classification `guarded` and stage `receipt`.
 
 The CLI creates receipt storage before delivery. A failure proven to occur before native
 admission sends nothing and permits a guarded retry of the same unchanged original. A failure
