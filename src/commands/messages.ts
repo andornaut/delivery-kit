@@ -20,6 +20,11 @@ export const MESSAGE_SEND_OPTIONS = {
 
 export const MESSAGE_DISPATCH_OPTIONS = { id: { type: "string" } } as const;
 
+export const MESSAGE_RETIRE_SPOOL_OPTIONS = {
+  "dry-run": { type: "boolean" },
+  recipient: { type: "string" },
+} as const;
+
 export const MESSAGE_STATUS_OPTIONS = {
   id: { type: "string" },
   "include-body": { type: "boolean" },
@@ -205,4 +210,15 @@ export const messageReconcile: Handler = (io, root, args) => {
       input === undefined ? await service.reconcileReceipt(id) : await service.reconcile(input),
     ),
   );
+};
+
+export const messageRetireSpool: Handler = (io, root, args) => {
+  let selection: { recipient: string; dryRun: boolean };
+  try {
+    const values = options(MESSAGE_RETIRE_SPOOL_OPTIONS, args);
+    selection = { dryRun: values["dry-run"] === true, recipient: required(values, "recipient") };
+  } catch {
+    return usage(io, "message retire-spool");
+  }
+  return operate(io, root, (service) => service.retireSpool(selection));
 };

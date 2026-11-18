@@ -23,6 +23,12 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   excludes `--game`. `--poll-seconds` defaults to 5. It creates no state directory and drains only
   spools that already exist, so it can start before any game state. Without `--conversation`, an
   absent registry stops it with exit 1.
+- `message retire-spool --recipient ROLE_OR_UUID [--dry-run]`: moves unclaimed Claude spool
+  entries whose parent message is `handled` or `superseded` from
+  `<stateRoot>/transport/messages/recipients/<uuid>/unblock/claude-spool/` to the sibling
+  `claude-retired/`, under `unblock.lock`. Without an active work protocol the same layout sits
+  beneath `<reviewDir>/messages/`. Anything it cannot prove terminal and exactly bound is retained
+  with a reason; see [Common messages](messages.md).
 - `inbox snapshot` and `inbox ack`: `--recipient` defaults to the game's `reports.recipient`.
   `--recipient` and `--parent` take a role name, or a canonical conversation UUID registered for
   the active harness, with the worker recipient exception below. With Claude the recipient must

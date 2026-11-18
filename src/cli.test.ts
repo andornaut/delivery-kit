@@ -91,6 +91,7 @@ describe("dispatcher", () => {
     expect(help.code).toBe(EXIT_OK);
     expect(help.out).toContain("message dispatch --id UUID");
     expect(help.out).toContain("message reconcile --id UUID --receipt");
+    expect(help.out).toContain("message retire-spool --recipient ROLE|UUID [--dry-run]");
     expect(help.out).toContain("harness doctor --game ID ... [--role ROLE ...]");
     expect(help.out).toContain("harness doctor --role ROLE ...");
     expect(help.out).not.toContain("harness doctor [");

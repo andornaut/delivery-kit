@@ -45,6 +45,19 @@ recipient readiness before claiming it. An entry whose parent message is `handle
 `superseded` stays blocked and unclaimed without another store scan, because a terminal message
 takes no further attempt.
 
+`message retire-spool --recipient ROLE_OR_UUID [--dry-run]` retires unclaimed Claude spool
+entries of terminal messages for one conversation: a role selects its registered Claude
+conversation, and a canonical UUID selects that conversation directly, including an earlier one.
+It holds the generation lease and then `unblock.lock`, as the consumer does. An entry is retired
+only when its receipt matches the entry at `sending` and exactly one message record holds its
+request ID, is `handled` or `superseded`, and binds the same Claude recipient and transport text.
+Every other entry is retained with a reason such as `parent-not-terminal`, `parent-missing`,
+`receipt-mismatch` or `receipt-not-sending`. Retired entries move by rename, with identical
+bytes, to `unblock/claude-retired/` beside `claude-delivered/`; receipts stay at their bound path
+and nothing is deleted. Output is one JSON object with `retired` and `retained` counts, `reasons`
+counts and per-entry outcomes. `--dry-run` reports the same outcomes and moves nothing. If
+`unblock.lock` stays held for 60 seconds the command fails with `spool-busy` and moves nothing.
+
 Status and outbox entries may include `diagnostic`: allowlisted `stage`, `category` and
 `classification`, with optional known native `method` and `rpcCode`. Service attempt counts
 do not count accepted native sends. A local or question-guard refusal is distinct from a

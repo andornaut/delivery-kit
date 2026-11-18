@@ -13,6 +13,7 @@ import { DOCTOR_OPTIONS } from "./doctor.ts";
 import {
   MESSAGE_DISPATCH_OPTIONS,
   MESSAGE_RECONCILE_OPTIONS,
+  MESSAGE_RETIRE_SPOOL_OPTIONS,
   MESSAGE_SEND_OPTIONS,
   MESSAGE_STATUS_OPTIONS,
 } from "./messages.ts";
@@ -243,6 +244,12 @@ export const SPECS = {
     options: MESSAGE_RECONCILE_OPTIONS,
     summary: "reconcile exact receipt or explicit handling and retention evidence",
     values: { disposition: "accepted|handled|superseded|retained", id: "UUID" },
+  },
+  "message retire-spool": {
+    forms: [["recipient", "dry-run?"]],
+    group: "message",
+    options: MESSAGE_RETIRE_SPOOL_OPTIONS,
+    summary: "move Claude spool entries of handled or superseded messages to claude-retired",
   },
   "message send": {
     forms: [["from", "recipient", "id", "body-file", "intent?", "parent?"]],

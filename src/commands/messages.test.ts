@@ -8,9 +8,15 @@ import type { Handler } from "../io.ts";
 import { loadLayout } from "../layout.ts";
 import { MessageService } from "../messages/service.ts";
 import { messageExpectation } from "../messages/store.ts";
-import { createRegistry, type Registry } from "../registry/index.ts";
-import { makeFixture, registryInput } from "../testFixtures.ts";
-import { messageDispatch, messageReconcile, messageSend, messageStatus } from "./messages.ts";
+import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
+import { CODEX_TECH, makeFixture, registryInput } from "../testFixtures.ts";
+import {
+  messageDispatch,
+  messageReconcile,
+  messageRetireSpool,
+  messageSend,
+  messageStatus,
+} from "./messages.ts";
 
 const ID = "00000000-0000-4000-8000-000000000099";
 const ROLE = "archies-dog-walks/tech";
@@ -253,6 +259,9 @@ describe("common message command handlers", () => {
       [messageStatus, ["--recipient", " "]],
       [messageDispatch, ["--id", ID, "--receipt"]],
       [messageReconcile, ["--id", ID, "--receipt", "--evidence", "PRIVATE_VALUE"]],
+      [messageRetireSpool, []],
+      [messageRetireSpool, ["--recipient", ROLE, "--recipient", ROLE]],
+      [messageRetireSpool, ["--recipient", ROLE, "--dry-run=PRIVATE_VALUE"]],
       [
         messageReconcile,
         [
@@ -314,6 +323,29 @@ describe("common message command handlers", () => {
       expect(result).toMatchObject({ code: 2, out: "" });
       expect(result.err).not.toContain("PRIVATE_VALUE");
     }
+  });
+});
+
+it("reports exact empty retirement counts and refuses a recipient without a Claude conversation", async () => {
+  const test = setup();
+  const empty = await run(test, messageRetireSpool, "--recipient", "game-coordinator", "--dry-run");
+  expect(empty).toMatchObject({ code: 0, err: "" });
+  expect(JSON.parse(empty.out)).toEqual({
+    dryRun: true,
+    entries: [],
+    reasons: {},
+    recipient: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    retained: 0,
+    retired: 0,
+  });
+  expect(existsSync(join(test.layout.reviewDir, "messages", "recipients"))).toBe(false);
+  updateRegistry(test.layout, readRegistry(test.layout).revision, (draft) => {
+    draft.roles[ROLE]!.conversations = { codex: CODEX_TECH };
+  });
+  expect(await run(test, messageRetireSpool, "--recipient", ROLE)).toEqual({
+    code: 1,
+    err: "delivery-kit: recipient-unavailable\n",
+    out: "",
   });
 });
 

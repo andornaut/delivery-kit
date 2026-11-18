@@ -480,53 +480,53 @@ describe("message service", () => {
   });
 });
 
+async function spooledEntry(
+  test: ReturnType<typeof fixture>,
+  service: MessageService,
+  id: string,
+  body: string,
+) {
+  const record = await service.send({ ...input("game-coordinator", id), body });
+  const lease = await service.store.beginAttempt(messageExpectation(record));
+  const source = lease.source;
+  const pending = lease.complete({ reason: "transport-pending", source, state: "ambiguous" });
+  const stateDir = messageChannelStateDir(test.layout, CLAUDE_COORDINATOR);
+  const path = join(stateDir, `${source.requestId}.json`);
+  const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+  const message = { recipient: CLAUDE_COORDINATOR, requestId: source.requestId, text: body };
+  mkdirSync(stateDir, { recursive: true });
+  expect((await transport.send(path, message)).status).toBe("queued");
+  return { message, path, pending, transport };
+}
+
+function deliverableEnv(test: ReturnType<typeof fixture>) {
+  writeJsonDurable(test.layout.routeFile, {
+    schema: 2,
+    state: "active",
+    host: GAME,
+    targets: [ROLE],
+  });
+  marker(join(gameLayout(test.layout, GAME).busDir, "unblock"), CLAUDE_COORDINATOR);
+  const executable = join(test.base, "idle-listing.mjs");
+  const listing = JSON.stringify([{ sessionId: CLAUDE_COORDINATOR, status: "idle" }]);
+  writeFileSync(
+    executable,
+    `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(listing)});\n`,
+  );
+  chmodSync(executable, 0o700);
+  return { CLAUDE_BIN: executable };
+}
+
 describe("channel consumer guard cost", () => {
-  async function spooled(
-    test: ReturnType<typeof fixture>,
-    service: MessageService,
-    id: string,
-    body: string,
-  ) {
-    const record = await service.send({ ...input("game-coordinator", id), body });
-    const lease = await service.store.beginAttempt(messageExpectation(record));
-    const source = lease.source;
-    const pending = lease.complete({ reason: "transport-pending", source, state: "ambiguous" });
-    const stateDir = messageChannelStateDir(test.layout, CLAUDE_COORDINATOR);
-    const path = join(stateDir, `${source.requestId}.json`);
-    const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
-    const message = { recipient: CLAUDE_COORDINATOR, requestId: source.requestId, text: body };
-    mkdirSync(stateDir, { recursive: true });
-    expect((await transport.send(path, message)).status).toBe("queued");
-    return { message, path, pending, transport };
-  }
-
-  function deliverable(test: ReturnType<typeof fixture>) {
-    writeJsonDurable(test.layout.routeFile, {
-      schema: 2,
-      state: "active",
-      host: GAME,
-      targets: [ROLE],
-    });
-    marker(join(gameLayout(test.layout, GAME).busDir, "unblock"), CLAUDE_COORDINATOR);
-    const executable = join(test.base, "idle-listing.mjs");
-    const listing = JSON.stringify([{ sessionId: CLAUDE_COORDINATOR, status: "idle" }]);
-    writeFileSync(
-      executable,
-      `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(listing)});\n`,
-    );
-    chmodSync(executable, 0o700);
-    return { CLAUDE_BIN: executable };
-  }
-
   it("indexes the store once per drain and skips terminal parents without claiming or rescanning", async () => {
     const test = fixture();
-    const env = deliverable(test);
+    const env = deliverableEnv(test);
     const service = new MessageService({ layout: test.layout, env });
     const terminal = [];
     for (const [index, id] of [ID, SECOND, REPLACEMENT].entries()) {
       // Sequential sends keep each message lock and spool write ordered.
       // eslint-disable-next-line no-await-in-loop
-      const entry = await spooled(test, service, id, `terminal original ${index}\n`);
+      const entry = await spooledEntry(test, service, id, `terminal original ${index}\n`);
       // eslint-disable-next-line no-await-in-loop
       await service.reconcile({
         disposition: "superseded",
@@ -557,13 +557,77 @@ describe("channel consumer guard cost", () => {
       expect(JSON.parse(readFileSync(entry.path, "utf8")).status).toBe("sending");
     }
     // Between drains a sender's non-blocking unblock.lock attempt succeeds.
-    const live = await spooled(test, service, WORKER, "deliverable original\n");
+    const live = await spooledEntry(test, service, WORKER, "deliverable original\n");
     expect(await drain()).toBe(true);
     expect(scans).toHaveBeenCalledTimes(2);
     expect(lines.map((line) => JSON.parse(line).params.content)).toEqual([
       "deliverable original\n",
     ]);
     expect((await live.transport.send(live.path, live.message)).status).toBe("accepted");
+  });
+});
+
+describe("legacy Claude spool retirement", () => {
+  it("moves only matching entries of terminal parents and retains every other entry with a reason", async () => {
+    const test = fixture();
+    const env = deliverableEnv(test);
+    const service = new MessageService({ layout: test.layout, env });
+    const handled = await spooledEntry(test, service, ID, "handled original\n");
+    await service.reconcile({
+      disposition: "superseded",
+      evidence: "fixture-owner-reconciliation",
+      expectedRevision: handled.pending.revision,
+      id: ID,
+    });
+    const pending = await spooledEntry(test, service, SECOND, "pending original\n");
+    const changed = await spooledEntry(test, service, REPLACEMENT, "changed original\n");
+    await service.reconcile({
+      disposition: "superseded",
+      evidence: "fixture-owner-reconciliation",
+      expectedRevision: changed.pending.revision,
+      id: REPLACEMENT,
+    });
+    writeJsonDurable(changed.path, {
+      ...JSON.parse(readFileSync(changed.path, "utf8")),
+      text: "altered receipt text\n",
+    });
+    const busDir = dirname(messageChannelStateDir(test.layout, CLAUDE_COORDINATOR));
+    const spool = spoolDir(busDir);
+    const retired = join(busDir, "unblock", "claude-retired");
+    const bytes = readFileSync(join(spool, `${handled.message.requestId}.json`));
+    const receiptBytes = readFileSync(handled.path);
+    const before = readdirSync(spool).sort();
+    const dry = await service.retireSpool({ dryRun: true, recipient: "game-coordinator" });
+    expect(dry).toMatchObject({
+      dryRun: true,
+      reasons: { "parent-not-terminal": 1, "receipt-mismatch": 1 },
+      recipient: CLAUDE_COORDINATOR,
+      retained: 2,
+      retired: 1,
+    });
+    expect(dry.entries).toContainEqual({
+      outcome: "retired",
+      reason: null,
+      requestId: handled.message.requestId,
+    });
+    expect(dry.entries).toContainEqual({
+      outcome: "retained",
+      reason: "parent-not-terminal",
+      requestId: pending.message.requestId,
+    });
+    expect(readdirSync(spool).sort()).toEqual(before);
+    expect(existsSync(retired)).toBe(false);
+    const applied = await service.retireSpool({ dryRun: false, recipient: CLAUDE_COORDINATOR });
+    expect(applied).toMatchObject({ dryRun: false, retained: 2, retired: 1 });
+    expect(readdirSync(spool).sort()).toEqual(
+      [pending.message.requestId, changed.message.requestId].map((id) => `${id}.json`).sort(),
+    );
+    expect(readFileSync(join(retired, `${handled.message.requestId}.json`))).toEqual(bytes);
+    expect(readFileSync(handled.path)).toEqual(receiptBytes);
+    expect(
+      await service.retireSpool({ dryRun: false, recipient: CLAUDE_COORDINATOR }),
+    ).toMatchObject({ retained: 2, retired: 0 });
+    expect(service.store.read(SECOND)?.state).toBe("ambiguous");
   });
 });
 

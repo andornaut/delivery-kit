@@ -1,11 +1,11 @@
 // Review briefs and bus events for a Claude recipient go through a spool that the recipient's
 // own channel consumer drains. The receipt is always written at `sending`
 // before its spool entry, so an interruption between the two is never resent.
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 
-import { readJsonIfExists, writeJsonDurable } from "../../durable.ts";
-import { holdLock, LockBusy } from "../../lock.ts";
+import { fsyncDirectory, readJsonIfExists, writeJsonDurable } from "../../durable.ts";
+import { holdLock, holdLockAsync, LockBusy } from "../../lock.ts";
 import type { NativeMessage, TransportReceipt } from "../../messages/transports.ts";
 import { decisionClear } from "../shared/decisions.ts";
 import { eventRequestId, isCanonicalUuid, slotRequestId } from "../shared/ids.ts";
@@ -17,6 +17,7 @@ import { type AgentEntry, listingOrNull, recipientReady, roleDiagnostics } from 
 const UNBLOCK = "unblock";
 export const SPOOL = "claude-spool";
 export const DELIVERED = "claude-delivered";
+export const RETIRED = "claude-retired";
 export const LOCK_FILE = "unblock.lock";
 
 export type EntryKind = "event" | "review" | "message";
@@ -69,6 +70,10 @@ export function spoolDir(busDir: string): string {
 
 export function deliveredDir(busDir: string): string {
   return join(busDir, UNBLOCK, DELIVERED);
+}
+
+export function retiredDir(busDir: string): string {
+  return join(busDir, UNBLOCK, RETIRED);
 }
 
 function listNames(directory: string, suffix: string): string[] {
@@ -453,6 +458,116 @@ export function spoolMessage(
     persist(path, { ...state, status: "sending" });
     writeSpoolEntry(busDir, { kind: "message", receipt, recipient, requestId, text });
     return outcome("queued");
+  } finally {
+    lock.release();
+  }
+}
+
+export interface SpoolRetirement {
+  readonly requestId: string;
+  readonly outcome: "retired" | "retained";
+  readonly reason: string | null;
+}
+
+/** Returns null to retire a matching message entry, or the reason it is retained. */
+export type SpoolRetirementDecision = (entry: NativeMessage) => string | null;
+
+const RETIRE_LOCK_SECONDS = 60;
+
+/**
+ * Move unclaimed message entries for one recipient from the spool to `claude-retired/` when
+ * `decide` proves them undeliverable. Bytes move by rename; receipts stay at their bound path.
+ * Holds unblock.lock throughout, so the consumer and senders never observe a partial move.
+ */
+export async function retireSpoolEntries(
+  decide: SpoolRetirementDecision,
+  busDir: string,
+  recipient: string,
+  dryRun: boolean,
+): Promise<readonly SpoolRetirement[]> {
+  const spool = spoolDir(busDir);
+  if (!existsSync(spool)) {
+    return [];
+  }
+  const lock = await holdLockAsync(join(unblockDir(busDir), LOCK_FILE), {
+    timeoutSeconds: RETIRE_LOCK_SECONDS,
+  });
+  try {
+    const results: SpoolRetirement[] = [];
+    const retired = retiredDir(busDir);
+    let moved = false;
+    for (const name of listNames(spool, ".json")) {
+      const requestId = name.slice(0, -".json".length);
+      const retain = (reason: string): void => {
+        results.push({ outcome: "retained", reason, requestId });
+      };
+      const entry = readEntry(join(spool, name));
+      if (entry === undefined) {
+        retain("unreadable-entry");
+        continue;
+      }
+      if (entry.kind !== "message") {
+        retain("not-a-message");
+        continue;
+      }
+      if (
+        entry.requestId !== requestId ||
+        entry.recipient !== recipient ||
+        typeof entry.text !== "string" ||
+        entry.receipt !== `${UNBLOCK}/${requestId}.json`
+      ) {
+        retain("entry-binding-mismatch");
+        continue;
+      }
+      let receipt: Json | undefined;
+      try {
+        const stored = readJsonIfExists(join(busDir, entry.receipt));
+        if (stored === undefined) {
+          retain("receipt-missing");
+          continue;
+        }
+        receipt = record(stored);
+      } catch {
+        receipt = undefined;
+      }
+      if (receipt === undefined) {
+        retain("receipt-unreadable");
+        continue;
+      }
+      if (
+        receipt.kind !== "message" ||
+        receipt.requestId !== requestId ||
+        receipt.recipient !== recipient ||
+        receipt.text !== entry.text
+      ) {
+        retain("receipt-mismatch");
+        continue;
+      }
+      if (receipt.status !== "sending") {
+        retain("receipt-not-sending");
+        continue;
+      }
+      const reason = decide({ recipient, requestId, text: entry.text });
+      if (reason !== null) {
+        retain(reason);
+        continue;
+      }
+      if (existsSync(join(retired, name))) {
+        retain("retired-conflict");
+        continue;
+      }
+      if (!dryRun) {
+        mkdirSync(retired, { mode: 0o700, recursive: true });
+        renameSync(join(spool, name), join(retired, name));
+        moved = true;
+      }
+      results.push({ outcome: "retired", reason: null, requestId });
+    }
+    if (moved) {
+      fsyncDirectory(retired);
+      fsyncDirectory(spool);
+    }
+    return results;
   } finally {
     lock.release();
   }

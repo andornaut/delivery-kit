@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import { captureAccounting } from "../accounting/boundary.ts";
 import { recipientReady } from "../adapters/claude/agents.ts";
 import type { MessageChannelGuard } from "../adapters/claude/channel.ts";
+import { retireSpoolEntries, type SpoolRetirement } from "../adapters/claude/spool.ts";
 import { clearanceUnchanged } from "../adapters/codex/guard.ts";
 import { connectControl, type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import { deliverReceipt, selectTarget } from "../adapters/codex/steer.ts";
@@ -19,6 +20,9 @@ import { readRoleRoute } from "../adapters/shared/route.ts";
 import { type DeliveryDiagnostic, safeDeliveryDiagnostic } from "../adapters/types.ts";
 import { readJsonIfExists } from "../durable.ts";
 import { gameLayout, type Layout } from "../layout.ts";
+import { LockBusy } from "../lock.ts";
+import { acquireProtocolLayout } from "../protocol/layout.ts";
+import { captureProtocolSelection, checkProtocolSelection } from "../protocol/selection.ts";
 import { resolveConversation, resolveHarness, resolveRole } from "../registry/resolve.ts";
 import { readRegistry } from "../registry/store.ts";
 import { messageChannelStateDir } from "./paths.ts";
@@ -252,6 +256,15 @@ export interface MessageServiceContext {
     source: MessageAttemptSource,
     directory: string,
   ) => MessageTransport;
+}
+
+export interface SpoolRetirementReport {
+  readonly dryRun: boolean;
+  readonly recipient: string;
+  readonly retired: number;
+  readonly retained: number;
+  readonly reasons: Readonly<Record<string, number>>;
+  readonly entries: readonly SpoolRetirement[];
 }
 
 export interface MessageView extends MessageStatus {
@@ -585,6 +598,101 @@ export class MessageService {
           client.close();
         }
       },
+    };
+  }
+
+  /** The registered Claude conversation of a role, or an explicit canonical conversation UUID. */
+  private claudeConversation(recipient: string): string {
+    if (isCanonicalUuid(recipient)) {
+      return recipient;
+    }
+    const registry = readRegistry(this.context.layout);
+    const conversation = registry.roles[resolveRole(registry, recipient)]?.conversations.claude;
+    if (!isCanonicalUuid(conversation)) {
+      throw new MessageError("recipient-unavailable");
+    }
+    return conversation;
+  }
+
+  /**
+   * Retire unclaimed Claude spool entries whose matching parent message is handled or superseded.
+   * A terminal message takes no further attempt, so its entry can never be delivered. Every other
+   * entry is retained with a reason. Entries move to `claude-retired/`; nothing is deleted.
+   */
+  async retireSpool(selection: {
+    readonly recipient: string;
+    readonly dryRun: boolean;
+  }): Promise<SpoolRetirementReport> {
+    const recipient = this.claudeConversation(selection.recipient);
+    const busDir = dirname(messageChannelStateDir(this.context.layout, recipient));
+    const layout = this.context.layout;
+    const protocol = captureProtocolSelection(layout);
+    let lease;
+    try {
+      // The generation lease precedes unblock.lock, as in the channel consumer.
+      lease = await acquireProtocolLayout(layout, protocol.protocol, {
+        allowPending: protocol.management.status === "pending",
+        expectedManagement: protocol.management,
+        nonBlocking: true,
+      });
+    } catch (error) {
+      throw error instanceof LockBusy ? new MessageError("protocol-busy") : error;
+    }
+    let entries: readonly SpoolRetirement[];
+    try {
+      checkProtocolSelection(layout, protocol);
+      let index: ReturnType<MessageStore["attemptIndex"]> | undefined;
+      entries = await retireSpoolEntries(
+        (entry) => {
+          index ??= this.store.attemptIndex();
+          const matches = index.get(entry.requestId) ?? [];
+          if (matches.length !== 1) {
+            return matches.length === 0 ? "parent-missing" : "parent-ambiguous";
+          }
+          let record: MessageRecord | undefined;
+          try {
+            record = this.store.read(matches[0]!.id);
+          } catch {
+            return "parent-unreadable";
+          }
+          if (record === undefined || record.revision !== matches[0]!.revision) {
+            return "parent-changed";
+          }
+          if (!terminalState(record.state)) {
+            return "parent-not-terminal";
+          }
+          const source = record.attempts.find(
+            (attempt) => attempt.source.requestId === entry.requestId,
+          )?.source;
+          return source !== undefined &&
+            source.owner.harness === "claude" &&
+            messageNativeRecipient(source) === entry.recipient &&
+            messageTransportText(record, source) === entry.text
+            ? null
+            : "parent-binding-mismatch";
+        },
+        busDir,
+        recipient,
+        selection.dryRun,
+      );
+    } catch (error) {
+      throw error instanceof LockBusy ? new MessageError("spool-busy") : error;
+    } finally {
+      lease.release();
+    }
+    const reasons: Record<string, number> = {};
+    for (const entry of entries) {
+      if (entry.reason !== null) {
+        reasons[entry.reason] = (reasons[entry.reason] ?? 0) + 1;
+      }
+    }
+    return {
+      dryRun: selection.dryRun,
+      entries,
+      reasons,
+      recipient,
+      retained: entries.filter((entry) => entry.outcome === "retained").length,
+      retired: entries.filter((entry) => entry.outcome === "retired").length,
     };
   }
 

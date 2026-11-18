@@ -23,6 +23,7 @@ import { inboxAck, inboxSnapshot } from "./commands/inbox.ts";
 import {
   messageDispatch,
   messageReconcile,
+  messageRetireSpool,
   messageSend,
   messageStatus,
 } from "./commands/messages.ts";
@@ -89,6 +90,7 @@ export const COMMANDS = [
   "message dispatch",
   "message status",
   "message reconcile",
+  "message retire-spool",
   "ledger intake",
   "ledger apply",
   "ledger show",
@@ -297,6 +299,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "ledger show": ledgerShow,
   "message dispatch": messageDispatch,
   "message reconcile": messageReconcile,
+  "message retire-spool": messageRetireSpool,
   "message send": messageSend,
   "message status": messageStatus,
   "protocol activate": protocolActivate,
