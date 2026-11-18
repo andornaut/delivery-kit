@@ -15,6 +15,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
+  `observer_adoption` compares the running identity token with the last observer adoption; see
+  [Observer adoption](runner.md#observer-adoption).
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of

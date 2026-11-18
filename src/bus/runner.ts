@@ -17,6 +17,7 @@ import {
 } from "../deploy.ts";
 import { holdLock, LockBusy, type LockHandle } from "../lock.ts";
 import { DEFERRED_PREFIX, deliverScheduledWake } from "../review/wake.ts";
+import { reportResidentIdentity } from "./adoption.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
 import { loadedIdentity, pinGuard, recordPin } from "./pin.ts";
@@ -314,6 +315,7 @@ export async function runRunner(
     }
     bindDeliveryRunner(context, runnerToken);
     recordPin(context, loaded, cliPath);
+    reportResidentIdentity(context, runnerToken);
     const guard = pinGuard(context, loaded);
     for (const sha of unfinishedCi(context)) {
       tasks.start(context, sha);

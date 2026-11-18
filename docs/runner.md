@@ -1,6 +1,6 @@
 # Resident runner
 
-The per-game resident runner: launch, supervision and replacement, the pin guard, status provenance, departures, the gate container and test-only overrides.
+The per-game resident runner: launch, supervision and replacement, the pin guard, status provenance, observer adoption, departures, the gate container and test-only overrides.
 
 Launch one runner per game from that game's canonical checkout, in its own session, so it
 resolves the game's own `node_modules`:
@@ -116,8 +116,31 @@ Upgrade or replace a supervised runner in a quiet window:
 4. Run `systemctl --user restart delivery-kit-GAME_ID.service`.
 5. Verify exactly one holder of each lock with `status` (`runner_lock_held`, `loop_lock_held`,
    `identity_status` `current`) and `runner.json`.
-6. Under an active work protocol, record observer adoption again for the new resident with
-   `protocol observer-adoption`, then observe the next normal slot.
+6. Under an active work protocol, record observer adoption again for the new resident (see
+   [Observer adoption](#observer-adoption)), then observe the next normal slot.
+
+## Observer adoption
+
+Under an active work protocol, the bus owner's `protocol observer-adoption` records the resident it
+inspected. The adopted identity is `resident.residentId` in the audit artifact that registry
+`operations.<game>.lastAdoption.evidenceRef` names; the audit must name the operation and match the
+registry's bus owner, adopted version and CLI digest. Every runner start writes a new identity
+token, so a start leaves the previous adoption stale until the bus owner refreshes it.
+
+- At startup, when the protocol is active and the recorded adoption names a different token, the
+  runner logs it and emits one `resident-identity-changed` event keyed by the new token. It goes
+  through the existing reporter path to `reports.recipient` and names the bus owner who must
+  refresh observer adoption. Each token reports at most once. An absent, unreadable or
+  inconsistent adoption is logged, not reported.
+- `status --game ID` reports `observer_adoption`, read-only:
+  - `current`: the running identity is attested (`identity_status` `current`) and equals the
+    adopted token;
+  - `stale`: the running identity is attested and differs from the adopted token;
+  - `unknown`: neither can be compared. `observer_adoption_reason` is `runner_not_current`,
+    `protocol_inactive`, `protocol_unavailable`, `registry_unavailable`, `adoption_absent` or
+    `adoption_unreadable`, and null for `current` and `stale`.
+
+Neither the event nor the field records adoption, changes the registry or authorises replacement.
 
 ## Pin guard
 

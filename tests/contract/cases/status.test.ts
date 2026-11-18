@@ -20,6 +20,8 @@ interface Report {
   drained: boolean;
   reporter_blockers: string[];
   queued_branches: number;
+  observer_adoption: string;
+  observer_adoption_reason: string | null;
   control: {
     desired_state: string;
     desired_status: string;
@@ -98,6 +100,10 @@ suite("status", () => {
       "stale",
     ]);
     expect(result.idle && result.drained).toBe(true);
+    expect([result.observer_adoption, result.observer_adoption_reason]).toEqual([
+      "unknown",
+      "runner_not_current",
+    ]);
   });
 
   contract("a held lock with the matching token is running with its record", async () => {
@@ -114,6 +120,11 @@ suite("status", () => {
       expect([result.status, result.identity_status]).toEqual(["running", "current"]);
       expect(result.identity).toEqual(identity);
       expect(ws.read("runner.lock").trim()).toBe(identity.token);
+      // Without an active work protocol there is no observer adoption to compare.
+      expect([result.observer_adoption, result.observer_adoption_reason]).toEqual([
+        "unknown",
+        "protocol_inactive",
+      ]);
     } finally {
       await runner.stop();
     }

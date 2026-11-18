@@ -15,6 +15,7 @@ import {
 import { join } from "node:path";
 
 import { writeDurable } from "../durable.ts";
+import { type AdoptedResident, observerAdoption } from "./adoption.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { lockHeld } from "./locks.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
@@ -246,8 +247,15 @@ function controlReport(
   };
 }
 
-/** The status report. The last push needs a CI record, because every 1.x game watches CI. */
-export function statusReport(paths: BusPaths, repo?: string): StatusReport {
+/**
+ * The status report. The last push needs a CI record, because every 1.x game watches CI.
+ * `adopted` is the game's last observer adoption; without it the comparison is unknown.
+ */
+export function statusReport(
+  paths: BusPaths,
+  repo?: string,
+  adopted: AdoptedResident = { reason: "protocol_inactive", status: "unknown" },
+): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
@@ -338,6 +346,9 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   }
   const config = identityStatus === "current" && identity !== null ? configStatus(identity) : null;
   const loopHeld = lockHeld(paths.loopLock);
+  const token =
+    identityStatus === "current" && typeof identity?.token === "string" ? identity.token : null;
+  const adoption = observerAdoption(adopted, token);
   return {
     config_status: config,
     control: controlReport({ identity, identityStatus, loopHeld, running }, paths),
@@ -348,6 +359,8 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
     idle: blockers.length === 0,
     idle_blockers: blockers,
     loop_lock_held: loopHeld,
+    observer_adoption: adoption.status,
+    observer_adoption_reason: adoption.reason,
     provenance: provenanceReport({ identity, identityStatus, loopHeld }, repo),
     reporter_blockers: reporters,
     runner_lock_held: running,
