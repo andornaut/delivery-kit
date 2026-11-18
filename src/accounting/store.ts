@@ -1027,6 +1027,12 @@ export class LedgerStore {
     return id === undefined ? projection(state) : structuredClone(state.requests.get(id));
   }
 
+  /** The projection and the events it was built from, from one replay. */
+  snapshot(): { readonly projection: LedgerProjection; readonly events: readonly LedgerEvent[] } {
+    const state = this.#replay();
+    return { events: structuredClone(state.events), projection: projection(state) };
+  }
+
   history(id?: string): readonly LedgerEvent[] {
     return structuredClone(
       this.#replay().events.filter((e) => {

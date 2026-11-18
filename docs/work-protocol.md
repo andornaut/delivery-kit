@@ -161,6 +161,16 @@ commands use the configured root; an alternate active root is refused. Repeat in
 publish an active receipt under the current claim after cutover. Prepared receipts alone do not
 establish adoption.
 
+Scope resolution reads each role journal, the registry and the request ledger once, so the
+scope is internally consistent and other roles' concurrent writes, including their enrollments
+and publications, never refuse an enrollment, report or boundary. `protocol enroll` and
+`protocol boundary` recheck only the selected role's own inputs: its journal must be unchanged
+through resolution and report, and its registry entry and effective binding unchanged; a change
+refuses with `enrollment-source-changed`. Publication commits at the context's expected journal
+revision and validates the role's own references, participant row, epoch, binding and
+generation. The receipt's inspection `registryRevision` may precede unrelated registry writes,
+but not exceed the current revision.
+
 Use `protocol observer-adoption --input-file adoption.json` to record an actual resident reader
 inspection. Its typed input carries `context`, `operation`, `expectedRegistryRevision` and an
 evidence artifact, with `reconcileRegistryRevision` available for explicit reconciliation.

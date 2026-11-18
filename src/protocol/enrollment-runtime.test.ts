@@ -1,13 +1,14 @@
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { IntakeStore } from "../accounting/intake.ts";
 import { LedgerStore } from "../accounting/store.ts";
 import type { LedgerCommand, LedgerSource } from "../accounting/types.ts";
 import { loadLayout } from "../layout.ts";
-import { createRegistry, type Registry, updateRegistry } from "../registry/index.ts";
-import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
+import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
+import * as registryStore from "../registry/store.ts";
+import { CLAUDE_COORDINATOR, CLAUDE_TECH, makeFixture, registryInput } from "../testFixtures.ts";
 import { ProtocolStore, protocolWorkerRole } from "./core.ts";
 import { EnrollmentStore } from "./enrollment.ts";
 import {
@@ -411,6 +412,96 @@ describe("canonical enrollment scope", () => {
       type: "cancel",
     });
     expect(boundary("cleanup").allowed).toBe(false);
+  });
+  it("admits interleaved enrollments by two roles and refuses only the role whose own journal changed", async () => {
+    const t = await fixture();
+    const TECH = "games/archies-dog-walks/tech";
+    const techBinding = { harness: "claude" as const, nativeId: CLAUDE_TECH };
+    await t.protocol.claim({
+      at: AT,
+      binding: techBinding,
+      evidence: "fixture:tech",
+      expectedEpoch: 0,
+      role: TECH,
+    });
+    const coordinator = await approvedWork(t, ROLE, BINDING);
+    const tech = await approvedWork(t, TECH, techBinding);
+    const coordinatorScope = resolveEnrollmentScope(t.layout, t.protocol, {
+      ...t.input,
+      role: ROLE,
+    });
+    const techScope = resolveEnrollmentScope(t.layout, t.protocol, { ...t.input, role: TECH });
+    await tech.enroll(techScope);
+    // The tech role's later message original does not invalidate the coordinator's inspection.
+    await new ProtocolMessages({ store: t.protocol }).publish(tech.writer("tech-message"), {
+      envelope: {
+        body: "Unrelated tech original\n",
+        created: AT,
+        fromRole: "archies-dog-walks/tech",
+        id: "tech-message",
+        intent: "queue",
+        schema: 1,
+        toRole: "game-coordinator",
+      },
+      guards: { artifacts: [], hold: "unknown", question: "unknown", references: [] },
+      links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+    });
+    await coordinator.enroll(coordinatorScope);
+    for (const role of [ROLE, TECH]) {
+      const checked = evaluateEnrollmentBoundary(t.layout, t.protocol, {
+        ...t.input,
+        boundary: "resume",
+        role,
+      });
+      expect(checked.admission, role).toMatchObject({ allowed: true });
+    }
+    // A concurrent write lands in the other role's journal between the scan and the recheck.
+    const read = t.protocol.read.bind(t.protocol);
+    const before = read(TECH);
+    let techReads = 0;
+    const spy = vi.spyOn(t.protocol, "read").mockImplementation((role) => {
+      if (role !== TECH) {
+        return read(role);
+      }
+      techReads += 1;
+      return techReads === 1 ? before : { ...read(role), revision: before.revision + 1 };
+    });
+    expect(() => enrollmentStatus(t.layout, t.protocol, { ...t.input, role: ROLE })).not.toThrow();
+    techReads = 0;
+    expect(() => resolveEnrollmentScope(t.layout, t.protocol, { ...t.input, role: TECH })).toThrow(
+      "enrollment-source-changed",
+    );
+    spy.mockRestore();
+    // A change to the enrolling role's own registry entry still refuses its scope.
+    const registry = readRegistry(t.layout);
+    const reads = vi.spyOn(registryStore, "readRegistry");
+    reads.mockReturnValueOnce(registry).mockImplementation(() => ({
+      ...registry,
+      roles: {
+        ...registry.roles,
+        "game-coordinator": {
+          ...registry.roles["game-coordinator"]!,
+          conversations: { claude: "00000000-0000-4000-8000-000000000099" },
+        },
+      },
+    }));
+    expect(() => resolveEnrollmentScope(t.layout, t.protocol, { ...t.input, role: ROLE })).toThrow(
+      "enrollment-source-changed",
+    );
+    reads.mockReturnValueOnce(registry).mockImplementation(() => ({
+      ...registry,
+      roles: {
+        ...registry.roles,
+        "archies-dog-walks/tech": {
+          ...registry.roles["archies-dog-walks/tech"]!,
+          phase: "held",
+        },
+      },
+    }));
+    expect(() =>
+      resolveEnrollmentScope(t.layout, t.protocol, { ...t.input, role: ROLE }),
+    ).not.toThrow();
+    reads.mockRestore();
   });
   it("requires actual registry owners and UNKNOWN scopes instead of empty publication discovery", async () => {
     const t = await fixture();

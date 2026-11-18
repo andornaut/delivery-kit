@@ -323,6 +323,7 @@ export class EnrollmentStore {
     scope: EnrollmentScope,
     participant: EnrollmentParticipant,
     current: ProtocolState = this.#protocol.read(participant.role),
+    parents?: ReadonlyMap<string, ProtocolState>,
   ): string | null {
     if (
       record.workspaceId !== scope.workspaceId ||
@@ -348,7 +349,7 @@ export class EnrollmentStore {
       return "enrollment-binding-mismatch";
     }
     if (current.parent !== null) {
-      const parent = this.#protocol.read(current.parent.role);
+      const parent = parents?.get(current.parent.role) ?? this.#protocol.read(current.parent.role);
       if (parent.epoch !== current.parent.epoch) {
         return "enrollment-parent-mismatch";
       }
@@ -461,7 +462,8 @@ export class EnrollmentStore {
       const participants = this.#scope(scope);
       const participant = participants.get(context.role);
       demand(participant !== undefined, "enrollment-roster-mismatch");
-      demand(input.registryRevision === scope.registryRevision, "enrollment-registry-mismatch");
+      // The inspection may precede unrelated registry writes; the role's binding is checked below.
+      demand(input.registryRevision <= scope.registryRevision, "enrollment-registry-mismatch");
       const mismatch = this.#matches(record, scope, participant);
       demand(mismatch === null, mismatch ?? "invalid-enrollment");
       const known = new Set(participant.knownReferences.map(referenceKey));
@@ -508,7 +510,11 @@ export class EnrollmentStore {
     });
   }
 
-  report(scope: EnrollmentScope): EnrollmentReport {
+  /**
+   * Each participant's journal is read once. With `options.role`, that role's journal must be
+   * unchanged when the report completes; other roles' concurrent writes never refuse it.
+   */
+  report(scope: EnrollmentScope, options: { readonly role?: string } = {}): EnrollmentReport {
     const participants = this.#scope(scope);
     const records = new Map<string, EnrollmentRecord>();
     const revisions = new Map<string, number>();
@@ -520,13 +526,20 @@ export class EnrollmentStore {
     const snapshots = new Map<string, ProtocolState>();
     for (const participant of participants.values()) {
       try {
-        const snapshot = this.#protocol.read(participant.role);
-        snapshots.set(participant.role, snapshot);
+        snapshots.set(participant.role, this.#protocol.read(participant.role));
+      } catch {
+        // An unreadable journal is reported below as unavailable.
+      }
+    }
+    for (const participant of participants.values()) {
+      try {
+        const snapshot = snapshots.get(participant.role);
+        demand(snapshot !== undefined, "enrollment-unavailable");
         const record = this.#record(snapshot);
         if (record === undefined) {
           continue;
         }
-        const mismatch = this.#matches(record, scope, participant, snapshot);
+        const mismatch = this.#matches(record, scope, participant, snapshot, snapshots);
         if (mismatch !== null) {
           stale.push({ reason: mismatch, role: participant.role });
           continue;
@@ -581,8 +594,11 @@ export class EnrollmentStore {
           role: participant.role,
         };
       });
-    for (const [role, snapshot] of snapshots) {
-      demand(isDeepStrictEqual(snapshot, this.#protocol.read(role)), "enrollment-source-changed");
+    if (options.role !== undefined && snapshots.has(options.role)) {
+      demand(
+        isDeepStrictEqual(snapshots.get(options.role), this.#protocol.read(options.role)),
+        "enrollment-source-changed",
+      );
     }
     const allRepresented = rows.every((row) => row.represented);
     return {

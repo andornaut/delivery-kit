@@ -39,12 +39,34 @@ export interface EnrollmentScopeInput {
   readonly phase: EnrollmentPhase;
   readonly stateRoot: string;
   readonly census?: readonly EnrollmentWorkerCensus[];
+  /**
+   * The enrolling or admitted role. Its own journal and registry entry must stay unchanged while
+   * the scope and report are read; other roles' concurrent writes never refuse it.
+   */
+  readonly role?: string;
 }
 /** One replayed request view per operation, including explicit unknown when replay is unavailable. */
 export function enrollmentRequests(directory: string): Map<string, LedgerRequest> {
   const view = new LedgerStore({ directory }).read();
   return new Map(view.requests.map((request) => [request.id, request]));
 }
+/** The focus role's registry entry and effective binding, or null when it is not registered. */
+function registryEntry(registry: ReturnType<typeof readRegistry>, namespace: string) {
+  const owner = namespace.split("/workers/")[0]!;
+  const role = Object.keys(registry.roles).find((key) => protocolRole(key) === owner);
+  return role === undefined
+    ? null
+    : {
+        conversation: resolveConversation(registry, role),
+        entry: registry.roles[role],
+        harness: resolveHarness(registry, role),
+        role,
+      };
+}
+/**
+ * Each journal, the registry and the ledger are read once, so the scope is internally consistent
+ * without refusing other roles' concurrent writes. Only `input.role`'s own inputs are rechecked.
+ */
 export function resolveEnrollmentScope(
   layout: Layout,
   protocol: ProtocolStore,
@@ -52,12 +74,7 @@ export function resolveEnrollmentScope(
 ): EnrollmentScope {
   const registry = readRegistry(layout);
   const ledger = new LedgerStore({ directory: join(input.stateRoot, "accounting") });
-  const view = ledger.read();
-  const history = ledger.history();
-  const last = history.at(-1);
-  if ((last?.revision ?? 0) !== view.revision || (last?.hash ?? null) !== view.hash) {
-    throw new EnrollmentError("enrollment-source-changed");
-  }
+  const { events: history, projection: view } = ledger.snapshot();
   const participants = new Map<string, EnrollmentParticipant>();
   const references = new Map<string, EnrollmentReference[]>();
   const unknowns = new Map<string, Set<string>>();
@@ -237,17 +254,13 @@ export function resolveEnrollmentScope(
       }
     }
   }
-  for (const [role, snapshot] of snapshots) {
-    if (!isDeepStrictEqual(snapshot, protocol.read(role))) {
-      throw new EnrollmentError("enrollment-source-changed");
-    }
-  }
   if (
-    !isDeepStrictEqual(registry, readRegistry(layout)) ||
-    !isDeepStrictEqual(
-      view,
-      new LedgerStore({ directory: join(input.stateRoot, "accounting") }).read(),
-    )
+    input.role !== undefined &&
+    (!isDeepStrictEqual(state(input.role), protocol.read(input.role)) ||
+      !isDeepStrictEqual(
+        registryEntry(registry, input.role),
+        registryEntry(readRegistry(layout), input.role),
+      ))
   ) {
     throw new EnrollmentError("enrollment-source-changed");
   }
@@ -275,7 +288,13 @@ export function enrollmentStatus(
   input: EnrollmentScopeInput,
 ) {
   const scope = resolveEnrollmentScope(layout, protocol, input);
-  return { report: new EnrollmentStore({ protocol }).report(scope), scope };
+  return {
+    report: new EnrollmentStore({ protocol }).report(
+      scope,
+      input.role === undefined ? {} : { role: input.role },
+    ),
+    scope,
+  };
 }
 export const PROTOCOL_LIFECYCLE_PHASES = [
   "intake",
@@ -349,7 +368,8 @@ export function evaluateEnrollmentBoundary(
     readonly workRole?: string;
   },
 ) {
-  const current = enrollmentStatus(layout, protocol, input);
+  // The admitted role is the focus: only its own journal and registry entry are rechecked.
+  const current = enrollmentStatus(layout, protocol, { ...input, role: input.role });
   const row = current.report.participants.find((value) => value.role === input.role);
   let reason:
     | "enrollment-required"

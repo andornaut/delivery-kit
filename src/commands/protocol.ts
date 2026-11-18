@@ -843,13 +843,15 @@ export const protocolEnroll = handler(PROTOCOL_INPUT_OPTIONS, async (io, layout,
         value.context.binding,
         value.context.id,
       );
-      const { scope } = enrollmentStatus(layout, protocol, { ...base, census });
+      // Only the enrolling role's own inputs are rechecked; other roles may enroll concurrently.
+      const own = { ...base, census, role: value.context.role };
+      const { scope } = enrollmentStatus(layout, protocol, own);
       const event = await new EnrollmentStore({ protocol }).publish(
         value.context,
         value.input,
         scope,
       );
-      return { event, ...enrollmentStatus(layout, protocol, { ...base, census }) };
+      return { event, ...enrollmentStatus(layout, protocol, own) };
     },
     repairLease(chosen.management),
   );

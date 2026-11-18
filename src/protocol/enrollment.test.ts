@@ -443,7 +443,7 @@ describe("managed work enrollment", () => {
     ).toContain('"enrollment"');
   });
 
-  it("refuses a report when an enrollment changes between observation and final source validation", async () => {
+  it("refuses a focused report only when the focus role's journal changes during the report", async () => {
     const f = await fixture();
     await f.store.publish(f.context(), f.input(), f.scope);
     const original = f.protocol.read.bind(f.protocol);
@@ -453,6 +453,8 @@ describe("managed work enrollment", () => {
       reads += 1;
       return reads >= 3 ? { ...state, revision: state.revision + 1 } : state;
     });
-    expect(() => f.store.report(f.scope)).toThrow("enrollment-source-changed");
+    expect(() => f.store.report(f.scope, { role: ROLE })).toThrow("enrollment-source-changed");
+    reads = 0;
+    expect(f.store.report(f.scope, { role: OTHER })).toMatchObject({ allRepresented: true });
   });
 });
