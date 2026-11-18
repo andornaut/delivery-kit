@@ -10,7 +10,7 @@ force, watches CI for it and deploys on a pass. Fixes go forward: a red gate rec
 `gate-failed/<sha>` and the next departure waits for a new commit. Only the one-minute load
 admits a departure; CPU and memory settings cap execution. The package check refuses a build
 whose bundled coordination-kit is outside the supported range, and `status` reports the bundled
-version; before each departure it compares the loaded package with the installed one
+version; before each departure the runner compares the loaded package with the installed one
 and finishes on the loaded code until an idle replacement. Desired delivery control is a persistent record that the runner observes.
 
 Reference: [runner](../runner.md), [configuration](../configuration.md), [state](../state.md).

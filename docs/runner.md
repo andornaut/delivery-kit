@@ -41,9 +41,8 @@ The recipient's instruction contract for every caller-configured scheduled revie
   that one snapshot contains every role's payloads.
 - Report unavailable visibility explicitly, including unavailable Claude native target queues and
   worker visibility; never infer an empty backlog from unavailable data. Refused native historical
-  worker-queue access remains unknown. Public 4.0.0 lacks the supported worker inbox path; adopt a
-  reviewed package pin containing the 4.1.0 worker inbox support before using it. Report capability
-  limits and require owner reconciliation without bypassing refusals or forcing session loads.
+  worker-queue access remains unknown. Report capability limits and require owner reconciliation
+  without bypassing refusals or forcing session loads.
 - Acknowledge only exact unchanged originals with evidence of actual handling or supersession.
   Native or channel acceptance proves delivery, not handling.
 - Retain guarded items and unanswered decisions with their owner, reason and next review boundary.
@@ -60,7 +59,7 @@ This contract changes no cadence, routing or runtime capability.
 To replace a runner: record its identity, stop it while idle, start one runner, verify exactly one
 holder of each lock with `status` and `runner.json`, then observe the next normal slot. A
 replacement resumes every CI watch whose `ci/<sha>.status` is still running, with its original
-deadline.
+deadline. A `pending` status, or a last push with no CI status, starts a watch with a new deadline.
 
 A second start while another runner holds `runner.lock` or `loop.lock` is refused with exit 3 and
 leaves the holder's identity intact.

@@ -27,13 +27,13 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 
   ```json
   "devDependencies": {
-    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz"
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.1/coordination-kit-1.0.1.tgz"
   }
   ```
 
   From 5.0.0 to 5.0.1, a game only reinstalls delivery-kit 5.0.1, which bundles
   coordination-kit 1.0.1. game-coordinator's coordination-kit pin may stay on any 1.0.x release:
-  1.0.1 changes only tests, so its runtime, CLI, exports and formats match 1.0.0.
+  1.0.1 changes only tests and docs, so its runtime, CLI, exports and formats match 1.0.0.
 
 - Commands: each moved command keeps its options, JSON output and exit codes under
   `coordination-kit`. delivery-kit 5 refuses the old form with exit 2 and a one-line hint naming
@@ -121,7 +121,9 @@ game and game-coordinator) moves to 3.0.0 in the same idle replacement window.
 
 ## Removed command forms
 
-A removed form exits 2 with a one-line hint naming its replacement; there are no aliases.
+A removed form exits 2; there are no aliases. Each prints a one-line hint naming its replacement,
+except `migrate`, which prints the usage text, and `request --request-id`, which is refused as an
+unknown option with the `request` usage line.
 
 | Removed form                                                                       | Removed in | Current form                                                                 |
 | ---------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------- |

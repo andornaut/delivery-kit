@@ -17,7 +17,8 @@ when the work protocol is active:
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
   `events/` (coordination-kit's event outbox, with delivery-kit's per-commit `<sha>.state`),
   `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
-  `resources.log`, `runner.log`, `delivery-control.json` and `control.lock`.
+  `resources.log`, `runner.log`, `codex-bus.pid` (the runner's PID), `delivery-control.json` and
+  `control.lock`.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 
@@ -82,10 +83,10 @@ the new runner, `game-coordinator` uses the upgraded CLI to explicitly initializ
 states. An older installed CLI does not implement `control`:
 
 ```bash
-delivery-kit control --game archies-dog-walks --state paused \
-  --reason 'Approved initial Archie pause' --requester game-coordinator
-delivery-kit control --game chibis-way-home --state enabled \
-  --reason 'Approved initial Chibi enablement' --requester game-coordinator
+delivery-kit control --game GAME_ID --state paused \
+  --reason 'Approved initial pause' --requester game-coordinator
+delivery-kit control --game OTHER_GAME_ID --state enabled \
+  --reason 'Approved initial enablement' --requester game-coordinator
 ```
 
 These are explicit adoption operations, not built-in defaults. Preserve an existing upgraded

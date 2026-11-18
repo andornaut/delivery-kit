@@ -4,7 +4,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
 
 ## Command semantics
 
-- `request`: `SAFE_ID` is 1 to 64 ASCII letters, digits, underscores or hyphens.
+- `request`: `SAFE_ID` is an ASCII letter or digit, then up to 63 letters, digits, underscores or
+  hyphens.
 - `control`: `game-coordinator` writes desired control; Tech owns runner adoption. The command changes
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is

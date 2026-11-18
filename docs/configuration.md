@@ -10,8 +10,8 @@ credential references.
 
 Committed in game-coordinator, schema 1. Every path is relative to game-coordinator. See `examples/config.json`.
 
-- `timezone` and `wakeMinutes` (integers 0 to 59): the scheduled review minutes. An empty
-  `wakeMinutes` schedules no review.
+- `timezone` (an IANA time zone) and `wakeMinutes` (unique integers 0 to 59): the scheduled
+  review minutes. An empty `wakeMinutes` schedules no review.
 - `games.<id>`: `name` (the report name, for example `Archie`), `path` to the game checkout and
   `roles`.
 - `kits.<id>.path` and `sharedRoles`.
@@ -23,7 +23,7 @@ route and every role reference must use these keys.
 
 Committed in each game, schema 1, and owned by its Tech role. See `examples/delivery-kit.json`.
 
-- `git`: `main`, `remote` and the GitHub `owner/name`.
+- `git`: `main`, `remote` and `github` (the GitHub `owner/name`).
 - `schedule`: `departures`, a non-empty list of two-digit minute strings such as `"00"`, and
   `timezone`, which defaults to the `config.json` timezone.
 - `gate`: `image`, `install` and ordered `steps` (`name`, `run`). Any image and install command
@@ -35,9 +35,9 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   the gate. No step name has special meaning. The
   canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
   `art`), so every game lists the shared steps the same way and opts into extras by adding them.
-- `resources`: `cpus` (integer 1 to 4), required `memoryMiB` (integer 6 to 8192) and
-  `loadLimit` (0 to 30). Gate containers receive `--memory <memoryMiB>m`, in MiB. CPU and memory
-  limits cap execution; only the one-minute load controls admission. A departure starts only below
+- `resources`: `cpus` (integer 1 to 4), `memoryMiB` (integer 6 to 8192) and `loadLimit` (a
+  number 0 to 30), all required. Gate containers receive `--memory <memoryMiB>m`, in MiB. CPU and
+  memory limits cap execution; only the one-minute load controls admission. A departure starts only below
   `loadLimit`. At or above it, the departure re-checks the one-minute load every 60 seconds and
   starts once the load is below the limit, up to 15 minutes after its scheduled slot; a load still
   at or above the limit then skips the slot with `blocked-load`. A `loadLimit` of 0 holds every
@@ -53,4 +53,7 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   (see [runner.md](runner.md#departures)).
 - `reports`: `project` (must equal the game's `name` in `config.json`), `scheduledTicks`, and
   `recipient` and `workerParents`, each a registered role key. `recipient` receives the game's
-  events and, when the game hosts the route, its scheduled reviews.
+  events and, when the game hosts the route, its scheduled reviews. `scheduledTicks` (boolean)
+  adds one `scheduled-status` report per departure slot. When `var/registry.json` exists,
+  `check-config` requires each `workerParents` role to resolve to a canonical conversation UUID
+  that no other parent shares.
