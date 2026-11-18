@@ -244,8 +244,11 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   required run completes with a conclusion other than `success`, `neutral` or `skipped`, and
   passes once every required run has completed and passed. Runs of other names, such as a
   third-party integration's check, are recorded in `ci/<sha>.json` and the log but never fail or
-  hold the watch. `requiredNames` must not be empty. `ci/<sha>.json` marks each run `required`. A
-  failure names the failed required runs, and a timeout names the required checks with no run and
+  hold the watch. `requiredNames` must not be empty. A workflow that skips jobs by changed paths
+  lists its path-classification job in `requiredNames`, and its skippable jobs run unless that
+  job explicitly reports a docs-only change, because a skipped required run counts as passing.
+  delivery-kit's own workflow uses `!cancelled() && needs.changes.outputs.code != 'false'`.
+  `ci/<sha>.json` marks each run `required`. A failure names the failed required runs, and a timeout names the required checks with no run and
   those still incomplete. A watch that reaches `timeoutSeconds` reports the status as unknown
   (`ci_timeout`), and a refused GitHub
   authentication stops the watch with `ci_auth_failed`. The next departure restarts either watch,

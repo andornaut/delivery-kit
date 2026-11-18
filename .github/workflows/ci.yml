@@ -84,7 +84,7 @@ jobs:
         run: npm run check && npm run lint:node && npm run lint:markdown
   build:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -98,7 +98,7 @@ jobs:
         run: npm run build
   test:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -112,7 +112,7 @@ jobs:
         run: npm run build && npm test
   contract:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     # Contracts include timed observer waits alongside installs and builds; at 30 minutes a
     # contract run has hung rather than finished normally.
@@ -130,7 +130,7 @@ jobs:
         run: npm run contract
   package:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
