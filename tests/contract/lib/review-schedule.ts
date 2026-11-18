@@ -47,8 +47,11 @@ export class ReviewSchedule {
     await this.runner.armed();
   }
 
-  /** Advance one minute and wait for that slot's scheduled review result. */
-  async slot(timeoutMs = 30_000): Promise<SlotOutput> {
+  /**
+   * Advance one minute and wait for that slot's scheduled review result. A slot runs the native
+   * helper, whose own deadline is 25 seconds; the default leaves room under load.
+   */
+  async slot(timeoutMs = 45_000): Promise<SlotOutput> {
     let slot: number;
     if (this.realtime) {
       // The next wall-clock minute after the previous slot.
@@ -62,10 +65,22 @@ export class ReviewSchedule {
     }
     const prefix = `bus: scheduled review ${slot}`;
     let line: string | undefined;
-    await this.runner!.until(
-      () => (line = this.lines.find((row) => row.startsWith(prefix))) !== undefined,
-      timeoutMs,
-    );
+    // A local deadline, not Resident.until's 120 s floor: a missing slot fails within the case.
+    const deadline = Date.now() + timeoutMs;
+    while ((line = this.lines.find((row) => row.startsWith(prefix))) === undefined) {
+      const exited = this.runner!.child.exitCode !== null;
+      if (exited || Date.now() > deadline) {
+        const reason = exited ? "runner exited" : `timed out after ${timeoutMs} ms`;
+        throw new Error(
+          [
+            `${reason} before "${prefix}" (virtual now ${this.ws.virtualNow()})`,
+            "recent runner output:",
+            ...this.lines.slice(-40),
+          ].join("\n"),
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     const json = line!.slice(prefix.length);
     return {
       slot,
