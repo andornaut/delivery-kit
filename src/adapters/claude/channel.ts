@@ -22,13 +22,17 @@ import {
 /** Writes one complete line synchronously; throws when the channel output is unusable. */
 export type LineWriter = (line: string) => void;
 
-export type MessageChannelGuard = (message: {
-  readonly requestId: string;
-  readonly recipient: string;
-  readonly text: string;
-}) =>
-  | { readonly status: "clear" | "blocked" | "unavailable" }
-  | Promise<{ readonly status: "clear" | "blocked" | "unavailable" }>;
+export interface MessageChannelGuard {
+  (message: {
+    readonly requestId: string;
+    readonly recipient: string;
+    readonly text: string;
+  }):
+    | { readonly status: "clear" | "blocked" | "unavailable" }
+    | Promise<{ readonly status: "clear" | "blocked" | "unavailable" }>;
+  /** Opens one guard view for a drain under unblock.lock; it is discarded when the drain ends. */
+  readonly drain?: () => MessageChannelGuard;
+}
 
 export interface MessageChannelOptions {
   /** Fresh exact source/role/harness/native binding, HOLD and qualified question clearance. */
@@ -123,6 +127,7 @@ async function deliverLocked(
 ): Promise<boolean> {
   reconcileClaims(busDir);
   const spool = spoolDir(busDir);
+  let guard: MessageChannelGuard | undefined;
   for (const name of names(spool, ".json")) {
     const pending = join(spool, name);
     let claimed: string;
@@ -150,9 +155,10 @@ async function deliverLocked(
         if (options.beforeMessage === undefined) {
           continue;
         }
+        guard ??= options.beforeMessage.drain?.() ?? options.beforeMessage;
         // The service verifies exact durable source and fresh ownership/clearance under this claim lock.
         // eslint-disable-next-line no-await-in-loop
-        const clearance = await options.beforeMessage({
+        const clearance = await guard({
           recipient,
           requestId: entry.requestId as string,
           text: entry.text as string,

@@ -25,6 +25,7 @@ import { MessageError } from "./errors.ts";
 import { messageLayout } from "./paths.ts";
 import type {
   MessageAttempt,
+  MessageAttemptIndexEntry,
   MessageAttemptLease,
   MessageAttemptSource,
   MessageCompletion,
@@ -402,7 +403,28 @@ export class MessageStore {
     return this.readView(() => this.readRecords());
   }
 
-  private readRecords(): readonly MessageRecord[] {
+  /**
+   * One scan mapping every attempt request ID to its records. It skips the per-record protocol
+   * original check, so callers must re-read a selected record through `read`.
+   */
+  attemptIndex(): ReadonlyMap<string, readonly MessageAttemptIndexEntry[]> {
+    const index = new Map<string, MessageAttemptIndexEntry[]>();
+    for (const record of this.readRecords(false)) {
+      record.attempts.forEach((attempt, position) => {
+        const entries = index.get(attempt.source.requestId) ?? [];
+        entries.push({
+          id: record.envelope.id,
+          latest: position === record.attempts.length - 1,
+          revision: record.revision,
+          state: record.state,
+        });
+        index.set(attempt.source.requestId, entries);
+      });
+    }
+    return index;
+  }
+
+  private readRecords(originals = true): readonly MessageRecord[] {
     if (this.layout !== null) {
       checkProtocolSelection(this.layout, this.selection!);
     }
@@ -425,7 +447,9 @@ export class MessageStore {
           throw new MessageError("unreadable-record");
         }
         validRecord(record);
-        this.checkOriginal(record.envelope);
+        if (originals) {
+          this.checkOriginal(record.envelope);
+        }
         requireThat(
           this.path(record.envelope.id) === join(this.directory, name),
           "binding-conflict",

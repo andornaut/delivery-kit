@@ -39,6 +39,12 @@ pending work, not native acceptance. Native acceptance is not handling. A queued
 also does not prove channel acceptance. Inspect the returned state: exit 0 reports a completed
 operation, including a guarded or still-pending result, not proof of delivery.
 
+The Claude channel consumer checks each queued message entry under `unblock.lock` with one
+message-store index per drain, then rereads the exact record, binding, decision clearance and
+recipient readiness before claiming it. An entry whose parent message is `handled` or
+`superseded` stays blocked and unclaimed without another store scan, because a terminal message
+takes no further attempt.
+
 Status and outbox entries may include `diagnostic`: allowlisted `stage`, `category` and
 `classification`, with optional known native `method` and `rpcCode`. Service attempt counts
 do not count accepted native sends. A local or question-guard refusal is distinct from a

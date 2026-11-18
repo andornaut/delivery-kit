@@ -11,6 +11,8 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { deliverPending } from "../adapters/claude/channel.ts";
+import { spoolDir } from "../adapters/claude/spool.ts";
 import { type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import { decisionClear } from "../adapters/shared/decisions.ts";
 import { safeDeliveryDiagnostic } from "../adapters/types.ts";
@@ -21,7 +23,7 @@ import { CLAUDE_COORDINATOR, CODEX_TECH, makeFixture, registryInput } from "../t
 import { messageChannelStateDir } from "./paths.ts";
 import { messageConsumeGuard, messageGuardDirectory, MessageService } from "./service.ts";
 import { messageExpectation, MessageStore } from "./store.ts";
-import type { MessageTransport, NativeMessage } from "./transports.ts";
+import { claudeMessageTransport, type MessageTransport, type NativeMessage } from "./transports.ts";
 
 const GAME = "archies-dog-walks";
 const ROLE = `${GAME}/tech`;
@@ -414,7 +416,7 @@ describe("message service", () => {
     ).toBe(false);
   });
 
-  it("blocks an old spool when a newer attempt replaces it between summary and record reads", async () => {
+  it("blocks an old spool when a newer attempt replaces it between index and record reads", async () => {
     const test = fixture();
     writeJsonDurable(test.layout.routeFile, {
       schema: 2,
@@ -451,13 +453,13 @@ describe("message service", () => {
     const directory = join(test.layout.reviewDir, "messages");
     const file = readdirSync(directory).find((name) => name.endsWith(".json"))!;
     const path = join(directory, file);
-    // The summary observes the refused attempt; a concurrent sender then persists its successor.
+    // The index observes the refused attempt; a concurrent sender then persists its successor.
     writeJsonDurable(path, first);
-    const summary = MessageStore.prototype.summary;
-    vi.spyOn(MessageStore.prototype, "summary").mockImplementationOnce(function (
+    const attemptIndex = MessageStore.prototype.attemptIndex;
+    vi.spyOn(MessageStore.prototype, "attemptIndex").mockImplementationOnce(function (
       this: MessageStore,
     ) {
-      const snapshot = summary.call(this);
+      const snapshot = attemptIndex.call(this);
       writeJsonDurable(path, second);
       return snapshot;
     });
@@ -474,6 +476,93 @@ describe("message service", () => {
     expect(service.store.read(ID)?.attempts.at(-1)?.source.requestId).toBe(
       secondLease.source.requestId,
     );
+  });
+});
+
+describe("channel consumer guard cost", () => {
+  async function spooled(
+    test: ReturnType<typeof fixture>,
+    service: MessageService,
+    id: string,
+    body: string,
+  ) {
+    const record = await service.send({ ...input("game-coordinator", id), body });
+    const lease = await service.store.beginAttempt(messageExpectation(record));
+    const source = lease.source;
+    const pending = lease.complete({ reason: "transport-pending", source, state: "ambiguous" });
+    const stateDir = messageChannelStateDir(test.layout, CLAUDE_COORDINATOR);
+    const path = join(stateDir, `${source.requestId}.json`);
+    const transport = claudeMessageTransport({ messageChannelStateDir: stateDir });
+    const message = { recipient: CLAUDE_COORDINATOR, requestId: source.requestId, text: body };
+    mkdirSync(stateDir, { recursive: true });
+    expect((await transport.send(path, message)).status).toBe("queued");
+    return { message, path, pending, transport };
+  }
+
+  function deliverable(test: ReturnType<typeof fixture>) {
+    writeJsonDurable(test.layout.routeFile, {
+      schema: 2,
+      state: "active",
+      host: GAME,
+      targets: [ROLE],
+    });
+    marker(join(gameLayout(test.layout, GAME).busDir, "unblock"), CLAUDE_COORDINATOR);
+    const executable = join(test.base, "idle-listing.mjs");
+    const listing = JSON.stringify([{ sessionId: CLAUDE_COORDINATOR, status: "idle" }]);
+    writeFileSync(
+      executable,
+      `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(listing)});\n`,
+    );
+    chmodSync(executable, 0o700);
+    return { CLAUDE_BIN: executable };
+  }
+
+  it("indexes the store once per drain and skips terminal parents without claiming or rescanning", async () => {
+    const test = fixture();
+    const env = deliverable(test);
+    const service = new MessageService({ layout: test.layout, env });
+    const terminal = [];
+    for (const [index, id] of [ID, SECOND, REPLACEMENT].entries()) {
+      // Sequential sends keep each message lock and spool write ordered.
+      // eslint-disable-next-line no-await-in-loop
+      const entry = await spooled(test, service, id, `terminal original ${index}\n`);
+      // eslint-disable-next-line no-await-in-loop
+      await service.reconcile({
+        disposition: "superseded",
+        evidence: "fixture-owner-reconciliation",
+        expectedRevision: entry.pending.revision,
+        id,
+      });
+      terminal.push(entry);
+    }
+    const busDir = dirname(messageChannelStateDir(test.layout, CLAUDE_COORDINATOR));
+    const summary = vi.spyOn(MessageStore.prototype, "summary");
+    const scans = vi.spyOn(MessageStore.prototype, "attemptIndex");
+    const lines: string[] = [];
+    const guard = messageConsumeGuard(test.layout, env);
+    const drain = () =>
+      deliverPending((line) => void lines.push(line), busDir, CLAUDE_COORDINATOR, {
+        beforeMessage: guard,
+      });
+    expect(await drain()).toBe(true);
+    expect(scans).toHaveBeenCalledTimes(1);
+    expect(await drain()).toBe(true);
+    expect(scans).toHaveBeenCalledTimes(1);
+    expect(summary).not.toHaveBeenCalled();
+    expect(lines).toEqual([]);
+    const spool = readdirSync(spoolDir(busDir)).sort();
+    expect(spool).toEqual(terminal.map((entry) => `${entry.message.requestId}.json`).sort());
+    for (const entry of terminal) {
+      expect(JSON.parse(readFileSync(entry.path, "utf8")).status).toBe("sending");
+    }
+    // Between drains a sender's non-blocking unblock.lock attempt succeeds.
+    const live = await spooled(test, service, WORKER, "deliverable original\n");
+    expect(await drain()).toBe(true);
+    expect(scans).toHaveBeenCalledTimes(2);
+    expect(lines.map((line) => JSON.parse(line).params.content)).toEqual([
+      "deliverable original\n",
+    ]);
+    expect((await live.transport.send(live.path, live.message)).status).toBe("accepted");
   });
 });
 

@@ -69,6 +69,15 @@ export interface MessageAttempt {
   readonly reason: MessageReason | null;
 }
 
+/** One record holding an attempt request ID, as observed by a single store scan. */
+export interface MessageAttemptIndexEntry {
+  readonly id: string;
+  readonly revision: number;
+  readonly state: MessageState;
+  /** True when the request ID is the record's latest attempt. */
+  readonly latest: boolean;
+}
+
 export interface MessageRetention {
   readonly ownerRole: string;
   readonly reason: string;

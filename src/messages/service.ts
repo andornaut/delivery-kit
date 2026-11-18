@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { captureAccounting } from "../accounting/boundary.ts";
 import { recipientReady } from "../adapters/claude/agents.ts";
+import type { MessageChannelGuard } from "../adapters/claude/channel.ts";
 import { clearanceUnchanged } from "../adapters/codex/guard.ts";
 import { connectControl, type RpcClient, RpcError } from "../adapters/codex/rpc.ts";
 import { deliverReceipt, selectTarget } from "../adapters/codex/steer.ts";
@@ -31,6 +32,7 @@ import {
   type TransportReceipt,
 } from "./transports.ts";
 import type {
+  MessageAttemptIndexEntry,
   MessageAttemptSource,
   MessageEnvelope,
   MessageOwner,
@@ -48,6 +50,8 @@ export interface MessageChannelInput {
 export interface MessageClearance {
   readonly status: "clear" | "blocked" | "unavailable";
 }
+
+type MessageAttemptIndex = ReadonlyMap<string, readonly MessageAttemptIndexEntry[]>;
 
 /** Resolve the current registered owner without probing a session or manufacturing lineage. */
 export function currentMessageOwner(
@@ -128,73 +132,104 @@ function bindingCurrent(
   return isDeepStrictEqual(currentMessageOwner(layout, record.envelope), source.owner);
 }
 
-/** Generic channel consumption uses exact durable source and fresh supported guards. */
-export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv) {
-  return async (message: MessageChannelInput): Promise<MessageClearance> => {
-    try {
-      const store = new MessageStore({
-        layout,
-        resolveOwner: (_role, envelope) => currentMessageOwner(layout, envelope),
-      });
-      if (!isCanonicalUuid(message.requestId) || !isCanonicalUuid(message.recipient)) {
-        return { status: "blocked" };
+function terminalState(state: MessageRecord["state"]): boolean {
+  return state === "handled" || state === "superseded";
+}
+
+/**
+ * Generic channel consumption uses exact durable source and fresh supported guards. `drain()`
+ * opens one store index for a consumer drain; calling the guard directly opens a fresh index.
+ */
+export function messageConsumeGuard(layout: Layout, env: NodeJS.ProcessEnv): MessageChannelGuard {
+  // A terminal record never takes another attempt, so its latest request ID stays undeliverable.
+  const terminalRequests = new Set<string>();
+  const drain = () => {
+    let view: { readonly store: MessageStore; readonly index: MessageAttemptIndex } | null = null;
+    let opened = false;
+    const open = () => {
+      if (!opened) {
+        opened = true;
+        try {
+          const store = new MessageStore({
+            layout,
+            resolveOwner: (_role, envelope) => currentMessageOwner(layout, envelope),
+          });
+          view = { index: store.attemptIndex(), store };
+        } catch {
+          view = null;
+        }
       }
-      const inventory = store.summary();
-      if (inventory.status !== "available") {
+      return view;
+    };
+    return async (message: MessageChannelInput): Promise<MessageClearance> => {
+      try {
+        if (!isCanonicalUuid(message.requestId) || !isCanonicalUuid(message.recipient)) {
+          return { status: "blocked" };
+        }
+        if (terminalRequests.has(message.requestId)) {
+          return { status: "blocked" };
+        }
+        const current = open();
+        if (current === null) {
+          return { status: "unavailable" };
+        }
+        const { store } = current;
+        const matches = (current.index.get(message.requestId) ?? []).filter((item) => item.latest);
+        if (matches.some((item) => terminalState(item.state))) {
+          terminalRequests.add(message.requestId);
+          return { status: "blocked" };
+        }
+        if (matches.length !== 1) {
+          return { status: "blocked" };
+        }
+        const snapshot = matches[0]!;
+        const record = store.read(snapshot.id);
+        const source = record?.attempts.at(-1)?.source;
+        if (
+          record === undefined ||
+          record.revision !== snapshot.revision ||
+          source === undefined ||
+          source.requestId !== message.requestId ||
+          source.owner.harness !== "claude" ||
+          !["sending", "ambiguous"].includes(record.state) ||
+          messageNativeRecipient(source) !== message.recipient ||
+          messageTransportText(record, source) !== message.text ||
+          !bindingCurrent(layout, record, source)
+        ) {
+          return { status: "blocked" };
+        }
+        const directory = messageGuardDirectory(layout, record.envelope.toRole);
+        if (directory === null) {
+          return { status: "unavailable" };
+        }
+        const route = record.envelope.toRole.includes("/") ? null : readRoleRoute(layout);
+        const marker = decisionRecord(directory, message.recipient);
+        if (!decisionClear(directory, message.recipient)) {
+          return { status: "blocked" };
+        }
+        if (recipientReady(env, message.recipient).status === null) {
+          return { status: "unavailable" };
+        }
+        const latest = store.read(record.envelope.id);
+        return {
+          status:
+            latest?.revision === snapshot.revision &&
+            latest.attempts.at(-1)?.source.requestId === message.requestId &&
+            isDeepStrictEqual(latest.attempts.at(-1)?.source, source) &&
+            bindingCurrent(layout, record, source) &&
+            messageGuardDirectory(layout, record.envelope.toRole) === directory &&
+            (route === null || isDeepStrictEqual(route, readRoleRoute(layout))) &&
+            decisionClear(directory, message.recipient) &&
+            isDeepStrictEqual(marker, decisionRecord(directory, message.recipient))
+              ? "clear"
+              : "blocked",
+        };
+      } catch {
         return { status: "unavailable" };
       }
-      const matches = inventory.messages.filter(
-        (item) => item.outbox.at(-1)?.requestId === message.requestId,
-      );
-      if (matches.length !== 1) {
-        return { status: "blocked" };
-      }
-      const snapshot = matches[0]!;
-      const record = store.read(snapshot.id);
-      const source = record?.attempts.at(-1)?.source;
-      if (
-        record === undefined ||
-        record.revision !== snapshot.revision ||
-        source === undefined ||
-        source.requestId !== message.requestId ||
-        source.owner.harness !== "claude" ||
-        !["sending", "ambiguous"].includes(record.state) ||
-        messageNativeRecipient(source) !== message.recipient ||
-        messageTransportText(record, source) !== message.text ||
-        !bindingCurrent(layout, record, source)
-      ) {
-        return { status: "blocked" };
-      }
-      const directory = messageGuardDirectory(layout, record.envelope.toRole);
-      if (directory === null) {
-        return { status: "unavailable" };
-      }
-      const route = record.envelope.toRole.includes("/") ? null : readRoleRoute(layout);
-      const marker = decisionRecord(directory, message.recipient);
-      if (!decisionClear(directory, message.recipient)) {
-        return { status: "blocked" };
-      }
-      if (recipientReady(env, message.recipient).status === null) {
-        return { status: "unavailable" };
-      }
-      const latest = store.read(record.envelope.id);
-      return {
-        status:
-          latest?.revision === snapshot.revision &&
-          latest.attempts.at(-1)?.source.requestId === message.requestId &&
-          isDeepStrictEqual(latest.attempts.at(-1)?.source, source) &&
-          bindingCurrent(layout, record, source) &&
-          messageGuardDirectory(layout, record.envelope.toRole) === directory &&
-          (route === null || isDeepStrictEqual(route, readRoleRoute(layout))) &&
-          decisionClear(directory, message.recipient) &&
-          isDeepStrictEqual(marker, decisionRecord(directory, message.recipient))
-            ? "clear"
-            : "blocked",
-      };
-    } catch {
-      return { status: "unavailable" };
-    }
+    };
   };
+  return Object.assign((message: MessageChannelInput) => drain()(message), { drain });
 }
 
 export interface MessageSendInput {
