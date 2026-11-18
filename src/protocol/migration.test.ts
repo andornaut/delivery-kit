@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ import * as durable from "../durable.ts";
 import { loadLayout } from "../layout.ts";
 import { LockBusy } from "../lock.ts";
 import { messageEnvelope } from "../messages/envelope.ts";
+import { messageChannelStateDir } from "../messages/paths.ts";
 import { createRegistry, readRegistry, type Registry, updateRegistry } from "../registry/index.ts";
 import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
 import { ProtocolStore } from "./core.ts";
@@ -29,7 +30,7 @@ import {
 import { WorkStore } from "./work.ts";
 const AT = "2026-11-16T04:00:00.000Z";
 const BINDING = { harness: "claude" as const, nativeId: CLAUDE_COORDINATOR };
-function fixture() {
+function fixture(prepare: (messages: string) => void = () => {}) {
   const test = makeFixture();
   const layout = loadLayout(test.root);
   const raw = registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">;
@@ -60,6 +61,7 @@ function fixture() {
   );
   writeFileSync(join(dir, `${createHash("sha256").update(envelope.id).digest("hex")}.json`), bytes);
   writeFileSync(join(dir, `${createHash("sha256").update(envelope.id).digest("hex")}.lock`), "");
+  prepare(dir);
   const stateRoot = join(test.base, "protocol-state");
   const plan = planProtocolMigration(layout, {
     expectedGeneration: 0,
@@ -82,6 +84,74 @@ function fixture() {
       })),
   );
   return { ...test, bytes, envelope, layout, participants, plan, registry, stateRoot };
+}
+const RECIPIENT = "01a18dc1-f75d-7071-b26e-f547aa8a5ba6";
+const REQUEST = "010b7a08-b0ba-47f6-95fd-24fa477f86ea";
+const RECEIPT = Buffer.from(
+  `${JSON.stringify({
+    kind: "message",
+    recipient: RECIPIENT,
+    requestId: REQUEST,
+    status: "accepted",
+    text: "fixture",
+  })}\n`,
+);
+/** The per-recipient transport layout the Claude channel and Codex queue transports write. */
+function recipientState(messages: string): void {
+  const unblock = join(messages, "recipients", RECIPIENT, "unblock");
+  mkdirSync(join(unblock, "claude-spool"), { recursive: true });
+  mkdirSync(join(unblock, "claude-delivered"), { recursive: true });
+  writeFileSync(join(unblock, `${REQUEST}.json`), RECEIPT);
+  writeFileSync(join(unblock, `${REQUEST}.json.lock`), "");
+  writeFileSync(join(unblock, "unblock.lock"), "");
+  writeFileSync(join(unblock, "claude-spool", "pending-request.json"), "{}\n");
+  writeFileSync(join(unblock, "claude-spool", "claimed-request.claimed"), "{}\n");
+  writeFileSync(join(unblock, "claude-delivered", `${REQUEST}.json`), "{}\n");
+}
+function publication(messageId: string) {
+  return {
+    evidenceRef: "fixture:legacy-audit",
+    guards: { artifacts: [], hold: "held" as const, question: "unknown" as const, references: [] },
+    links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+    messageId,
+    writer: {
+      at: AT,
+      binding: BINDING,
+      epoch: 1,
+      expectedRevision: 1,
+      id: "import-original",
+      role: "coordinator",
+    },
+  };
+}
+async function claimCoordinator(stateRoot: string): Promise<ProtocolStore> {
+  const store = new ProtocolStore({ directory: stateRoot, resolveBinding: () => true });
+  await store.claim({
+    at: AT,
+    binding: BINDING,
+    evidence: "fixture:owner",
+    expectedEpoch: 0,
+    role: "coordinator",
+  });
+  return store;
+}
+async function verifiedCopies(t: ReturnType<typeof fixture>) {
+  const backup = await backupProtocol(t.layout, {
+    destination: join(t.base, "backup"),
+    stateRoot: t.stateRoot,
+  });
+  const restore = await restoreProtocol(t.layout, {
+    backup,
+    destination: join(t.base, "restore"),
+  });
+  return {
+    backup,
+    expectedGeneration: 0 as const,
+    participants: t.participants,
+    plan: t.plan,
+    registryRevision: t.registry.revision,
+    restore,
+  };
 }
 describe("explicit initial protocol migration", () => {
   it("requires prepared representation and revalidation after managed cutover", async () => {
@@ -562,6 +632,59 @@ describe("explicit initial protocol migration", () => {
         workspaceId: "fixture",
       }),
     ).toThrow("migration-already-active");
+  });
+  it("carries recipient transport state to the state root without publishing it as originals", async () => {
+    const t = fixture(recipientState);
+    await importProtocolMigration(t.layout, t.plan);
+    await claimCoordinator(t.stateRoot);
+    await expect(
+      importProtocolOriginals(t.layout, {
+        publications: [publication(REQUEST)],
+        stateRoot: t.stateRoot,
+      }),
+    ).rejects.toMatchObject({ code: "invalid-migration" });
+    const result = await importProtocolOriginals(t.layout, {
+      publications: [publication(t.envelope.id)],
+      stateRoot: t.stateRoot,
+    });
+    expect(result.pending).toEqual([]);
+    expect(result.published.map((item) => item.messageId)).toEqual([t.envelope.id]);
+    const active = await activateProtocol(t.layout, await verifiedCopies(t));
+    expect(active?.stateRoot).toBe(t.stateRoot);
+    const unblock = messageChannelStateDir(t.layout, RECIPIENT);
+    expect(unblock).toBe(
+      join(t.stateRoot, "transport", "messages", "recipients", RECIPIENT, "unblock"),
+    );
+    expect(readFileSync(join(unblock, `${REQUEST}.json`))).toEqual(RECEIPT);
+    expect(readFileSync(join(unblock, "claude-spool", "pending-request.json"), "utf8")).toBe(
+      "{}\n",
+    );
+  });
+  it.each([
+    "notes.txt",
+    `recipients/${RECIPIENT}/receipt.json`,
+    `recipients/${RECIPIENT.toUpperCase()}/unblock/${REQUEST}.json`,
+    "recipients/not-a-session/unblock/request.json",
+    `recipients/${RECIPIENT}/unblock/request.txt`,
+    `recipients/${RECIPIENT}/unblock/nested/request.json`,
+    `recipients/${RECIPIENT}/unblock/claude-spool/request.tmp`,
+  ])("refuses unexpected legacy message file %s", async (path) => {
+    const t = fixture((messages) => {
+      mkdirSync(dirname(join(messages, path)), { recursive: true });
+      writeFileSync(join(messages, path), "{}\n");
+    });
+    await importProtocolMigration(t.layout, t.plan);
+    await claimCoordinator(t.stateRoot);
+    await expect(
+      importProtocolOriginals(t.layout, {
+        publications: [publication(t.envelope.id)],
+        stateRoot: t.stateRoot,
+      }),
+    ).rejects.toMatchObject({ code: "invalid-migration" });
+    await expect(activateProtocol(t.layout, await verifiedCopies(t))).rejects.toMatchObject({
+      code: "invalid-migration",
+    });
+    expect(resolveProtocolLayout(t.layout)).toBeNull();
   });
   it("refuses changed source bytes, source aliases, overlapping backups, and corrupt restoration", async () => {
     const t = fixture();

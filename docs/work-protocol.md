@@ -340,6 +340,16 @@ is the canonical original after migration. Old attempts and handling claims rema
 transport observations. No recipient receipt is inferred. Unknown source ownership stays staged
 and unpublished until an explicit current owner can publish under its fence.
 
+The plan inventory covers `var/accounting` and the legacy messages directory, which import copies
+byte-exact to `<stateRoot>/transport/messages`. Only top-level `<sha256>.json` records, with their
+`<sha256>.lock` files, are message originals. Per-recipient transport state under
+`recipients/<conversation-uuid>/unblock/` is carried as is and never published as an original:
+receipts `<request-id>.json` with their `<request-id>.json.lock` files, the channel `unblock.lock`,
+`claude-spool/<request-id>.json` or `.claimed` entries and `claude-delivered/<request-id>.json`
+copies. After activation the transports read it at the new root, so delivered and pending requests
+keep their receipts. Original import and activation refuse any other file there with
+`invalid-migration`.
+
 Before activation, require reviewed readers/writers, an independently located approved local
 backup, verified restore, hash inventory, matching canonical originals for preserved transport
 records, and fencing of affected old writers. Essential evidence must be promoted before task

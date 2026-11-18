@@ -15,6 +15,8 @@ import {
 import { dirname, join, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+import { DELIVERED, LOCK_FILE, SPOOL } from "../adapters/claude/spool.ts";
+import { isCanonicalUuid } from "../adapters/shared/ids.ts";
 import { fsyncDirectory, writeDurable, writeJsonDurable } from "../durable.ts";
 import type { Layout } from "../layout.ts";
 import { holdLockAsync } from "../lock.ts";
@@ -547,12 +549,39 @@ async function restoreProtocolOperation(
     { allowPending: true, exclusive: true, expectedManagement: resolveProtocolManagement(layout) },
   );
 }
+const LEGACY_RECORD = /^transport\/messages\/[a-f0-9]{64}\.(?:json|lock)$/u;
+const RECIPIENT_STATE = /^transport\/messages\/recipients\/([^/]+)\/unblock\/(.+)$/u;
+/**
+ * Per-recipient transport state beneath `recipients/<uuid>/unblock/`: native receipts and their
+ * locks, plus the Claude channel lock, spool and delivered copies. The inventory carries it
+ * byte-exact to the state root; it is never a message original.
+ */
+function recipientStateFile(name: string): boolean {
+  const [head, leaf, extra] = name.split("/");
+  if (extra !== undefined || head === undefined) {
+    return false;
+  }
+  if (leaf === undefined) {
+    return head === LOCK_FILE || /^[A-Za-z0-9_-]+\.json(?:\.lock)?$/u.test(head);
+  }
+  return (
+    (head === SPOOL && /^[A-Za-z0-9_-]+\.(?:json|claimed)$/u.test(leaf)) ||
+    (head === DELIVERED && /^[A-Za-z0-9_-]+\.json$/u.test(leaf))
+  );
+}
+function legacyMessageFile(path: string): boolean {
+  if (LEGACY_RECORD.test(path)) {
+    return true;
+  }
+  const match = RECIPIENT_STATE.exec(path);
+  return match !== null && isCanonicalUuid(match[1]) && recipientStateFile(match[2]!);
+}
 function legacyOriginals(plan: ProtocolMigrationPlan) {
   const files = plan.inventory.entries.filter(
     (entry) => entry.kind === "file" && entry.path.startsWith("transport/messages/"),
   );
   demand(
-    files.every((entry) => /^transport\/messages\/[a-f0-9]{64}\.(?:json|lock)$/u.test(entry.path)),
+    files.every((entry) => legacyMessageFile(entry.path)),
     "invalid-migration",
   );
   return plan.inventory.entries
