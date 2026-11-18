@@ -152,10 +152,10 @@ volume from the lockfile, then invokes this controller after the checks.
 
 ## Compatibility and releases
 
-`VERSION` and `package.json` carry the version, and `pack` refuses a mismatch. The CLI,
-`delivery-kit.json`, `config.json`, the source identity module API, the supported
-coordination-kit range and the `var/` layout follow semver: an incompatible change needs a major
-version. The registry and route schemas are coordination-kit's and follow its versions. 2.0.0 removes
+`VERSION` and `package.json` carry the version, and `pack` refuses a mismatch. The CLI, the source
+identity module API, the supported coordination-kit range and the `var/` layout follow semver: an
+incompatible change needs a major version. coordination-kit validates `delivery-kit.json`,
+`config.json`, the registry and the route, so their schemas follow coordination-kit's versions. 2.0.0 removes
 the `migrate` command; a 0.9.x installation upgrades through 1.0.3 first.
 
 A release is three files from `pack`:
