@@ -31,7 +31,7 @@ function fixture(includeGuide: boolean) {
   writeFileSync(join(source, "SOURCE_COMMIT"), fixtureCommit);
   if (includeGuide) {
     mkdirSync(join(source, "docs"));
-    for (const guide of ["request-accounting.md", "work-protocol.md"]) {
+    for (const guide of readdirSync(join(root, "docs"))) {
       cpSync(join(root, "docs", guide), join(source, "docs", guide));
     }
   }
@@ -45,7 +45,7 @@ function fixture(includeGuide: boolean) {
 }
 
 describe("actual release package", () => {
-  it("ships the README-linked guide and public API from the real staging and npm pack helper", () => {
+  it("ships the README-linked guides and public API from the real staging and npm pack helper", () => {
     const test = fixture(true);
     execFileSync(process.execPath, [helper, test.staging, test.output], {
       cwd: test.source,
@@ -58,12 +58,9 @@ describe("actual release package", () => {
     const pkg = join(extracted, "package");
     const readme = readFileSync(join(pkg, "README.md"), "utf8");
     expect(readme).toMatch(/\]\((?:\.\/)?docs\/request-accounting\.md(?:#[^)]*)?\)/u);
-    expect(readFileSync(join(pkg, "docs/request-accounting.md"))).toEqual(
-      readFileSync(join(root, "docs/request-accounting.md")),
-    );
-    expect(readFileSync(join(pkg, "docs/work-protocol.md"))).toEqual(
-      readFileSync(join(root, "docs/work-protocol.md")),
-    );
+    for (const doc of readdirSync(join(root, "docs"))) {
+      expect(readFileSync(join(pkg, "docs", doc))).toEqual(readFileSync(join(root, "docs", doc)));
+    }
     expect(readFileSync(join(pkg, "SOURCE_COMMIT"), "utf8")).toBe(fixtureCommit);
     execFileSync("sha256sum", ["--check", "SHA256SUMS"], { cwd: test.output, stdio: "pipe" });
     execFileSync(
@@ -93,7 +90,7 @@ describe("actual release package", () => {
       encoding: "utf8",
     });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("docs/request-accounting.md");
+    expect(result.stderr).toContain("docs/commands.md");
     expect(existsSync(join(test.output, `delivery-kit-${test.version}.tgz`))).toBe(false);
     expect(readdirSync(test.output)).toEqual([]);
   });

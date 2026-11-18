@@ -1,4 +1,4 @@
-// One scheduled or requested trunk-based departure under departure.lock; README "Departures" lists its steps.
+// One scheduled or requested trunk-based departure under departure.lock; docs/runner.md "Departures" lists its steps.
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 

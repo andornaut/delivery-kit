@@ -21,8 +21,7 @@ const METADATA = [
   "README.md",
   "SOURCE_COMMIT",
   "package.json",
-  "docs/request-accounting.md",
-  "docs/work-protocol.md",
+  ...readdirSync(join(root, "docs")).map((doc) => `docs/${doc}`),
 ];
 
 beforeAll(() => {
@@ -145,6 +144,9 @@ describe("packed package", () => {
     const files = pack.files.map((file) => file.path).sort();
     const dist = files.filter((path) => path.startsWith("dist/"));
     expect(files.filter((path) => !path.startsWith("dist/") && !METADATA.includes(path))).toEqual(
+      [],
+    );
+    expect(METADATA.filter((path) => path.startsWith("docs/") && !files.includes(path))).toEqual(
       [],
     );
     expect(dist.filter((path) => !path.startsWith("dist/types/"))).toEqual([

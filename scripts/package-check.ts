@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -70,10 +71,8 @@ export function inspectPackage(
   };
   if (manifest.version !== readFileSync(join(root, "VERSION"), "utf8").trim())
     throw new Error("package version differs from VERSION");
-  if (!existsSync(join(pkg, "docs/request-accounting.md")))
-    throw new Error("package request accounting guide is missing");
-  if (!existsSync(join(pkg, "docs/work-protocol.md")))
-    throw new Error("package work protocol guide is missing");
+  for (const doc of readdirSync(join(root, "docs")))
+    if (!existsSync(join(pkg, "docs", doc))) throw new Error(`package docs/${doc} is missing`);
   const version = spawnSync(process.execPath, [join(pkg, "dist/cli.js"), "--version"], {
     encoding: "utf8",
   });

@@ -4,6 +4,27 @@ The work protocol publishes durable work and message records under one explicitl
 external state root. Filesystem discovery works when notifications or a channel are unavailable.
 Discovery is read-only; it does not deliver native input, acknowledge queues or answer questions.
 
+## Discovery and activation
+
+The work protocol provides fenced role publications, canonical message originals and separate
+recipient handling receipts. Discover supported
+commands with `delivery-kit --help`; `protocol status` reports configuration and
+`protocol inbox --role kits/game-kit --sender kits/delivery-kit` reads an explicit filesystem
+scope without native delivery. Bodies require `--include-body`.
+
+Activation requires an explicit external `stateRoot`, reviewed readers and writers, an
+independent backup and verified restore. Unmanaged callers retain the optional protocol contract;
+a declared managed workspace covers all current, upcoming and future work for registered owners
+and verified workers, preserving explicit parent-owned UNKNOWN gaps. Representation, active
+adoption and coverage completeness are separate. Existing 4.5 pins do not enforce managed
+enrollment; publication alone does not establish rollout or adoption.
+
+Missing configuration retains legacy compatibility only outside required managed mode and
+when no cutover fence exists; invalid configuration, a missing pointer after cutover or
+generation disagreement fails closed. `--state-root DIR` selects a prepared root before
+activation, not a second active backend. Registry, route, checkpoints, review snapshots and
+game bus state stay under `var/`.
+
 ## Configuration and authority
 
 `var/work-protocol.json` names `schema: 1`, `workspaceId`, `stateRoot` and `generation`. The root
@@ -17,7 +38,7 @@ Deleting the pointer does not roll back activation or enable a second writable b
 
 Import the public SDK APIs and types from `@andornaut/delivery-kit/build/protocol`, including
 `runtimeProtocolStore`, `ProtocolMessages` and `protocolNamespace`. See the
-[public build API list](../README.md#public-build-apis) for canonical subpaths and compatibility aliases.
+[public build API list](libraries.md#public-build-apis) for canonical subpaths and compatibility aliases.
 
 Stable namespaces are `coordinator`, `kits/<kit>` and `games/<game>/<role>`.
 The core registry-key mapper, exported publicly as `protocolNamespace(registryRole)`, maps those

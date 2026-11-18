@@ -33,7 +33,16 @@ for (const file of [
   "README.md",
   "LICENSE",
   "SOURCE_COMMIT",
+  "docs/commands.md",
+  "docs/configuration.md",
+  "docs/libraries.md",
+  "docs/messages.md",
+  "docs/registry.md",
   "docs/request-accounting.md",
+  "docs/review.md",
+  "docs/runner.md",
+  "docs/state.md",
+  "docs/upgrading.md",
   "docs/work-protocol.md",
 ]) {
   mkdirSync(dirname(join(staging, file)), { recursive: true });
