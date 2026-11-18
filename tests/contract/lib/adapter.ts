@@ -44,8 +44,6 @@ export interface Implementation {
   resourceReport(ws: Workspace): Command;
   request(ws: Workspace, id: string): Command;
   run(ws: Workspace): Command;
-  /** The Claude channel consumer (stdio MCP server). */
-  channel(ws: Workspace, args: string[]): Command;
 }
 
 export const impl: Implementation = nodeImplementation;
@@ -101,7 +99,7 @@ export interface Resident {
   output(): { stdout: string; stderr: string };
 }
 
-/** Start a long-running command (the resident runner or the channel consumer) in its own group. */
+/** Start a long-running command (the resident runner) in its own group. */
 export function start(command: Command): Resident {
   const child = spawn(command.argv[0]!, command.argv.slice(1), {
     cwd: command.cwd,

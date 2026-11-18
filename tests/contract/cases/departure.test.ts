@@ -317,7 +317,8 @@ suite("departure", () => {
       await runner.until(() => kinds(ws).includes("blocked-load"));
       await runner.stop();
       expect(pushes(ws)).toBe(0);
-      expect(new Set(kinds(ws))).toEqual(new Set(["attempt", "blocked-load"]));
+      // One attempt, then one blocked-load event for it, in creation order.
+      expect(kinds(ws)).toEqual(["attempt", "blocked-load"]);
       expect(containers(ws)).toEqual([]);
     },
   );

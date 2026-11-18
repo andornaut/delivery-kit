@@ -1,6 +1,6 @@
 // Scripted Codex native state for review and event delivery cases: per-thread status, latest
 // turn, item history, queue pages, child inventories and ordered steer/start outcomes.
-import type { CodexSocket, Reply, RpcCall } from "./codex-socket.ts";
+import type { CodexSocket, RpcCall } from "./codex-socket.ts";
 
 export const TECH = "00000000-0000-0000-0000-000000000001";
 export const ART = "00000000-0000-0000-0000-000000000002";
@@ -138,9 +138,3 @@ export class NativeWorld {
     return input?.[0]?.text ?? "";
   }
 }
-
-export function rpcError(message: string, code = -32600): Reply {
-  return { error: { code, message } };
-}
-
-export const STALE = rpcError("expectedTurnId does not match active turn");

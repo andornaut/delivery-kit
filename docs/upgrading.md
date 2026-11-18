@@ -10,7 +10,7 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 4.7.0.
 
 - Pins: a game pins only delivery-kit, which bundles coordination-kit; delivery-kit 5 bundles
-  coordination-kit 1.x and supports `>=1.0.0 <2.0.0` ([Pin guard](runner.md#pin-guard)).
+  coordination-kit 1.x; 5.0.1 supports `>=1.0.1 <2.0.0` ([Pin guard](runner.md#pin-guard)).
   game-coordinator pins coordination-kit directly for the roles' CLI and the channel MCP server,
   beside its delivery-kit pin for `check-config` and `status`. The two installs exchange data only
   through the on-disk formats, which stay compatible within coordination-kit 1.x. Pin each release
@@ -19,7 +19,7 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 
   ```json
   "devDependencies": {
-    "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.0/delivery-kit-5.0.0.tgz"
+    "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v5.0.1/delivery-kit-5.0.1.tgz"
   }
   ```
 
@@ -30,6 +30,10 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
     "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v1.0.0/coordination-kit-1.0.0.tgz"
   }
   ```
+
+  From 5.0.0 to 5.0.1, a game only reinstalls delivery-kit 5.0.1, which bundles
+  coordination-kit 1.0.1. game-coordinator's coordination-kit pin may stay on any 1.0.x release:
+  1.0.1 changes only tests, so its runtime, CLI, exports and formats match 1.0.0.
 
 - Commands: each moved command keeps its options, JSON output and exit codes under
   `coordination-kit`. delivery-kit 5 refuses the old form with exit 2 and a one-line hint naming

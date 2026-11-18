@@ -2,11 +2,13 @@
 
 Every case under `cases/` runs against the built bundle.
 
-Fixture defaults: the fake `gh` reports the default required check (`Test`) completed and successful unless a case scripts it, because a departure deploys only after CI passes. A case that names no report recipient gets a registered `game-coordinator` role with a fixture conversation, because a recipient must resolve through the registry. A route fixture sets its host game's `reports.recipient`, because the review recipient is that field. The adapter installs the built bundle as the game's pinned package and replays `runner.log` as resident output. The Claude channel consumer is coordination-kit's CLI from this checkout's `node_modules`. A gate worktree gets the fake `node_modules/wrangler/bin/wrangler.js` only from the `docker cp` of `node_modules/` out of a passing gate.
+Fixture defaults: the fake `gh` reports the default required check (`Test`) completed and successful unless a case scripts it, because a departure deploys only after CI passes. A case that names no report recipient gets a registered `game-coordinator` role with a fixture conversation, because a recipient must resolve through the registry. A route fixture sets its host game's `reports.recipient`, because the review recipient is that field. The adapter installs the built bundle as the game's pinned package and replays `runner.log` as resident output. A gate worktree gets the fake `node_modules/wrangler/bin/wrangler.js` only from the `docker cp` of `node_modules/` out of a passing gate.
+
+Event delivery is coordination-kit's contract (1.0.1 and later): the Claude spool and channel, Codex turn delivery, receipts, deduplication, ambiguous and rejected outcomes, guards and route fallback. The cases here assert what the runner produces and when it flushes: the events a load-blocked or gate-failed departure records, and one observer flush per virtual minute under the event dispatch lock, counted by a fake `flock`.
 
 Decisions the cases assert:
 
-- Routes carry no harness: a route names roles, and brief target lines name the registry role key (`briefTarget`).
+- Routes carry no harness: a route names roles.
 - Native health events: health events such as review-stuck are delivered natively to the recipient. Cases that count slot sends count only slot requests (`slotMutations`) or only connections that delivered no event (`ownConnections`).
 - CI poll interval: `ci.pollSeconds` must be at least 1; cases poll every second under the test clock.
 - Resource caps: `resources.maxWorkers` is an unknown key.

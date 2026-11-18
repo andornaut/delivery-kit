@@ -53,7 +53,7 @@ describe("status report", () => {
     try {
       expect(statusReport(bus).coordination_kit).toEqual({
         bundled: "0.0.0-test",
-        supported: ">=1.0.0 <2.0.0",
+        supported: ">=1.0.1 <2.0.0",
       });
     } finally {
       lock.release();

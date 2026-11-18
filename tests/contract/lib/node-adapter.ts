@@ -13,7 +13,6 @@
 // - The built package is installed into the game's node_modules with a package-lock entry, so
 //   the pin guard sees the installed identity equal to the loaded one. The bundle inlines
 //   coordination-kit, so the game installs no coordination-kit package.
-// - The Claude channel consumer is coordination-kit's CLI from this checkout's node_modules.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +23,6 @@ import { KIT_ROOT, SHA, type Workspace, writeJson } from "./workspace.ts";
 const CLI = join(KIT_ROOT, "dist", "cli.js");
 const COORDINATION_KIT = "@andornaut/coordination-kit";
 const COORDINATION_ROOT = join(KIT_ROOT, "node_modules", COORDINATION_KIT);
-const COORDINATION_CLI = join(COORDINATION_ROOT, "dist", "cli.js");
 
 /**
  * Complete the 1.0 required fields a case leaves out with neutral defaults. Fields a case sets,
@@ -223,9 +221,4 @@ export const nodeImplementation: Implementation = {
   resourceReport: (ws) => command(ws, ["status", "--resources"]),
   request: (ws, id) => command(ws, ["request", "--id", id]),
   run: (ws) => ({ ...command(ws, ["run"]), logFile: join(ws.state, "runner.log") }),
-  channel: (ws, args) => ({
-    argv: [process.execPath, COORDINATION_CLI, "claude", "channel", ...args],
-    cwd: ws.coordinator,
-    env: env(ws),
-  }),
 };
