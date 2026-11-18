@@ -15,6 +15,11 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
+- `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
+  nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
+  canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of
+  `gh`, `docker`, `git`, `flock` and `claude` on `PATH`. A missing installed CLI or tool exits 1
+  with no stdout. Install and upgrade steps are in [Supervision](runner.md#supervision).
 - `claude channel`: by default it drains every game's spool (or each `--game`) for the
   conversation of the `reports.recipient` those games name, and requires that role's effective
   harness to be `claude`. Games that name different recipients stop it with exit 1; select games

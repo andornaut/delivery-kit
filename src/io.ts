@@ -2,6 +2,8 @@
 export const EXIT_OK = 0;
 export const EXIT_INVALID = 1;
 export const EXIT_USAGE = 2;
+/** `run` refused to start because another runner holds runner.lock or loop.lock. */
+export const EXIT_REFUSED = 3;
 
 export interface Io {
   readonly env: NodeJS.ProcessEnv;

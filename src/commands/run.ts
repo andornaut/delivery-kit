@@ -3,7 +3,7 @@ import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
 import { RunnerRefused, runRunner } from "../bus/runner.ts";
 import { testOptions } from "../bus/testOverrides.ts";
-import { EXIT_INVALID, EXIT_OK, type Handler } from "../io.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, type Handler } from "../io.ts";
 import { readRegistry, RegistryMissing } from "../registry/store.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
@@ -42,7 +42,7 @@ export const run: Handler = async (io, root, args) => {
   } catch (error) {
     if (error instanceof RunnerRefused) {
       io.err(`delivery-kit: ${error.message}\n`);
-      return EXIT_INVALID;
+      return EXIT_REFUSED;
     }
     throw error;
   } finally {

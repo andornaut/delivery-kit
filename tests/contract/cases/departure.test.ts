@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
+import { CASE_TIMEOUT_MS, contract, EXIT_REFUSED, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at, LOAD_WAIT_SECONDS, sleep } from "../lib/time.ts";
 import { SHA, type Workspace } from "../lib/workspace.ts";
@@ -285,14 +285,14 @@ suite("departure", () => {
       const loop = await hold(ws.path("loop.lock"));
       try {
         const result = await execute(impl.run(ws), { timeoutMs: 10_000 });
-        expect(result.code).toBe(1);
+        expect(result.code).toBe(EXIT_REFUSED);
       } finally {
         await loop.release();
       }
       const runner = await hold(ws.path("runner.lock"));
       try {
         const result = await execute(impl.run(ws), { timeoutMs: 10_000 });
-        expect(result.code).toBe(1);
+        expect(result.code).toBe(EXIT_REFUSED);
       } finally {
         await runner.release();
       }

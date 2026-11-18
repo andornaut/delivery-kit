@@ -31,14 +31,15 @@ runner runs from that game's own `node_modules`; game-coordinator's copy runs `c
 
 ## Commands
 
-Top-level verbs are game operations; `inbox`, `harness`, `claude` and `codex` are noun groups that take a
-verb. Every command resolves game-coordinator from `--root DIR`, else `DELIVERY_KIT_ROOT`, else the working
-directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
+Top-level verbs are game operations; `inbox`, `harness`, `claude`, `codex` and `runner` are noun
+groups that take a verb. Every command resolves game-coordinator from `--root DIR`, else
+`DELIVERY_KIT_ROOT`, else the working directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
 explicit; it is never inferred from the working directory.
 
 | Command                                                                                                                                                  | Purpose                                                                                                                                                          |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `run --game ID`                                                                                                                                          | Game operation: the resident runner for one game.                                                                                                                |
+| `runner unit --game ID`                                                                                                                                  | Game operation: print the optional systemd user unit for the game's resident runner; installs nothing.                                                           |
 | `status --game ID [--resources]`                                                                                                                         | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information.       |
 | `control --game ID --state enabled\|paused --reason TEXT --requester ROLE`                                                                               | Game operation: persist desired delivery control with its reason and requesting role.                                                                            |
 | `check-config [--game ID]`                                                                                                                               | Game operation: validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
@@ -54,12 +55,12 @@ explicit; it is never inferred from the working directory.
 
 Per-command semantics and worker inbox reconciliation are in [docs/commands.md](docs/commands.md).
 
-Exit status is 0 on success, 1 for invalid configuration, a failed precondition, an unavailable
-read or a refused runner start, and 2 for a usage error or an unexpected failure. `run` exits 130
-on `SIGINT` and 143 on `SIGTERM`. Errors, a refused runner start and a refused request go to
-stderr prefixed `delivery-kit:`. `inbox snapshot` and `inbox ack` keep their JSON result on
-stdout and also name the error on stderr. `--help` is generated from each command's parser
-options, so it lists every flag a command accepts.
+Exit status is 0 on success, 1 for invalid configuration, a failed precondition or an unavailable
+read, 2 for a usage error or an unexpected failure, and 3 for a refused runner start (another runner
+holds `runner.lock` or `loop.lock`). `run` exits 130 on `SIGINT` and 143 on `SIGTERM`. Errors, a
+refused runner start and a refused request go to stderr prefixed `delivery-kit:`. `inbox snapshot`
+and `inbox ack` keep their JSON result on stdout and also name the error on stderr. `--help` is
+generated from each command's parser options, so it lists every flag a command accepts.
 
 ## Configuration
 
@@ -77,7 +78,7 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 | [docs/messages.md](docs/messages.md)                     | Common message send, status, dispatch, delivery guards and reconciliation                                                                                  |
 | [docs/review.md](docs/review.md)                         | The review route `var/route.json`, the Claude and Codex adapters, mixed inbox snapshots and event remedies                                                 |
 | [docs/state.md](docs/state.md)                           | The state layout, durable writes, desired and observed delivery control, and adopting persistent control                                                   |
-| [docs/runner.md](docs/runner.md)                         | Launching and replacing the resident runner, the pin guard, status provenance, departures, the gate container and test overrides                           |
+| [docs/runner.md](docs/runner.md)                         | Launching, supervising and replacing the resident runner, the pin guard, status provenance, departures, the gate container and test overrides              |
 | [docs/libraries.md](docs/libraries.md)                   | Public build API subpaths and aliases, the registry library, transport endpoint selection and the source identity library                                  |
 | [docs/request-accounting.md](docs/request-accounting.md) | Requested outcomes tracked separately from message delivery and recipient handling: provenance, per-target closure, protected questions and capture limits |
 | [docs/work-protocol.md](docs/work-protocol.md)           | Fenced role publications, canonical message originals, recipient handling receipts and external `stateRoot` activation                                     |

@@ -1,6 +1,6 @@
 // delivery-kit command dispatcher. Top-level verbs are game operations; the inbox, harness,
-// claude and codex groups take a verb. Every command resolves game-coordinator from --root (in any position, once),
-// DELIVERY_KIT_ROOT or the working directory, in that order.
+// claude, codex and runner groups take a verb. Every command resolves game-coordinator from
+// --root (in any position, once), DELIVERY_KIT_ROOT or the working directory, in that order.
 import { parseArgs } from "node:util";
 
 import { readRoleRoute, routeRecipient } from "./adapters/shared/route.ts";
@@ -61,6 +61,7 @@ import {
 import { claudeReady, codexReady, harnessReady } from "./commands/ready.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
+import { runnerUnit } from "./commands/runner.ts";
 import { type Command, GROUPS, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import { addressedRoles, loadProjectConfig, type ProjectConfig } from "./config.ts";
@@ -70,10 +71,11 @@ import { gameLayout, type Layout, loadLayout } from "./layout.ts";
 import { resolveRole } from "./registry/resolve.ts";
 import { type Registry, validateRegistry } from "./registry/schema.ts";
 declare const __DK_VERSION__: string;
-export { EXIT_INVALID, EXIT_OK, EXIT_USAGE, type Handler, type Io } from "./io.ts";
+export { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, type Handler, type Io } from "./io.ts";
 export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
 export const COMMANDS = [
   "run",
+  "runner unit",
   "status",
   "control",
   "check-config",
@@ -333,6 +335,7 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "protocol work-submit": protocolWorkSubmit,
   request,
   run,
+  "runner unit": runnerUnit,
   status,
 };
 /** Take every `--root DIR` out of the arguments; at most one is allowed. */

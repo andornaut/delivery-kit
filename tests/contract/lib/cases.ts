@@ -30,6 +30,9 @@ export const WORKER_PARENTS_ROUTE_MESSAGE =
 /** check-config's exit status for invalid configuration. */
 export const EXIT_INVALID = 1;
 
+/** run's exit status when another runner holds runner.lock or loop.lock. */
+export const EXIT_REFUSED = 3;
+
 /** A fresh workspace per case, removed afterwards. */
 export function workspaces(): (options?: GameOptions) => Workspace {
   const created: Workspace[] = [];

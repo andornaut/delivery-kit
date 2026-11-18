@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { contract, EXIT_REFUSED, suite, workspaces } from "../lib/cases.ts";
 import { hold } from "../lib/locks.ts";
 import { at } from "../lib/time.ts";
 import { KIT_ROOT, type Workspace } from "../lib/workspace.ts";
@@ -189,7 +189,7 @@ suite("status", () => {
     try {
       const token = ws.read("runner.lock");
       const duplicate = await execute(impl.run(ws), { timeoutMs: 10_000 });
-      expect(duplicate.code).toBe(1);
+      expect(duplicate.code).toBe(EXIT_REFUSED);
       expect(ws.read("runner.lock")).toBe(token);
       expect((await report(ws)).identity_status).toBe("current");
     } finally {

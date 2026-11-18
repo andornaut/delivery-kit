@@ -1,6 +1,6 @@
 # Resident runner
 
-The per-game resident runner: launch and replacement, the pin guard, status provenance, departures, the gate container and test-only overrides.
+The per-game resident runner: launch, supervision and replacement, the pin guard, status provenance, departures, the gate container and test-only overrides.
 
 Launch one runner per game from that game's canonical checkout, in its own session, so it
 resolves the game's own `node_modules`:
@@ -13,7 +13,8 @@ cd /absolute/path/to/game \
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
 and runs the scheduled and requested departure loop, the per-minute observer (scheduled reviews,
 scheduled-slot reports and event flushes), the 1800 s resource sampler and the CI watches
-in-process. No timer outlives it, and no systemd unit, cron entry or other timer is involved. A
+in-process. The runner creates no timers: none outlives it, and no cron entry or other timer is
+involved. Supervision by a systemd user service is optional (see [Supervision](#supervision)). A
 missed scheduled slot is never replayed.
 
 The observer wakes at the start of each minute after its previous clock reading, so a pass that
@@ -58,6 +59,65 @@ To replace a runner: record its identity, stop it while idle, start one runner, 
 holder of each lock with `status` and `runner.json`, then observe the next normal slot. A
 replacement resumes every CI watch whose `ci/<sha>.status` is still running, with its original
 deadline.
+
+A second start while another runner holds `runner.lock` or `loop.lock` is refused with exit 3 and
+leaves the holder's identity intact.
+
+## Supervision
+
+Supervision by a systemd user service is optional and adds no timer: the service starts the same
+resident runner, whose schedule stays in-process. `runner unit` prints an explicit unit for one
+game and installs nothing; it never runs `systemctl`. Run it from the game's canonical checkout
+with the Node binary and `PATH` the runner should use:
+
+```bash
+mkdir -p ~/.config/systemd/user \
+  && cd /absolute/path/to/game \
+  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator npx delivery-kit runner unit --game GAME_ID \
+  > ~/.config/systemd/user/delivery-kit-GAME_ID.service
+```
+
+The unit resolves every path when it is printed:
+
+- `WorkingDirectory` is the game's canonical checkout. `ExecStart` is the absolute Node binary
+  running the command (`process.execPath`), the game's installed
+  `node_modules/@andornaut/delivery-kit/dist/cli.js` and `run --game GAME_ID`, with no `npx`.
+- `Environment` sets `DELIVERY_KIT_ROOT` to the resolved coordinator root and `PATH` to the
+  directories of `node`, `gh`, `docker`, `git`, `flock` and `claude` as found on the caller's
+  `PATH`, Node first. A missing tool or installed CLI exits 1 with no unit printed.
+- `Restart=on-failure` with `RestartSec=30`. A sixth start within 600 s (`StartLimitIntervalSec`,
+  `StartLimitBurst=5`) is refused and the unit stays failed until `systemctl --user reset-failed`,
+  so a persistent failure does not loop.
+- `SuccessExitStatus=143` makes a `SIGTERM` stop a clean exit. `RestartPreventExitStatus=3` never
+  restarts a refused start, because another runner holds the locks.
+- `KillMode=mixed` and `KillSignal=SIGTERM` signal only the runner, which ends its own children.
+  `TimeoutStopSec=120` covers an idle shutdown; processes still running after it are killed.
+- `[Install]` has `WantedBy=default.target`.
+
+The service sees only those variables plus the systemd user manager's defaults, such as `HOME`.
+Git push and `gh` authentication must work without an interactive session's environment.
+
+Enable and start it, after stopping any manually launched runner for that game:
+
+```bash
+systemctl --user daemon-reload \
+  && systemctl --user enable --now delivery-kit-GAME_ID.service
+```
+
+Starting at boot without a login session needs lingering, which the user enables with
+`sudo loginctl enable-linger "$USER"`.
+
+Upgrade or replace a supervised runner in a quiet window:
+
+1. Install the new pin in the game checkout: the devDependency bump, then `npm ci`.
+2. After a Node upgrade or a moved tool, run `runner unit` again, replace the unit file and run
+   `systemctl --user daemon-reload`. A pin change alone keeps every path.
+3. Confirm with `status --game GAME_ID` that the runner is idle and drained.
+4. Run `systemctl --user restart delivery-kit-GAME_ID.service`.
+5. Verify exactly one holder of each lock with `status` (`runner_lock_held`, `loop_lock_held`,
+   `identity_status` `current`) and `runner.json`.
+6. Under an active work protocol, record observer adoption again for the new resident with
+   `protocol observer-adoption`, then observe the next normal slot.
 
 ## Pin guard
 

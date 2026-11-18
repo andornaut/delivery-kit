@@ -13,6 +13,7 @@ Decisions the cases assert:
 - CI poll interval: `ci.pollSeconds` must be at least 1; cases poll every second under the test clock.
 - Resource caps: `resources.maxWorkers` is an unknown key.
 - Invalid configuration: `check-config` exits 1 (`EXIT_INVALID`); usage errors exit 2.
+- Refused runner start: `run` exits 3 (`EXIT_REFUSED`) while another runner holds `runner.lock` or `loop.lock`.
 - Receive timeouts: a native reply that never arrives is classified and latched as a timeout (child health, question state and the review history transport failure).
 - CI decision: only the runs named in `ci.requiredNames` decide a watch.
 - Docs-only departures: departure "a range under docs/ pushes without a gate container, watches CI and never deploys" expects one push, no gate container, no deployment and a `complete` report that names the skipped gate.

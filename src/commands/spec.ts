@@ -455,6 +455,13 @@ export const SPECS = {
     options: GAME,
     summary: "run one game's resident delivery runner",
   },
+  "runner unit": {
+    forms: [["game"]],
+    group: "game",
+    options: GAME,
+    summary:
+      "print the optional systemd user unit for the game's resident runner; installs nothing",
+  },
   status: {
     forms: [["game", "resources?"]],
     group: "game",
