@@ -2,6 +2,11 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 4.7
+
+`run --game` now exits 3, not 1, when another runner holds `runner.lock` or `loop.lock`.
+Invalid configuration still exits 1. Scripts that treat 1 as "already running" must check 3.
+
 ## Upgrading to 4.0
 
 Version 4.0 requires an explicit `resources.memoryMiB` in every game configuration, including
