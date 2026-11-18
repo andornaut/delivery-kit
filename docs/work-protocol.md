@@ -205,6 +205,19 @@ fence and configuration writes. It validates the registry without mutating it.
 The operator owns root and backup selection and actual consumer rollout; SDK publication performs
 none of those operations.
 
+### Work definitions and receipts
+
+- A work receipt binds the exact `definitionHash` it was recorded against. Republishing a work
+  definition with different content requires `replaces` set to the prior publication hash and
+  starts with no receipts or accepted submissions. Record evidence again against the new
+  definition. Republishing identical content keeps them.
+- When the definition has a `source` pin, every `execution` and `check` receipt must carry a
+  `source` equal to it (commit, base, tree and dependencies), or it is refused with
+  `receipt-source-mismatch`. Other phases are not compared with the pin.
+- The plan does not count as cleanup evidence. `before-cleanup` and `cleanup` require
+  `definition.artifacts` to list at least one nonempty artifact whose hash differs from
+  `definition.plan`.
+
 ### Lifecycle boundaries and repair
 
 `protocol boundary` accepts `--role ROLE --phase PHASE --at ISO_TIMESTAMP`. Phases are `intake`,
@@ -220,8 +233,8 @@ For `before-work` and `worker-start`, supply `--work-id ID` and, when needed,
 worker's parent; unrelated roles cannot supply its approval. The referenced work must be
 canonical, reviewed and unguarded. Finish, handoff and cleanup boundaries require canonical
 essential artifacts plus retained work or closure-ready evidence;
-`before-cleanup` and `cleanup` additionally require a nonempty essential artifact distinct from
-the plan. Worker completion additionally requires the parent's recorded acceptance. A sole
+`before-cleanup` and `cleanup` additionally require a nonempty artifact in `definition.artifacts`
+distinct from the plan. Worker completion additionally requires the parent's recorded acceptance. A sole
 temporary copy, UNKNOWN or successful boundary cannot authorize destructive cleanup or clear a question.
 
 Finish and cleanup may also use historical, actually completed reviewed requests when their
