@@ -176,12 +176,66 @@ describe("managed work enrollment", () => {
         ],
       }),
     ).toMatchObject({
-      allRepresented: false,
+      allRepresented: true,
+      coverageComplete: false,
       omitted: [{ reference: { key: "work:new", kind: "work" }, role: ROLE }],
+      uncovered: [{ reference: { key: "work:new", kind: "work" }, role: ROLE }],
     });
     expect(
       reader.report({ ...later, ledgerAnchors: [{ hash: "c".repeat(64), revision: 1 }] }).stale,
     ).toContainEqual({ reason: "enrollment-ledger-mismatch", role: ROLE });
+  });
+
+  it("keeps an active receipt adopted for later references but not for references it omitted", async () => {
+    const f = await fixture();
+    const later: EnrollmentReference = { key: "original:later", kind: "original" };
+    const omitted: EnrollmentReference = { key: "work:omitted", kind: "work" };
+    const active: EnrollmentScope = {
+      ...f.scope,
+      participants: [{ ...f.participant, knownReferences: [KNOWN, omitted] }],
+      phase: "active",
+    };
+    await f.store.publish(f.context(), f.input(active), active);
+    expect(f.store.report(active)).toMatchObject({
+      allAdopted: false,
+      allRepresented: false,
+      omitted: [{ reference: omitted, role: ROLE }],
+      uncovered: [],
+    });
+    const complete = { ...active, participants: [f.participant] };
+    await f.store.publish(f.context("complete"), f.input(complete), complete);
+    const grown = {
+      ...complete,
+      participants: [{ ...f.participant, knownReferences: [KNOWN, later] }],
+    };
+    expect(f.store.report(grown)).toMatchObject({
+      allAdopted: true,
+      allRepresented: true,
+      coverageComplete: false,
+      omitted: [{ reference: later, role: ROLE }],
+      uncovered: [{ reference: later, role: ROLE }],
+    });
+    const anchor = f.protocol
+      .read(ROLE)
+      .objects.find((object) => object.id === "enrollment-anchor")!;
+    // A receipt rewritten without its anchor, as an older writer would, is checked strictly.
+    await f.protocol.transact({
+      ...f.context("unanchored"),
+      mutations: [
+        {
+          collection: "intake",
+          expectedRevision: f.protocol.read(ROLE).objects.find((o) => o.id === "enrollment")!
+            .revision,
+          id: "enrollment",
+          value: {
+            ...(f.store.read(ROLE) as unknown as Record<string, never>),
+            inspectedAt: "2026-11-16T05:00:00.000Z",
+          },
+        },
+      ],
+    });
+    expect(f.protocol.read(ROLE).objects.find((o) => o.id === "enrollment-anchor")).toEqual(anchor);
+    expect(f.store.report(grown)).toMatchObject({ allAdopted: false, uncovered: [] });
   });
 
   it("represents an unavailable owner only through its designated parent without fabricating adoption", async () => {
@@ -339,7 +393,15 @@ describe("managed work enrollment", () => {
       unknowns: input.unknowns,
     });
     expect(f.store.read(ROLE)?.references).toEqual([KNOWN, question, hold]);
-    expect(f.protocol.read(ROLE).objects.map((object) => object.collection)).toEqual(["intake"]);
+    expect(
+      f.protocol
+        .read(ROLE)
+        .objects.map((object) => [object.collection, object.id])
+        .sort(),
+    ).toEqual([
+      ["intake", "enrollment"],
+      ["intake", "enrollment-anchor"],
+    ]);
   });
 
   it("serializes competing attestations and recovers an interrupted publication by exact replay", async () => {

@@ -137,7 +137,8 @@ function json(value: unknown, seen = new Set<object>()): boolean {
   return valid;
 }
 
-function canonical(value: unknown): string {
+/** Canonical JSON with sorted object keys, the form journal digests use. */
+export function canonical(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonical).join(",")}]`;
   }

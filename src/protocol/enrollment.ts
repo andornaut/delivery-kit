@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
-import { ProtocolStore, protocolWorkerRole } from "./core.ts";
+import { canonical, ProtocolStore, protocolWorkerRole } from "./core.ts";
 import type {
   ArtifactRef,
   Binding,
@@ -72,7 +73,13 @@ export interface EnrollmentReport {
   readonly coverageComplete: boolean;
   readonly missing: readonly string[];
   readonly stale: readonly { readonly role: string; readonly reason: string }[];
+  /** Every current known reference a participant's receipt does not list. */
   readonly omitted: readonly { readonly role: string; readonly reference: EnrollmentReference }[];
+  /**
+   * The subset of `omitted` that first became known after the receipt was published. It keeps
+   * coverage incomplete without revoking the receipt's adoption or representation.
+   */
+  readonly uncovered: readonly { readonly role: string; readonly reference: EnrollmentReference }[];
   readonly unknowns: readonly EnrollmentUnknown[];
   readonly participants: readonly {
     readonly role: string;
@@ -161,6 +168,22 @@ function artifacts(protocol: ProtocolStore, values: readonly ArtifactRef[]): voi
       "enrollment-evidence-mismatch",
     );
   }
+}
+
+/** Journal object, written with each receipt, recording the references known at publication. */
+const ANCHOR_ID = "enrollment-anchor";
+const ANCHOR_KEYS = ["schema", "kind", "receipt", "knownReferences"];
+
+interface EnrollmentAnchor {
+  readonly schema: 1;
+  readonly kind: "enrollment-anchor";
+  /** SHA-256 of the canonical receipt it was published with. */
+  readonly receipt: string;
+  readonly knownReferences: readonly EnrollmentReference[];
+}
+
+function receiptDigest(record: EnrollmentRecord): string {
+  return createHash("sha256").update(canonical(record)).digest("hex");
 }
 
 const INPUT_KEYS = [
@@ -381,6 +404,30 @@ export class EnrollmentStore {
     return structuredClone(record);
   }
 
+  /**
+   * The reference keys known when `record` was published, or null for a receipt without a
+   * matching anchor. A null anchor treats every omitted reference as revoking.
+   */
+  #anchor(state: ProtocolState, record: EnrollmentRecord): Set<string> | null {
+    const object = state.objects.find(
+      (entry) => entry.collection === "intake" && entry.id === ANCHOR_ID,
+    );
+    if (object === undefined) {
+      return null;
+    }
+    try {
+      fields(object.value, ANCHOR_KEYS);
+      const anchor = object.value as unknown as EnrollmentAnchor;
+      demand(anchor.schema === 1 && anchor.kind === "enrollment-anchor");
+      references(anchor.knownReferences);
+      return anchor.receipt === receiptDigest(record)
+        ? new Set(anchor.knownReferences.map(referenceKey))
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   read(role: string): EnrollmentRecord | undefined {
     return this.#record(this.#protocol.read(role));
   }
@@ -406,6 +453,10 @@ export class EnrollmentStore {
     const object = current.objects.find(
       (entry) => entry.collection === "intake" && entry.id === "enrollment",
     );
+    const anchorObject = current.objects.find(
+      (entry) => entry.collection === "intake" && entry.id === ANCHOR_ID,
+    );
+    let anchor: ProtocolTransaction["mutations"][number] | undefined;
     if (previous === undefined) {
       const participants = this.#scope(scope);
       const participant = participants.get(context.role);
@@ -420,6 +471,25 @@ export class EnrollmentStore {
       );
       this.#unknowns(context.role, input, participants);
       demand(Date.parse(input.inspectedAt) <= Date.parse(context.at), "enrollment-inspection-time");
+      const value: EnrollmentAnchor = {
+        kind: "enrollment-anchor",
+        knownReferences: [...participant.knownReferences].sort((a, b) =>
+          referenceKey(a).localeCompare(referenceKey(b)),
+        ),
+        receipt: receiptDigest(record),
+        schema: 1,
+      };
+      anchor = {
+        collection: "intake",
+        expectedRevision: anchorObject?.revision ?? 0,
+        id: ANCHOR_ID,
+        value: structuredClone(
+          value,
+        ) as unknown as ProtocolTransaction["mutations"][number]["value"],
+      };
+    } else if (previous.type === "transaction") {
+      // An exact retry replays the anchor recorded with the original attempt.
+      anchor = previous.transaction.mutations.find((mutation) => mutation.id === ANCHOR_ID);
     }
     return this.#protocol.transact({
       ...context,
@@ -433,6 +503,7 @@ export class EnrollmentStore {
           id: "enrollment",
           value: record as unknown as ProtocolTransaction["mutations"][number]["value"],
         },
+        ...(anchor === undefined ? [] : [anchor]),
       ],
     });
   }
@@ -444,6 +515,8 @@ export class EnrollmentStore {
     const missing: string[] = [];
     const stale: { role: string; reason: string }[] = [];
     const omitted: { role: string; reference: EnrollmentReference }[] = [];
+    const uncovered: { role: string; reference: EnrollmentReference }[] = [];
+    const anchors = new Map<string, Set<string> | null>();
     const snapshots = new Map<string, ProtocolState>();
     for (const participant of participants.values()) {
       try {
@@ -460,6 +533,7 @@ export class EnrollmentStore {
         }
         this.#unknowns(participant.role, record, participants);
         records.set(participant.role, record);
+        anchors.set(participant.role, this.#anchor(snapshot, record));
         revisions.set(
           participant.role,
           snapshot.objects.find(
@@ -480,12 +554,16 @@ export class EnrollmentStore {
           (value) => !seen.has(referenceKey(value)),
         );
         omitted.push(...absent.map((reference) => ({ reference, role: participant.role })));
+        const anchor = anchors.get(participant.role) ?? null;
+        const later = absent.filter((value) => anchor?.has(referenceKey(value)) === false);
+        uncovered.push(...later.map((reference) => ({ reference, role: participant.role })));
         const unknownComplete = participant.requiredUnknownScopes.every((required) =>
           record?.unknowns.some(
             (value) => value.participantRole === participant.role && value.scope === required,
           ),
         );
-        const own = record !== undefined && absent.length === 0 && unknownComplete;
+        // References known at publication must be listed; later references stay uncovered only.
+        const own = record !== undefined && absent.length === later.length && unknownComplete;
         const fallback = unknowns.some(
           (value) =>
             value.participantRole === participant.role &&
@@ -519,6 +597,11 @@ export class EnrollmentStore {
       ),
       participants: rows,
       stale: stale.sort((a, b) => a.role.localeCompare(b.role)),
+      uncovered: uncovered.sort(
+        (a, b) =>
+          a.role.localeCompare(b.role) ||
+          referenceKey(a.reference).localeCompare(referenceKey(b.reference)),
+      ),
       unknowns: unknowns.sort(
         (a, b) => a.participantRole.localeCompare(b.participantRole) || a.id.localeCompare(b.id),
       ),

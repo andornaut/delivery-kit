@@ -114,9 +114,20 @@ request or work state. The integration adapter supplies the complete expected `s
 store caller must not substitute the set of existing journals for that roster.
 
 `report(scope)` separates `allRepresented`, `allAdopted` and `coverageComplete`, with `missing`,
-`stale`, `omitted`, `unknowns` and per-participant results. An own current active receipt can
-establish adoption while preserving declared UNKNOWN scopes; those gaps still prevent a
-coverage-complete claim. A designated parent's fallback can establish representation only.
+`stale`, `omitted`, `uncovered`, `unknowns` and per-participant results. An own current active
+receipt can establish adoption while preserving declared UNKNOWN scopes; those gaps still prevent
+a coverage-complete claim. A designated parent's fallback can establish representation only.
+
+Each receipt is published with an `intake/enrollment-anchor` object in the same transaction. It
+records the participant's known references at publication and the digest of that receipt. A
+reference the receipt does not list revokes representation and adoption only if it was known at
+publication. A reference first known later, such as the role's own later message original, work
+publication, ledger request or intake offer, appears in both `omitted` and `uncovered` and keeps
+`coverageComplete` false; the receipt stays represented and, when active, adopted, so later
+boundaries are not refused for it. A receipt without a matching anchor, such as one rewritten by
+an earlier CLI, treats every omitted reference as revoking. Generation, phase, ledger prefix,
+registry revision, epoch, binding and parent epoch checks still mark a receipt stale, and a fresh
+enrollment publishes a new anchor.
 
 Runtime enrollment admission is role-local: the selected owner needs its own current active
 adopted row, not global `allAdopted` or `coverageComplete`. Explicit UNKNOWNs in that own receipt

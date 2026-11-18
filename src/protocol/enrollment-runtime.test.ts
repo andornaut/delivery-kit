@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { IntakeStore } from "../accounting/intake.ts";
 import { LedgerStore } from "../accounting/store.ts";
 import type { LedgerCommand, LedgerSource } from "../accounting/types.ts";
 import { loadLayout } from "../layout.ts";
@@ -14,6 +15,8 @@ import {
   evaluateEnrollmentBoundary,
   resolveEnrollmentScope,
 } from "./enrollment-runtime.ts";
+import { ProtocolMessages } from "./messages.ts";
+import type { Binding } from "./types.ts";
 import { WorkStore } from "./work.ts";
 const AT = "2026-11-16T06:00:00.000Z";
 const ROLE = "coordinator";
@@ -42,7 +45,196 @@ async function fixture() {
     registry,
   };
 }
+const SOURCE: LedgerSource = {
+  native: null,
+  origin: "owner-attested",
+  reference: "fixture:approved-work",
+  wordingHash: null,
+};
+function fixtureRequest(id: string) {
+  return {
+    assignment: null,
+    dependencies: [],
+    id,
+    kind: "request" as const,
+    parentId: null,
+    question: null,
+    reviewed: true,
+    source: SOURCE,
+    summary: "Fixture approved work",
+    targets: [
+      {
+        consumers: [],
+        criteria: [
+          { description: "Checked source", id: "check", requiredEvidence: ["check" as const] },
+        ],
+        description: "Exact source",
+        id: "target",
+      },
+    ],
+  };
+}
+async function approvedWork(
+  t: Awaited<ReturnType<typeof fixture>>,
+  role: string,
+  binding: Binding,
+) {
+  const ledger = new LedgerStore({ directory: join(t.input.stateRoot, "accounting") });
+  let sequence = 0;
+  const send = (command: LedgerCommand) =>
+    ledger.apply({
+      actor: "game-coordinator",
+      at: AT,
+      command,
+      commandId: `${role}-fixture-${++sequence}`,
+      expectedRevision: ledger.read().revision,
+      schema: 1,
+      source: SOURCE,
+    });
+  const artifact = await t.protocol.putArtifact(Buffer.from(`fixture essential source ${role}`));
+  const plan = await t.protocol.putArtifact(Buffer.from(`fixture plan ${role}`));
+  const work = new WorkStore({ protocol: t.protocol, readRequest: (id) => ledger.read(id) });
+  const writer = (id: string) => ({
+    at: AT,
+    binding,
+    epoch: t.protocol.read(role).epoch,
+    expectedRevision: t.protocol.read(role).revision,
+    id,
+    role,
+  });
+  const publish = (id: string, requestId: string) =>
+    work.publish(writer(`publish-${id}`), {
+      definition: {
+        artifacts: [artifact],
+        clauseIds: [],
+        criteria: [{ consumers: [], id: "check", phases: ["check"], targetId: "target" }],
+        id,
+        messageIds: [],
+        plan,
+        requestIds: [requestId],
+        retention: null,
+        source: {
+          base: "b".repeat(40),
+          commit: "a".repeat(40),
+          dependencies: [],
+          tree: "c".repeat(40),
+        },
+      },
+      expectedWorkRevision: 0,
+      ready: false,
+      replaces: null,
+    });
+  const enroll = async (scope: ReturnType<typeof resolveEnrollmentScope>, id = "enrollment") => {
+    const own = scope.participants.find((p) => p.role === role)!;
+    return new EnrollmentStore({ protocol: t.protocol }).publish(
+      writer(id),
+      {
+        evidence: [artifact],
+        generation: 1,
+        inspectedAt: AT,
+        ledger: scope.ledgerAnchors.at(-1)!,
+        phase: "active",
+        references: own.knownReferences,
+        registryRevision: scope.registryRevision,
+        unknowns: own.requiredUnknownScopes.map((unknown, index) => ({
+          evidence: [artifact],
+          id: `unknown-${index}`,
+          nextBoundary: "next owner audit",
+          parentRole: own.parentRole ?? role,
+          participantRole: role,
+          reason: "unavailable source",
+          scope: unknown,
+        })),
+        workspaceId: "fixture",
+      },
+      scope,
+    );
+  };
+  return { artifact, enroll, publish, send, writer };
+}
 describe("canonical enrollment scope", () => {
+  it("keeps an own active receipt adopted while later publications stay uncovered", async () => {
+    const t = await fixture();
+    const owner = await approvedWork(t, ROLE, BINDING);
+    await owner.send({ request: fixtureRequest("request-one"), type: "register" });
+    await owner.publish("work-one", "request-one");
+    await owner.enroll(resolveEnrollmentScope(t.layout, t.protocol, t.input));
+    const boundary = (phase: Parameters<typeof evaluateEnrollmentBoundary>[2]["boundary"]) =>
+      evaluateEnrollmentBoundary(t.layout, t.protocol, {
+        ...t.input,
+        boundary: phase,
+        role: ROLE,
+        workId: "work-one",
+      });
+    expect(boundary("before-work").admission.allowed).toBe(true);
+    await new ProtocolMessages({ store: t.protocol }).publish(owner.writer("message-publish"), {
+      envelope: {
+        body: "Exact later original\n",
+        created: AT,
+        fromRole: "game-coordinator",
+        id: "message-later",
+        intent: "queue",
+        schema: 1,
+        toRole: "archies-dog-walks/tech",
+      },
+      guards: { artifacts: [], hold: "unknown", question: "unknown", references: [] },
+      links: { clauseIds: [], messageIds: [], requestIds: [], workIds: [] },
+    });
+    await owner.send({ request: fixtureRequest("request-later"), type: "register" });
+    await owner.publish("work-later", "request-later");
+    new IntakeStore({ directory: join(t.input.stateRoot, "accounting", "intake") }).offer({
+      actor: "game-coordinator",
+      command: {
+        coverage: [],
+        requests: [
+          {
+            assignment: null,
+            dependencies: [],
+            id: "request-offered",
+            kind: "unknown",
+            parentId: null,
+            question: null,
+            reviewed: false,
+            source: SOURCE,
+            summary: "Observed source awaiting owner review",
+            targets: [],
+          },
+        ],
+        type: "capture",
+      },
+      source: SOURCE,
+    });
+    for (const phase of ["before-work", "resume"] as const) {
+      const checked = boundary(phase);
+      expect(checked.admission).toEqual({ allowed: true, reason: null, requiredOwner: ROLE });
+      expect(checked.report.participants.find((p) => p.role === ROLE)).toMatchObject({
+        adopted: true,
+        represented: true,
+      });
+      expect(checked.report.coverageComplete).toBe(false);
+      expect(checked.report.uncovered.map((entry) => [entry.role, entry.reference.kind])).toEqual(
+        expect.arrayContaining([
+          [ROLE, "original"],
+          [ROLE, "work"],
+          [ROLE, "request"],
+          [ROLE, "intake"],
+        ]),
+      );
+      expect(checked.report.uncovered).toEqual(
+        checked.report.omitted.filter((entry) => entry.role === ROLE),
+      );
+    }
+    // An epoch change still invalidates the receipt instead of anchoring it.
+    await t.protocol.claim({
+      at: AT,
+      binding: BINDING,
+      evidence: "fixture:reclaim",
+      expectedEpoch: 1,
+      role: ROLE,
+    });
+    expect(boundary("resume").admission.reason).toBe("enrollment-required");
+  });
+
   it("allows completed evidence cleanup without reopening execution or cancelled authority", async () => {
     const t = await fixture();
     const ledger = new LedgerStore({ directory: join(t.input.stateRoot, "accounting") });
