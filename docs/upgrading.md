@@ -14,12 +14,12 @@ Commands, options and exit codes are unchanged.
    `npm ci` before any 6.1 runner starts. A 6.1 runner on an older root, 2.0.0 included, still
    starts, departs and appends events, but defers every review and event ingest with
    `cli-version`.
-2. Each game pins delivery-kit 6.1.1, commits the lockfile integrity, runs `npm ci` and replaces
+2. Each game pins delivery-kit 6.1.2, commits the lockfile integrity, runs `npm ci` and replaces
    its runner while idle, after its own departure and outside a wake minute:
 
    ```json
    "devDependencies": {
-     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.1/delivery-kit-6.1.1.tgz"
+     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.2/delivery-kit-6.1.2.tgz"
    }
    ```
 
@@ -47,7 +47,7 @@ DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The i
   gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated departure
   completes; 6.1.0 and 6.1.1 complete only docs-only pushes. A coordinator CLI from 2.1.2 stores
   `gate_passed` without a role message; 2.0.1 to 2.1.1 deliver it as one.
-- Pins: delivery-kit 6.1.1 bundles coordination-kit 2.1.2 for its utilities
+- Pins: delivery-kit 6.1.2 bundles coordination-kit 2.1.2 for its utilities
   (`COORDINATION_KIT_RANGE` `>=2.0.0 <3.0.0`); the coordinator CLI range is `>=2.0.1 <3.0.0`,
   because a 2.0.0 ingest quarantines the runner's lines with a null `status`.
 - Rollback: run `coordination-kit events ingest --game GAME_ID` once with the 2.0 CLI to drain
