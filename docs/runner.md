@@ -7,7 +7,7 @@ resolves the game's own `node_modules`:
 
 ```bash
 cd /absolute/path/to/game \
-  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator setsid npx delivery-kit run --game GAME_ID
+  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator setsid node node_modules/@andornaut/delivery-kit/dist/cli.js run --game GAME_ID
 ```
 
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
@@ -140,7 +140,7 @@ with the Node binary and `PATH` the runner should use:
 ```bash
 mkdir -p ~/.config/systemd/user \
   && cd /absolute/path/to/game \
-  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator npx delivery-kit runner unit --game GAME_ID \
+  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator node node_modules/@andornaut/delivery-kit/dist/cli.js runner unit --game GAME_ID \
   > ~/.config/systemd/user/delivery-kit-GAME_ID.service
 ```
 
