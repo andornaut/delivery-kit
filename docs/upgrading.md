@@ -56,7 +56,7 @@ swapped. Events stay in `events.jsonl` and are ingested once both match.
 - Pins: delivery-kit 7.0.0 bundles coordination-kit 2.0.1 (`COORDINATION_KIT_RANGE`
   `>=2.0.1 <4.0.0`); the bundle uses only `build/registry`, `build/review` and `build/shared`,
   which 3.0 keeps, so a later bundle move to 3.x is a pin change only.
-- Rollback: restore the coordination-kit 2.x pin at the root and the delivery-kit 6.1.1 pins in
+- Rollback: restore the coordination-kit 2.x pin at the root and the delivery-kit 6.1.2 pins in
   the games together, run `npm ci` in each, and replace the runners while idle (`runner stop`
   from the 7.0 install before its `npm ci`, then start the 6.1 runner as before). The event log
   formats are the same, so the 6.1 runners continue from the same `events.jsonl` and cursor.
@@ -73,12 +73,12 @@ Commands, options and exit codes are unchanged.
    `npm ci` before any 6.1 runner starts. A 6.1 runner on an older root, 2.0.0 included, still
    starts, departs and appends events, but defers every review and event ingest with
    `cli-version`.
-2. Each game pins delivery-kit 6.1.1, commits the lockfile integrity, runs `npm ci` and replaces
+2. Each game pins delivery-kit 6.1.2, commits the lockfile integrity, runs `npm ci` and replaces
    its runner while idle, after its own departure and outside a wake minute:
 
    ```json
    "devDependencies": {
-     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.1/delivery-kit-6.1.1.tgz"
+     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.2/delivery-kit-6.1.2.tgz"
    }
    ```
 
@@ -104,8 +104,9 @@ DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The i
   ([State](state.md)).
 - Events: a push under `deploy.mode` `none` now appends `deploy_disabled`. From 6.1.2, a passed
   gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated departure
-  completes; 6.1.0 and 6.1.1 complete only docs-only pushes.
-- Pins: delivery-kit 6.1.1 bundles coordination-kit 2.0.1 for its utilities
+  completes; 6.1.0 and 6.1.1 complete only docs-only pushes. A coordinator CLI from 2.1.2 stores
+  `gate_passed` without a role message; 2.0.1 to 2.1.1 deliver it as one.
+- Pins: delivery-kit 6.1.2 bundles coordination-kit 2.1.2 for its utilities
   (`COORDINATION_KIT_RANGE` `>=2.0.0 <3.0.0`); the coordinator CLI range is `>=2.0.1 <3.0.0`,
   because a 2.0.0 ingest quarantines the runner's lines with a null `status`.
 - Rollback: run `coordination-kit events ingest --game GAME_ID` once with the 2.0 CLI to drain
