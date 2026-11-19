@@ -33,7 +33,7 @@ which need a release inside `>=3.0.0 <4.0.0`:
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.1/delivery-kit-6.1.1.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v7.0.0/delivery-kit-7.0.0.tgz"
 }
 ```
 
