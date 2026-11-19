@@ -91,11 +91,14 @@ class CiTasks {
   }
 }
 
-/** The runner log line for a review outcome; undefined for a slot this runner does not dispatch. */
+/**
+ * The runner log line for a review outcome. A `nothing-due` skip is logged too, so a runner that
+ * does not host the route still shows each call.
+ */
 export function reviewLine(
   wake: number,
   outcome: SeamOutcome,
-): { readonly line: string; readonly stderr: boolean } | undefined {
+): { readonly line: string; readonly stderr: boolean } {
   if (!outcome.claimed) {
     return {
       line: `bus: scheduled review ${wake} unavailable (${outcome.why}); no delivery claimed`,
@@ -109,12 +112,10 @@ export function reviewLine(
     case "deferred":
       return { line: `${DEFERRED_PREFIX}${outcome.reason ?? "unknown"}${detail}`, stderr: true };
     default:
-      return outcome.reason === "nothing-due"
-        ? undefined
-        : {
-            line: `bus: scheduled review ${wake}: skipped ${outcome.reason ?? "unknown"}${detail}`,
-            stderr: false,
-          };
+      return {
+        line: `bus: scheduled review ${wake}: skipped ${outcome.reason ?? "unknown"}${detail}`,
+        stderr: false,
+      };
   }
 }
 
@@ -134,11 +135,9 @@ async function observe(
     } catch (error) {
       report = reviewLine(wake, { claimed: false, why: String(error) });
     }
-    if (report !== undefined) {
-      context.log(report.line);
-      if (report.stderr) {
-        process.stderr.write(`${report.line}\n`);
-      }
+    context.log(report.line);
+    if (report.stderr) {
+      process.stderr.write(`${report.line}\n`);
     }
   }
   if (config.reports.scheduledTicks) {

@@ -176,7 +176,12 @@ describe("observer", () => {
     const controller = new AbortController();
     coordinator.outcome = () => {
       order.push("review");
-      return { claimed: true, detail: "", reason: "nothing-due", status: "skipped" };
+      return {
+        claimed: true,
+        detail: "route on another host",
+        reason: "nothing-due",
+        status: "skipped",
+      };
     };
     const emit = events.emit.bind(events);
     events.emit = (kind, key, message) => {
@@ -196,8 +201,10 @@ describe("observer", () => {
       "scheduled-status",
       "ingest",
     ]);
-    // A skipped nothing-due slot is not dispatched by this runner and prints nothing.
-    expect(context.lines.filter((line) => line.includes("review"))).toEqual([]);
+    // A nothing-due slot is not dispatched by this runner; its call is still logged.
+    expect(context.lines.filter((line) => line.includes("review"))).toEqual([
+      `bus: scheduled review ${twenty}: skipped nothing-due: route on another host`,
+    ]);
   });
 });
 
@@ -220,7 +227,24 @@ describe("reviewLine", () => {
       { claimed: true, cli, detail: "receipt r-1", reason: "already-delivered", status: "skipped" },
       { line: "bus: scheduled review 60: skipped already-delivered: receipt r-1", stderr: false },
     ],
-    [{ claimed: true, cli, detail: "", reason: "nothing-due", status: "skipped" }, undefined],
+    [
+      {
+        claimed: true,
+        cli,
+        detail: "not the route host",
+        reason: "nothing-due",
+        status: "skipped",
+      },
+      { line: "bus: scheduled review 60: skipped nothing-due: not the route host", stderr: false },
+    ],
+    [
+      { claimed: true, cli, detail: "", reason: "nothing-due", status: "skipped" },
+      { line: "bus: scheduled review 60: skipped nothing-due", stderr: false },
+    ],
+    [
+      { claimed: true, cli, detail: "spooled", reason: "in-flight", status: "deferred" },
+      { line: "bus: review deferred: in-flight: spooled", stderr: true },
+    ],
     [
       { claimed: false, why: "exit 1" },
       { line: "bus: scheduled review 60 unavailable (exit 1); no delivery claimed", stderr: false },

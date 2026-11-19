@@ -184,7 +184,10 @@ suite("review cadence", () => {
           line: (slot) =>
             `bus: scheduled review ${slot} unavailable (the result is not JSON); no delivery claimed`,
         },
-        { review: { reason: "nothing-due", status: "skipped" } },
+        {
+          review: { detail: "not the route host", reason: "nothing-due", status: "skipped" },
+          line: (slot) => `bus: scheduled review ${slot}: skipped nothing-due: not the route host`,
+        },
       ];
       for (const [index, { line, review }] of cases.entries()) {
         const slot = at(20, 0, index);

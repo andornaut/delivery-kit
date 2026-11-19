@@ -355,6 +355,20 @@ describe("events ingest", () => {
     ]);
   });
 
+  it("treats an in-flight result as a deferral and logs it once", async () => {
+    const { cli, lines } = fixture({
+      ingest: { detail: "spooled", reason: "in-flight", status: "skipped" },
+    });
+    for (let pass = 0; pass < 3; pass += 1) {
+      cli.ingest();
+      // eslint-disable-next-line no-await-in-loop
+      await cli.drain();
+    }
+    expect(lines.filter((line) => line.includes("ingest"))).toEqual([
+      "bus: event ingest deferred: in-flight: spooled",
+    ]);
+  });
+
   it("defers while the CLI is missing and claims nothing for a malformed result", async () => {
     const missing = fixture();
     missing.cli.ingest();

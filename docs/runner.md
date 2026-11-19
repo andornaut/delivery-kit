@@ -83,7 +83,7 @@ and never parses `detail`.
 
 `reason` is null when delivered, otherwise one of `route-unavailable`, `recipient-unavailable`,
 `recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`, `already-delivered`,
-`nothing-due`, `no-events` or `cli-error`; an unknown token is a deferral.
+`nothing-due`, `no-events` or `cli-error`; an unknown token, such as `in-flight`, is a deferral.
 The runner adds `cli-unavailable` and `cli-version` for its own deferrals. coordination-kit
 records each review result under `bus/unblock/review-deliver/` and prints it again for a repeated
 call, except a `recipient-busy` lock contention, which it does not record. The runner never
@@ -119,8 +119,7 @@ Review lines in `runner.log`:
 | ------------------------------- | ------------------------------------------------------------------- |
 | `delivered`                     | `bus: scheduled review WAKE: DETAIL`                                |
 | `deferred`, or an unknown token | `bus: review deferred: REASON: DETAIL`, also written to stderr      |
-| `skipped` with `nothing-due`    | none: this runner does not dispatch the slot                        |
-| `skipped`, other reasons        | `bus: scheduled review WAKE: skipped REASON: DETAIL`                |
+| `skipped`                       | `bus: scheduled review WAKE: skipped REASON: DETAIL`                |
 | no delivery claimed             | `bus: scheduled review WAKE unavailable (WHY); no delivery claimed` |
 
 `WAKE` is the slot start in epoch seconds. An ingest logs `bus: event ingest deferred: REASON:

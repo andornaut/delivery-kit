@@ -31,7 +31,9 @@ Commands, options and exit codes are unchanged.
    `reporter_blockers` holds no `events_legacy_outbox`, and that `events.drained` becomes `true`
    once the first ingest runs.
 
-- Output: the ingest logs `bus: event ingest deferred|failed`; the `held` line is gone. Each
+- Output: a `nothing-due` review now logs `bus: scheduled review SLOT: skipped nothing-due:
+DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The ingest logs
+  `bus: event ingest deferred|failed`; the `held` line is gone. Each
   appended event's `detail` keeps the text the 6.0 outbox delivered.
 - Status: `status --game` adds `events {file, size, cursorOffset, rotated, torn, drained}`;
   `reporter_blockers` replaces `unsent_events:N` and `event_flush_running` with the event log
