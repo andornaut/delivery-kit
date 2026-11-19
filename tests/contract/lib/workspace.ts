@@ -251,7 +251,7 @@ export class Workspace {
     writeJson(join(dirname(dirname(cli)), "package.json"), {
       name: "@andornaut/coordination-kit",
       type: "module",
-      version: "2.0.0",
+      version: "2.0.1",
     });
   }
 

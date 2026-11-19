@@ -104,7 +104,7 @@ passes `--capture`.
   and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
 - **Range:** the CLI version in each result must satisfy `COORDINATOR_CLI_RANGE` in
-  `src/bus/pin.ts`, `>=2.0.0 <3.0.0` in delivery-kit 6.1.0. A result from a CLI outside it defers
+  `src/bus/pin.ts`, `>=2.0.1 <3.0.0` in delivery-kit 6.1.0. A result from a CLI outside it defers
   with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
   its version until a supported install answers. Departures continue.
 - **Identity:** the runner logs `bus: coordinator CLI VERSION (dist sha256 SHA256), inside RANGE`
@@ -325,9 +325,9 @@ durable writes, configuration validation, IDs and the protocol read), so a game
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`;
-delivery-kit 6.1.0 supports `>=1.0.1 <2.0.0` and bundles 1.2.0; the coordinator CLI it spawns is
-a 2.x release. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
-`=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
+delivery-kit 6.1.0 supports `>=2.0.0 <3.0.0` and bundles 2.0.1; the coordinator CLI it spawns
+needs `>=2.0.1 <3.0.0`. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
+`>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.
 
 `status` reports `coordination_kit` read-only: `bundled` (the inlined version) and `supported`

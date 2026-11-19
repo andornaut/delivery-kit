@@ -17,12 +17,12 @@ import { readTrimmed } from "./state.ts";
 export const PACKAGE = "@andornaut/delivery-kit";
 export const COORDINATION_KIT = "@andornaut/coordination-kit";
 /** The coordination-kit releases this delivery-kit supports. The one place the range is declared. */
-export const COORDINATION_KIT_RANGE = ">=1.0.1 <2.0.0";
+export const COORDINATION_KIT_RANGE = ">=2.0.0 <3.0.0";
 /**
  * The coordinator-installed coordination-kit CLI releases whose review and event results this
  * runner accepts. A result from a CLI outside it defers reviews and event delivery.
  */
-export const COORDINATOR_CLI_RANGE = ">=2.0.0 <3.0.0";
+export const COORDINATOR_CLI_RANGE = ">=2.0.1 <3.0.0";
 declare const __DK_COORDINATION_KIT_VERSION__: string;
 /** The coordination-kit version the build inlined; source runs report "0.0.0-source". */
 export const COORDINATION_KIT_BUNDLED =

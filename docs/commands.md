@@ -21,7 +21,7 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   coordination-kit version and the supported range; see [Pin guard](runner.md#pin-guard).
   `coordinator_cli` reports the last coordinator CLI identity a seam result carried, from
   `bus/seam.json`: `{version, distSha256, seenAt, supported}`, where `supported` tests `version`
-  against `>=2.0.0 <3.0.0`, and every field is null before the runner has seen one; see
+  against `>=2.0.1 <3.0.0`, and every field is null before the runner has seen one; see
   [Coordinator CLI seam](runner.md#coordinator-cli-seam).
   `events` reads the event log and its cursor, read-only: `{file, size, cursorOffset, rotated,
 torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffset` is null

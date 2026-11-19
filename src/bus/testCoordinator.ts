@@ -31,7 +31,7 @@ export function installCoordinator(root: string, control: Record<string, unknown
   copyFileSync(FAKE_COORDINATOR_CLI, cli);
   writeFileSync(
     join(dirname(dirname(cli)), "package.json"),
-    JSON.stringify({ name: "@andornaut/coordination-kit", type: "module", version: "2.0.0" }),
+    JSON.stringify({ name: "@andornaut/coordination-kit", type: "module", version: "2.0.1" }),
   );
   scriptCoordinator(root, control);
   return cli;
@@ -55,7 +55,7 @@ export interface RecordingCoordinator extends Coordinator {
   outcome: (slot: number) => SeamOutcome | Promise<SeamOutcome>;
 }
 
-const CLI = { distSha256: "a".repeat(64), version: "2.0.0" };
+const CLI = { distSha256: "a".repeat(64), version: "2.0.1" };
 
 /** An in-process coordinator that records each call and delivers every review. */
 export function recordingCoordinator(): RecordingCoordinator {
