@@ -9,7 +9,8 @@ import {
   type ProjectConfig,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { emitEvent } from "../events.ts";
+import { type EventType, type RunnerStarted, startedDetail } from "../events.ts";
+import { EventLog } from "./eventlog.ts";
 import { type Exec, spawnExec } from "./exec.ts";
 import { type Coordinator, CoordinatorCli } from "./seam.ts";
 import { type BusPaths, busPaths } from "./state.ts";
@@ -21,8 +22,14 @@ export interface Clock {
 }
 
 export interface Events {
-  emit(kind: string, key: string, message: string): void;
-  flush(): void;
+  /** Prepare the log at runner start: torn-tail repair, dedupe rebuild, legacy outbox import. */
+  open(): void;
+  /** Append one event at most once per (type, key) and request an ingest. */
+  emit(type: EventType, key: string, message: string): void;
+  /** Append `runner.started` for this start, keyed by the runner token. */
+  started(key: string, started: RunnerStarted): void;
+  /** Request a `coordination-kit events ingest`. */
+  ingest(): void;
 }
 
 /** A game's configuration with the schedule timezone resolved from config.json when omitted. */
@@ -71,26 +78,30 @@ const systemClock: Clock = {
 };
 
 /**
- * Events recorded through events.ts and delivered by the coordinator CLI. Persistence failures are
- * logged and never stop a departure; every recorded event requests a flush.
+ * Events appended to bus/events.jsonl and ingested by the coordinator CLI. A failed append is
+ * logged and never stops a departure; every appended event requests an ingest. The detail keeps
+ * the operator-facing `<project> bus: ` prefix the 6.0 outbox gave each message.
  */
 function busEvents(
-  game: GameLayout,
+  log: EventLog,
   options: { readonly coordinator: Coordinator; readonly project: string },
-  log: (line: string) => void,
 ): Events {
   return {
-    emit(kind, key, message) {
-      try {
-        emitEvent(game, { project: options.project }, kind, key, message);
-      } catch (error) {
-        log(`bus: event persistence failed; operator review required (${String(error)})`);
-        return;
+    emit(type, key, message) {
+      if (log.append(type, key, `${options.project} bus: ${message}`)) {
+        this.ingest();
       }
-      this.flush();
     },
-    flush() {
-      options.coordinator.flush();
+    ingest() {
+      options.coordinator.ingest();
+    },
+    open() {
+      log.open();
+    },
+    started(key, started) {
+      if (log.append("runner.started", key, startedDetail(started))) {
+        this.ingest();
+      }
     },
   };
 }
@@ -141,7 +152,17 @@ export function busContext(
     config: { ...config, schedule },
     coordinator,
     events:
-      options.events ?? busEvents(game, { coordinator, project: config.reports.project }, log),
+      options.events ??
+      busEvents(
+        new EventLog({
+          game: game.id,
+          log,
+          now: () => clock.now(),
+          paths,
+          repo: game.repo,
+        }),
+        { coordinator, project: config.reports.project },
+      ),
     exec: options.exec ?? spawnExec,
     game,
     layout,

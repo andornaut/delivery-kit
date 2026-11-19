@@ -1,7 +1,16 @@
 // Test fixtures for the bus: a scratch game-coordinator tree whose game is a real Git checkout with a
 // bare origin, fake docker, gh and Wrangler children, recorded events and a manual clock.
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -14,11 +23,13 @@ import {
   validateProjectConfig,
 } from "@andornaut/coordination-kit/build/shared";
 
+import type { RunnerEvent, RunnerStarted } from "../events.ts";
 import { makeFixture, projectConfig } from "../testFixtures.ts";
 import { type BusContext, busContext, type Clock, type Events } from "./context.ts";
 import { setDesiredDelivery } from "./control.ts";
 import { type Exec, type ExecResult, type ExecSpec, spawnExec } from "./exec.ts";
 import type { Coordinator } from "./seam.ts";
+import { busPaths } from "./state.ts";
 import { recordingCoordinator } from "./testCoordinator.ts";
 
 export const GAME = "archies-dog-walks";
@@ -54,22 +65,45 @@ export function commitFile(
 
 export interface RecordedEvents extends Events {
   readonly list: [string, string, string][];
-  flushes: number;
+  readonly starts: [string, RunnerStarted][];
+  ingests: number;
+  opens: number;
 }
 
 export function recordingEvents(): RecordedEvents {
   const list: [string, string, string][] = [];
+  const starts: [string, RunnerStarted][] = [];
   const events = {
-    emit(kind: string, key: string, message: string) {
-      list.push([kind, key, message]);
+    emit(type: string, key: string, message: string) {
+      list.push([type, key, message]);
     },
-    flush() {
-      events.flushes += 1;
+    ingest() {
+      events.ingests += 1;
     },
-    flushes: 0,
+    ingests: 0,
     list,
+    open() {
+      events.opens += 1;
+    },
+    opens: 0,
+    started(key: string, started: RunnerStarted) {
+      starts.push([key, started]);
+    },
+    starts,
   };
   return events;
+}
+
+/** The events bus/events.jsonl holds, oldest first; [] when it does not exist. */
+export function loggedEvents(test: TestGame): RunnerEvent[] {
+  const path = busPaths(test.game.busDir).eventsLog;
+  if (!existsSync(path)) {
+    return [];
+  }
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as RunnerEvent);
 }
 
 export interface ManualClock extends Clock {
@@ -308,7 +342,8 @@ export function makeGame(
 export interface ContextParts {
   readonly exec?: Exec;
   readonly clock?: Clock;
-  readonly events?: Events;
+  /** Defaults to recording events; "log" appends to the real bus/events.jsonl. */
+  readonly events?: Events | "log";
   /** Defaults to a recording coordinator that delivers every review. */
   readonly coordinator?: Coordinator;
   /** A fixed one-minute load, or a source read at every load check. */
@@ -326,7 +361,7 @@ export function testContext(
     {
       clock: parts.clock ?? manualClock(1_800_000_000),
       coordinator: parts.coordinator ?? recordingCoordinator(),
-      events: parts.events ?? recordingEvents(),
+      ...(parts.events === "log" ? {} : { events: parts.events ?? recordingEvents() }),
       exec: parts.exec ?? fakeExec(() => ok()),
       loadAverage: typeof load === "function" ? load : () => load,
       log: (line) => lines.push(line),

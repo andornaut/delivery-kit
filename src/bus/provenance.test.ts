@@ -142,13 +142,12 @@ describe("status provenance", () => {
       claimDeliveryRunner(store, token);
       beginDeliveryActivity(store, token, { id: "batch", state: "checking", sha: SOURCE });
       writeFileSync(test.bus.activeDeparture, "1\n");
-      mkdirSync(test.bus.eventsDir);
-      writeFileSync(join(test.bus.eventsDir, "one.json"), JSON.stringify({ sent: false }));
+      writeFileSync(test.bus.eventsLog, '{"schema":1}\n');
       expect(test.report()).toMatchObject({
         idle: false,
         drained: false,
         idle_blockers: ["active_departure"],
-        reporter_blockers: ["unsent_events:1"],
+        reporter_blockers: ["events_uningested:13"],
         control: { observed: { state: "checking" }, observed_status: "current" },
         provenance: { resident_status: "attested", comparison: { cli_sha256: "match" } },
       });

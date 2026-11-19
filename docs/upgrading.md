@@ -2,6 +2,51 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 6.1
+
+6.1.0 replaces the in-process event outbox with a per-game append-only event log,
+`bus/events.jsonl`, that the runner alone writes, and asks the coordinator CLI to
+`events ingest` it instead of `events flush` ([Event log](runner.md#event-log)). The runner no
+longer tracks `<sha>.state` or emits `complete`: COMPLETE is a coordination-kit projection.
+Commands, options and exit codes are unchanged.
+
+1. game-coordinator installs coordination-kit 2.0.0 or later (inside `>=2.0.0 <3.0.0`) and runs
+   `npm ci` before any 6.1 runner starts. A 6.1 runner on an older root still starts, departs and
+   appends events, but defers every review and ingest with `cli-version`.
+2. Each game pins delivery-kit 6.1.0, commits the lockfile integrity, runs `npm ci` and replaces
+   its runner while idle, after its own departure and outside a wake minute:
+
+   ```json
+   "devDependencies": {
+     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.0/delivery-kit-6.1.0.tgz"
+   }
+   ```
+
+   At that first start, before its loop, the runner imports the unsent `bus/events/*.json`
+   outbox files into `events.jsonl` in creation order and renames `bus/events` to
+   `bus/events.imported-<epoch>`; the `<sha>.state` files stay there. The import repeats safely
+   if interrupted.
+
+3. Confirm with `status --game GAME_ID` that `coordinator_cli.supported` is `true`, that
+   `reporter_blockers` holds no `events_legacy_outbox`, and that `events.drained` becomes `true`
+   once the first ingest runs.
+
+- Output: the ingest logs `bus: event ingest deferred|failed`; the `held` line is gone. Each
+  appended event's `detail` keeps the text the 6.0 outbox delivered.
+- Status: `status --game` adds `events {file, size, cursorOffset, rotated, torn, drained}`;
+  `reporter_blockers` replaces `unsent_events:N` and `event_flush_running` with the event log
+  blockers in [Command semantics](commands.md#command-semantics).
+- State: the bus gains `events.jsonl`, `events.cursor`, `events.quarantine.jsonl`,
+  `events.<epoch>.jsonl`, `events.imported-<epoch>/` and `last-complete.sha`
+  ([State](state.md)).
+- Events: a push under `deploy.mode` `none` now appends `deploy_disabled`.
+- Pins: delivery-kit 6.1.0 still bundles coordination-kit 1.2.0 for its utilities
+  (`COORDINATION_KIT_RANGE` `>=1.0.1 <2.0.0`); only the coordinator CLI range moves to 2.x.
+- Rollback: run `coordination-kit events ingest --game GAME_ID` once with the 2.0 CLI to drain
+  `events.jsonl`, confirm `events.drained`, then restore the 6.0.0 pin and lockfile, run `npm ci`
+  and start the 6.0 runner while idle. The 2.0 CLI keeps `events flush` working on the 6.0
+  outbox, so the root keeps coordination-kit 2.0.
+
 ## Upgrading to 6.0
 
 6.0.0 stops bundling scheduled review delivery and event delivery. The runner spawns the

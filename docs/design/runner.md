@@ -2,11 +2,12 @@
 
 One resident runner per game runs from that game's own `node_modules`. It holds `runner.lock`
 and `loop.lock`, so a second runner is refused, and writes only to its own bus directory. The
-departure loop, the per-minute observer (scheduled reviews, slot reports and event flushes), the
-resource sampler and the CI watches run in-process. Reviews and event delivery are child
-processes of the coordinator-installed coordination-kit CLI with a typed result, a 45 s deadline
-and a process-group kill; a failed call claims no delivery and never holds a departure. A missed
-slot is never replayed.
+departure loop, the per-minute observer (scheduled reviews, slot reports and event ingests), the
+resource sampler and the CI watches run in-process. Reviews and event ingest are child processes
+of the coordinator-installed coordination-kit CLI with a typed result, a 45 s deadline and a
+process-group kill; a failed call claims no delivery and never holds a departure. A missed slot
+is never replayed. The runner is the only writer of its append-only event log; the CLI's ingest
+cursor is the only state it reads back, so `status` reports drain without the store.
 
 Each departure gates local `main` HEAD in an isolated container, pushes that exact SHA without
 force, watches CI for it and deploys on a pass. Fixes go forward: a red gate records

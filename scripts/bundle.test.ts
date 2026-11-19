@@ -60,9 +60,15 @@ describe("bundles", () => {
     }
   });
 
-  it("no longer bundle the review and event delivery the coordinator CLI performs", () => {
+  it("no longer bundle the review and event delivery or the 6.0 event outbox writer", () => {
     const text = readFileSync(join(root, "dist/cli.js"), "utf8");
-    for (const name of ["deliverScheduledReview", "flushEventsWith", "spoolReviewBrief"]) {
+    for (const name of [
+      "deliverScheduledReview",
+      "flushEventsWith",
+      "spoolReviewBrief",
+      "recordEvent",
+      "enqueueEvent",
+    ]) {
       expect(text, name).not.toContain(`function ${name}(`);
     }
   });

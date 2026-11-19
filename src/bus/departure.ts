@@ -18,6 +18,7 @@ import {
   updateDeliveryWork,
   withDeliveryRunner,
 } from "../deploy.ts";
+import type { BlockedStage } from "../events.ts";
 import { runGate, treeFingerprint } from "../gate.ts";
 import { type BusContext, loadOk } from "./context.ts";
 import { assertNotInterrupted, git, Interrupted } from "./exec.ts";
@@ -105,7 +106,7 @@ const REMEDY = {
 function blocked(
   context: BusContext,
   attempt: Attempt,
-  stage: string,
+  stage: BlockedStage,
   message: string,
   remedy: string,
 ): number {

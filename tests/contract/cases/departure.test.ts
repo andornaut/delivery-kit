@@ -59,8 +59,12 @@ function deploys(ws: Workspace) {
   return ws.calls("wrangler");
 }
 
+/** The event types a departure appended; runner.started belongs to every start. */
 function kinds(ws: Workspace): string[] {
-  return ws.events().map((event) => String(event.kind));
+  return ws
+    .events()
+    .map((event) => String(event.type))
+    .filter((type) => type !== "runner.started");
 }
 
 async function departOnce(ws: Workspace, done: () => boolean, speed = 30): Promise<Resident> {
@@ -107,16 +111,23 @@ suite("departure", () => {
       bus(ws);
       ws.updateControl((c) => (c.git = { files: "docs/runner.md\ndocs/guide/setup.md" }));
       impl.offer(ws, ["bus/docs"]);
-      const runner = await departOnce(ws, () => kinds(ws).includes("complete"));
+      const runner = await departOnce(ws, () => kinds(ws).includes("ci_success"));
       await runner.stop();
       expect(pushes(ws)).toBe(1);
       expect(containers(ws)).toEqual([]);
       expect(deploys(ws)).toEqual([]);
       expect(ws.exists("deploy-pending")).toBe(false);
       expect(ws.read("last-deploy-skipped.sha").trim()).toBe(SHA);
-      expect(kinds(ws)).toEqual(expect.arrayContaining(["push", "deploy_skipped", "ci_success"]));
-      const complete = ws.events().find((event) => event.kind === "complete");
-      expect(String(complete?.message)).toContain("docs-only, gate skipped; CI success");
+      // The inputs of coordination-kit's COMPLETE projection: gate skipped, push, CI, deployment.
+      const outcome = (type: string) => {
+        const event = ws.events().find((row) => row.type === type);
+        return [event?.kind, event?.status, event?.sha];
+      };
+      expect(outcome("gate_skipped")).toEqual(["gate", "skipped", SHA]);
+      expect(outcome("push")).toEqual(["push", "ok", SHA]);
+      expect(outcome("deploy_skipped")).toEqual(["deploy", "skipped", SHA]);
+      expect(outcome("ci_success")).toEqual(["ci", "ok", SHA]);
+      expect(kinds(ws)).not.toContain("complete");
     },
   );
 
@@ -230,8 +241,8 @@ suite("departure", () => {
       const runner = await departOnce(ws, () => kinds(ws).includes("deploy_failure"));
       await runner.stop();
       expect(pushes(ws)).toBe(1);
-      const failure = ws.events().find((event) => event.kind === "deploy_failure");
-      expect(String(failure?.message)).toContain(`Deployment of pushed ${SHA} could not be staged`);
+      const failure = ws.events().find((event) => event.type === "deploy_failure");
+      expect(String(failure?.detail)).toContain(`Deployment of pushed ${SHA} could not be staged`);
       expect(deploys(ws)).toEqual([]);
     },
   );
@@ -331,7 +342,7 @@ suite("departure", () => {
     const runner = startRunner(ws);
     await runner.until(() => ws.virtualNow() >= at(3, 0, 1), 20_000);
     await runner.stop();
-    expect(ws.events()).toEqual([]);
+    expect(kinds(ws)).toEqual([]);
     expect(ws.calls("git").some((call) => call.args.includes("worktree"))).toBe(false);
   });
 

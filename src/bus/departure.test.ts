@@ -81,7 +81,7 @@ describe("trunk-based departures", () => {
     expect(originMain(test)).toBe(head);
     expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
     expect(started).toEqual([head]);
-    expect(kinds()).toEqual(["scheduled-status", "attempt", "push"]);
+    expect(kinds()).toEqual(["scheduled-status", "attempt", "push", "deploy_disabled"]);
     const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
     expect(create[2]).toBe(`delivery-kit-gate-archies-dog-walks-${head.slice(0, 12)}`);
     expect(create).toContainEqual(
@@ -188,7 +188,7 @@ describe("trunk-based departures", () => {
     expect(receipt).toBe(`{"head": "${head}", "id": "r1", "state": "pending"}\n`);
     expect(await depart(context, { requestId: "r1" })).toBe(0);
     expect(originMain(test)).toBe(head);
-    expect(kinds()).toEqual(["attempt", "push"]);
+    expect(kinds()).toEqual(["attempt", "push", "deploy_disabled"]);
     await expect(captureRequest(requestStore(context), "r2")).rejects.toThrow(
       "nothing new to depart",
     );
@@ -277,7 +277,7 @@ describe("departures at high load", () => {
     expect(originMain(test)).toBe(head);
     expect(creates()).toBe(1);
     expect(started).toEqual([head]);
-    expect(kinds()).toEqual(["scheduled-status", "attempt", "push"]);
+    expect(kinds()).toEqual(["scheduled-status", "attempt", "push", "deploy_disabled"]);
     expect(context.lines).toContain(
       "2027-01-15 03:00 EST bus: load at or above 24; re-checking every 60 seconds until " +
         "2027-01-15 03:15 EST",

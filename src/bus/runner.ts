@@ -1,7 +1,8 @@
 // The resident runner for one game: singleton locks, identity, the
 // serialized scheduled and requested departure loop, the 60 s observer, the 1800 s resource
-// sampler and the in-runner CI watches. Scheduled reviews and event delivery go through the
-// coordinator CLI seam (seam.ts). No timer outlives the process.
+// sampler and the in-runner CI watches. Events are appended to bus/events.jsonl (eventlog.ts);
+// scheduled reviews and event ingest go through the coordinator CLI seam (seam.ts). No timer
+// outlives the process.
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -117,7 +118,7 @@ export function reviewLine(
   }
 }
 
-/** One observer pass: scheduled reviews, scheduled-slot reports and an event flush. */
+/** One observer pass: scheduled reviews, scheduled-slot reports and an event ingest. */
 async function observe(
   context: BusContext,
   after: number,
@@ -146,7 +147,7 @@ async function observe(
       reportScheduledTick(context, slot, slotDetail(context));
     }
   }
-  context.events.flush();
+  context.events.ingest();
 }
 
 /**
@@ -321,6 +322,8 @@ export async function runRunner(
   const locks = holdSingleton(context);
   let failed = false;
   try {
+    // Before any append: torn-tail repair, dedupe rebuild and the 6.0 outbox import.
+    context.events.open();
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));
     const loaded = loadedIdentity(LOADED_VERSION, cliPath, context.game.repo);
@@ -348,10 +351,20 @@ export async function runRunner(
     for (const sha of unfinishedCi(context)) {
       tasks.start(context, sha);
     }
-    // The seam never delays startup or a departure: the probe only logs the CLI identity early.
+    // The seam never delays startup or a departure: the probe logs the CLI identity early, and
+    // runner.started carries it once the probe settles.
     signal.addEventListener("abort", () => context.coordinator.stop(), { once: true });
+    const startedKey = runnerToken ?? `${process.pid}:${context.clock.now()}`;
     const background = [
-      context.coordinator.probe(signal),
+      context.coordinator.probe(signal).then((cli) =>
+        context.events.started(startedKey, {
+          cliSha256: loaded.cliSha256,
+          coordinationKitVersion: cli?.version ?? null,
+          deliveryKitVersion: LOADED_VERSION,
+          distSha256: cli?.distSha256 ?? null,
+          token: runnerToken ?? null,
+        }),
+      ),
       sampleResources(context, signal),
       observer(context, signal, () => tasks.refresh(context)),
     ];

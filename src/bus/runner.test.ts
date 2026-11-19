@@ -117,6 +117,22 @@ describe("runRunner", () => {
     expect(readFileSync(context.paths.activeDeparture, "utf8")).toBe("");
     expect(readFileSync(context.paths.resourcesLog, "utf8")).toContain("load average");
     expect(coordinator.probes).toBe(1);
+    expect(events.opens).toBe(1);
+    const token = JSON.parse(readFileSync(context.paths.identity, "utf8")).token as string;
+    expect(events.starts).toEqual([
+      [
+        token,
+        {
+          cliSha256: createHash("sha256").update("loaded build").digest("hex"),
+          coordinationKitVersion: "2.0.0",
+          deliveryKitVersion: expect.any(String),
+          distSha256: "a".repeat(64),
+          token,
+        },
+      ],
+    ]);
+    // Deployment mode none reports the pushed SHA as deployment disabled.
+    expect(events.list.map(([type]) => type)).toContain("deploy_disabled");
     const slot = coordinator.reviews[0] ?? 0;
     expect(slot % 60).toBe(0);
     expect([20, 50]).toContain(zonedParts("America/Toronto", slot).minute);
@@ -146,7 +162,7 @@ describe("observer", () => {
     expect(coordinator.reviews).toEqual([twenty, fifty]);
   });
 
-  it("calls the seam once per due slot, then reports slots and flushes in that order", async () => {
+  it("calls the seam once per due slot, then reports slots and ingests in that order", async () => {
     const twenty = Date.UTC(2026, 10, 4, 3, 20, 0) / 1000;
     const clock = manualClock(twenty - 60);
     const order: string[] = [];
@@ -167,8 +183,8 @@ describe("observer", () => {
       order.push(kind);
       emit(kind, key, message);
     };
-    events.flush = () => {
-      order.push("flush");
+    events.ingest = () => {
+      order.push("ingest");
       if (clock.time > twenty + 120) {
         controller.abort();
       }
@@ -178,7 +194,7 @@ describe("observer", () => {
     expect(order.slice(order.indexOf("review"), order.indexOf("review") + 3)).toEqual([
       "review",
       "scheduled-status",
-      "flush",
+      "ingest",
     ]);
     // A skipped nothing-due slot is not dispatched by this runner and prints nothing.
     expect(context.lines.filter((line) => line.includes("review"))).toEqual([]);
@@ -186,7 +202,7 @@ describe("observer", () => {
 });
 
 describe("reviewLine", () => {
-  const cli = { distSha256: "a".repeat(64), version: "1.2.0" };
+  const cli = { distSha256: "a".repeat(64), version: "2.0.0" };
   it.each([
     [
       { claimed: true, cli, detail: "brief r-1 sent", reason: null, status: "delivered" },

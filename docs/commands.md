@@ -10,8 +10,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
-- `status --game`: an unreadable `ci/`, `events/`, `requests/` or `gate-failed/` directory is a
-  blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
+- `status --game`: an unreadable `ci/`, `requests/` or `gate-failed/` directory or event log is
+  a blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
   `unreadable` with the `identity_unreadable` blocker. The runner loads `delivery-kit.json` once
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
@@ -21,8 +21,16 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   coordination-kit version and the supported range; see [Pin guard](runner.md#pin-guard).
   `coordinator_cli` reports the last coordinator CLI identity a seam result carried, from
   `bus/seam.json`: `{version, distSha256, seenAt, supported}`, where `supported` tests `version`
-  against `>=1.2.0 <2.0.0`, and every field is null before the runner has seen one; see
+  against `>=2.0.0 <3.0.0`, and every field is null before the runner has seen one; see
   [Coordinator CLI seam](runner.md#coordinator-cli-seam).
+  `events` reads the event log and its cursor, read-only: `{file, size, cursorOffset, rotated,
+torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffset` is null
+  without a valid cursor, `rotated` lists rotated logs awaiting ingest, `torn` is true while the
+  last line has no newline, and `drained` is true when the cursor reaches the end with no rotated
+  log and no torn line. Its reporter blockers are `events_uningested:BYTES`, `events_rotated:N`,
+  `events_torn`, `events_cursor_invalid`, `events_cursor_ahead`, `events_unreadable` and
+  `events_dir_unreadable`, plus `events_legacy_outbox` while a 6.0 `events/` outbox awaits import.
+  `drained` at the top level also requires no idle blocker; see [Event log](runner.md#event-log).
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of

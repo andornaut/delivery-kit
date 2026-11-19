@@ -9,8 +9,8 @@ The legacy default is `var/`.
 The role registry, durable role messages, harness adapters, inbox review, the request ledger and
 the work protocol are [coordination-kit](https://github.com/andornaut/coordination-kit), which delivery-kit
 builds on. The resident runner decides when a scheduled review slot is due and hands it to the
-coordinator-installed coordination-kit CLI, records its bus events in coordination-kit's event
-outbox and asks that CLI to deliver them ([Coordinator CLI seam](docs/runner.md#coordinator-cli-seam)).
+coordinator-installed coordination-kit CLI, appends its bus events to a per-game event log and asks
+that CLI to ingest them ([Event log](docs/runner.md#event-log)).
 
 The `game-coordinator` role coordinates from the `game-coordinator` repository.
 
@@ -26,21 +26,21 @@ from disk after startup except configuration and state. Its child processes are 
 
 Games and game-coordinator pin the release asset as a devDependency and commit the lockfile
 integrity. The bundles inline coordination-kit's utilities, so a game pins only delivery-kit;
-delivery-kit 6.0.0 bundles coordination-kit 1.2.0, inside `>=1.0.1 <2.0.0`
+delivery-kit 6.1.0 bundles coordination-kit 1.2.0, inside `>=1.0.1 <2.0.0`
 ([Pin guard](docs/runner.md#pin-guard)). game-coordinator also pins coordination-kit directly
-for the roles' CLI, the channel MCP server and the reviews and event delivery each runner spawns,
-which need a release inside `>=1.2.0 <2.0.0`:
+for the roles' CLI, the channel MCP server and the reviews and event ingest each runner spawns,
+which need a release inside `>=2.0.0 <3.0.0`:
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.0.0/delivery-kit-6.0.0.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.0/delivery-kit-6.1.0.tgz"
 }
 ```
 
 A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
 runner runs from that game's own `node_modules`; game-coordinator's copy runs `check-config` and
 `status`, and its coordination-kit copy runs the coordination commands and the runners' reviews
-and event delivery.
+and event ingest.
 
 ## Commands
 
@@ -77,21 +77,21 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 
 ## Documentation
 
-| Doc                                                      | Covers                                                                                                                                                                                                         |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [docs/commands.md](docs/commands.md)                     | Per-command semantics and the commands that moved to coordination-kit                                                                                                                                          |
-| [docs/configuration.md](docs/configuration.md)           | `config.json` and `delivery-kit.json`: schedule, gate, resources, CI, deployment and reports                                                                                                                   |
-| [docs/registry.md](docs/registry.md)                     | Pointer: the registry moved to coordination-kit; what delivery-kit still reads from it                                                                                                                         |
-| [docs/messages.md](docs/messages.md)                     | Pointer: common role messages moved to coordination-kit                                                                                                                                                        |
-| [docs/review.md](docs/review.md)                         | The scheduled review seam the runner calls and the bus events it records, with their remedies                                                                                                                  |
-| [docs/state.md](docs/state.md)                           | The state layout, durable writes, desired and observed delivery control, and adopting persistent control                                                                                                       |
-| [docs/runner.md](docs/runner.md)                         | Launching, supervising and replacing the resident runner, the coordinator CLI seam, the pin guard and coordination-kit ranges, status and observer adoption, departures, the gate container and test overrides |
-| [docs/libraries.md](docs/libraries.md)                   | The public build API subpath and alias and the source identity library; the subpaths that moved                                                                                                                |
-| [docs/request-accounting.md](docs/request-accounting.md) | Pointer: the request ledger moved to coordination-kit                                                                                                                                                          |
-| [docs/work-protocol.md](docs/work-protocol.md)           | Pointer: the work protocol moved to coordination-kit                                                                                                                                                           |
-| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 6.0, 5.0, 4.7, 4.0 and 3.0, and the removed command forms                                                                                                                                         |
-| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                                                                                 |
-| [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                                                                        |
+| Doc                                                      | Covers                                                                                                                                                                                                                        |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [docs/commands.md](docs/commands.md)                     | Per-command semantics and the commands that moved to coordination-kit                                                                                                                                                         |
+| [docs/configuration.md](docs/configuration.md)           | `config.json` and `delivery-kit.json`: schedule, gate, resources, CI, deployment and reports                                                                                                                                  |
+| [docs/registry.md](docs/registry.md)                     | Pointer: the registry moved to coordination-kit; what delivery-kit still reads from it                                                                                                                                        |
+| [docs/messages.md](docs/messages.md)                     | Pointer: common role messages moved to coordination-kit                                                                                                                                                                       |
+| [docs/review.md](docs/review.md)                         | The scheduled review seam the runner calls and the bus events it records, with their remedies                                                                                                                                 |
+| [docs/state.md](docs/state.md)                           | The state layout, durable writes, desired and observed delivery control, and adopting persistent control                                                                                                                      |
+| [docs/runner.md](docs/runner.md)                         | Launching, supervising and replacing the resident runner, the coordinator CLI seam, the event log, the pin guard and coordination-kit ranges, status and observer adoption, departures, the gate container and test overrides |
+| [docs/libraries.md](docs/libraries.md)                   | The public build API subpath and alias and the source identity library; the subpaths that moved                                                                                                                               |
+| [docs/request-accounting.md](docs/request-accounting.md) | Pointer: the request ledger moved to coordination-kit                                                                                                                                                                         |
+| [docs/work-protocol.md](docs/work-protocol.md)           | Pointer: the work protocol moved to coordination-kit                                                                                                                                                                          |
+| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 6.0, 5.0, 4.7, 4.0 and 3.0, and the removed command forms                                                                                                                                                        |
+| [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                                                                                                |
+| [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                                                                                       |
 
 ## Developing
 

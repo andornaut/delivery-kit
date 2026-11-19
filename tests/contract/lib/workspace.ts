@@ -241,7 +241,8 @@ export class Workspace {
 
   /**
    * Install the fake coordination-kit CLI (lib/fake-coordination-kit.mjs) at the coordinator
-   * root. Unscripted, every review is skipped with nothing-due and every flush with no-events.
+   * root. Unscripted, every review is skipped with nothing-due and every ingest consumes the event
+   * log per the cursor contract.
    */
   installCoordinatorCli(): void {
     const cli = join(this.coordinator, COORDINATOR_CLI);
@@ -250,7 +251,7 @@ export class Workspace {
     writeJson(join(dirname(dirname(cli)), "package.json"), {
       name: "@andornaut/coordination-kit",
       type: "module",
-      version: "1.2.0",
+      version: "2.0.0",
     });
   }
 
@@ -551,12 +552,29 @@ export class Workspace {
     return statSync(this.path(...parts)).ino;
   }
 
-  /** Outbox events, oldest first. */
+  /** The events in bus/events.jsonl, oldest first; torn and malformed lines are left out. */
   events(): Array<Record<string, unknown>> {
-    return this.list("events")
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => this.readJson(join("events", name)))
-      .sort((a, b) => Number(a.created) - Number(b.created));
+    if (!this.exists("events.jsonl")) return [];
+    return this.read("events.jsonl")
+      .split("\n")
+      .slice(0, -1)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as Record<string, unknown>];
+        } catch {
+          return [];
+        }
+      });
+  }
+
+  /** The events the fake coordination-kit CLI ingested, oldest first. */
+  ingested(): Array<Record<string, unknown>> {
+    const path = join(this.coordinator, "fake-coordination-kit", "ingested.jsonl");
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
   }
 
   cleanup(): void {

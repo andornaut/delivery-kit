@@ -1,6 +1,3 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
 import { ProtocolStore } from "@andornaut/coordination-kit/build/protocol";
 import {
   createRegistry,
@@ -10,13 +7,12 @@ import {
 import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { emitEvent } from "../events.ts";
+import type { RunnerEvent } from "../events.ts";
 import { activateProtocolFixture, registryInput } from "../testFixtures.ts";
 import { adoptedResident, observerAdoption, reportResidentIdentity } from "./adoption.ts";
-import type { Events } from "./context.ts";
 import { busPaths } from "./state.ts";
 import { recordIdentity, statusReport } from "./status.ts";
-import { GAME, makeGame, testContext, type TestGame } from "./testGame.ts";
+import { GAME, loggedEvents, makeGame, testContext, type TestGame } from "./testGame.ts";
 
 const CLI_SHA256 = "c".repeat(64);
 const ADOPTED = "1234:1794994070515000000:d23faae9-397f-4aaa-abbe-b78d21512112";
@@ -65,22 +61,8 @@ async function adopt(
   });
 }
 
-/** Events through the real durable enqueue, which deduplicates on kind and key. */
-function durableEvents(test: TestGame): Events {
-  return {
-    emit: (kind, key, message) => emitEvent(test.game, { project: "Archie" }, kind, key, message),
-    flush: () => undefined,
-  };
-}
-
-function identityEvents(test: TestGame): Record<string, unknown>[] {
-  const directory = join(test.game.busDir, "events");
-  return readdirSync(directory)
-    .filter((name) => name.endsWith(".json"))
-    .map(
-      (name) => JSON.parse(readFileSync(join(directory, name), "utf8")) as Record<string, unknown>,
-    )
-    .filter((event) => event.kind === "resident-identity-changed");
+function identityEvents(test: TestGame): RunnerEvent[] {
+  return loggedEvents(test).filter((event) => event.type === "resident-identity-changed");
 }
 
 describe("adoptedResident", () => {
@@ -182,19 +164,22 @@ describe("reportResidentIdentity", () => {
   it("emits one event per new token that differs from the adopted one", async () => {
     const fixture = protocolGame();
     await adopt(fixture, ADOPTED);
-    const context = testContext(fixture.test, { events: durableEvents(fixture.test) });
+    const context = testContext(fixture.test, { events: "log" });
     reportResidentIdentity(context, "first-token");
     reportResidentIdentity(context, "first-token");
     expect(identityEvents(fixture.test)).toMatchObject([
       {
         key: "first-token",
-        message: expect.stringContaining(
-          `runner first-token differs from the observer adoption of ${ADOPTED}`,
+        detail: expect.stringMatching(
+          new RegExp(
+            `^Archie bus: Resident identity changed: runner first-token differs .* ${ADOPTED}`,
+          ),
         ),
-        sent: false,
+        kind: "runner",
+        status: null,
       },
     ]);
-    expect(identityEvents(fixture.test)[0]?.message).toContain(
+    expect(identityEvents(fixture.test)[0]?.detail).toContain(
       "Bus owner game-coordinator must refresh observer adoption.",
     );
     reportResidentIdentity(context, "second-token");
@@ -208,24 +193,24 @@ describe("reportResidentIdentity", () => {
   it("stays silent for the adopted token and without an active protocol", async () => {
     const fixture = protocolGame();
     await adopt(fixture, ADOPTED);
-    const context = testContext(fixture.test, { events: durableEvents(fixture.test) });
+    const context = testContext(fixture.test, { events: "log" });
     reportResidentIdentity(context, ADOPTED);
     const legacy = makeGame();
-    const legacyContext = testContext(legacy, { events: durableEvents(legacy) });
+    const legacyContext = testContext(legacy, { events: "log" });
     reportResidentIdentity(legacyContext, "first-token");
     for (const test of [fixture.test, legacy]) {
-      expect(() => identityEvents(test)).toThrow(/ENOENT/u);
+      expect(identityEvents(test)).toEqual([]);
     }
     expect(legacyContext.lines).toEqual([]);
   });
 
   it("logs an unknown adoption without reporting it", () => {
     const fixture = protocolGame();
-    const context = testContext(fixture.test, { events: durableEvents(fixture.test) });
+    const context = testContext(fixture.test, { events: "log" });
     reportResidentIdentity(context, "first-token");
     expect(context.lines).toEqual([
       "bus: observer adoption unknown (adoption_absent); no identity report",
     ]);
-    expect(() => identityEvents(fixture.test)).toThrow(/ENOENT/u);
+    expect(identityEvents(fixture.test)).toEqual([]);
   });
 });

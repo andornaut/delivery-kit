@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -109,7 +101,7 @@ describe("review deliver", () => {
     });
     expect(await cli.review(SLOT)).toEqual({
       claimed: true,
-      cli: { distSha256: SHA, version: "1.2.0" },
+      cli: { distSha256: SHA, version: "2.0.0" },
       detail: "brief r-1 sent to game-coordinator",
       reason: null,
       status: "delivered",
@@ -123,13 +115,13 @@ describe("review deliver", () => {
       },
     ]);
     expect(lines).toEqual([
-      `bus: coordinator CLI 1.2.0 (dist sha256 ${SHA}), inside >=1.2.0 <2.0.0`,
+      `bus: coordinator CLI 2.0.0 (dist sha256 ${SHA}), inside >=2.0.0 <3.0.0`,
     ]);
     expect(JSON.parse(readFileSync(seamFile, "utf8"))).toEqual({
       distSha256: SHA,
       schema: 1,
       seenAt: SEEN,
-      version: "1.2.0",
+      version: "2.0.0",
     });
     // A repeat call is the CLI's no-op: it returns the recorded outcome.
     expect(await cli.review(SLOT)).toMatchObject({ status: "delivered" });
@@ -163,7 +155,7 @@ describe("review deliver", () => {
     [{ stdout: "" }, "no result on stdout"],
     [{ stdout: '{"schema":1}\n{"schema":1}' }, "stdout holds more than one line"],
     [{ override: { schema: 2 } }, "malformed result: schema is not 1"],
-    [{ override: { kind: "events-flush" } }, "malformed result: kind is not review-deliver"],
+    [{ override: { kind: "events-ingest" } }, "malformed result: kind is not review-deliver"],
     [{ override: { game: "other-game" } }, "malformed result: game differs"],
     // The same instant in another form is not the slot that was sent.
     [{ override: { slot: "2026-11-04T03:20:00Z" } }, "malformed result: slot differs"],
@@ -171,7 +163,7 @@ describe("review deliver", () => {
     [{ override: { reason: "Not A Token" } }, "malformed result: reason"],
     [{ override: { reason: null, status: "deferred" } }, "malformed result: reason is null"],
     [{ override: { detail: 1 } }, "malformed result: detail"],
-    [{ override: { cli: { version: "1.2.0" } } }, "malformed result: cli"],
+    [{ override: { cli: { version: "2.0.0" } } }, "malformed result: cli"],
   ])("claims no delivery for %j", async (review, why) => {
     const { cli, lines, seamFile } = fixture({ review });
     const outcome = await cli.review(SLOT);
@@ -236,22 +228,22 @@ describe("review deliver", () => {
   it("defers an out-of-range CLI and probes it before asking it again", async () => {
     const { cli, lines, root, seamFile } = fixture({
       review: { status: "delivered" },
-      version: "2.0.0",
+      version: "3.0.0",
     });
     expect(await cli.review(SLOT)).toEqual({
       claimed: true,
-      detail: "coordinator CLI 2.0.0 is outside >=1.2.0 <2.0.0",
+      detail: "coordinator CLI 3.0.0 is outside >=2.0.0 <3.0.0",
       reason: "cli-version",
       status: "deferred",
     });
     expect(lines).toEqual([
-      `bus: coordinator CLI 2.0.0 (dist sha256 ${SHA}) is outside >=1.2.0 <2.0.0; reviews and event delivery defer`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}) is outside >=2.0.0 <3.0.0; reviews and event delivery defer`,
     ]);
     expect(coordinatorCliReport(seamFile)).toEqual({
       distSha256: SHA,
       seenAt: SEEN,
       supported: false,
-      version: "2.0.0",
+      version: "3.0.0",
     });
     // Still out of range: only the version probe runs.
     expect(await cli.review(SLOT + 1800)).toMatchObject({ reason: "cli-version" });
@@ -260,10 +252,10 @@ describe("review deliver", () => {
       ["--version", "--json"],
     ]);
     // A supported install is probed, logged and then asked.
-    scriptCoordinator(root, { distSha256: SHA, review: { status: "delivered" }, version: "1.2.1" });
+    scriptCoordinator(root, { distSha256: SHA, review: { status: "delivered" }, version: "2.0.1" });
     expect(await cli.review(SLOT + 3600)).toMatchObject({ status: "delivered" });
     expect(lines.at(-1)).toBe(
-      `bus: coordinator CLI 1.2.1 (dist sha256 ${SHA}), inside >=1.2.0 <2.0.0`,
+      `bus: coordinator CLI 2.0.1 (dist sha256 ${SHA}), inside >=2.0.0 <3.0.0`,
     );
     expect(coordinatorCalls(root).map((call) => call.args.slice(0, 2))).toEqual([
       ["review", "deliver"],
@@ -273,7 +265,7 @@ describe("review deliver", () => {
     ]);
   });
 
-  it.each(["1.1.0", "1.2.0-rc.1", "0.9.0"])("treats CLI %s as out of range", async (version) => {
+  it.each(["1.2.0", "2.0.0-rc.1", "3.0.0"])("treats CLI %s as out of range", async (version) => {
     const { cli } = fixture({ review: { status: "delivered" }, version });
     expect(await cli.review(SLOT)).toMatchObject({ reason: "cli-version", status: "deferred" });
   });
@@ -292,14 +284,14 @@ describe("review deliver", () => {
     scriptCoordinator(root, { distSha256: other, review: { status: "delivered" } });
     await cli.review(SLOT + 180);
     expect(lines).toEqual([
-      `bus: coordinator CLI 1.2.0 (dist sha256 ${SHA}), inside >=1.2.0 <2.0.0`,
-      `bus: coordinator CLI 1.2.0 (dist sha256 ${other}), inside >=1.2.0 <2.0.0`,
+      `bus: coordinator CLI 2.0.0 (dist sha256 ${SHA}), inside >=2.0.0 <3.0.0`,
+      `bus: coordinator CLI 2.0.0 (dist sha256 ${other}), inside >=2.0.0 <3.0.0`,
     ]);
     expect(coordinatorCliReport(seamFile)).toEqual({
       distSha256: other,
       seenAt: "2026-11-04T03:21:00Z",
       supported: true,
-      version: "1.2.0",
+      version: "2.0.0",
     });
   });
 });
@@ -307,12 +299,12 @@ describe("review deliver", () => {
 describe("probe", () => {
   it("logs the identity early, a missing CLI and an unusable probe", async () => {
     const present = fixture({});
-    await present.cli.probe();
+    expect(await present.cli.probe()).toEqual({ distSha256: SHA, version: "2.0.0" });
     expect(present.lines).toEqual([
-      `bus: coordinator CLI 1.2.0 (dist sha256 ${SHA}), inside >=1.2.0 <2.0.0`,
+      `bus: coordinator CLI 2.0.0 (dist sha256 ${SHA}), inside >=2.0.0 <3.0.0`,
     ]);
     const missing = fixture();
-    await missing.cli.probe();
+    expect(await missing.cli.probe()).toBeUndefined();
     expect(missing.lines).toEqual([
       `bus: coordinator CLI: ${join(missing.root, COORDINATOR_CLI)} is missing; reviews and event delivery defer`,
     ]);
@@ -324,107 +316,92 @@ describe("probe", () => {
   });
 });
 
-describe("events flush", () => {
-  it("runs one flush at a time and one more for requests made meanwhile", async () => {
-    const { cli, lines, root } = fixture({ flush: { delayMs: 300 } });
-    cli.flush();
-    cli.flush();
-    cli.flush();
+describe("events ingest", () => {
+  it("runs one ingest at a time and one more for requests made meanwhile", async () => {
+    const { cli, lines, root } = fixture({ ingest: { delayMs: 300 } });
+    cli.ingest();
+    cli.ingest();
+    cli.ingest();
     await cli.drain();
     expect(coordinatorCalls(root).map((call) => call.args)).toEqual([
-      ["events", "flush", "--game", GAME],
-      ["events", "flush", "--game", GAME],
+      ["events", "ingest", "--game", GAME],
+      ["events", "ingest", "--game", GAME],
     ]);
-    expect(lines.filter((line) => line.includes("flush"))).toEqual([]);
+    expect(lines.filter((line) => line.includes("ingest"))).toEqual([]);
   });
 
-  it("logs a deferral, a hold and a failure once until the outcome changes", async () => {
+  it("logs a deferral and a failure once until the outcome changes", async () => {
     const { cli, lines, root } = fixture({
-      flush: { detail: "no route", reason: "route-unavailable", status: "deferred" },
+      ingest: { detail: "store busy", reason: "cli-error", status: "deferred" },
     });
     for (let pass = 0; pass < 2; pass += 1) {
-      cli.flush();
+      cli.ingest();
       // eslint-disable-next-line no-await-in-loop
       await cli.drain();
     }
-    scriptCoordinator(root, { distSha256: SHA, flush: { exit: 1, stderr: "boom" } });
-    cli.flush();
+    scriptCoordinator(root, { distSha256: SHA, ingest: { exit: 1, stderr: "boom" } });
+    cli.ingest();
     await cli.drain();
-    scriptCoordinator(root, {
-      distSha256: SHA,
-      flush: { detail: "receipt ambiguous", override: { held: 2 }, status: "skipped" },
-    });
-    cli.flush();
+    scriptCoordinator(root, { distSha256: SHA, ingest: { status: "skipped" } });
+    cli.ingest();
     await cli.drain();
-    scriptCoordinator(root, { distSha256: SHA, flush: { status: "skipped" } });
-    cli.flush();
+    scriptCoordinator(root, { distSha256: SHA, ingest: { exit: 1, stderr: "boom" } });
+    cli.ingest();
     await cli.drain();
-    expect(lines.filter((line) => line.includes("flush"))).toEqual([
-      "bus: event flush deferred: route-unavailable: no route",
-      "bus: event flush failed: exit 1: boom; no delivery claimed",
-      "bus: event flush held 2: receipt ambiguous",
-    ]);
-  });
-
-  it("logs the CLI's outbox-unreadable deferral", async () => {
-    const { cli, lines, root } = fixture({ flush: { markSent: true } });
-    const events = join(root, "var", "games", GAME, "bus", "events");
-    mkdirSync(events, { recursive: true });
-    writeFileSync(join(events, "broken.json"), "{");
-    cli.flush();
-    await cli.drain();
-    expect(lines.filter((line) => line.includes("flush"))).toEqual([
-      "bus: event flush deferred: outbox-unreadable: an outbox event is unreadable",
+    expect(lines.filter((line) => line.includes("ingest"))).toEqual([
+      "bus: event ingest deferred: cli-error: store busy",
+      "bus: event ingest failed: exit 1: boom; no delivery claimed",
+      "bus: event ingest failed: exit 1: boom; no delivery claimed",
     ]);
   });
 
   it("defers while the CLI is missing and claims nothing for a malformed result", async () => {
     const missing = fixture();
-    missing.cli.flush();
+    missing.cli.ingest();
     await missing.cli.drain();
     expect(missing.lines).toEqual([
-      `bus: event flush deferred: cli-unavailable: ${join(missing.root, COORDINATOR_CLI)} is missing`,
+      `bus: event ingest deferred: cli-unavailable: ${join(missing.root, COORDINATOR_CLI)} is missing`,
     ]);
-    const malformed = fixture({ flush: { override: { delivered: -1 } } });
-    malformed.cli.flush();
+    const malformed = fixture({ ingest: { override: { kind: "events-flush" } } });
+    malformed.cli.ingest();
     await malformed.cli.drain();
-    expect(malformed.lines).toEqual([
-      "bus: event flush failed: malformed result: delivered or held; no delivery claimed",
-    ]);
+    expect(malformed.lines.at(-1)).toBe(
+      "bus: event ingest failed: malformed result: kind is not events-ingest; no delivery claimed",
+    );
   });
 });
 
 describe("parsing", () => {
-  const cli = { distSha256: SHA, version: "1.2.0" };
-  const flush = {
+  const cli = { distSha256: SHA, version: "2.0.0" };
+  const ingest = {
     cli,
-    delivered: 2,
-    detail: "2 delivered",
+    detail: "ingested 2",
     game: GAME,
-    held: 1,
-    kind: "events-flush",
+    kind: "events-ingest",
     reason: null,
     schema: 1,
     status: "delivered",
   };
 
-  it("reads an events-flush result with its counts", () => {
-    expect(parseResult({ game: GAME, kind: "events-flush" }, `${JSON.stringify(flush)}\n`)).toEqual(
-      {
-        claimed: true,
-        cli,
-        delivered: 2,
-        detail: "2 delivered",
-        held: 1,
-        reason: null,
-        status: "delivered",
-      },
-    );
+  it("reads an events-ingest result and ignores fields it does not define", () => {
+    const line = `${JSON.stringify({ ...ingest, ingested: 2 })}\n`;
+    expect(parseResult({ game: GAME, kind: "events-ingest" }, line)).toEqual({
+      claimed: true,
+      cli,
+      detail: "ingested 2",
+      reason: null,
+      status: "delivered",
+    });
+    const skipped = JSON.stringify({ ...ingest, reason: "no-events", status: "skipped" });
+    expect(parseResult({ game: GAME, kind: "events-ingest" }, skipped)).toMatchObject({
+      reason: "no-events",
+      status: "skipped",
+    });
   });
 
   it("reads a version identity and rejects an unusable one", () => {
     expect(parseVersion(`${JSON.stringify({ schema: 1, ...cli })}\n`)).toEqual(cli);
-    expect(parseVersion(JSON.stringify({ schema: 1, version: "1.2.0" }))).toBe(
+    expect(parseVersion(JSON.stringify({ schema: 1, version: "2.0.0" }))).toBe(
       "malformed result: version or distSha256",
     );
     expect(parseVersion(JSON.stringify({ schema: 2, ...cli }))).toBe(

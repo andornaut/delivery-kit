@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
+import { CURSOR_FILE, EVENTS_FILE } from "../events.ts";
+
 export interface BusPaths {
   readonly dir: string;
   readonly loopLock: string;
@@ -25,7 +27,14 @@ export interface BusPaths {
   readonly ciDir: string;
   readonly requestsDir: string;
   readonly requestsLock: string;
-  readonly eventsDir: string;
+  /** The runner event log; the runner is its only writer. */
+  readonly eventsLog: string;
+  /** The ingest cursor, written only by `coordination-kit events ingest`. */
+  readonly eventsCursor: string;
+  /** The 6.0 event outbox, imported into eventsLog at the first 6.1 start. */
+  readonly legacyOutbox: string;
+  /** The last SHA the runner saw complete: the base of the next deploy event's work range. */
+  readonly lastCompleteSha: string;
   readonly gateLogsDir: string;
   readonly identity: string;
   readonly runnerJson: string;
@@ -45,15 +54,18 @@ export function busPaths(dir: string): BusPaths {
     deployDir: at("deploy"),
     deployPending: at("deploy-pending"),
     dir,
-    eventsDir: at("events"),
+    eventsCursor: at(CURSOR_FILE),
+    eventsLog: at(EVENTS_FILE),
     gateFailedDir: at("gate-failed"),
     gateLogsDir: at("gate-logs"),
     identity: at("runner.identity.json"),
+    lastCompleteSha: at("last-complete.sha"),
     lastDeploy: at("last-deploy"),
     lastDeploySha: at("last-deploy.sha"),
     lastDeploySkippedSha: at("last-deploy-skipped.sha"),
     lastPush: at("last-push"),
     lastPushSha: at("last-push.sha"),
+    legacyOutbox: at("events"),
     loopLock: at("loop.lock"),
     requestsDir: at("requests"),
     requestsLock: join(dir, "requests", "requests.lock"),

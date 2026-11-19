@@ -32,6 +32,11 @@ const BUNDLED_SEAM = [
     message: SEAM_MESSAGE,
     name: `${COORDINATION_KIT}events`,
   },
+  {
+    importNames: ["enqueueEvent", "recordEvent"],
+    message: "Append runner events to bus/events.jsonl through src/bus/eventlog.ts.",
+    name: `${COORDINATION_KIT}events`,
+  },
 ];
 
 export default defineConfig(

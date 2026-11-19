@@ -15,7 +15,7 @@ import { at } from "../lib/time.ts";
 import { COORDINATOR_CLI, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000002";
-const RANGE = ">=1.2.0 <2.0.0";
+const RANGE = ">=2.0.0 <3.0.0";
 
 /** A game with the observer at minutes 20 and 50 and departures at 00 and 10. */
 function cadenceGame(
@@ -58,7 +58,7 @@ suite("review cadence", () => {
       }
       expect(slots).toEqual([at(20), at(50)]);
       expect(reviewCalls(ws)).toEqual([iso(at(20)), iso(at(50))]);
-      // Release ticks at the departure minutes report through the event outbox.
+      // Release ticks at the departure minutes report through the event log.
       const runner = await startRunnerAt(ws, at(-1, 50));
       try {
         // Wait for both release reports, not a fixed span of virtual time: a slow host may
@@ -66,12 +66,12 @@ suite("review cadence", () => {
         await runner.until(
           () =>
             virtualNow(ws) > at(11, 30) &&
-            ws.events().filter((event) => event.kind === "scheduled-status").length >= 2,
+            ws.events().filter((event) => event.type === "scheduled-status").length >= 2,
         );
       } finally {
         await runner.stop();
       }
-      const reports = ws.events().filter((event) => event.kind === "scheduled-status");
+      const reports = ws.events().filter((event) => event.type === "scheduled-status");
       expect(reports.map((event) => event.key)).toEqual([String(at(0)), String(at(10))]);
       expect(runner.output().stdout).toContain("bus: scheduled 00 10 (America/Toronto)");
     },
@@ -94,14 +94,14 @@ suite("review cadence", () => {
         execPath: process.execPath,
         root: ws.coordinator,
       });
-      expect(calls.some((call) => call.args.join(" ") === `events flush --game ${ws.game}`)).toBe(
+      expect(calls.some((call) => call.args.join(" ") === `events ingest --game ${ws.game}`)).toBe(
         true,
       );
       const distSha256 = createHash("sha256")
         .update(readFileSync(join(ws.coordinator, COORDINATOR_CLI)))
         .digest("hex");
       expect(result.stdout).toContain(
-        `bus: coordinator CLI 1.2.0 (dist sha256 ${distSha256}), inside ${RANGE}`,
+        `bus: coordinator CLI 2.0.0 (dist sha256 ${distSha256}), inside ${RANGE}`,
       );
       const status = await cli(ws, ["status"]);
       expect(status.code, status.stderr).toBe(0);
@@ -110,7 +110,7 @@ suite("review cadence", () => {
         distSha256,
         seenAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/),
         supported: true,
-        version: "1.2.0",
+        version: "2.0.0",
       });
       // runner.json keeps recording the bundled coordination-kit.
       expect(ws.readJson("runner.json").coordinationKitVersion).toBe(
@@ -121,7 +121,7 @@ suite("review cadence", () => {
   );
 
   contract(
-    "the released coordination-kit CLI answers the seam with typed results",
+    "the bundled coordination-kit release answers the version probe and is outside the 2.x range",
     async () => {
       const ws = workspace();
       cadenceGame(ws);
@@ -131,18 +131,23 @@ suite("review cadence", () => {
         readFileSync(join(dirname(dirname(cliPath)), "package.json"), "utf8"),
       ) as { version: string };
       const distSha256 = createHash("sha256").update(readFileSync(cliPath)).digest("hex");
-      // No route names this game, so the slot is not this runner's to dispatch.
+      // The devDependency predates the 2.x seam: its identity is read and it is deferred.
+      expect(version).toMatch(/^1\./);
       const result = await tick(ws, at(20));
       const output = result.stdout + result.stderr;
       expect(output).toContain(
-        `bus: coordinator CLI ${version} (dist sha256 ${distSha256}), inside ${RANGE}`,
+        `bus: coordinator CLI ${version} (dist sha256 ${distSha256}) is outside ${RANGE}`,
       );
-      expect(output).not.toMatch(/unavailable \(|no delivery claimed|is outside/);
+      // A probe killed at shutdown claims nothing; a parsed probe is never malformed.
+      expect(output).not.toMatch(/unavailable \(|malformed result/);
+      expect(output).toContain(
+        `bus: review deferred: cli-version: coordinator CLI ${version} is outside`,
+      );
       const status = JSON.parse((await cli(ws, ["status"])).stdout) as Record<
         string,
         Record<string, unknown>
       >;
-      expect(status.coordinator_cli).toMatchObject({ distSha256, supported: true, version });
+      expect(status.coordinator_cli).toMatchObject({ distSha256, supported: false, version });
     },
     CASE_TIMEOUT_MS,
   );
@@ -253,7 +258,9 @@ suite("review cadence", () => {
       expect(stdout).toContain(
         `bus: coordinator CLI: ${missing} is missing; reviews and event delivery defer`,
       );
-      expect(stdout).toContain(`bus: event flush deferred: cli-unavailable: ${missing} is missing`);
+      expect(stdout).toContain(
+        `bus: event ingest deferred: cli-unavailable: ${missing} is missing`,
+      );
       expect(reviewCalls(ws)).toEqual([iso(at(25))]);
       expect(pushes(ws)).toBe(1);
     },
@@ -266,16 +273,16 @@ suite("review cadence", () => {
       const ws = workspace();
       cadenceGame(ws);
       ws.config.schedule = { departures: ["20"], timezone: "America/Toronto" };
-      ws.scriptCoordinator({ review: { status: "delivered" }, version: "2.0.0" });
+      ws.scriptCoordinator({ review: { status: "delivered" }, version: "3.0.0" });
       impl.offer(ws, ["bus/feature"]);
-      const deferral = `bus: review deferred: cli-version: coordinator CLI 2.0.0 is outside ${RANGE}`;
+      const deferral = `bus: review deferred: cli-version: coordinator CLI 3.0.0 is outside ${RANGE}`;
       const result = await tick(ws, at(20), {
         done: ({ stderr }) => pushes(ws) === 1 && stderr.includes(deferral),
         // A departure under load can outlast the default settle; end on the condition.
         settle: 1_200,
       });
       expect(result.stdout).toContain(`is outside ${RANGE}; reviews and event delivery defer`);
-      expect(result.stdout).toContain("bus: event flush deferred: cli-version: ");
+      expect(result.stdout).toContain("bus: event ingest deferred: cli-version: ");
       // The startup probe found it out of range, so it is asked only for its version.
       expect(reviewCalls(ws)).toEqual([]);
       expect(ws.coordinatorCalls().every((call) => call.args[0] === "--version")).toBe(true);
@@ -284,7 +291,7 @@ suite("review cadence", () => {
         string,
         Record<string, unknown>
       >;
-      expect(status.coordinator_cli).toMatchObject({ supported: false, version: "2.0.0" });
+      expect(status.coordinator_cli).toMatchObject({ supported: false, version: "3.0.0" });
     },
     CASE_TIMEOUT_MS,
   );

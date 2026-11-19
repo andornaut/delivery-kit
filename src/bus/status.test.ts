@@ -71,8 +71,9 @@ describe("status report", () => {
       });
       const distSha256 = "e".repeat(64);
       for (const [version, supported] of [
-        ["1.2.0", true],
-        ["2.0.0", false],
+        ["1.2.0", false],
+        ["2.0.0", true],
+        ["3.0.0", false],
       ] as const) {
         writeFileSync(
           bus.seam,
@@ -309,8 +310,8 @@ describe("status report", () => {
     writeFileSync(join(bus.ciDir, `${"b".repeat(40)}.status`), "running\n");
     mkdirSync(bus.requestsDir);
     writeFileSync(join(bus.requestsDir, "r1.json"), '{"state": "pending"}\n');
-    mkdirSync(bus.eventsDir);
-    writeFileSync(join(bus.eventsDir, "e.json"), '{"sent": false}\n');
+    writeFileSync(bus.eventsLog, '{"schema":1}\n');
+    mkdirSync(bus.legacyOutbox);
     mkdirSync(bus.gateFailedDir);
     writeFileSync(join(bus.gateFailedDir, "c".repeat(40)), "failed\n");
     expect(statusReport(bus)).toMatchObject({
@@ -324,15 +325,40 @@ describe("status report", () => {
         "request_pending:r1",
       ],
       gate_failed: ["c".repeat(40)],
-      reporter_blockers: ["unsent_events:1"],
+      reporter_blockers: ["events_uningested:13", "events_legacy_outbox"],
     });
   });
 
-  it("reports an unreadable ci/ or events directory and a corrupt identity as blockers", () => {
+  it("reports the event log read-only, drained once ingest reaches its end", () => {
+    const bus = paths();
+    writeFileSync(bus.eventsLog, '{"schema":1}\n');
+    const cursor = { at: "2026-11-18T21:30:00Z", file: "events.jsonl", lastId: null, lines: 1 };
+    writeFileSync(bus.eventsCursor, JSON.stringify({ ...cursor, offset: 13, schema: 1 }));
+    expect(statusReport(bus)).toMatchObject({
+      drained: true,
+      events: {
+        cursorOffset: 13,
+        drained: true,
+        file: bus.eventsLog,
+        rotated: [],
+        size: 13,
+        torn: false,
+      },
+      reporter_blockers: [],
+    });
+    writeFileSync(join(bus.dir, "events.1800000000.jsonl"), "");
+    expect(statusReport(bus)).toMatchObject({
+      drained: false,
+      events: { drained: false, rotated: ["events.1800000000.jsonl"] },
+      reporter_blockers: ["events_rotated:1"],
+    });
+  });
+
+  it("reports an unreadable ci/ directory or event log and a corrupt identity as blockers", () => {
     const bus = paths();
     // A file where a directory belongs cannot be listed, unlike a directory that is absent.
     writeFileSync(bus.ciDir, "");
-    writeFileSync(bus.eventsDir, "");
+    mkdirSync(bus.eventsLog);
     writeFileSync(bus.identity, "{not json");
     expect(statusReport(bus)).toMatchObject({
       drained: false,
@@ -340,7 +366,7 @@ describe("status report", () => {
       identity_status: "unreadable",
       idle: false,
       idle_blockers: ["identity_unreadable", "ci_dir_unreadable"],
-      reporter_blockers: ["events_dir_unreadable"],
+      reporter_blockers: ["events_unreadable"],
     });
   });
 

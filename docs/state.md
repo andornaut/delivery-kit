@@ -15,8 +15,11 @@ when the work protocol is active:
 - `games/<g>/bus/`: the bus. It holds `runner.lock`, `loop.lock`, `departure.lock`,
   `active-departure`, `gate-failed/`, the detached `gate-<sha>` worktree kept for a pending
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
-  `events/` (coordination-kit's event outbox, with delivery-kit's per-commit `<sha>.state`),
-  `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
+  `events.jsonl` (the runner's event log), `events.cursor` (the ingest cursor, written only by
+  `coordination-kit events ingest`), `events.quarantine.jsonl` (malformed lines ingest set aside),
+  `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (the imported
+  6.0 outbox with its `<sha>.state` files), `last-complete.sha` (the last commit the runner saw
+  complete), `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
   `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
   `runner.log`, `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
 
@@ -27,7 +30,9 @@ An active work protocol uses its external `stateRoot` for publications and artif
 `<stateRoot>/transport/messages` for derived message transport state and recipient spools.
 The configuration pointer and cutover fence remain under `var/`.
 
-Every state write is a temp file, fsync, rename, then a directory fsync. Locks are `flock(1)` on
+Every state write is a temp file, fsync, rename, then a directory fsync. The event log is the
+exception: an append-only file whose lines are single `O_APPEND` writes followed by fsync
+([Event log](runner.md#event-log)). Locks are `flock(1)` on
 files under the selected state directories. Runners read `<game>/delivery-kit.json` and write only to their own
 `var/games/<g>/bus/`. delivery-kit writes nothing under any `.claude/` directory.
 

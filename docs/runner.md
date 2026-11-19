@@ -1,6 +1,6 @@
 # Resident runner
 
-The per-game resident runner: launch, supervision and replacement, the coordinator CLI seam, the pin guard, status provenance, observer adoption, departures, the gate container and test-only overrides.
+The per-game resident runner: launch, supervision and replacement, the coordinator CLI seam, the event log, the pin guard, status provenance, observer adoption, departures, the gate container and test-only overrides.
 
 Launch one runner per game from that game's canonical checkout, in its own session, so it
 resolves the game's own `node_modules`:
@@ -12,7 +12,7 @@ cd /absolute/path/to/game \
 
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
 and runs the scheduled and requested departure loop, the per-minute observer (scheduled reviews,
-scheduled-slot reports and event flushes), the 1800 s resource sampler and the CI watches
+scheduled-slot reports and event ingests), the 1800 s resource sampler and the CI watches
 in-process. The runner creates no timers: none outlives it, and no cron entry or other timer is
 involved. Supervision by a systemd user service is optional (see [Supervision](#supervision)). A
 missed scheduled slot is never replayed.
@@ -23,7 +23,7 @@ during one pass is skipped, not replayed.
 
 For each due slot the observer calls the coordinator-installed `coordination-kit review deliver`,
 logs the line for its result, reports scheduled slots when `scheduledTicks` is set, then requests
-an event flush ([Coordinator CLI seam](#coordinator-cli-seam)). coordination-kit composes and
+an event ingest ([Coordinator CLI seam](#coordinator-cli-seam)). coordination-kit composes and
 delivers the review and owns the per-slot receipt: a repeated call for a slot returns the recorded
 outcome without another send. The runner keeps no slot receipt, calls at most once per due slot
 in each pass and never replays a missed slot.
@@ -69,19 +69,21 @@ The runner spawns the coordinator root's
 | Call                                        | When                                                                  |
 | ------------------------------------------- | --------------------------------------------------------------------- |
 | `review deliver --game GAME_ID --slot SLOT` | Once per due `wakeMinutes` slot                                       |
-| `events flush --game GAME_ID`               | Once per observer pass and after each recorded event                  |
+| `events ingest --game GAME_ID`              | Once per observer pass and after each appended event                  |
 | `--version --json`                          | At startup, and before a call while the last seen CLI is out of range |
 
 `SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
 `2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
 call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed `game` (and `slot`,
 which must equal the one sent), `status` (`delivered`, `deferred` or `skipped`), `reason`, free-text
-`detail` and `cli` `{version, distSha256}`; a flush adds `delivered` and `held` counts. The runner
-parses the JSON, not its key order, and never parses `detail`.
+`detail` and `cli` `{version, distSha256}`. An ingest result has `kind` `events-ingest`: `delivered`
+when it ingested lines, `skipped` with `no-events` when nothing was new, and `deferred` with a
+reason otherwise. The runner parses the JSON, not its key order, ignores fields it does not define
+and never parses `detail`.
 
 `reason` is null when delivered, otherwise one of `route-unavailable`, `recipient-unavailable`,
 `recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`, `already-delivered`,
-`nothing-due`, `no-events`, `outbox-unreadable` or `cli-error`; an unknown token is a deferral.
+`nothing-due`, `no-events` or `cli-error`; an unknown token is a deferral.
 The runner adds `cli-unavailable` and `cli-version` for its own deferrals. coordination-kit
 records each review result under `bus/unblock/review-deliver/` and prints it again for a repeated
 call, except a `recipient-busy` lock contention, which it does not record. The runner never
@@ -97,10 +99,10 @@ passes `--capture`.
   shutdown) the runner kills the child's whole process group. A spawn never holds
   `departure.lock` and never delays a departure; departures never depend on the seam.
 - **Missing CLI:** while the file is missing, for example during `npm ci` at the root, reviews
-  and flushes defer with reason `cli-unavailable`. The next call after the install finishes
+  and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
 - **Range:** the CLI version in each result must satisfy `COORDINATOR_CLI_RANGE` in
-  `src/bus/pin.ts`, `>=1.2.0 <2.0.0` in delivery-kit 6.0.0. A result from a CLI outside it defers
+  `src/bus/pin.ts`, `>=2.0.0 <3.0.0` in delivery-kit 6.1.0. A result from a CLI outside it defers
   with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
   its version until a supported install answers. Departures continue.
 - **Identity:** the runner logs `bus: coordinator CLI VERSION (dist sha256 SHA256), inside RANGE`
@@ -121,14 +123,105 @@ Review lines in `runner.log`:
 | `skipped`, other reasons        | `bus: scheduled review WAKE: skipped REASON: DETAIL`                |
 | no delivery claimed             | `bus: scheduled review WAKE unavailable (WHY); no delivery claimed` |
 
-`WAKE` is the slot start in epoch seconds. A flush logs `bus: event flush deferred: REASON:
-DETAIL`, `bus: event flush held N: DETAIL` or `bus: event flush failed: WHY; no delivery claimed`
-once until its outcome changes, and nothing for a delivered or skipped flush with nothing held.
-At most one flush runs at a time; a request during one runs one more after it.
+`WAKE` is the slot start in epoch seconds. An ingest logs `bus: event ingest deferred: REASON:
+DETAIL` or `bus: event ingest failed: WHY; no delivery claimed` once until its outcome changes,
+and nothing for a delivered or skipped ingest. At most one ingest runs at a time; a request during
+one runs one more after it.
 
-The runner still records events in-process: `events/` is coordination-kit's outbox format, and
-delivery-kit's per-commit tracking and `complete` event run under its lock. The CLI only delivers
-them.
+## Event log
+
+The runner appends every bus event to `var/games/<g>/bus/events.jsonl` and is its only writer;
+the coordinator CLI's `events ingest` reads it. The schema lives in `src/events.ts`.
+
+- **Lines:** one JSON object per line, terminated by `\n`. The file is opened with `O_APPEND`;
+  each line is a single `write()` under 4096 bytes, then `fsync`. A `detail` that does not fit is
+  cut at a character boundary and ends in `[truncated]`.
+- **Fields:** `{"schema":1,"id":ID,"game":G,"kind":K,"type":T,"key":KEY,"at":ISO,"sha":SHA|null,
+"status":S|null,"detail":TEXT,"work":[IDS]|null}`. `id` is the sha256 hex of
+  `${game}\n${type}\n${key}`; `sha` is the key when the key is a commit SHA; `at` is UTC to the
+  second. `detail` is the operator-facing text, with the `<project> bus:` prefix the 6.0 outbox
+  gave it.
+- **At most once:** per `(type, key)`, through an in-memory ID set rebuilt at startup from the
+  unrotated log; coordination-kit's store keeps the older IDs unique. A failed append logs
+  `bus: event TYPE KEY not appended to events.jsonl (...); operator review required` to
+  `runner.log` and stderr and never stops a departure. Every appended event requests an ingest.
+- **`runner.started`:** appended at each start once the startup probe settles, keyed by the
+  runner token. Its `detail` is the JSON string `{token, deliveryKitVersion, cliSha256,
+coordinationKitVersion, distSha256}`: the loaded delivery-kit and the coordinator CLI identity,
+  null when the probe found none.
+- **`work`:** on a deploy event with status `ok` or `skipped`, the work IDs whose
+  `docs/work/<id>.md` front matter is `status: done` at this SHA but not at the last complete SHA,
+  from `git` in the game checkout; `[]` when none, null when either commit is unknown. A commit is
+  complete once its push, CI and deploy events are `ok` (deploy `ok` or `skipped`); the runner
+  keeps the last one in `bus/last-complete.sha`. Elsewhere `work` is null. A deploy event appended
+  before an earlier commit completes can list items that commit also lists; ingest records each
+  item once.
+- **COMPLETE:** a coordination-kit projection with a unique `(game, complete, sha)` key, formed
+  when the gate (or a docs-only skip), push and CI succeed and the deploy status is `ok` or
+  `skipped`. The runner appends no `complete` event.
+
+| `type`                                                                            | `kind`    | `status`  |
+| --------------------------------------------------------------------------------- | --------- | --------- |
+| `attempt`                                                                         | `attempt` | null      |
+| `blocked-main`, `blocked-fetch`, `blocked-load`                                   | `attempt` | `blocked` |
+| `gate_skipped`                                                                    | `gate`    | `skipped` |
+| `blocked-gate`                                                                    | `gate`    | `blocked` |
+| `blocked-full-gate`, `blocked-install`                                            | `gate`    | `failed`  |
+| `push`                                                                            | `push`    | `ok`      |
+| `blocked-push`                                                                    | `push`    | `blocked` |
+| `ci_pending`                                                                      | `ci`      | null      |
+| `ci_success`                                                                      | `ci`      | `ok`      |
+| `ci_failure`                                                                      | `ci`      | `failed`  |
+| `ci_auth_failed`                                                                  | `ci`      | `blocked` |
+| `ci_timeout`                                                                      | `ci`      | `timeout` |
+| `deploy_retry`                                                                    | `deploy`  | null      |
+| `deploy_success`                                                                  | `deploy`  | `ok`      |
+| `deploy_failure`                                                                  | `deploy`  | `failed`  |
+| `deploy_skipped`, `deploy_disabled`                                               | `deploy`  | `skipped` |
+| `scheduled-status`, `pin-mismatch`, `resident-identity-changed`, `runner.started` | `runner`  | null      |
+
+`blocked-full-gate` and `blocked-install` are failed gates: the SHA is never gated again.
+`blocked-gate` is a gate that could not run. `deploy_disabled` reports a push under
+`deploy.mode` `none`. A null status is progress or a notice, not an outcome.
+
+### Cursor and drain
+
+`events ingest` writes `bus/events.cursor` atomically, and the runner and `status` only read it:
+`{"schema":1,"file":"events.jsonl","offset":BYTES,"lines":N,"lastId":ID|null,"at":ISO}`.
+`status` reports the log as drained when `offset` equals the size of `events.jsonl`, no rotated
+`events.<epoch>.jsonl` remains and the last line is not torn. Ingest never consumes a torn line
+and moves a malformed complete line to `events.quarantine.jsonl`.
+
+### Rotation
+
+Before an append, when the cursor's offset equals the file size and the size exceeds 1 MiB, the
+runner renames the file to `events.<epochSeconds>.jsonl` and starts a new one. It never deletes a
+rotated file; ingest consumes and deletes it.
+
+### Torn last line
+
+A last line without its newline can only come from a runner that stopped mid-append. At startup,
+holding `runner.lock`, the runner writes a newline after it. A fragment that is valid JSON is the
+whole event without its newline and becomes a normal line, deduplicated with the rest. Any other
+fragment becomes a malformed complete line that ingest quarantines. Leaving it unterminated would
+merge the next append into it and lose that event to quarantine. After a failed append the runner
+checks the tail the same way before its next append.
+
+### Import of the 6.0 outbox
+
+At its first start, before the loop, a 6.1 runner appends the unsent `bus/events/*.json` outbox
+files to `events.jsonl` in creation order, keeping each kind as `type` with its family, then
+renames `bus/events` to `bus/events.imported-<epoch>`. The `<sha>.state` files stay in the renamed
+directory; the most recently completed one seeds `last-complete.sha`. An interrupted import
+repeats safely: events already in the log are skipped by ID. A 6.0 `complete` event imports as
+type `complete`, kind `runner`, status `ok`. Unreadable files stay in the renamed directory and
+the runner logs their count.
+
+### Rollback to 6.0
+
+Run `coordination-kit events ingest --game GAME_ID` once with the 2.0 CLI to drain
+`events.jsonl`, confirm `status --game GAME_ID` reports `events.drained`, then start the 6.0
+runner. The 2.0 CLI keeps `events flush` working on a 6.0 outbox.
 
 ## Supervision
 
@@ -195,9 +288,8 @@ registry's bus owner, adopted version and CLI digest. Every runner start writes 
 token, so a start leaves the previous adoption stale until the bus owner refreshes it.
 
 - At startup, when the protocol is active and the recorded adoption names a different token, the
-  runner logs it and emits one `resident-identity-changed` event keyed by the new token. It goes
-  through the existing reporter path to `reports.recipient` and names the bus owner who must
-  refresh observer adoption. Each token reports at most once. An absent, unreadable or
+  runner logs it and appends one `resident-identity-changed` event keyed by the new token. Ingest
+  delivers it to `reports.recipient`; it names the bus owner who must refresh observer adoption. Each token reports at most once. An absent, unreadable or
   inconsistent adoption is logged, not reported.
 - `status --game ID` reports `observer_adoption`, read-only:
   - `current`: the running identity is attested (`identity_status` `current`) and equals the
@@ -212,11 +304,12 @@ Neither the event nor the field records adoption, changes the registry or author
 ## Pin guard
 
 The bundles inline the coordination-kit utilities they use (layout, registry reads, locks,
-durable writes, configuration validation, IDs, event recording and the protocol read), so a game
+durable writes, configuration validation, IDs and the protocol read), so a game
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`;
-delivery-kit 6.0.0 supports `>=1.0.1 <2.0.0` and bundles 1.2.0, the same release as the coordinator CLI it requires. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
+delivery-kit 6.1.0 supports `>=1.0.1 <2.0.0` and bundles 1.2.0; the coordinator CLI it spawns is
+a 2.x release. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`, `>=`,
 `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.
 
@@ -224,8 +317,8 @@ build whose bundled version is outside the range, so a release can only ship a s
 (the range). game-coordinator pins coordination-kit directly for the roles' CLI, the channel
 MCP server and the seam the runner spawns, whose own range is `COORDINATOR_CLI_RANGE`
 ([Coordinator CLI seam](#coordinator-cli-seam)). Otherwise that install and each game's runner
-exchange data only through the on-disk formats, which stay compatible within coordination-kit
-1.x.
+exchange data only through on-disk formats: the registry, the event log and its cursor
+([Event log](#event-log)).
 
 At startup the runner writes `var/games/<g>/bus/runner.json`: `schema`, `pid`, `startedAt`,
 `version`, `coordinationKitVersion` (the bundled coordination-kit), `cliPath` (realpath of the
@@ -269,13 +362,12 @@ configuration, control, lock, idle and reporter/drain fields separately. Status 
 registry update, runner replacement or scheduling action.
 
 Reporter drain is separate from recipient inbox health. Use `status --game ID` to read
-`reporter_blockers` and `drained`; an idle runner can still have unsent events. delivery-kit has
-no reporter-event list, reconciliation or flush command. The resident observer requests
-coordination-kit's `events flush`, which processes event receipts in order and marks an event
-sent only after accepted delivery. Recipient inbox
-acknowledgements and common-message reconciliation do not change reporter event state.
-Installing a newer CLI or adopting its generic inbox does not prove an older resident's
-reporters drained. Preserve event originals and ambiguous receipts for supported owner review.
+`events`, `reporter_blockers` and `drained`; an idle runner can still have uningested events.
+delivery-kit has no reporter-event list, reconciliation or ingest command. The resident observer
+requests coordination-kit's `events ingest`, which advances the cursor only past lines it has
+stored. Recipient inbox acknowledgements and common-message reconciliation do not change the
+cursor. Installing a newer CLI or adopting its generic inbox does not prove an older resident's
+reporters drained.
 A persisted review snapshot proves collection, not reminder delivery. Adapter availability and
 local inbox health do not attest a resident reporter, native bridge or scheduled wake.
 

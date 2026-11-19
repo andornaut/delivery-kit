@@ -18,6 +18,7 @@ import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
 import { type AdoptedResident, observerAdoption } from "./adoption.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
+import { eventLogReport } from "./eventlog.ts";
 import { lockHeld } from "./locks.ts";
 import { coordinationKitReport } from "./pin.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
@@ -319,32 +320,11 @@ export function statusReport(
       blockers.push(`request_${value}:${name.slice(0, -".json".length)}`);
     }
   }
-  const reporters: string[] = [];
-  const events = jsonFiles(paths.eventsDir, ".json");
-  if (events === null) {
-    // Its dispatch lock cannot be probed either.
-    reporters.push("events_dir_unreadable");
-  } else if (lockHeld(join(paths.eventsDir, "dispatch.lock"))) {
-    reporters.push("event_flush_running");
-  }
-  let unsent = 0;
-  for (const name of events ?? []) {
-    let event: unknown;
-    try {
-      event = parse(readText(join(paths.eventsDir, name)));
-    } catch {
-      reporters.push(`event_unreadable:${name.slice(0, -".json".length)}`);
-      continue;
-    }
-    if (typeof event === "object" && event !== null && !Array.isArray(event)) {
-      const { sent, suppressed } = event as { sent?: unknown; suppressed?: unknown };
-      if (!sent && !suppressed) {
-        unsent += 1;
-      }
-    }
-  }
-  if (unsent > 0) {
-    reporters.push(`unsent_events:${unsent}`);
+  const events = eventLogReport(paths);
+  const reporters = [...events.blockers];
+  // A 6.0 outbox that the first 6.1 start has not imported yet.
+  if (existsSync(paths.legacyOutbox)) {
+    reporters.push("events_legacy_outbox");
   }
   const gateFailed = jsonFiles(paths.gateFailedDir, "");
   if (gateFailed === null) {
@@ -361,6 +341,7 @@ export function statusReport(
     coordination_kit: coordinationKitReport(),
     coordinator_cli: coordinatorCliReport(paths.seam),
     drained: blockers.length === 0 && reporters.length === 0,
+    events: events.report,
     gate_failed: gateFailed ?? [],
     identity,
     identity_status: identityStatus,

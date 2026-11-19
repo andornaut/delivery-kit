@@ -391,6 +391,11 @@ export async function stageDeploy(
     return;
   }
   if (context.config.deploy.mode === "none") {
+    context.events.emit(
+      "deploy_disabled",
+      sha,
+      `Deployment disabled for pushed ${sha}: deploy.mode is none; CI pending until verified.`,
+    );
     context.log(`deployment disabled for ${sha}`);
     await removeWorktree(context, pending.work);
     return;

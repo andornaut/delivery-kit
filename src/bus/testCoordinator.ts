@@ -31,7 +31,7 @@ export function installCoordinator(root: string, control: Record<string, unknown
   copyFileSync(FAKE_COORDINATOR_CLI, cli);
   writeFileSync(
     join(dirname(dirname(cli)), "package.json"),
-    JSON.stringify({ name: "@andornaut/coordination-kit", type: "module", version: "1.2.0" }),
+    JSON.stringify({ name: "@andornaut/coordination-kit", type: "module", version: "2.0.0" }),
   );
   scriptCoordinator(root, control);
   return cli;
@@ -49,22 +49,22 @@ export function coordinatorCalls(root: string): FakeCall[] {
 
 export interface RecordingCoordinator extends Coordinator {
   readonly reviews: number[];
-  flushes: number;
+  ingests: number;
   probes: number;
   /** The outcome of each review; replace it to script one. */
   outcome: (slot: number) => SeamOutcome | Promise<SeamOutcome>;
 }
 
-const CLI = { distSha256: "a".repeat(64), version: "1.2.0" };
+const CLI = { distSha256: "a".repeat(64), version: "2.0.0" };
 
 /** An in-process coordinator that records each call and delivers every review. */
 export function recordingCoordinator(): RecordingCoordinator {
   const coordinator: RecordingCoordinator = {
     drain: () => Promise.resolve(),
-    flush() {
-      coordinator.flushes += 1;
+    ingest() {
+      coordinator.ingests += 1;
     },
-    flushes: 0,
+    ingests: 0,
     outcome: () => ({
       claimed: true,
       cli: CLI,
@@ -74,7 +74,7 @@ export function recordingCoordinator(): RecordingCoordinator {
     }),
     probe() {
       coordinator.probes += 1;
-      return Promise.resolve();
+      return Promise.resolve(CLI);
     },
     probes: 0,
     review(slot) {

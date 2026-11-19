@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A fake coordinator-installed coordination-kit CLI implementing the runner seam contract:
-// `--root ROOT review deliver --game G --slot S`, `--root ROOT events flush --game G` and
+// `--root ROOT review deliver --game G --slot S`, `--root ROOT events ingest --game G` and
 // `--root ROOT --version --json`, each printing one JSON line. Installed as
 // ROOT/node_modules/@andornaut/coordination-kit/dist/cli.js. ROOT/fake-coordination-kit/control.json
 // scripts each command; every call is appended to ROOT/fake-coordination-kit/calls.jsonl.
@@ -8,14 +8,19 @@
 // S is an ISO 8601 minute start with an offset and is echoed as given. A typed review result is
 // recorded at ROOT/var/games/G/bus/unblock/review-deliver/<epoch seconds>.json and printed again
 // for a repeat call; recipient-busy (lock contention) is not recorded. A nonzero exit prints no
-// stdout and one `coordination-kit:` stderr line. An unreadable outbox event defers a flush with
-// outbox-unreadable before any send.
+// stdout and one `coordination-kit:` stderr line.
 //
-// control.json: { version?, distSha256?, review?, reviews?: {S: behaviour}, flush?, probe? }
+// `events ingest` follows the event log contract: it consumes rotated `events.<epoch>.jsonl` logs
+// oldest first and deletes them, then reads bus/events.jsonl from the cursor's offset (from 0 once
+// a rotated log was consumed), stops before a last line without its newline, appends a malformed
+// complete line to events.quarantine.jsonl and writes bus/events.cursor atomically. Ingested
+// events, deduplicated by ID, are appended to ROOT/fake-coordination-kit/ingested.jsonl.
+//
+// control.json: { version?, distSha256?, review?, reviews?: {S: behaviour}, ingest?, probe? }
 // A behaviour: { status?, reason?, detail?, override?, stdout?, stderr?, exit?, hang?, delayMs?,
-// markSent? }. `stdout` replaces the result line, `override` is merged over it, `hang` starts a
+// consume? }. `stdout` replaces the result line, `override` is merged over it, `hang` starts a
 // grandchild in the same process group, records both PIDs in hang.json and never exits, and
-// `markSent` (flush) marks the game's unsent outbox events sent.
+// `consume: false` (ingest) leaves the log and cursor untouched.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -24,6 +29,8 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -51,7 +58,7 @@ const control = readJson(join(dir, "control.json"), {});
 const cli = {
   distSha256:
     control.distSha256 ?? createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"),
-  version: control.version ?? "1.2.0",
+  version: control.version ?? "2.0.0",
 };
 
 function option(name) {
@@ -101,17 +108,7 @@ async function respond(behaviour, result) {
 
 /** The result's keys in the CLI's print order; the runner parses JSON and ignores the order. */
 function ordered(fields) {
-  const keys = [
-    "schema",
-    "kind",
-    "game",
-    "slot",
-    "status",
-    "reason",
-    "detail",
-    "delivered",
-    "held",
-  ];
+  const keys = ["schema", "kind", "game", "slot", "status", "reason", "detail"];
   const result = {};
   for (const key of keys) if (fields[key] !== undefined) result[key] = fields[key];
   return { ...result, cli };
@@ -122,20 +119,85 @@ function reason(behaviour, status, otherwise) {
   return status === "delivered" ? null : otherwise;
 }
 
-/** The game's outbox events, or null when one is unreadable. */
-function outbox(game) {
-  const events = join(root, "var", "games", game, "bus", "events");
-  if (!existsSync(events)) return [];
-  const entries = [];
-  for (const name of readdirSync(events)
-    .filter((entry) => entry.endsWith(".json"))
-    .sort()) {
-    const path = join(events, name);
-    const event = readJson(path, null);
-    if (event === null || typeof event !== "object") return null;
-    entries.push({ event, path });
+const ROTATED = /^events\.(\d+)\.jsonl$/;
+
+/** Complete lines of `buffer` from byte `offset`: each line and the offset after it. */
+function completeLines(buffer, offset) {
+  const lines = [];
+  let at = offset;
+  for (;;) {
+    const end = buffer.indexOf(0x0a, at);
+    if (end === -1) return lines;
+    lines.push({ end: end + 1, text: buffer.subarray(at, end).toString("utf8") });
+    at = end + 1;
   }
-  return entries;
+}
+
+/** Ingest the game's event log per the cursor contract; the number of lines consumed. */
+function ingest(game) {
+  const bus = join(root, "var", "games", game, "bus");
+  const cursorPath = join(bus, "events.cursor");
+  const seen = new Set(
+    existsSync(join(dir, "ingested.jsonl"))
+      ? readFileSync(join(dir, "ingested.jsonl"), "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line).id)
+      : [],
+  );
+  let cursor = readJson(cursorPath, { lastId: null, lines: 0, offset: 0 });
+  let consumed = 0;
+  const take = (text) => {
+    let event;
+    try {
+      event = JSON.parse(text);
+    } catch {
+      event = null;
+    }
+    if (event === null || typeof event !== "object" || event.schema !== 1 || !event.id) {
+      appendFileSync(join(bus, "events.quarantine.jsonl"), `${text}\n`);
+    } else {
+      if (!seen.has(event.id)) {
+        seen.add(event.id);
+        appendFileSync(join(dir, "ingested.jsonl"), `${JSON.stringify(event)}\n`);
+      }
+      cursor = { ...cursor, lastId: event.id };
+    }
+    consumed += 1;
+  };
+  const rotated = existsSync(bus)
+    ? readdirSync(bus)
+        .filter((name) => ROTATED.test(name))
+        .sort((a, b) => Number(ROTATED.exec(a)[1]) - Number(ROTATED.exec(b)[1]))
+    : [];
+  for (const name of rotated) {
+    for (const line of completeLines(readFileSync(join(bus, name)), 0)) take(line.text);
+    rmSync(join(bus, name));
+    cursor = { ...cursor, lines: 0, offset: 0 };
+  }
+  const log = join(bus, "events.jsonl");
+  if (existsSync(log)) {
+    const buffer = readFileSync(log);
+    if (cursor.offset > buffer.length) cursor = { ...cursor, lines: 0, offset: 0 };
+    for (const line of completeLines(buffer, cursor.offset)) {
+      take(line.text);
+      cursor = { ...cursor, lines: cursor.lines + 1, offset: line.end };
+    }
+  }
+  if (consumed > 0 || rotated.length > 0 || !existsSync(cursorPath)) {
+    const record = {
+      schema: 1,
+      file: "events.jsonl",
+      offset: cursor.offset,
+      lines: cursor.lines,
+      lastId: cursor.lastId,
+      at: new Date().toISOString(),
+    };
+    mkdirSync(bus, { recursive: true });
+    writeFileSync(`${cursorPath}.tmp`, `${JSON.stringify(record)}\n`);
+    renameSync(`${cursorPath}.tmp`, cursorPath);
+  }
+  return consumed;
 }
 
 if (rest[0] === "--version" && rest[1] === "--json") {
@@ -175,47 +237,23 @@ if (rest[0] === "--version" && rest[1] === "--json") {
     writeFileSync(record, `${JSON.stringify(result)}\n`);
   }
   await respond(behaviour, result);
-} else if (rest[0] === "events" && rest[1] === "flush") {
+} else if (rest[0] === "events" && rest[1] === "ingest") {
   const game = option("--game");
   if (game === undefined) {
-    process.stderr.write("usage: coordination-kit events flush --game G\n");
+    process.stderr.write("usage: coordination-kit events ingest --game G\n");
     process.exit(2);
   }
-  const behaviour = control.flush ?? {};
-  const entries = outbox(game);
-  if (entries === null) {
-    // An unreadable event file stops a flush before any send.
-    await respond(
-      behaviour,
-      ordered({
-        delivered: 0,
-        detail: "an outbox event is unreadable",
-        game,
-        held: 0,
-        kind: "events-flush",
-        reason: "outbox-unreadable",
-        schema: 1,
-        status: "deferred",
-      }),
-    );
-  }
-  let delivered = 0;
-  if (behaviour.markSent === true) {
-    for (const { event, path } of entries) {
-      if (event.sent === true || event.suppressed === true) continue;
-      writeFileSync(path, `${JSON.stringify({ ...event, sent: true })}\n`);
-      delivered += 1;
-    }
-  }
-  const status = behaviour.status ?? (delivered > 0 ? "delivered" : "skipped");
+  const behaviour = control.ingest ?? {};
+  const idle =
+    behaviour.consume === false || behaviour.hang === true || (behaviour.exit ?? 0) !== 0;
+  const consumed = idle ? 0 : ingest(game);
+  const status = behaviour.status ?? (consumed > 0 ? "delivered" : "skipped");
   await respond(
     behaviour,
     ordered({
-      delivered,
-      detail: behaviour.detail ?? `${delivered} delivered`,
+      detail: behaviour.detail ?? `ingested ${consumed}`,
       game,
-      held: 0,
-      kind: "events-flush",
+      kind: "events-ingest",
       reason: reason(behaviour, status, "no-events"),
       schema: 1,
       status,

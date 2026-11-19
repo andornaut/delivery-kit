@@ -18,6 +18,7 @@ interface Report {
   idle: boolean;
   idle_blockers: string[];
   drained: boolean;
+  events: Record<string, unknown>;
   reporter_blockers: string[];
   queued_branches: number;
   observer_adoption: string;
@@ -91,7 +92,15 @@ suite("status", () => {
   contract("a stale record with a free lock is not running, idle and drained", async () => {
     const ws = workspace();
     quiet(ws);
-    await (await started(ws)).stop();
+    const runner = await started(ws);
+    // runner.started is ingested before the stop, so the event log is drained.
+    await runner.until(
+      () =>
+        ws.exists("events.cursor") &&
+        Number(ws.readJson("events.cursor").offset) > 0 &&
+        Number(ws.readJson("events.cursor").offset) === ws.read("events.jsonl").length,
+    );
+    await runner.stop();
     ws.write("active-departure", "");
     const result = await report(ws);
     expect([result.status, result.runner_lock_held, result.identity_status]).toEqual([
@@ -176,22 +185,46 @@ suite("status", () => {
     }
   });
 
-  contract("unsent events and a running flush are not drained", async () => {
-    const ws = workspace();
-    quiet(ws);
-    ws.write("events/one.json", JSON.stringify({ sent: false }));
-    ws.write("events/two.json", JSON.stringify({ sent: false, suppressed: true }));
-    ws.write("events/dispatch.lock", "");
-    const flush = await hold(ws.path("events", "dispatch.lock"));
-    try {
-      const result = await report(ws);
-      expect(result.idle).toBe(true);
+  contract(
+    "an uningested, rotated or torn event log and a 6.0 outbox are not drained",
+    async () => {
+      const ws = workspace();
+      quiet(ws);
+      const line = '{"schema":1}\n';
+      ws.write("events.jsonl", line);
+      let result = await report(ws);
+      expect([result.idle, result.drained]).toEqual([true, false]);
+      expect(result.reporter_blockers).toEqual([`events_uningested:${line.length}`]);
+      const cursor = { at: "2026-11-18T21:30:00Z", file: "events.jsonl", lastId: null, lines: 1 };
+      ws.write("events.cursor", JSON.stringify({ ...cursor, offset: line.length, schema: 1 }));
+      result = await report(ws);
+      expect(result.drained).toBe(true);
+      expect(result.events).toEqual({
+        cursorOffset: line.length,
+        drained: true,
+        file: ws.path("events.jsonl"),
+        rotated: [],
+        size: line.length,
+        torn: false,
+      });
+      ws.write("events.jsonl", `${line}{"torn"`);
+      ws.write("events.1800000000.jsonl", line);
+      ws.write("events/one.json", JSON.stringify({ sent: false }));
+      result = await report(ws);
       expect(result.drained).toBe(false);
-      expect(result.reporter_blockers).toEqual(["event_flush_running", "unsent_events:1"]);
-    } finally {
-      await flush.release();
-    }
-  });
+      expect(result.reporter_blockers).toEqual([
+        "events_uningested:7",
+        "events_rotated:1",
+        "events_torn",
+        "events_legacy_outbox",
+      ]);
+      expect(result.events).toMatchObject({
+        drained: false,
+        rotated: ["events.1800000000.jsonl"],
+        torn: true,
+      });
+    },
+  );
 
   contract("a refused duplicate start leaves the holder's identity token intact", async () => {
     const ws = workspace();

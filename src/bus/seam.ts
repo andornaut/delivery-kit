@@ -34,7 +34,6 @@ export const KNOWN_REASONS: ReadonlySet<string> = new Set([
   "already-delivered",
   "nothing-due",
   "no-events",
-  "outbox-unreadable",
   "cli-error",
 ]);
 /** Reasons the runner itself reports without a CLI result. */
@@ -60,8 +59,6 @@ export interface SeamResult {
   readonly reason: string | null;
   readonly detail: string;
   readonly cli?: CliIdentity;
-  readonly delivered?: number;
-  readonly held?: number;
 }
 
 /** No delivery claimed: the spawn, its exit or its result was unusable. */
@@ -201,10 +198,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function count(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
 /** The single JSON object stdout holds, or why it is not one. */
 function resultLine(stdout: string): Record<string, unknown> | string {
   const text = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
@@ -235,10 +228,10 @@ function identity(value: unknown): CliIdentity | undefined {
     : undefined;
 }
 
-/** The expected fields of a review-deliver or events-flush result. */
+/** The expected fields of a review-deliver or events-ingest result. */
 type Expected =
   | { readonly kind: "review-deliver"; readonly game: string; readonly slot: string }
-  | { readonly kind: "events-flush"; readonly game: string };
+  | { readonly kind: "events-ingest"; readonly game: string };
 
 /** Validate one result; an unknown reason token turns any status into a deferral. */
 export function parseResult(expected: Expected, stdout: string): SeamOutcome {
@@ -279,13 +272,6 @@ export function parseResult(expected: Expected, stdout: string): SeamOutcome {
   if (cli === undefined) {
     return mismatch("cli");
   }
-  let counts: { delivered?: number; held?: number } = {};
-  if (expected.kind === "events-flush") {
-    if (!count(value.delivered) || !count(value.held)) {
-      return mismatch("delivered or held");
-    }
-    counts = { delivered: value.delivered, held: value.held };
-  }
   const known = reason === null || KNOWN_REASONS.has(reason);
   return {
     claimed: true,
@@ -293,7 +279,6 @@ export function parseResult(expected: Expected, stdout: string): SeamOutcome {
     detail: oneLine(detail),
     reason,
     status: known ? status : "deferred",
-    ...counts,
   };
 }
 
@@ -342,17 +327,20 @@ export function coordinatorCliReport(seamFile: string): CoordinatorCliReport {
   return { distSha256: null, seenAt: null, supported: null, version: null };
 }
 
-/** What the runner needs from the seam; the observer and the event flush call it. */
+/** What the runner needs from the seam; the observer and the event log call it. */
 export interface Coordinator {
   /** Deliver one due review slot. */
   review(slot: number, signal?: AbortSignal): Promise<SeamOutcome>;
-  /** Request an event flush: at most one runs, and a request during one runs one more after it. */
-  flush(): void;
-  /** Read the CLI identity with `--version --json` for an early log line. */
-  probe(signal?: AbortSignal): Promise<void>;
+  /** Request an event ingest: at most one runs, and a request during one runs one more after it. */
+  ingest(): void;
+  /**
+   * Read the CLI identity with `--version --json` for an early log line and `runner.started`;
+   * undefined when it is unavailable.
+   */
+  probe(signal?: AbortSignal): Promise<CliIdentity | undefined>;
   /** Kill every running child's process group. */
   stop(): void;
-  /** Settle every running child and queued flush. */
+  /** Settle every running child and queued ingest. */
   drain(): Promise<void>;
 }
 
@@ -383,9 +371,9 @@ export class CoordinatorCli implements Coordinator {
   #identity: (CliIdentity & { readonly supported: boolean }) | undefined;
   #written: { readonly key: string; readonly at: number } | undefined;
   #probing: Promise<unknown> | undefined;
-  #flushing = false;
-  #flushAgain = false;
-  #lastFlushLine: string | undefined;
+  #ingesting = false;
+  #ingestAgain = false;
+  #lastIngestLine: string | undefined;
 
   constructor(options: CoordinatorOptions) {
     this.#options = options;
@@ -520,66 +508,68 @@ export class CoordinatorCli implements Coordinator {
     );
   }
 
-  async probe(signal?: AbortSignal): Promise<void> {
+  async probe(signal?: AbortSignal): Promise<CliIdentity | undefined> {
     const probing = this.#probe(signal);
     this.#probing = probing;
     const probed = await probing;
     this.#probing = undefined;
     if (probed === true) {
-      return;
+      const identity = this.#identity;
+      return identity === undefined
+        ? undefined
+        : { distSha256: identity.distSha256, version: identity.version };
     }
     if (probed.claimed) {
       this.#options.log(`bus: coordinator CLI: ${probed.detail}; reviews and event delivery defer`);
     } else {
       this.#options.log(`bus: coordinator CLI unavailable (${probed.why})`);
     }
+    return undefined;
   }
 
-  /** Log a flush outcome that needs attention, once until the outcome changes. */
-  #logFlush(outcome: SeamOutcome): void {
+  /** Log an ingest outcome that needs attention, once until the outcome changes. */
+  #logIngest(outcome: SeamOutcome): void {
     let line: string | undefined;
     if (!outcome.claimed) {
-      line = `bus: event flush failed: ${outcome.why}; no delivery claimed`;
+      line = `bus: event ingest failed: ${outcome.why}; no delivery claimed`;
     } else if (outcome.status === "deferred") {
-      line = `bus: event flush deferred: ${outcome.reason ?? "unknown"}: ${outcome.detail}`;
-    } else if ((outcome.held ?? 0) > 0) {
-      line = `bus: event flush held ${outcome.held ?? 0}: ${outcome.detail}`;
+      line = `bus: event ingest deferred: ${outcome.reason ?? "unknown"}: ${outcome.detail}`;
     }
-    if (line !== undefined && line !== this.#lastFlushLine) {
+    if (line !== undefined && line !== this.#lastIngestLine) {
       this.#options.log(line);
     }
-    this.#lastFlushLine = line;
+    this.#lastIngestLine = line;
   }
 
-  async #flushLoop(): Promise<void> {
-    this.#flushing = true;
+  async #ingestLoop(): Promise<void> {
+    this.#ingesting = true;
     try {
       do {
-        this.#flushAgain = false;
-        // Each flush follows the previous one; a request meanwhile runs exactly one more.
+        this.#ingestAgain = false;
+        // Each ingest follows the previous one; a request meanwhile runs exactly one more.
         // eslint-disable-next-line no-await-in-loop
-        const outcome = await this.#call(["events", "flush", "--game", this.#options.game], {
+        const outcome = await this.#call(["events", "ingest", "--game", this.#options.game], {
           game: this.#options.game,
-          kind: "events-flush",
+          kind: "events-ingest",
         });
-        this.#logFlush(outcome);
-      } while (this.#flushAgain && !this.#stop.signal.aborted);
+        this.#logIngest(outcome);
+      } while (this.#ingestAgain && !this.#stop.signal.aborted);
     } catch (error) {
-      this.#options.log(`bus: event flush failed: ${String(error)}; no delivery claimed`);
+      this.#options.log(`bus: event ingest failed: ${String(error)}; no delivery claimed`);
     } finally {
-      this.#flushing = false;
+      this.#ingesting = false;
     }
   }
 
-  flush(): void {
+  ingest(): void {
     if (this.#stop.signal.aborted) {
       return;
     }
-    if (this.#flushing) {
-      this.#flushAgain = true;
+    if (this.#ingesting) {
+      this.#ingestAgain = true;
       return;
     }
-    const loop = this.#flushLoop();
+    const loop = this.#ingestLoop();
     this.#running.add(loop);
     void loop.finally(() => this.#running.delete(loop));
   }
