@@ -26,14 +26,14 @@ from disk after startup except configuration and state. Its child processes are 
 
 Games and game-coordinator pin the release asset as a devDependency and commit the lockfile
 integrity. The bundles inline coordination-kit's utilities, so a game pins only delivery-kit;
-delivery-kit 6.1.0 bundles coordination-kit 2.0.1, inside `>=2.0.0 <3.0.0`
+delivery-kit 6.1.1 bundles coordination-kit 2.0.1, inside `>=2.0.0 <3.0.0`
 ([Pin guard](docs/runner.md#pin-guard)). game-coordinator also pins coordination-kit directly
 for the roles' CLI, the channel MCP server and the reviews and event ingest each runner spawns,
 which need a release inside `>=2.0.1 <3.0.0`:
 
 ```json
 "devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.0/delivery-kit-6.1.0.tgz"
+  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v6.1.1/delivery-kit-6.1.1.tgz"
 }
 ```
 
