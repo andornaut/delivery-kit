@@ -35,3 +35,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0027 | Report the slot's own departure correctly in scheduled-slot status                 | [dk-0027.md](../work/dk-0027.md) |
 | dk-0028 | Stop and start a game's runner with one command                                    | [dk-0028.md](../work/dk-0028.md) |
 | dk-0031 | Bind the stock gate to the verified source identity                                | [dk-0031.md](../work/dk-0031.md) |
+| dk-0034 | Log a gate_passed event so every passed departure completes                        | [dk-0034.md](../work/dk-0034.md) |
