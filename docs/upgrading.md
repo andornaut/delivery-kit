@@ -53,7 +53,7 @@ swapped. Events stay in `events.jsonl` and are ingested once both match.
   6.0 outbox still imports with kind `runner` and a null status.
   A passed gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated
   departure completes, as from 6.1.2.
-- Pins: delivery-kit 7.0.0 bundles coordination-kit 2.0.1 (`COORDINATION_KIT_RANGE`
+- Pins: delivery-kit 7.0.0 bundles coordination-kit 3.0.0 (`COORDINATION_KIT_RANGE`
   `>=2.0.1 <4.0.0`); the bundle uses only `build/registry`, `build/review` and `build/shared`,
   which 3.0 keeps, so a later bundle move to 3.x is a pin change only.
 - Rollback: restore the coordination-kit 2.x pin at the root and the delivery-kit 6.1.2 pins in

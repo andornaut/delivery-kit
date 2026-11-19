@@ -374,7 +374,7 @@ durable writes, configuration validation and IDs) from `build/registry`, `build/
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`;
-delivery-kit 7.0.0 supports `>=2.0.1 <4.0.0` and bundles 2.0.1; the coordinator CLI it spawns
+delivery-kit 7.0.0 supports `>=2.0.1 <4.0.0` and bundles 3.0.0; the coordinator CLI it spawns
 needs `>=3.0.0 <4.0.0`. The bundled range spans 2.0.1 and 3.x because coordination-kit 3.0 keeps
 those subpaths unchanged, so moving the bundle to 3.x is a pin change only. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
