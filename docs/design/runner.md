@@ -30,3 +30,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0022 | Call the coordinator-installed coordination-kit CLI for reviews and event delivery | [dk-0022.md](../work/dk-0022.md) |
 | dk-0025 | Record runner events in a per-game append-only log                                 | [dk-0025.md](../work/dk-0025.md) |
 | dk-0026 | Derive observer adoption from the runner's own start record                        | [dk-0026.md](../work/dk-0026.md) |
+| dk-0027 | Report the slot's own departure correctly in scheduled-slot status                 | [dk-0027.md](../work/dk-0027.md) |
