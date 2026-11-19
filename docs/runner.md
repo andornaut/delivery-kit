@@ -332,7 +332,7 @@ durable writes, configuration validation, IDs and the protocol read), so a game
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`;
-delivery-kit 6.1.0 supports `>=2.0.0 <3.0.0` and bundles 2.0.1; the coordinator CLI it spawns
+delivery-kit 6.1 supports `>=2.0.0 <3.0.0` and bundles 2.1.2 (2.0.1 before 6.1.2); the coordinator CLI it spawns
 needs `>=2.0.1 <3.0.0`. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.

@@ -45,8 +45,9 @@ DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The i
   ([State](state.md)).
 - Events: a push under `deploy.mode` `none` now appends `deploy_disabled`. From 6.1.2, a passed
   gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated departure
-  completes; 6.1.0 and 6.1.1 complete only docs-only pushes.
-- Pins: delivery-kit 6.1.1 bundles coordination-kit 2.0.1 for its utilities
+  completes; 6.1.0 and 6.1.1 complete only docs-only pushes. A coordinator CLI from 2.1.2 stores
+  `gate_passed` without a role message; 2.0.1 to 2.1.1 deliver it as one.
+- Pins: delivery-kit 6.1.1 bundles coordination-kit 2.1.2 for its utilities
   (`COORDINATION_KIT_RANGE` `>=2.0.0 <3.0.0`); the coordinator CLI range is `>=2.0.1 <3.0.0`,
   because a 2.0.0 ingest quarantines the runner's lines with a null `status`.
 - Rollback: run `coordination-kit events ingest --game GAME_ID` once with the 2.0 CLI to drain

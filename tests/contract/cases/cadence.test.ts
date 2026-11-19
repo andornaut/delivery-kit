@@ -254,6 +254,13 @@ suite("review cadence", () => {
             `bus: COMPLETE ${sha}: gate ok, push ok, ci ok, deploy deploy_disabled (skipped)`,
           ),
         ]);
+        // gate_passed is stored for the projection but sends no role message.
+        expect(
+          store
+            .prepare("SELECT status FROM bus_events WHERE type = ? AND sha = ?")
+            .all("gate_passed", sha),
+        ).toEqual([{ status: "ok" }]);
+        expect(bodies.filter((body) => body.includes("gate_passed"))).toEqual([]);
       } finally {
         store.close();
       }
