@@ -10,11 +10,13 @@
 // for a repeat call; recipient-busy (lock contention) is not recorded. A nonzero exit prints no
 // stdout and one `coordination-kit:` stderr line.
 //
-// `events ingest` follows the event log contract: it consumes rotated `events.<epoch>.jsonl` logs
-// oldest first and deletes them, then reads bus/events.jsonl from the cursor's offset (from 0 once
-// a rotated log was consumed), stops before a last line without its newline, appends a malformed
-// complete line to events.quarantine.jsonl and writes bus/events.cursor atomically. Ingested
-// events, deduplicated by ID, are appended to ROOT/fake-coordination-kit/ingested.jsonl.
+// `events ingest` follows the event log contract: it finds the file the cursor names by its first
+// line ID (inode and device for a file without one) among the rotated `events.<epoch>.jsonl` logs
+// and bus/events.jsonl, finishes that file from the cursor's offset and newer files from 0 (every
+// file from 0 when none matches), deletes each rotated log it read, stops before a last line
+// without its newline, appends a malformed complete line to events.quarantine.jsonl and writes
+// bus/events.cursor atomically with the live log's identity. Ingested events, deduplicated by
+// ID, are appended to ROOT/fake-coordination-kit/ingested.jsonl.
 //
 // control.json: { version?, distSha256?, review?, reviews?: {S: behaviour}, ingest?, probe? }
 // A behaviour: { status?, reason?, detail?, override?, stdout?, stderr?, exit?, hang?, delayMs?,
@@ -31,6 +33,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -133,7 +136,34 @@ function completeLines(buffer, offset) {
   }
 }
 
-/** Ingest the game's event log per the cursor contract; the number of lines consumed. */
+function parseEvent(text) {
+  try {
+    const event = JSON.parse(text);
+    return event !== null && typeof event === "object" && event.schema === 1 && event.id
+      ? event
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A log's identity: its first complete line's ID (null without one), inode and device. */
+function identity(path) {
+  const stat = statSync(path);
+  const first = completeLines(readFileSync(path), 0)[0];
+  return { dev: stat.dev, firstId: (first && parseEvent(first.text)?.id) ?? null, inode: stat.ino };
+}
+
+function refersTo(cursor, id) {
+  if (cursor.firstId !== null) return cursor.firstId === id.firstId;
+  return id.firstId === null && cursor.inode === id.inode && cursor.dev === id.dev;
+}
+
+/**
+ * Ingest the game's event log per the cursor contract; the counts consumed. The cursor's offset
+ * applies to the file it names: the live log, or a rotated log that is finished from there before
+ * newer files are read from 0. A cursor that names no file present restarts every file at 0.
+ */
 function ingest(game) {
   const bus = join(root, "var", "games", game, "bus");
   const cursorPath = join(bus, "events.cursor");
@@ -145,59 +175,73 @@ function ingest(game) {
           .map((line) => JSON.parse(line).id)
       : [],
   );
-  let cursor = readJson(cursorPath, { lastId: null, lines: 0, offset: 0 });
-  let consumed = 0;
-  const take = (text) => {
-    let event;
-    try {
-      event = JSON.parse(text);
-    } catch {
-      event = null;
+  const counts = { held: 0, ingested: 0, quarantined: 0 };
+  const cursor = readJson(cursorPath, null);
+  const live = join(bus, "events.jsonl");
+  const files = [
+    ...(existsSync(bus)
+      ? readdirSync(bus)
+          .filter((name) => ROTATED.test(name))
+          .sort((a, b) => Number(ROTATED.exec(a)[1]) - Number(ROTATED.exec(b)[1]))
+          .map((name) => join(bus, name))
+      : []),
+    ...(existsSync(live) ? [live] : []),
+  ];
+  let start = 0;
+  let offset = 0;
+  if (cursor !== null) {
+    const at = files.findIndex((path) => refersTo(cursor, identity(path)));
+    if (at !== -1) {
+      start = at;
+      offset = cursor.offset;
     }
-    if (event === null || typeof event !== "object" || event.schema !== 1 || !event.id) {
-      appendFileSync(join(bus, "events.quarantine.jsonl"), `${text}\n`);
-    } else {
-      if (!seen.has(event.id)) {
-        seen.add(event.id);
-        appendFileSync(join(dir, "ingested.jsonl"), `${JSON.stringify(event)}\n`);
+  }
+  let lastId = cursor?.lastId ?? null;
+  let liveOffset = 0;
+  let liveLines = 0;
+  for (const [index, path] of files.entries()) {
+    const buffer = readFileSync(path);
+    const from = index < start ? 0 : index === start ? Math.min(offset, buffer.length) : 0;
+    const lines = completeLines(buffer, from);
+    for (const line of lines) {
+      const event = parseEvent(line.text);
+      if (event === null) {
+        appendFileSync(join(bus, "events.quarantine.jsonl"), `${line.text}\n`);
+        counts.quarantined += 1;
+      } else {
+        if (!seen.has(event.id)) {
+          seen.add(event.id);
+          appendFileSync(join(dir, "ingested.jsonl"), `${JSON.stringify(event)}\n`);
+          counts.ingested += 1;
+        }
+        lastId = event.id;
       }
-      cursor = { ...cursor, lastId: event.id };
     }
-    consumed += 1;
-  };
-  const rotated = existsSync(bus)
-    ? readdirSync(bus)
-        .filter((name) => ROTATED.test(name))
-        .sort((a, b) => Number(ROTATED.exec(a)[1]) - Number(ROTATED.exec(b)[1]))
-    : [];
-  for (const name of rotated) {
-    for (const line of completeLines(readFileSync(join(bus, name)), 0)) take(line.text);
-    rmSync(join(bus, name));
-    cursor = { ...cursor, lines: 0, offset: 0 };
-  }
-  const log = join(bus, "events.jsonl");
-  if (existsSync(log)) {
-    const buffer = readFileSync(log);
-    if (cursor.offset > buffer.length) cursor = { ...cursor, lines: 0, offset: 0 };
-    for (const line of completeLines(buffer, cursor.offset)) {
-      take(line.text);
-      cursor = { ...cursor, lines: cursor.lines + 1, offset: line.end };
+    if (path === live) {
+      liveOffset = lines.at(-1)?.end ?? from;
+      liveLines = completeLines(buffer.subarray(0, liveOffset), 0).length;
+      counts.held = liveOffset < buffer.length ? 1 : 0;
+    } else {
+      rmSync(path);
     }
   }
-  if (consumed > 0 || rotated.length > 0 || !existsSync(cursorPath)) {
+  if (existsSync(live)) {
+    const id = identity(live);
     const record = {
       schema: 1,
       file: "events.jsonl",
-      offset: cursor.offset,
-      lines: cursor.lines,
-      lastId: cursor.lastId,
+      offset: liveOffset,
+      lines: liveLines,
+      lastId,
+      firstId: id.firstId,
+      inode: id.inode,
+      dev: id.dev,
       at: new Date().toISOString(),
     };
-    mkdirSync(bus, { recursive: true });
     writeFileSync(`${cursorPath}.tmp`, `${JSON.stringify(record)}\n`);
     renameSync(`${cursorPath}.tmp`, cursorPath);
   }
-  return consumed;
+  return counts;
 }
 
 if (rest[0] === "--version" && rest[1] === "--json") {
@@ -246,19 +290,24 @@ if (rest[0] === "--version" && rest[1] === "--json") {
   const behaviour = control.ingest ?? {};
   const idle =
     behaviour.consume === false || behaviour.hang === true || (behaviour.exit ?? 0) !== 0;
-  const consumed = idle ? 0 : ingest(game);
+  const counts = idle ? { held: 0, ingested: 0, quarantined: 0 } : ingest(game);
+  const consumed = counts.ingested + counts.quarantined;
   const status = behaviour.status ?? (consumed > 0 ? "delivered" : "skipped");
-  await respond(
-    behaviour,
-    ordered({
-      detail: behaviour.detail ?? `ingested ${consumed}`,
+  await respond(behaviour, {
+    ...ordered({
+      detail: behaviour.detail ?? `ingested ${counts.ingested}`,
       game,
       kind: "events-ingest",
       reason: reason(behaviour, status, "no-events"),
       schema: 1,
       status,
     }),
-  );
+    completed: 0,
+    delivered: consumed,
+    held: counts.held,
+    ingested: counts.ingested,
+    quarantined: counts.quarantined,
+  });
 } else {
   process.stderr.write(`coordination-kit: unknown command ${rest.join(" ")}\n`);
   process.exit(2);

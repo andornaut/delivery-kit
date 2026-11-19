@@ -215,15 +215,23 @@ export function parseLine(text: string): RunnerEvent | undefined {
 export interface EventCursor {
   readonly schema: typeof EVENT_SCHEMA;
   readonly file: typeof EVENTS_FILE;
-  /** Bytes of events.jsonl ingest has consumed; always at a line boundary. */
+  /** Bytes of the cursor's file ingest has consumed; always at a line boundary. */
   readonly offset: number;
   readonly lines: number;
   readonly lastId: string | null;
+  /** The ID of the file's first line; null for a file without one, matched by inode and dev. */
+  readonly firstId: string | null;
+  readonly inode: number;
+  readonly dev: number;
   readonly at: string;
 }
 
 function count(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function idOrNull(value: unknown): boolean {
+  return value === null || (typeof value === "string" && SHA256.test(value));
 }
 
 /** The cursor, or undefined when the text is not a valid cursor. */
@@ -240,12 +248,35 @@ export function parseCursor(text: string): EventCursor | undefined {
     value.file !== EVENTS_FILE ||
     !count(value.offset) ||
     !count(value.lines) ||
-    (value.lastId !== null && (typeof value.lastId !== "string" || !SHA256.test(value.lastId))) ||
+    !idOrNull(value.lastId) ||
+    !idOrNull(value.firstId) ||
+    !count(value.inode) ||
+    !count(value.dev) ||
     typeof value.at !== "string"
   ) {
     return undefined;
   }
   return value as unknown as EventCursor;
+}
+
+/** A log file's identity as the cursor names it. */
+export interface LogIdentity {
+  readonly firstId: string | null;
+  readonly inode: number;
+  readonly dev: number;
+}
+
+/**
+ * Whether the cursor refers to the file with `identity`: the same first line ID, or, for a file
+ * without one, the same inode and device.
+ */
+export function cursorRefersTo(cursor: EventCursor, identity: LogIdentity): boolean {
+  if (cursor.firstId !== null) {
+    return cursor.firstId === identity.firstId;
+  }
+  return (
+    identity.firstId === null && cursor.inode === identity.inode && cursor.dev === identity.dev
+  );
 }
 
 /** The `runner.started` detail, a JSON string. */

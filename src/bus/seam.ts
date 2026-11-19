@@ -59,7 +59,16 @@ export interface SeamResult {
   readonly reason: string | null;
   readonly detail: string;
   readonly cli?: CliIdentity;
+  /** An ingest result's counts, each present only when the CLI reported it. */
+  readonly counts?: Readonly<Partial<Record<IngestCount, number>>>;
 }
+
+/**
+ * The counts an events-ingest result may carry: lines ingested, quarantined, COMPLETE reports
+ * formed, lines committed (`delivered`) and `held` (1 while a torn tail is pending).
+ */
+export const INGEST_COUNTS = ["completed", "delivered", "held", "ingested", "quarantined"] as const;
+export type IngestCount = (typeof INGEST_COUNTS)[number];
 
 /** No delivery claimed: the spawn, its exit or its result was unusable. */
 export interface SeamUnclaimed {
@@ -272,6 +281,19 @@ export function parseResult(expected: Expected, stdout: string): SeamOutcome {
   if (cli === undefined) {
     return mismatch("cli");
   }
+  const counts: Partial<Record<IngestCount, number>> = {};
+  if (expected.kind === "events-ingest") {
+    for (const name of INGEST_COUNTS) {
+      const field = value[name];
+      if (field === undefined) {
+        continue;
+      }
+      if (!Number.isSafeInteger(field) || (field as number) < 0) {
+        return mismatch(name);
+      }
+      counts[name] = field as number;
+    }
+  }
   const known = reason === null || KNOWN_REASONS.has(reason);
   return {
     claimed: true,
@@ -279,6 +301,7 @@ export function parseResult(expected: Expected, stdout: string): SeamOutcome {
     detail: oneLine(detail),
     reason,
     status: known ? status : "deferred",
+    ...(Object.keys(counts).length === 0 ? {} : { counts }),
   };
 }
 

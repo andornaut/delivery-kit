@@ -26,10 +26,11 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   `events` reads the event log and its cursor, read-only: `{file, size, cursorOffset, rotated,
 torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffset` is null
   without a valid cursor, `rotated` lists rotated logs awaiting ingest, `torn` is true while the
-  last line has no newline, and `drained` is true when the cursor reaches the end with no rotated
-  log and no torn line. Its reporter blockers are `events_uningested:BYTES`, `events_rotated:N`,
-  `events_torn`, `events_cursor_invalid`, `events_cursor_ahead`, `events_unreadable` and
-  `events_dir_unreadable`, plus `events_legacy_outbox` while a 6.0 `events/` outbox awaits import.
+  last line has no newline, and `drained` is true when the cursor names the live log and reaches
+  its end, with no rotated log and no torn line. Its reporter blockers are `events_uningested:BYTES`, `events_rotated:N`,
+  `events_torn`, `events_cursor_invalid`, `events_cursor_ahead`, `events_cursor_rotated` (the
+  cursor names a rotated log), `events_cursor_unmatched` (it names no file present),
+  `events_unreadable` and `events_dir_unreadable`, plus `events_legacy_outbox` while a 6.0 `events/` outbox awaits import.
   `drained` at the top level also requires no idle blocker; see [Event log](runner.md#event-log).
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's

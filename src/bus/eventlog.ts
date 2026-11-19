@@ -13,6 +13,7 @@ import {
   readFileSync,
   readSync,
   renameSync,
+  type Stats,
   statSync,
   writeSync,
 } from "node:fs";
@@ -23,6 +24,7 @@ import { fsyncDirectory } from "@andornaut/coordination-kit/build/shared";
 import {
   cleanDetail,
   completesDeploy,
+  cursorRefersTo,
   type EventCursor,
   eventId,
   EVENTS_FILE,
@@ -32,6 +34,7 @@ import {
   IMPORTED_PREFIX,
   isoSeconds,
   LINE_LIMIT,
+  type LogIdentity,
   makeEvent,
   parseCursor,
   parseLine,
@@ -114,6 +117,58 @@ export function readCursor(path: string): EventCursor | "invalid" | undefined {
     return errno(error) === "ENOENT" ? undefined : "invalid";
   }
   return parseCursor(text) ?? "invalid";
+}
+
+/** The ID of the file's first complete line, null when it has none, undefined when absent. */
+export function firstLineId(path: string): string | null | undefined {
+  let head: Buffer;
+  try {
+    head = readAt(path, 0, LINE_LIMIT);
+  } catch (error) {
+    if (errno(error) === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+  const end = head.indexOf(0x0a);
+  return end === -1 ? null : (parseLine(head.subarray(0, end).toString("utf8"))?.id ?? null);
+}
+
+/** The identity a cursor names a log by, or undefined when the file does not exist. */
+export function logIdentity(path: string): LogIdentity | undefined {
+  let stat: Stats;
+  try {
+    stat = statSync(path);
+  } catch (error) {
+    if (errno(error) === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+  return { dev: stat.dev, firstId: firstLineId(path) ?? null, inode: stat.ino };
+}
+
+/** Which file the cursor refers to: the live log, a rotated one still present, or neither. */
+export function cursorTarget(
+  context: {
+    readonly dir: string;
+    readonly live: LogIdentity | undefined;
+    readonly rotated: readonly string[];
+  },
+  cursor: EventCursor,
+): "live" | "rotated" | "unmatched" {
+  if (context.live !== undefined && cursorRefersTo(cursor, context.live)) {
+    return "live";
+  }
+  const rotated = context.rotated.some((name) => {
+    try {
+      const identity = logIdentity(join(context.dir, name));
+      return identity !== undefined && cursorRefersTo(cursor, identity);
+    } catch {
+      return false;
+    }
+  });
+  return rotated ? "rotated" : "unmatched";
 }
 
 /** Rotated logs awaiting ingest, oldest first. */
@@ -337,6 +392,11 @@ export class EventLog {
     if (cursor === undefined || cursor === "invalid" || cursor.offset !== size) {
       return;
     }
+    // The offset counts only for the file the cursor names.
+    const live = logIdentity(eventsLog);
+    if (live === undefined || !cursorRefersTo(cursor, live)) {
+      return;
+    }
     const name = `events.${this.#options.now()}.jsonl`;
     if (existsSync(join(dir, name))) {
       return;
@@ -424,6 +484,24 @@ export class EventLog {
   }
 
   /**
+   * A push that has not completed by cutover gets a `push` line, so the COMPLETE projection can
+   * form when its CI and deployment finish under 6.1. Its key is the pushed SHA, as the original
+   * push event's was, so an imported original and a repeated import deduplicate.
+   */
+  #importLastPush(): void {
+    const pushed = readTrimmed(this.#options.paths.lastPushSha);
+    if (pushed === undefined || !SHA40.test(pushed) || pushed === this.#lastComplete) {
+      return;
+    }
+    const { game } = this.#options;
+    if (!this.#ids.has(eventId(game, "push", pushed))) {
+      this.#append(
+        makeEvent({ at: this.#at(), detail: "imported at 6.1 start", game }, "push", pushed),
+      );
+    }
+  }
+
+  /**
    * Append the 6.0 outbox's unsent events in creation order, keeping each kind as `type`, then
    * rename bus/events to events.imported-<epoch>. Duplicates by ID are skipped, so an interrupted
    * import repeats safely; `<sha>.state` files stay in the renamed directory.
@@ -479,6 +557,7 @@ export class EventLog {
         this.#recordComplete(seed);
       }
     }
+    this.#importLastPush();
     let epoch = this.#options.now();
     while (existsSync(join(dir, `${IMPORTED_PREFIX}${epoch}`))) {
       epoch += 1;
@@ -498,13 +577,16 @@ export interface EventLogReport {
   readonly file: string;
   /** Bytes in events.jsonl; 0 when it does not exist, null when unreadable. */
   readonly size: number | null;
-  /** The cursor's offset; null when absent or invalid. */
+  /** The cursor's offset in the file it names; null when absent or invalid. */
   readonly cursorOffset: number | null;
   /** Rotated logs awaiting ingest, oldest first. */
   readonly rotated: string[];
   /** The last line has no newline yet. */
   readonly torn: boolean;
-  /** Ingest has consumed every complete line and no rotated log remains. */
+  /**
+   * The cursor names the live log and has consumed every complete line, no rotated log remains
+   * and the last line is complete.
+   */
   readonly drained: boolean;
 }
 
@@ -516,9 +598,11 @@ export function eventLogReport(paths: BusPaths): {
   const blockers: string[] = [];
   let size: number | null;
   let torn = false;
+  let live: LogIdentity | undefined;
   try {
     size = sizeOf(paths.eventsLog) ?? 0;
     torn = tornTail(paths.eventsLog) !== undefined;
+    live = logIdentity(paths.eventsLog);
   } catch {
     size = null;
     blockers.push("events_unreadable");
@@ -533,14 +617,21 @@ export function eventLogReport(paths: BusPaths): {
   if (cursor === "invalid") {
     blockers.push("events_cursor_invalid");
   }
-  const offset = cursor === undefined || cursor === "invalid" ? null : cursor.offset;
-  if (size !== null && cursor !== "invalid") {
-    const consumed = offset ?? 0;
+  const valid = cursor === undefined || cursor === "invalid" ? undefined : cursor;
+  const target = valid && cursorTarget({ dir: paths.dir, live, rotated }, valid);
+  if (size !== null && live !== undefined && cursor !== "invalid") {
+    // Only a cursor that names the live log counts toward it.
+    const consumed = target === "live" ? (valid?.offset ?? 0) : 0;
     if (consumed < size) {
       blockers.push(`events_uningested:${size - consumed}`);
-    } else if (consumed > size && rotated.length === 0) {
+    } else if (consumed > size) {
       blockers.push("events_cursor_ahead");
     }
+  }
+  if (target === "rotated") {
+    blockers.push("events_cursor_rotated");
+  } else if (target === "unmatched" && live !== undefined) {
+    blockers.push("events_cursor_unmatched");
   }
   if (rotated.length > 0) {
     blockers.push(`events_rotated:${rotated.length}`);
@@ -551,7 +642,7 @@ export function eventLogReport(paths: BusPaths): {
   return {
     blockers,
     report: {
-      cursorOffset: offset,
+      cursorOffset: valid?.offset ?? null,
       drained: blockers.length === 0,
       file: paths.eventsLog,
       rotated,

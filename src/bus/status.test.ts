@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { holdLock } from "@andornaut/coordination-kit/build/shared";
@@ -332,8 +332,13 @@ describe("status report", () => {
   it("reports the event log read-only, drained once ingest reaches its end", () => {
     const bus = paths();
     writeFileSync(bus.eventsLog, '{"schema":1}\n');
+    // The line has no ID, so the cursor names the file by inode and device.
+    const { dev, ino } = statSync(bus.eventsLog);
     const cursor = { at: "2026-11-18T21:30:00Z", file: "events.jsonl", lastId: null, lines: 1 };
-    writeFileSync(bus.eventsCursor, JSON.stringify({ ...cursor, offset: 13, schema: 1 }));
+    writeFileSync(
+      bus.eventsCursor,
+      JSON.stringify({ ...cursor, dev, firstId: null, inode: ino, offset: 13, schema: 1 }),
+    );
     expect(statusReport(bus)).toMatchObject({
       drained: true,
       events: {

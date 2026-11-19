@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  cursorRefersTo,
   EVENT_TYPES,
   eventId,
   familyOf,
@@ -159,6 +160,9 @@ describe("the cursor and work files", () => {
   const cursor = {
     at: "2026-11-18T21:30:00Z",
     file: "events.jsonl",
+    dev: 2049,
+    firstId: "b".repeat(64),
+    inode: 1234,
     lastId: "a".repeat(64),
     lines: 2,
     offset: 512,
@@ -174,10 +178,24 @@ describe("the cursor and work files", () => {
       { ...cursor, offset: -1 },
       { ...cursor, offset: 1.5 },
       { ...cursor, lastId: "x" },
+      { ...cursor, firstId: "x" },
+      { ...cursor, firstId: undefined },
+      { ...cursor, inode: -1 },
+      { ...cursor, dev: "2049" },
     ]) {
       expect(parseCursor(JSON.stringify(invalid))).toBeUndefined();
     }
     expect(parseCursor("{")).toBeUndefined();
+  });
+
+  it("matches a file by its first line ID, or by inode and dev when it has none", () => {
+    const parsed = parseCursor(JSON.stringify(cursor))!;
+    expect(cursorRefersTo(parsed, { dev: 1, firstId: "b".repeat(64), inode: 1 })).toBe(true);
+    expect(cursorRefersTo(parsed, { dev: 2049, firstId: "c".repeat(64), inode: 1234 })).toBe(false);
+    const empty = parseCursor(JSON.stringify({ ...cursor, firstId: null }))!;
+    expect(cursorRefersTo(empty, { dev: 2049, firstId: null, inode: 1234 })).toBe(true);
+    expect(cursorRefersTo(empty, { dev: 2049, firstId: null, inode: 1235 })).toBe(false);
+    expect(cursorRefersTo(empty, { dev: 2049, firstId: "b".repeat(64), inode: 1234 })).toBe(false);
   });
 
   it("reads the front matter status of a work file", () => {

@@ -258,6 +258,10 @@ suite("events", () => {
       legacy("first", { kind: "push" }, 1);
       legacy("delivered", { kind: "attempt", sent: true }, 0);
       ws.write(`events/${SHA}.state`, '{"ci":"pending","deploy":"pending","pushed":true}\n');
+      // The last push, whose CI failed, never completed: the import adds its push line.
+      const last = "d".repeat(40);
+      ws.write("last-push.sha", `${last}\n`);
+      ws.write(`ci/${last}.status`, "failure\n");
       const runner = start(ws);
       try {
         await runner.until(() => types(ws).includes("runner.started") && drained(ws));
@@ -269,8 +273,10 @@ suite("events", () => {
       ).toEqual([
         ["push", "push", "ok", "Fixture bus: first"],
         ["ci_success", "ci", "ok", "Fixture bus: second"],
+        ["push", "push", "ok", "imported at 6.1 start"],
         ["runner.started", "runner", null, expect.any(String)],
       ]);
+      expect(ws.events()[2]!.key).toBe(last);
       expect(ws.exists("events")).toBe(false);
       const imported = ws.list().filter((name) => name.startsWith("events.imported-"));
       expect(imported).toHaveLength(1);

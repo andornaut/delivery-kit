@@ -16,7 +16,7 @@ when the work protocol is active:
   `active-departure`, `gate-failed/`, the detached `gate-<sha>` worktree kept for a pending
   deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
   `events.jsonl` (the runner's event log), `events.cursor` (the ingest cursor, written only by
-  `coordination-kit events ingest`), `events.quarantine.jsonl` (malformed lines ingest set aside),
+  `coordination-kit events ingest`, naming its file by first line ID, inode and device), `events.quarantine.jsonl` (malformed lines ingest set aside),
   `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (the imported
   6.0 outbox with its `<sha>.state` files), `last-complete.sha` (the last commit the runner saw
   complete), `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,

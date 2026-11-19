@@ -24,8 +24,9 @@ Commands, options and exit codes are unchanged.
 
    At that first start, before its loop, the runner imports the unsent `bus/events/*.json`
    outbox files into `events.jsonl` in creation order and renames `bus/events` to
-   `bus/events.imported-<epoch>`; the `<sha>.state` files stay there. The import repeats safely
-   if interrupted.
+   `bus/events.imported-<epoch>`; the `<sha>.state` files stay there. A last push that has not
+   completed gets a `push` line, so its COMPLETE still forms. The import repeats safely if
+   interrupted.
 
 3. Confirm with `status --game GAME_ID` that `coordinator_cli.supported` is `true`, that
    `reporter_blockers` holds no `events_legacy_outbox`, and that `events.drained` becomes `true`

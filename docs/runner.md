@@ -78,8 +78,10 @@ call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed `gam
 which must equal the one sent), `status` (`delivered`, `deferred` or `skipped`), `reason`, free-text
 `detail` and `cli` `{version, distSha256}`. An ingest result has `kind` `events-ingest`: `delivered`
 when it ingested lines, `skipped` with `no-events` when nothing was new, and `deferred` with a
-reason otherwise. The runner parses the JSON, not its key order, ignores fields it does not define
-and never parses `detail`.
+reason otherwise. It may add counts, each a non-negative integer when present: `ingested`,
+`quarantined`, `completed` (COMPLETE reports formed), `delivered` (lines committed) and `held` (1
+while a torn tail is pending). The runner parses the JSON, not its key order, ignores fields it
+does not define and never parses `detail`.
 
 `reason` is null when delivered, otherwise one of `route-unavailable`, `recipient-unavailable`,
 `recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`, `already-delivered`,
@@ -186,15 +188,25 @@ coordinationKitVersion, distSha256}`: the loaded delivery-kit and the coordinato
 ### Cursor and drain
 
 `events ingest` writes `bus/events.cursor` atomically, and the runner and `status` only read it:
-`{"schema":1,"file":"events.jsonl","offset":BYTES,"lines":N,"lastId":ID|null,"at":ISO}`.
-`status` reports the log as drained when `offset` equals the size of `events.jsonl`, no rotated
-`events.<epoch>.jsonl` remains and the last line is not torn. Ingest never consumes a torn line
+`{"schema":1,"file":"events.jsonl","offset":BYTES,"lines":N,"lastId":ID|null,"firstId":ID|null,
+"inode":N,"dev":N,"at":ISO}`. `firstId` is the ID of the first complete line of the file the
+cursor names, null when it has none; `inode` and `dev` identify that file. A cursor names a file
+when `firstId` equals that file's first line ID or, when `firstId` is null, when the file has no
+first line ID and its inode and device match. The offset counts only for the file the cursor
+names; the runner and `status` parse every field strictly.
+
+`status` reports the log as drained when the cursor names the live `events.jsonl`, its `offset`
+equals the file's size, no rotated `events.<epoch>.jsonl` remains and the last line is not torn.
+A cursor naming a rotated log adds `events_cursor_rotated`, and one naming no file present
+`events_cursor_unmatched`. Ingest finds the file the cursor names, finishes it from `offset` and
+reads newer files from 0, or every file from 0 when none matches; it never consumes a torn line
 and moves a malformed complete line to `events.quarantine.jsonl`.
 
 ### Rotation
 
-Before an append, when the cursor's offset equals the file size and the size exceeds 1 MiB, the
-runner renames the file to `events.<epochSeconds>.jsonl` and starts a new one. It never deletes a
+Before an append, when the cursor names the live file, its offset equals the file size and the
+size exceeds 1 MiB, the runner renames the file to `events.<epochSeconds>.jsonl` and starts a new
+one. It never deletes a
 rotated file; ingest consumes and deletes it.
 
 ### Torn last line
@@ -215,6 +227,12 @@ directory; the most recently completed one seeds `last-complete.sha`. An interru
 repeats safely: events already in the log are skipped by ID. A 6.0 `complete` event imports as
 type `complete`, kind `runner`, status `ok`. Unreadable files stay in the renamed directory and
 the runner logs their count.
+
+After the outbox events and before the rename, when `bus/last-push.sha` differs from
+`last-complete.sha`, the runner appends a `push` line for that SHA: status `ok`, the SHA as key,
+as the original push event's key was, and `detail` `imported at 6.1 start`. Its ID equals the
+original's, so an imported original or a repeated import adds nothing. This lets COMPLETE form
+for a commit pushed under 6.0 whose CI or deployment finishes under 6.1.
 
 ### Rollback to 6.0
 

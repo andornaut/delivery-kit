@@ -1,5 +1,5 @@
 // Runner identity and the read-only status report.
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
@@ -195,8 +195,51 @@ suite("status", () => {
       let result = await report(ws);
       expect([result.idle, result.drained]).toEqual([true, false]);
       expect(result.reporter_blockers).toEqual([`events_uningested:${line.length}`]);
+      // The line has no ID, so the cursor names the file by inode and device.
+      const { dev, ino } = statSync(ws.path("events.jsonl"));
       const cursor = { at: "2026-11-18T21:30:00Z", file: "events.jsonl", lastId: null, lines: 1 };
-      ws.write("events.cursor", JSON.stringify({ ...cursor, offset: line.length, schema: 1 }));
+      ws.write(
+        "events.cursor",
+        JSON.stringify({
+          ...cursor,
+          dev,
+          firstId: null,
+          inode: ino,
+          offset: line.length,
+          schema: 1,
+        }),
+      );
+      result = await report(ws);
+      expect(result.drained).toBe(true);
+      // A cursor naming another file does not count toward the live log.
+      ws.write(
+        "events.cursor",
+        JSON.stringify({
+          ...cursor,
+          dev,
+          firstId: "f".repeat(64),
+          inode: ino,
+          offset: line.length,
+          schema: 1,
+        }),
+      );
+      result = await report(ws);
+      expect(result.drained).toBe(false);
+      expect(result.reporter_blockers).toEqual([
+        `events_uningested:${line.length}`,
+        "events_cursor_unmatched",
+      ]);
+      ws.write(
+        "events.cursor",
+        JSON.stringify({
+          ...cursor,
+          dev,
+          firstId: null,
+          inode: ino,
+          offset: line.length,
+          schema: 1,
+        }),
+      );
       result = await report(ws);
       expect(result.drained).toBe(true);
       expect(result.events).toEqual({

@@ -4,6 +4,8 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +13,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { eventId, makeEvent, type RunnerEvent } from "../events.ts";
-import { EventLog, eventLogReport, workDone } from "./eventlog.ts";
+import { EventLog, eventLogReport, logIdentity, workDone } from "./eventlog.ts";
 import { busPaths } from "./state.ts";
 import { commitFile, GAME, gitSync, loggedEvents, makeGame, type TestGame } from "./testGame.ts";
 
@@ -47,12 +49,17 @@ function rawLines(h: Harness): string[] {
   return readFileSync(h.paths.eventsLog, "utf8").split("\n").slice(0, -1);
 }
 
-function writeCursor(h: Harness, offset: number): void {
+/** A cursor at `offset` naming the file at `path` (the live log by default). */
+function writeCursor(h: Harness, offset: number, path = h.paths.eventsLog): void {
+  const identity = logIdentity(path)!;
   writeFileSync(
     h.paths.eventsCursor,
     JSON.stringify({
       at: "2026-11-18T21:30:00Z",
+      dev: identity.dev,
       file: "events.jsonl",
+      firstId: identity.firstId,
+      inode: identity.inode,
       lastId: null,
       lines: 0,
       offset,
@@ -152,6 +159,20 @@ describe("EventLog rotation", () => {
     expect(h.lines).toContain(
       `bus: rotated events.jsonl (${size} bytes, ingested) to events.${NOW}.jsonl`,
     );
+  });
+
+  it("keeps a log whose cursor names another file, even at the same offset", () => {
+    const h = harness();
+    const size = fill(h, 1024 * 1024 + 1);
+    const other = join(h.paths.dir, "events.1799999999.jsonl");
+    writeFileSync(
+      other,
+      `${JSON.stringify(makeEvent({ at: "x", detail: "", game: GAME }, "attempt", "old"))}\n`,
+    );
+    writeCursor(h, size, other);
+    h.log().append("push", SHA, "pushed");
+    expect(existsSync(join(h.paths.dir, `events.${NOW}.jsonl`))).toBe(false);
+    expect(readFileSync(h.paths.eventsLog).length).toBeGreaterThan(size);
   });
 
   it("keeps a log that is not fully ingested or not over 1 MiB", () => {
@@ -311,6 +332,46 @@ describe("EventLog legacy outbox import", () => {
     expect(h.lines.at(-1)).toMatch(/^bus: imported 2 unsent/u);
   });
 
+  it("appends a push line for a last push that has not completed, once", () => {
+    const h = harness();
+    const pushed = "a".repeat(40);
+    writeFileSync(h.paths.lastPushSha, `${pushed}\n`);
+    mkdirSync(h.paths.legacyOutbox);
+    h.log().open();
+    expect(loggedEvents(h.test)).toEqual([
+      expect.objectContaining({
+        detail: "imported at 6.1 start",
+        id: eventId(GAME, "push", pushed),
+        key: pushed,
+        kind: "push",
+        sha: pushed,
+        status: "ok",
+        type: "push",
+      }),
+    ]);
+    // An interrupted import runs again: the push line is not repeated.
+    mkdirSync(h.paths.legacyOutbox);
+    h.log().open();
+    expect(loggedEvents(h.test)).toHaveLength(1);
+  });
+
+  it("keeps the original push line and skips a last push that already completed", () => {
+    const h = harness();
+    seedOutbox(h);
+    legacy(h, "p.json", { key: SHA, kind: "push", message: "Archie bus: pushed" }, 0);
+    writeFileSync(h.paths.lastPushSha, `${SHA}\n`);
+    // The seeded <sha>.state completed SHA, but the original push is still imported.
+    h.log().open();
+    const pushes = loggedEvents(h.test).filter((event) => event.type === "push");
+    expect(pushes.map((event) => event.detail)).toEqual(["Archie bus: pushed"]);
+    const other = harness();
+    writeFileSync(other.paths.lastPushSha, `${SHA}\n`);
+    writeFileSync(other.paths.lastCompleteSha, `${SHA}\n`);
+    mkdirSync(other.paths.legacyOutbox);
+    other.log().open();
+    expect(loggedEvents(other.test)).toEqual([]);
+  });
+
   it("keeps unreadable outbox files in the renamed directory", () => {
     const h = harness();
     mkdirSync(h.paths.legacyOutbox, { recursive: true });
@@ -363,5 +424,29 @@ describe("eventLogReport", () => {
     });
     writeCursor(h, 1_000_000);
     expect(eventLogReport(h.paths).blockers).toEqual(["events_cursor_ahead"]);
+  });
+
+  it("counts the offset only for the file the cursor names", () => {
+    const h = harness();
+    const log = h.log();
+    log.append("push", SHA, "pushed");
+    const size = readFileSync(h.paths.eventsLog).length;
+    writeCursor(h, size);
+    // The runner rotated the log the cursor names, then appended to a new one.
+    renameSync(h.paths.eventsLog, join(h.paths.dir, "events.1800000000.jsonl"));
+    log.append("attempt", "k", "attempt");
+    const live = readFileSync(h.paths.eventsLog).length;
+    expect(eventLogReport(h.paths)).toMatchObject({
+      blockers: [`events_uningested:${live}`, "events_cursor_rotated", "events_rotated:1"],
+      report: { cursorOffset: size, drained: false },
+    });
+    // Ingest deleted the rotated log without moving the cursor: it names no file present.
+    rmSync(join(h.paths.dir, "events.1800000000.jsonl"));
+    expect(eventLogReport(h.paths).blockers).toEqual([
+      `events_uningested:${live}`,
+      "events_cursor_unmatched",
+    ]);
+    writeCursor(h, live);
+    expect(eventLogReport(h.paths).report.drained).toBe(true);
   });
 });
