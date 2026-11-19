@@ -17,3 +17,5 @@ Reference: [work-protocol](../work-protocol.md),
 | dk-0010 | Anchor enrollment adoption to receipt-covered references             | [dk-0010.md](../work/dk-0010.md) |
 | dk-0011 | Validate an enrollment only against the enrolling role's own inputs  | [dk-0011.md](../work/dk-0011.md) |
 | dk-0012 | Document work receipt binding, source pin and cleanup artifact rules | [dk-0012.md](../work/dk-0012.md) |
+| dk-0032 | Account for user requests durably                                    | [dk-0032.md](../work/dk-0032.md) |
+| dk-0033 | Provide a filesystem work and message protocol                       | [dk-0033.md](../work/dk-0033.md) |

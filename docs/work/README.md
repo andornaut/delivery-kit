@@ -4,15 +4,15 @@ Each user request is one file, `docs/work/<id>.md`, whether or not it is approve
 progress (claims, blocks, receipts and acceptance) stays in the work protocol state root. The
 [design index](../design/README.md) lists the work items of each area.
 
-| Front matter | Content                                                                         |
-| ------------ | ------------------------------------------------------------------------------- |
-| `id`         | `dk-` and a zero-padded sequence (`dk-0001`), allocated in chronological order. |
-| `title`      | A short imperative title.                                                       |
-| `status`     | `proposed`, `approved`, `declined`, `done`, `cancelled` or `superseded`.        |
-| `approved`   | A short approval reference, such as `user, 2026-11-18`.                         |
-| `design`     | The design area in `docs/design/`.                                              |
-| `related`    | A list of related work IDs.                                                     |
-| `supersedes` | The ID of the item this one replaces; omitted otherwise.                        |
+| Front matter | Content                                                                  |
+| ------------ | ------------------------------------------------------------------------ |
+| `id`         | `dk-` and a zero-padded sequence (`dk-0001`), allocated in filing order. |
+| `title`      | A short imperative title.                                                |
+| `status`     | `proposed`, `approved`, `declined`, `done`, `cancelled` or `superseded`. |
+| `approved`   | A short approval reference, such as `user, 2026-11-18`.                  |
+| `design`     | The design area in `docs/design/`.                                       |
+| `related`    | A list of related work IDs.                                              |
+| `supersedes` | The ID of the item this one replaces; omitted otherwise.                 |
 
 The sections are Scope, Criteria, Decisions and Outcome. Decisions and Outcome state what was
 decided or delivered, and why, in a line or two each.
@@ -28,3 +28,5 @@ decided or delivered, and why, in a line or two each.
   conversation, only short approval references.
 - Docs-only changes run only the attribution and lint checks ([dk-0014](dk-0014.md)).
 - Work files are not part of the npm package.
+- [dk-0029](dk-0029.md) to [dk-0033](dk-0033.md) record requests approved before this convention, filed
+  after delivery, so their IDs do not follow approval order.

@@ -34,3 +34,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0026 | Derive observer adoption from the runner's own start record                        | [dk-0026.md](../work/dk-0026.md) |
 | dk-0027 | Report the slot's own departure correctly in scheduled-slot status                 | [dk-0027.md](../work/dk-0027.md) |
 | dk-0028 | Stop and start a game's runner with one command                                    | [dk-0028.md](../work/dk-0028.md) |
+| dk-0031 | Bind the stock gate to the verified source identity                                | [dk-0031.md](../work/dk-0031.md) |

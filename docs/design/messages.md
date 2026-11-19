@@ -8,9 +8,10 @@ Reference: [messages](../messages.md), [coordination-kit messages](https://githu
 
 ## Work items
 
-| ID      | Title                                                                | Link                             |
-| ------- | -------------------------------------------------------------------- | -------------------------------- |
-| dk-0002 | Report deduplicated and unchanged delivery receipts with diagnostics | [dk-0002.md](../work/dk-0002.md) |
-| dk-0007 | Bound the Claude channel consumer guard to one store index per drain | [dk-0007.md](../work/dk-0007.md) |
-| dk-0008 | Record a busy Claude spool as a retryable transport-busy refusal     | [dk-0008.md](../work/dk-0008.md) |
-| dk-0009 | Retire terminal Claude spool entries with `message retire-spool`     | [dk-0009.md](../work/dk-0009.md) |
+| ID      | Title                                                                   | Link                             |
+| ------- | ----------------------------------------------------------------------- | -------------------------------- |
+| dk-0002 | Report deduplicated and unchanged delivery receipts with diagnostics    | [dk-0002.md](../work/dk-0002.md) |
+| dk-0007 | Bound the Claude channel consumer guard to one store index per drain    | [dk-0007.md](../work/dk-0007.md) |
+| dk-0008 | Record a busy Claude spool as a retryable transport-busy refusal        | [dk-0008.md](../work/dk-0008.md) |
+| dk-0009 | Retire terminal Claude spool entries with `message retire-spool`        | [dk-0009.md](../work/dk-0009.md) |
+| dk-0029 | Recover guarded communication safely after send failures and compaction | [dk-0029.md](../work/dk-0029.md) |
