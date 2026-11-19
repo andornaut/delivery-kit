@@ -57,6 +57,7 @@ export const EVENT_TYPES = {
   deploy_retry: { kind: "deploy", status: null },
   deploy_skipped: { kind: "deploy", status: "skipped" },
   deploy_success: { kind: "deploy", status: "ok" },
+  gate_passed: { kind: "gate", status: "ok" },
   gate_skipped: { kind: "gate", status: "skipped" },
   "pin-mismatch": { kind: "runner", status: null },
   push: { kind: "push", status: "ok" },

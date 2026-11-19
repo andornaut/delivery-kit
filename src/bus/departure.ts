@@ -464,6 +464,8 @@ async function gateAndPush(
     context.log(`${attempt.when}  ${line}`);
   }
   writeLines(join(work, ".bus-built.sha"), head);
+  // The gate outcome coordination-kit's COMPLETE needs; gate_skipped is the docs-only counterpart.
+  context.events.emit("gate_passed", head, `Gate passed for ${head}.`);
   const failed = await pushHead(context, attempt, head);
   if (failed !== undefined) {
     await removeWorktree(context, work);

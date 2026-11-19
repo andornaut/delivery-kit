@@ -164,13 +164,14 @@ coordinationKitVersion, distSha256}`: the loaded delivery-kit and the coordinato
   before an earlier commit completes can list items that commit also lists; ingest records each
   item once.
 - **COMPLETE:** a coordination-kit projection with a unique `(game, complete, sha)` key, formed
-  when the gate (or a docs-only skip), push and CI succeed and the deploy status is `ok` or
-  `skipped`. The runner appends no `complete` event.
+  when the gate passes (`gate_passed`) or a docs-only range skips it (`gate_skipped`), push and CI
+  succeed and the deploy status is `ok` or `skipped`. The runner appends no `complete` event.
 
 | `type`                                                                            | `kind`    | `status`  |
 | --------------------------------------------------------------------------------- | --------- | --------- |
 | `attempt`                                                                         | `attempt` | null      |
 | `blocked-main`, `blocked-fetch`, `blocked-load`                                   | `attempt` | `blocked` |
+| `gate_passed`                                                                     | `gate`    | `ok`      |
 | `gate_skipped`                                                                    | `gate`    | `skipped` |
 | `blocked-gate`                                                                    | `gate`    | `blocked` |
 | `blocked-full-gate`, `blocked-install`                                            | `gate`    | `failed`  |
@@ -412,8 +413,8 @@ cherry-pick, rewrite or revert. Each scheduled or requested departure, under `de
    `blocked-load` and `main` retained. A runner shutdown ends the wait without a report.
 5. Stops with `blocked-push` when the remote `main` is known locally and is not an ancestor of
    HEAD. Nothing is gated or pushed; Tech merges the remote `main` into local `main`.
-6. Gates HEAD on a detached scratch worktree, so merge commits are gated as they are. A
-   docs-only range skips this step.
+6. Gates HEAD on a detached scratch worktree, so merge commits are gated as they are, and
+   appends `gate_passed` for HEAD once the gate passes. A docs-only range skips this step.
 7. Pushes with `git push <remote> <sha>:refs/heads/<main>`, never forced. A non-fast-forward
    rejection is reported as `blocked-push` and nothing is pushed.
 8. Stages the deployment, then watches CI for that exact SHA. A docs-only range never deploys.
