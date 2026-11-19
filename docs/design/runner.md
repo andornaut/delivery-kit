@@ -31,3 +31,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0025 | Record runner events in a per-game append-only log                                 | [dk-0025.md](../work/dk-0025.md) |
 | dk-0026 | Derive observer adoption from the runner's own start record                        | [dk-0026.md](../work/dk-0026.md) |
 | dk-0027 | Report the slot's own departure correctly in scheduled-slot status                 | [dk-0027.md](../work/dk-0027.md) |
+| dk-0034 | Log a gate_passed event so every passed departure completes                        | [dk-0034.md](../work/dk-0034.md) |
