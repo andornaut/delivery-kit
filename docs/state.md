@@ -13,8 +13,9 @@ when the work protocol is active:
 - `game-dev/`: review and inbox snapshots, health history, acknowledgements and retentions.
   This persisted directory remains `var/game-dev/` for the coordinator rename.
 - `games/<g>/bus/`: the bus. It holds `runner.lock`, `loop.lock`, `departure.lock`,
-  `active-departure`, `gate-failed/`, the detached `gate-<sha>` worktree kept for a pending
-  deployment, `gate-logs/`, `ci/`, `deploy/`, `deploy-pending`, `last-push*`, `last-deploy*`,
+  `active-departure` (the running departure's start epoch, empty when none), `gate-failed/`,
+  the detached `gate-<sha>` worktree kept for a pending deployment, `gate-logs/`, `ci/`, `deploy/`,
+  `deploy-pending`, `last-push*`, `last-deploy*`,
   `events.jsonl` (the runner's event log), `events.cursor` (the ingest cursor, written only by
   `coordination-kit events ingest`, naming its file by first line ID, inode and device), `events.quarantine.jsonl` (malformed lines ingest set aside),
   `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (the imported

@@ -28,6 +28,12 @@ delivers the review and owns the per-slot receipt: a repeated call for a slot re
 outcome without another send. The runner keeps no slot receipt, calls at most once per due slot
 in each pass and never replays a missed slot.
 
+A departure slot's `scheduled-status` report comes from whichever of the observer and that slot's
+departure appends it first. The observer compares the start epoch in `active-departure` with the
+slot start: a departure that started at or after the slot is the slot's own and still running,
+and only one that started earlier, or an unreadable epoch, is reported as still checking or
+finishing from before the slot.
+
 The recipient's instruction contract for every caller-configured scheduled review pass is:
 
 - Inventory registered parent queues, verified workers' queues and ready worker handoffs across

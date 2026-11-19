@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deployAfterCi } from "../deploy.ts";
-import { depart, LOAD_RECHECK_SECONDS, LOAD_WAIT_SECONDS, requestStore } from "./departure.ts";
+import {
+  depart,
+  LOAD_RECHECK_SECONDS,
+  LOAD_WAIT_SECONDS,
+  requestStore,
+  slotDetail,
+} from "./departure.ts";
 import type { Exec, ExecResult, ExecSpec } from "./exec.ts";
 import { captureRequest } from "./requests.ts";
 import {
@@ -72,6 +78,43 @@ function ciStatus(test: TestGame, sha: string, value: string): void {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, `${sha}.status`), `${value}\n`);
 }
+
+describe("slotDetail", () => {
+  // 22:10 EST.
+  const slot = Date.UTC(2026, 10, 4, 3, 10, 0) / 1000;
+  const own = "this slot's departure is running; attempt outcomes are reported separately.";
+  const earlier =
+    "a departure is still checking or finishing; this observer starts no new push or deployment; " +
+    "attempt outcomes are reported separately.";
+
+  it.each([
+    ["started at the slot start", `${slot}\n`, own],
+    ["started during the slot", `${slot + 1}\n`, own],
+    ["started before the slot", `${slot - 1}\n`, earlier],
+    ["recorded an unparseable epoch", "not-an-epoch\n", earlier],
+  ])("reports a departure that %s", (_name, active, detail) => {
+    const context = testContext(makeGame());
+    writeFileSync(context.paths.activeDeparture, active);
+    expect(slotDetail(context, slot)).toBe(detail);
+  });
+
+  it("reports a pending deployment when no departure is active", () => {
+    const context = testContext(makeGame());
+    writeFileSync(context.paths.activeDeparture, "");
+    writeFileSync(context.paths.deployPending, "a".repeat(40));
+    expect(slotDetail(context, slot)).toBe(
+      "deployment is pending; its retry and outcome are reported separately.",
+    );
+  });
+
+  it("reports an idle runner", () => {
+    const context = testContext(makeGame());
+    writeFileSync(context.paths.activeDeparture, "");
+    expect(slotDetail(context, slot)).toBe(
+      "no departure is currently active; main departs when it has a new commit.",
+    );
+  });
+});
 
 describe("trunk-based departures", () => {
   it("gates and pushes a fast-forward main HEAD, then watches its CI", async () => {

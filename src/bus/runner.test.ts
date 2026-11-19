@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { requestStore } from "./departure.ts";
+import type { Exec } from "./exec.ts";
 import { captureRequest } from "./requests.ts";
 import { observer, reviewLine, RunnerRefused, runRunner } from "./runner.ts";
 import { readTrimmed } from "./state.ts";
@@ -51,6 +52,30 @@ async function until(condition: () => boolean): Promise<void> {
       setTimeout(resolve, 5);
     });
   }
+}
+
+/** A clock that moves only when the test sets `time`; each sleep waits for it or for an abort. */
+function steppedClock(start: number) {
+  const clock = {
+    now: () => clock.time,
+    async sleep(seconds: number, signal?: AbortSignal) {
+      const wake = clock.time + seconds;
+      clock.sleeping.push(seconds);
+      try {
+        while (clock.time < wake && signal?.aborted !== true) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1);
+          });
+        }
+      } finally {
+        clock.sleeping.splice(clock.sleeping.indexOf(seconds), 1);
+      }
+    },
+    sleeping: [] as number[],
+    time: start,
+  };
+  return clock;
 }
 
 describe("runRunner", () => {
@@ -136,6 +161,63 @@ describe("runRunner", () => {
     const slot = coordinator.reviews[0] ?? 0;
     expect(slot % 60).toBe(0);
     expect([20, 50]).toContain(zonedParts("America/Toronto", slot).minute);
+  });
+});
+
+describe("scheduled-slot reports", () => {
+  it("reports the slot's own departure when it is active as the observer reports the slot", async () => {
+    // 22:20 EST: a departure slot and, in the fixture, a review wake minute.
+    const slot = Date.UTC(2026, 10, 4, 3, 20, 0) / 1000;
+    const test = makeGame((config) => {
+      (config.deploy as Record<string, unknown>).mode = "none";
+      (config.reports as Record<string, unknown>).scheduledTicks = true;
+      (config.schedule as Record<string, unknown>).departures = ["20"];
+    });
+    const clock = steppedClock(slot - 1);
+    const events = recordingEvents();
+    const coordinator = recordingCoordinator();
+    const controller = new AbortController();
+    const slotReports = (): [string, string, string][] =>
+      events.list.filter(([type]) => type === "scheduled-status");
+    const inner = fakeExec(gateDocker());
+    // The departure stays active until the observer has reported its slot.
+    const exec: Exec = async (spec) => {
+      if (spec.args.includes("ls-remote")) {
+        await until(() => slotReports().length > 0);
+      }
+      return inner(spec);
+    };
+    const context = testContext(test, { clock, coordinator, events, exec });
+    const delivered = coordinator.outcome;
+    // The review call holds the observer's pass until the departure loop records its start.
+    coordinator.outcome = async (wake) => {
+      await until(() => readTrimmed(context.paths.activeDeparture) === String(slot));
+      return delivered(wake);
+    };
+    const running = runRunner({ cliPath: cliFile(test), signal: controller.signal }, () => context);
+    // The departure loop and the observer both sleep toward the slot before it begins.
+    await until(() => clock.sleeping.filter((seconds) => seconds === 1).length >= 2);
+    // The test is the only writer of the stepped clock's time.
+    // eslint-disable-next-line require-atomic-updates
+    clock.time = slot;
+    await until(() => slotReports().length >= 2);
+    controller.abort();
+    await running;
+    expect(coordinator.reviews).toEqual([slot]);
+    expect(slotReports(), context.lines.join("\n")).toEqual([
+      [
+        "scheduled-status",
+        String(slot),
+        expect.stringContaining(
+          "scheduled slot: this slot's departure is running; attempt outcomes are reported separately.",
+        ),
+      ],
+      [
+        "scheduled-status",
+        String(slot),
+        expect.stringContaining("scheduled slot: nothing new on main; no departure."),
+      ],
+    ]);
   });
 });
 

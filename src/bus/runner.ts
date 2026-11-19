@@ -143,7 +143,7 @@ async function observe(
   if (config.reports.scheduledTicks) {
     const minutes = config.schedule.departures.map((departure) => Number.parseInt(departure, 10));
     for (const slot of minuteSlots(config.schedule.timezone, minutes, after, now)) {
-      reportScheduledTick(context, slot, slotDetail(context));
+      reportScheduledTick(context, slot, slotDetail(context, slot));
     }
   }
   context.events.ingest();

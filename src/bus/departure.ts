@@ -48,10 +48,25 @@ export function reportScheduledTick(context: BusContext, slot: number, detail: s
   );
 }
 
-/** The observer's detail for a departure slot. */
-export function slotDetail(context: BusContext): string {
+/** The start epoch `active-departure` records, or undefined when it is not a whole number. */
+function activeDepartureStart(context: BusContext): number | undefined {
+  const text = readTrimmed(context.paths.activeDeparture) ?? "";
+  const value = /^\d+$/u.test(text) ? Number(text) : Number.NaN;
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+/**
+ * The observer's detail for the departure slot that starts at `slot`. The departure loop records
+ * its start epoch in `active-departure`, so a departure that started at or after the slot is this
+ * slot's own; only an earlier one is unfinished from before the slot.
+ */
+export function slotDetail(context: BusContext, slot: number): string {
   const { paths } = context;
   if (nonEmpty(paths.activeDeparture)) {
+    const started = activeDepartureStart(context);
+    if (started !== undefined && started >= slot) {
+      return "this slot's departure is running; attempt outcomes are reported separately.";
+    }
     return [
       "a departure is still checking or finishing; this observer starts no new push or deployment;",
       "attempt outcomes are reported separately.",
