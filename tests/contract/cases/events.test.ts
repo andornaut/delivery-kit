@@ -105,6 +105,35 @@ suite("events", () => {
     expect(types(ws).filter((type) => type === "runner.started")).toHaveLength(1);
   });
 
+  contract("a passed gate appends gate_passed before the push and ingest receives it", async () => {
+    const ws = workspace();
+    bus(ws);
+    ws.config.deploy = { mode: "none", skipPattern: "" };
+    impl.offer(ws, ["bus/feature"]);
+    const runner = start(ws);
+    try {
+      await runner.until(() => {
+        const ingested = ws.ingested().map((event) => event.type);
+        return ingested.includes("gate_passed") && ingested.includes("push");
+      });
+    } finally {
+      await runner.stop();
+    }
+    const departed = types(ws).filter((type) => type !== "runner.started");
+    expect(departed.indexOf("gate_passed")).toBeLessThan(departed.indexOf("push"));
+    expect(departed.filter((type) => type === "gate_passed")).toHaveLength(1);
+    const gate = ws.ingested().filter((event) => event.type === "gate_passed");
+    expect(gate).toHaveLength(1);
+    const sha = String(gate[0]!.key);
+    expect(gate[0]).toMatchObject({
+      detail: `Fixture bus: Gate passed for ${sha}.`,
+      kind: "gate",
+      sha,
+      status: "ok",
+    });
+    expect(ws.events().find((event) => event.type === "push")!.key).toBe(sha);
+  });
+
   contract("runner.started carries the runner token and both CLI identities", async () => {
     const ws = workspace();
     idle(ws);

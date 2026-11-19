@@ -59,6 +59,7 @@ describe("the event type table", () => {
     const emitted = emittedTypes();
     expect(emitted).toContain("blocked-full-gate");
     expect(emitted).toContain("ci_success");
+    expect(emitted).toContain("gate_passed");
     expect(Object.keys(EVENT_TYPES).sort()).toEqual(emitted);
   });
 
@@ -75,6 +76,7 @@ describe("the event type table", () => {
   it("gives each type one family and an outcome status or null", () => {
     expect(familyOf("ci_success")).toEqual({ kind: "ci", status: "ok" });
     expect(familyOf("blocked-full-gate")).toEqual({ kind: "gate", status: "failed" });
+    expect(familyOf("gate_passed")).toEqual({ kind: "gate", status: "ok" });
     expect(familyOf("gate_skipped")).toEqual({ kind: "gate", status: "skipped" });
     expect(familyOf("ci_timeout")).toEqual({ kind: "ci", status: "timeout" });
     expect(familyOf("deploy_disabled")).toEqual({ kind: "deploy", status: "skipped" });

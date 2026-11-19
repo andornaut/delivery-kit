@@ -51,6 +51,8 @@ swapped. Events stay in `events.jsonl` and are ingested once both match.
 - Events: the runner no longer emits `resident-identity-changed`. `runner.started`, appended on
   every start with the identity token, replaces it. A `resident-identity-changed` event from a
   6.0 outbox still imports with kind `runner` and a null status.
+  A passed gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated
+  departure completes, as from 6.1.2.
 - Pins: delivery-kit 7.0.0 bundles coordination-kit 2.0.1 (`COORDINATION_KIT_RANGE`
   `>=2.0.1 <4.0.0`); the bundle uses only `build/registry`, `build/review` and `build/shared`,
   which 3.0 keeps, so a later bundle move to 3.x is a pin change only.
@@ -100,7 +102,9 @@ DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The i
 - State: the bus gains `events.jsonl`, `events.cursor`, `events.quarantine.jsonl`,
   `events.<epoch>.jsonl`, `events.imported-<epoch>/` and `last-complete.sha`
   ([State](state.md)).
-- Events: a push under `deploy.mode` `none` now appends `deploy_disabled`.
+- Events: a push under `deploy.mode` `none` now appends `deploy_disabled`. From 6.1.2, a passed
+  gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated departure
+  completes; 6.1.0 and 6.1.1 complete only docs-only pushes.
 - Pins: delivery-kit 6.1.1 bundles coordination-kit 2.0.1 for its utilities
   (`COORDINATION_KIT_RANGE` `>=2.0.0 <3.0.0`); the coordinator CLI range is `>=2.0.1 <3.0.0`,
   because a 2.0.0 ingest quarantines the runner's lines with a null `status`.

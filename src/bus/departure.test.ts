@@ -124,7 +124,13 @@ describe("trunk-based departures", () => {
     expect(originMain(test)).toBe(head);
     expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
     expect(started).toEqual([head]);
-    expect(kinds()).toEqual(["scheduled-status", "attempt", "push", "deploy_disabled"]);
+    expect(kinds()).toEqual([
+      "scheduled-status",
+      "attempt",
+      "gate_passed",
+      "push",
+      "deploy_disabled",
+    ]);
     const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
     expect(create[2]).toBe(`delivery-kit-gate-archies-dog-walks-${head.slice(0, 12)}`);
     expect(create).toContainEqual(
@@ -141,6 +147,30 @@ describe("trunk-based departures", () => {
     expect(gitSync(test.repo, "worktree", "list", "--porcelain")).not.toContain("gate-");
     expect(gitSync(test.repo, "rev-parse", "HEAD")).toBe(head);
     expect(gitSync(test.repo, "status", "--porcelain", "--untracked-files=no")).toBe("");
+  });
+
+  it("appends exactly one gate_passed for a passed gate, before the push", async () => {
+    const { context, events, test } = setup();
+    const before = originMain(test);
+    const head = mergeFastForward(test, "feature");
+    const remoteAtGate: string[] = [];
+    const record = events.emit.bind(events);
+    events.emit = (type, key, message) => {
+      if (type === "gate_passed") {
+        remoteAtGate.push(originMain(test));
+      }
+      record(type, key, message);
+    };
+    expect(await depart(context)).toBe(0);
+    expect(events.list.filter(([kind]) => kind === "gate_passed")).toEqual([
+      ["gate_passed", head, `Gate passed for ${head}.`],
+    ]);
+    // Appended while the remote main was still the previous commit: before the push.
+    expect(remoteAtGate).toEqual([before]);
+    expect(originMain(test)).toBe(head);
+    expect(events.list.map(([kind]) => kind).indexOf("gate_passed")).toBeLessThan(
+      events.list.map(([kind]) => kind).indexOf("push"),
+    );
   });
 
   it("does not depart a HEAD that already equals the remote main", async () => {
@@ -231,7 +261,7 @@ describe("trunk-based departures", () => {
     expect(receipt).toBe(`{"head": "${head}", "id": "r1", "state": "pending"}\n`);
     expect(await depart(context, { requestId: "r1" })).toBe(0);
     expect(originMain(test)).toBe(head);
-    expect(kinds()).toEqual(["attempt", "push", "deploy_disabled"]);
+    expect(kinds()).toEqual(["attempt", "gate_passed", "push", "deploy_disabled"]);
     await expect(captureRequest(requestStore(context), "r2")).rejects.toThrow(
       "nothing new to depart",
     );
@@ -263,6 +293,7 @@ describe("docs-only departures", () => {
     expect(originMain(test)).toBe(head);
     expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
     expect(started).toEqual([head]);
+    // A skipped gate appends gate_skipped alone, never gate_passed.
     expect(kinds()).toEqual([
       "scheduled-status",
       "attempt",
@@ -320,7 +351,13 @@ describe("departures at high load", () => {
     expect(originMain(test)).toBe(head);
     expect(creates()).toBe(1);
     expect(started).toEqual([head]);
-    expect(kinds()).toEqual(["scheduled-status", "attempt", "push", "deploy_disabled"]);
+    expect(kinds()).toEqual([
+      "scheduled-status",
+      "attempt",
+      "gate_passed",
+      "push",
+      "deploy_disabled",
+    ]);
     expect(context.lines).toContain(
       "2027-01-15 03:00 EST bus: load at or above 24; re-checking every 60 seconds until " +
         "2027-01-15 03:15 EST",

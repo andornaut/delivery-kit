@@ -127,6 +127,7 @@ suite("departure", () => {
       expect(outcome("push")).toEqual(["push", "ok", SHA]);
       expect(outcome("deploy_skipped")).toEqual(["deploy", "skipped", SHA]);
       expect(outcome("ci_success")).toEqual(["ci", "ok", SHA]);
+      expect(kinds(ws)).not.toContain("gate_passed");
       expect(kinds(ws)).not.toContain("complete");
     },
   );

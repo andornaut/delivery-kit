@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { expect } from "vitest";
 
@@ -252,6 +253,58 @@ suite("review cadence", () => {
         schema: 1,
         status: "skipped",
       });
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  // In range only from 3.0, like the case above.
+  contract.skipIf(!RELEASED_IN_RANGE)(
+    "the released coordination-kit CLI stores COMPLETE for a gated departure with deployment disabled",
+    async () => {
+      const ws = workspace();
+      cadenceGame(ws);
+      ws.installReleasedCoordinatorCli();
+      impl.offer(ws, ["bus/feature"]);
+      const drained = (): boolean =>
+        ws.exists("events.cursor") &&
+        Number(ws.readJson("events.cursor").offset) === ws.read("events.jsonl").length;
+      const runner = await startRunnerAt(ws, at(-1, 50));
+      try {
+        await runner.until(() => {
+          const types = ws.events().map((event) => event.type);
+          return types.includes("ci_success") && types.includes("deploy_disabled") && drained();
+        });
+      } finally {
+        await runner.stop();
+      }
+      const sha = String(ws.events().find((event) => event.type === "push")!.key);
+      const outcome = (type: string) => {
+        const event = ws.events().find((row) => row.type === type);
+        return [event?.kind, event?.status, event?.sha];
+      };
+      expect(outcome("gate_passed")).toEqual(["gate", "ok", sha]);
+      expect(outcome("deploy_disabled")).toEqual(["deploy", "skipped", sha]);
+      expect(ws.exists("events.quarantine.jsonl") ? ws.read("events.quarantine.jsonl") : "").toBe(
+        "",
+      );
+      // The store sits in the synthetic root's var/, as no work protocol state root is active.
+      const store = new DatabaseSync(join(ws.coordinator, "var", "coordination.db"), {
+        readOnly: true,
+      });
+      try {
+        const bodies = (
+          store.prepare("SELECT body FROM messages WHERE to_role = ?").all("game-coordinator") as {
+            body: string;
+          }[]
+        ).map((row) => row.body);
+        expect(bodies.filter((body) => body.includes(`bus: COMPLETE ${sha}`))).toEqual([
+          expect.stringContaining(
+            `bus: COMPLETE ${sha}: gate ok, push ok, ci ok, deploy deploy_disabled (skipped)`,
+          ),
+        ]);
+      } finally {
+        store.close();
+      }
     },
     CASE_TIMEOUT_MS,
   );
