@@ -149,7 +149,7 @@ describe("runRunner", () => {
         token,
         {
           cliSha256: createHash("sha256").update("loaded build").digest("hex"),
-          coordinationKitVersion: "2.0.1",
+          coordinationKitVersion: "3.0.0",
           deliveryKitVersion: expect.any(String),
           distSha256: "a".repeat(64),
           token,
@@ -291,7 +291,7 @@ describe("observer", () => {
 });
 
 describe("reviewLine", () => {
-  const cli = { distSha256: "a".repeat(64), version: "2.0.1" };
+  const cli = { distSha256: "a".repeat(64), version: "3.0.0" };
   it.each([
     [
       { claimed: true, cli, detail: "brief r-1 sent", reason: null, status: "delivered" },

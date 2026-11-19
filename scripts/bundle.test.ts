@@ -95,15 +95,18 @@ describe("bundles", () => {
 
 describe("bundled coordination-kit", () => {
   it("is inside the supported range, and the package check refuses one outside it", () => {
-    expect(bundledCoordinationKit(root)).toMatch(/^2\.\d+\.\d+$/u);
-    expect(COORDINATION_KIT_RANGE).toBe(">=2.0.0 <3.0.0");
+    expect(bundledCoordinationKit(root)).toMatch(/^[23]\.\d+\.\d+$/u);
+    // The current 2.0.1 bundle and a later 3.x bundle both pass.
+    expect(COORDINATION_KIT_RANGE).toBe(">=2.0.1 <4.0.0");
     for (const [version, accepted] of [
-      ["2.0.0", true],
+      ["2.0.1", true],
       ["2.9.3", true],
+      ["3.0.0", true],
+      ["3.7.1", true],
+      ["2.0.0", false],
       ["1.9.9", false],
-      ["1.2.0", false],
-      ["3.0.0", false],
-      ["2.1.0-rc.1", false],
+      ["4.0.0", false],
+      ["3.0.0-rc.1", false],
     ] as const) {
       const fixture = mkdtempSync(join(tmpdir(), "bundled-coordination-kit-"));
       const installed = join(fixture, "node_modules", "@andornaut", "coordination-kit");

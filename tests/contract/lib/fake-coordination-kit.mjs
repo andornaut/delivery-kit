@@ -61,7 +61,7 @@ const control = readJson(join(dir, "control.json"), {});
 const cli = {
   distSha256:
     control.distSha256 ?? createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"),
-  version: control.version ?? "2.0.1",
+  version: control.version ?? "3.0.0",
 };
 
 function option(name) {

@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
-import { type AdoptedResident, observerAdoption } from "./adoption.ts";
+import { observerAdoption } from "./adoption.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { eventLogReport } from "./eventlog.ts";
 import { lockHeld } from "./locks.ts";
@@ -255,14 +255,10 @@ function controlReport(
 }
 
 /**
- * The status report. The last push needs a CI record, because every 1.x game watches CI.
- * `adopted` is the game's last observer adoption; without it the comparison is unknown.
+ * The status report, read only from bus/. The last push needs a CI record, because every 1.x game
+ * watches CI.
  */
-export function statusReport(
-  paths: BusPaths,
-  repo?: string,
-  adopted: AdoptedResident = { reason: "protocol_inactive", status: "unknown" },
-): StatusReport {
+export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
@@ -334,7 +330,7 @@ export function statusReport(
   const loopHeld = lockHeld(paths.loopLock);
   const token =
     identityStatus === "current" && typeof identity?.token === "string" ? identity.token : null;
-  const adoption = observerAdoption(adopted, token);
+  const adoption = observerAdoption(paths, token);
   return {
     config_status: config,
     control: controlReport({ identity, identityStatus, loopHeld, running }, paths),

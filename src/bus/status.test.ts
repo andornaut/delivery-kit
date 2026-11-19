@@ -53,7 +53,7 @@ describe("status report", () => {
     try {
       expect(statusReport(bus).coordination_kit).toEqual({
         bundled: "0.0.0-test",
-        supported: ">=2.0.0 <3.0.0",
+        supported: ">=2.0.1 <4.0.0",
       });
     } finally {
       lock.release();
@@ -72,9 +72,10 @@ describe("status report", () => {
       const distSha256 = "e".repeat(64);
       for (const [version, supported] of [
         ["1.2.0", false],
-        ["2.0.0", false],
-        ["2.0.1", true],
-        ["3.0.0", false],
+        ["2.0.1", false],
+        ["3.0.0", true],
+        ["3.4.2", true],
+        ["4.0.0", false],
       ] as const) {
         writeFileSync(
           bus.seam,

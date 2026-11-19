@@ -68,6 +68,20 @@ async function started(ws: Workspace): Promise<Resident> {
   return runner;
 }
 
+function types(ws: Workspace): string[] {
+  return ws.exists("events.jsonl") ? ws.events().map((event) => String(event.type)) : [];
+}
+
+/** runner.started is appended and the cursor has consumed every line of events.jsonl. */
+function ingestedStart(ws: Workspace): boolean {
+  return (
+    types(ws).includes("runner.started") &&
+    ws.exists("seam.json") &&
+    ws.exists("events.cursor") &&
+    Number(ws.readJson("events.cursor").offset) === ws.read("events.jsonl").length
+  );
+}
+
 suite("status", () => {
   const workspace = workspaces();
 
@@ -129,10 +143,41 @@ suite("status", () => {
       expect([result.status, result.identity_status]).toEqual(["running", "current"]);
       expect(result.identity).toEqual(identity);
       expect(ws.read("runner.lock").trim()).toBe(identity.token);
-      // Without an active work protocol there is no observer adoption to compare.
+    } finally {
+      await runner.stop();
+    }
+  });
+
+  contract(
+    "observer adoption is current once an in-range CLI has ingested this runner's runner.started",
+    async () => {
+      const ws = workspace();
+      quiet(ws);
+      const runner = await started(ws);
+      try {
+        await runner.until(() => ingestedStart(ws));
+        const result = await report(ws);
+        expect([result.observer_adoption, result.observer_adoption_reason]).toEqual([
+          "current",
+          null,
+        ]);
+      } finally {
+        await runner.stop();
+      }
+    },
+  );
+
+  contract("observer adoption is unknown while the CLI last seen is out of range", async () => {
+    const ws = workspace();
+    quiet(ws);
+    ws.scriptCoordinator({ version: "2.0.1" });
+    const runner = await started(ws);
+    try {
+      await runner.until(() => ws.exists("seam.json") && types(ws).includes("runner.started"));
+      const result = await report(ws);
       expect([result.observer_adoption, result.observer_adoption_reason]).toEqual([
         "unknown",
-        "protocol_inactive",
+        "cli_out_of_range",
       ]);
     } finally {
       await runner.stop();

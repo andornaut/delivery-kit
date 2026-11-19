@@ -7,7 +7,9 @@ resource sampler and the CI watches run in-process. Reviews and event ingest are
 of the coordinator-installed coordination-kit CLI with a typed result, a 45 s deadline and a
 process-group kill; a failed call claims no delivery and never holds a departure. A missed slot
 is never replayed. The runner is the only writer of its append-only event log; the CLI's ingest
-cursor is the only state it reads back, so `status` reports drain without the store.
+cursor is the only state it reads back, so `status` reports drain without the store. Every start
+appends `runner.started` with its identity token, and `status` derives observer adoption from
+that line, the cursor and the last seen CLI, reading no store or work protocol.
 
 Each departure gates local `main` HEAD in an isolated container, pushes that exact SHA without
 force, watches CI for it and deploys on a pass. Fixes go forward: a red gate records

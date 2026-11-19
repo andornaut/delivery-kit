@@ -313,6 +313,20 @@ describe("EventLog legacy outbox import", () => {
     );
   });
 
+  it("imports a 6.x resident-identity-changed event as a runner notice", () => {
+    const h = harness();
+    legacy(
+      h,
+      "r.json",
+      { key: "1:2:token", kind: "resident-identity-changed", message: "Archie bus: changed" },
+      1,
+    );
+    h.log().open();
+    expect(
+      loggedEvents(h.test).map((event) => [event.type, event.kind, event.status, event.key]),
+    ).toEqual([["resident-identity-changed", "runner", null, "1:2:token"]]);
+  });
+
   it("repeats an interrupted import without duplicating events", () => {
     const h = harness();
     seedOutbox(h);

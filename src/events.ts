@@ -60,16 +60,19 @@ export const EVENT_TYPES = {
   gate_skipped: { kind: "gate", status: "skipped" },
   "pin-mismatch": { kind: "runner", status: null },
   push: { kind: "push", status: "ok" },
-  "resident-identity-changed": { kind: "runner", status: null },
   "runner.started": { kind: "runner", status: null },
   "scheduled-status": { kind: "runner", status: null },
 } as const satisfies Record<`blocked-${BlockedStage}` | (string & {}), EventFamily>;
 
 export type EventType = keyof typeof EVENT_TYPES;
 
-/** 6.0 outbox kinds the runner no longer appends; migration keeps them as `type`. */
+/**
+ * 6.x kinds the runner no longer appends; migration keeps them as `type`. `runner.started`, appended
+ * on every start, replaces `resident-identity-changed`.
+ */
 const LEGACY_TYPES: Readonly<Record<string, EventFamily>> = {
   complete: { kind: "runner", status: "ok" },
+  "resident-identity-changed": { kind: "runner", status: null },
 };
 
 /** The family of any type: a current one, a legacy outbox kind, or an unknown legacy kind. */

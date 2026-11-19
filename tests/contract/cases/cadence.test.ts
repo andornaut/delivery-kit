@@ -12,10 +12,27 @@ import { cli, execute, impl, startRunnerAt } from "../lib/adapter.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { iso, occurrences, reviewCalls, tick, virtualNow } from "../lib/review.ts";
 import { at } from "../lib/time.ts";
-import { COORDINATOR_CLI, type Workspace } from "../lib/workspace.ts";
+import { COORDINATOR_CLI, KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000002";
-const RANGE = ">=2.0.1 <3.0.0";
+const RANGE = ">=3.0.0 <4.0.0";
+/** The coordination-kit release this checkout builds against; its CLI is in range from 3.0. */
+const RELEASED_IN_RANGE = (() => {
+  try {
+    const manifest = join(
+      KIT_ROOT,
+      "node_modules",
+      "@andornaut",
+      "coordination-kit",
+      "package.json",
+    );
+    return (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version.startsWith(
+      "3.",
+    );
+  } catch {
+    return false;
+  }
+})();
 
 /** A game with the observer at minutes 20 and 50 and departures at 00 and 10. */
 function cadenceGame(
@@ -101,7 +118,7 @@ suite("review cadence", () => {
         .update(readFileSync(join(ws.coordinator, COORDINATOR_CLI)))
         .digest("hex");
       expect(result.stdout).toContain(
-        `bus: coordinator CLI 2.0.1 (dist sha256 ${distSha256}), inside ${RANGE}`,
+        `bus: coordinator CLI 3.0.0 (dist sha256 ${distSha256}), inside ${RANGE}`,
       );
       const status = await cli(ws, ["status"]);
       expect(status.code, status.stderr).toBe(0);
@@ -110,7 +127,7 @@ suite("review cadence", () => {
         distSha256,
         seenAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/),
         supported: true,
-        version: "2.0.1",
+        version: "3.0.0",
       });
       // runner.json keeps recording the bundled coordination-kit.
       expect(ws.readJson("runner.json").coordinationKitVersion).toBe(
@@ -120,7 +137,38 @@ suite("review cadence", () => {
     CASE_TIMEOUT_MS,
   );
 
-  contract(
+  contract.skipIf(RELEASED_IN_RANGE)(
+    "a released coordination-kit CLI before 3.0 defers with cli-version, and the runner still starts",
+    async () => {
+      const ws = workspace();
+      cadenceGame(ws);
+      ws.installReleasedCoordinatorCli();
+      const cliPath = join(ws.coordinator, COORDINATOR_CLI);
+      const { version } = JSON.parse(
+        readFileSync(join(dirname(dirname(cliPath)), "package.json"), "utf8"),
+      ) as { version: string };
+      const distSha256 = createHash("sha256").update(readFileSync(cliPath)).digest("hex");
+      const deferral = `bus: review deferred: cli-version: coordinator CLI ${version} is outside ${RANGE}`;
+      const result = await tick(ws, at(20), {
+        done: ({ stderr }) => stderr.includes(deferral),
+      });
+      expect(result.stdout).toContain(
+        `bus: coordinator CLI ${version} (dist sha256 ${distSha256}) is outside ${RANGE}; reviews and event delivery defer`,
+      );
+      expect(result.stderr).toContain(deferral);
+      const status = JSON.parse((await cli(ws, ["status"])).stdout) as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(status.coordinator_cli).toMatchObject({ distSha256, supported: false, version });
+      // An out-of-range CLI is never asked to ingest, so the event log stays uningested.
+      expect(ws.exists("events.cursor")).toBe(false);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  // In range only from 3.0; until the pin moves there, the case above covers the released CLI.
+  contract.skipIf(!RELEASED_IN_RANGE)(
     "the released coordination-kit CLI answers review deliver and events ingest with typed results",
     async () => {
       const ws = workspace();
@@ -131,7 +179,6 @@ suite("review cadence", () => {
         readFileSync(join(dirname(dirname(cliPath)), "package.json"), "utf8"),
       ) as { version: string };
       const distSha256 = createHash("sha256").update(readFileSync(cliPath)).digest("hex");
-      expect(version).toMatch(/^2\./);
       // The real ingest writes the cursor; the log is drained once it reaches the end.
       const drained = (): boolean =>
         ws.exists("events.cursor") &&
@@ -333,9 +380,9 @@ suite("review cadence", () => {
       const ws = workspace();
       cadenceGame(ws);
       ws.config.schedule = { departures: ["20"], timezone: "America/Toronto" };
-      ws.scriptCoordinator({ review: { status: "delivered" }, version: "2.0.0" });
+      ws.scriptCoordinator({ review: { status: "delivered" }, version: "2.0.1" });
       impl.offer(ws, ["bus/feature"]);
-      const deferral = `bus: review deferred: cli-version: coordinator CLI 2.0.0 is outside ${RANGE}`;
+      const deferral = `bus: review deferred: cli-version: coordinator CLI 2.0.1 is outside ${RANGE}`;
       const result = await tick(ws, at(20), {
         done: ({ stderr }) => pushes(ws) === 1 && stderr.includes(deferral),
         // A departure under load can outlast the default settle; end on the condition.
@@ -351,7 +398,7 @@ suite("review cadence", () => {
         string,
         Record<string, unknown>
       >;
-      expect(status.coordinator_cli).toMatchObject({ supported: false, version: "2.0.0" });
+      expect(status.coordinator_cli).toMatchObject({ supported: false, version: "2.0.1" });
     },
     CASE_TIMEOUT_MS,
   );

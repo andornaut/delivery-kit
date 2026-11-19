@@ -119,7 +119,7 @@ suite("events", () => {
     expect([event.kind, event.key, event.status, event.sha]).toEqual(["runner", token, null, null]);
     expect(JSON.parse(String(event.detail))).toEqual({
       cliSha256: ws.readJson("runner.identity.json").cli_sha256,
-      coordinationKitVersion: "2.0.1",
+      coordinationKitVersion: "3.0.0",
       deliveryKitVersion: ws.readJson("runner.identity.json").version,
       distSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
       token,

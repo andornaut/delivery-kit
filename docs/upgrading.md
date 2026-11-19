@@ -2,6 +2,50 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 7.0
+
+7.0.0 reads no coordination-kit work protocol state. It accepts results only from a coordinator
+CLI inside `>=3.0.0 <4.0.0` and derives `observer_adoption` from the runner's own
+`runner.started` record ([Observer adoption](runner.md#observer-adoption)). The event log schema,
+cursor, rotation, the 6.0 outbox import and the COMPLETE rules are unchanged, so a 6.0 runner can
+also move straight to 7.0.
+
+1. In one window, game-coordinator pins coordination-kit 3.x at the root and runs `npm ci`, and
+   each game pins delivery-kit 7.0.0, commits the lockfile integrity, runs `npm ci` and replaces
+   its runner while idle, after its own departure and outside a wake minute:
+
+   ```json
+   "devDependencies": {
+     "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v7.0.0/delivery-kit-7.0.0.tgz"
+   }
+   ```
+
+   A 6.1 runner on a 3.0 root, and a 7.0 runner on a 2.x root, still start, depart and append
+   events, but defer every review and event ingest with `cli-version` until the other side is
+   swapped. Events stay in `events.jsonl` and are ingested once both match.
+
+2. Confirm with `status --game GAME_ID` that `coordinator_cli.supported` is `true`, that
+   `events.drained` becomes `true` once the first ingest runs, and that `observer_adoption` is
+   `current`.
+
+- Status: `observer_adoption` is `current` when the latest `runner.started` carries the running
+  token, the cursor shows that line ingested and the last seen coordinator CLI is in range;
+  `stale` when that token differs; otherwise `unknown`. `observer_adoption_reason` is null only
+  for `current` and is one of `runner_not_current`, `log_unreadable`, `no_runner_started`,
+  `token_differs`, `cli_unseen`, `cli_out_of_range` or `not_ingested`. The 6.x reasons
+  `protocol_inactive`, `protocol_unavailable`, `registry_unavailable`, `adoption_absent` and
+  `adoption_unreadable` are gone, and registry `operations.<game>.lastAdoption` and owner
+  attestation are no longer read.
+- Events: the runner no longer emits `resident-identity-changed`. `runner.started`, appended on
+  every start with the identity token, replaces it. A `resident-identity-changed` event from a
+  6.0 outbox still imports with kind `runner` and a null status.
+- Pins: delivery-kit 7.0.0 bundles coordination-kit 2.0.1 (`COORDINATION_KIT_RANGE`
+  `>=2.0.1 <4.0.0`); the bundle uses only `build/registry`, `build/review` and `build/shared`,
+  which 3.0 keeps, so a later bundle move to 3.x is a pin change only.
+- Rollback: restore the coordination-kit 2.x pin at the root and the delivery-kit 6.1.1 pins in
+  the games together, run `npm ci` in each, and replace the runners while idle. The event log
+  formats are the same, so the 6.1 runners continue from the same `events.jsonl` and cursor.
+
 ## Upgrading to 6.1
 
 6.1.0 replaces the in-process event outbox with a per-game append-only event log,

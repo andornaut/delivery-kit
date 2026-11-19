@@ -1,9 +1,10 @@
 # Work protocol
 
 The filesystem work protocol, enrollment, migration and request accounting moved to
-coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md)). delivery-kit reads an active
-protocol's observer adoption for `status` through coordination-kit's `build/protocol`. The work
-items below shipped in delivery-kit before the move.
+coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md)). From 7.0 delivery-kit
+reads no work protocol state and imports nothing from coordination-kit's `build/protocol`;
+observer adoption comes from the runner's own `runner.started` record. The work items below
+shipped in delivery-kit before the move.
 
 Reference: [work-protocol](../work-protocol.md),
 [coordination-kit work protocol](https://github.com/andornaut/coordination-kit/blob/main/docs/design/work-protocol.md).

@@ -6,9 +6,9 @@ on a pass. The kit owns the mechanisms. Each game owns its repository, `delivery
 credentials and schedule; `game-coordinator` owns `config.json`, the registry and mutable state.
 The legacy default is `var/`.
 
-The role registry, durable role messages, harness adapters, inbox review, the request ledger and
-the work protocol are [coordination-kit](https://github.com/andornaut/coordination-kit), which delivery-kit
-builds on. The resident runner decides when a scheduled review slot is due and hands it to the
+The role registry, durable role messages, harness adapters, inbox review and the work store are
+[coordination-kit](https://github.com/andornaut/coordination-kit), which delivery-kit builds on;
+delivery-kit reads no coordination-kit store or work protocol state. The resident runner decides when a scheduled review slot is due and hands it to the
 coordinator-installed coordination-kit CLI, appends its bus events to a per-game event log and asks
 that CLI to ingest them ([Event log](docs/runner.md#event-log)).
 
@@ -26,10 +26,10 @@ from disk after startup except configuration and state. Its child processes are 
 
 Games and game-coordinator pin the release asset as a devDependency and commit the lockfile
 integrity. The bundles inline coordination-kit's utilities, so a game pins only delivery-kit;
-delivery-kit 6.1.1 bundles coordination-kit 2.0.1, inside `>=2.0.0 <3.0.0`
+delivery-kit 7.0.0 bundles coordination-kit 2.0.1, inside `>=2.0.1 <4.0.0`
 ([Pin guard](docs/runner.md#pin-guard)). game-coordinator also pins coordination-kit directly
 for the roles' CLI, the channel MCP server and the reviews and event ingest each runner spawns,
-which need a release inside `>=2.0.1 <3.0.0`:
+which need a release inside `>=3.0.0 <4.0.0`:
 
 ```json
 "devDependencies": {
@@ -89,7 +89,7 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 | [docs/libraries.md](docs/libraries.md)                   | The public build API subpath and alias and the source identity library; the subpaths that moved                                                                                                                               |
 | [docs/request-accounting.md](docs/request-accounting.md) | Pointer: the request ledger moved to coordination-kit                                                                                                                                                                         |
 | [docs/work-protocol.md](docs/work-protocol.md)           | Pointer: the work protocol moved to coordination-kit                                                                                                                                                                          |
-| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 6.0, 5.0, 4.7, 4.0 and 3.0, and the removed command forms                                                                                                                                                        |
+| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 7.0, 6.1, 6.0, 5.0, 4.7, 4.0 and 3.0, and the removed command forms                                                                                                                                              |
 | [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                                                                                                |
 | [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                                                                                       |
 

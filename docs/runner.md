@@ -110,7 +110,7 @@ passes `--capture`.
   and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
 - **Range:** the CLI version in each result must satisfy `COORDINATOR_CLI_RANGE` in
-  `src/bus/pin.ts`, `>=2.0.1 <3.0.0` in delivery-kit 6.1.0. A result from a CLI outside it defers
+  `src/bus/pin.ts`, `>=3.0.0 <4.0.0` from delivery-kit 7.0.0. A result from a CLI outside it defers
   with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
   its version until a supported install answers. Departures continue.
 - **Identity:** the runner logs `bus: coordinator CLI VERSION (dist sha256 SHA256), inside RANGE`
@@ -167,25 +167,25 @@ coordinationKitVersion, distSha256}`: the loaded delivery-kit and the coordinato
   when the gate (or a docs-only skip), push and CI succeed and the deploy status is `ok` or
   `skipped`. The runner appends no `complete` event.
 
-| `type`                                                                            | `kind`    | `status`  |
-| --------------------------------------------------------------------------------- | --------- | --------- |
-| `attempt`                                                                         | `attempt` | null      |
-| `blocked-main`, `blocked-fetch`, `blocked-load`                                   | `attempt` | `blocked` |
-| `gate_skipped`                                                                    | `gate`    | `skipped` |
-| `blocked-gate`                                                                    | `gate`    | `blocked` |
-| `blocked-full-gate`, `blocked-install`                                            | `gate`    | `failed`  |
-| `push`                                                                            | `push`    | `ok`      |
-| `blocked-push`                                                                    | `push`    | `blocked` |
-| `ci_pending`                                                                      | `ci`      | null      |
-| `ci_success`                                                                      | `ci`      | `ok`      |
-| `ci_failure`                                                                      | `ci`      | `failed`  |
-| `ci_auth_failed`                                                                  | `ci`      | `blocked` |
-| `ci_timeout`                                                                      | `ci`      | `timeout` |
-| `deploy_retry`                                                                    | `deploy`  | null      |
-| `deploy_success`                                                                  | `deploy`  | `ok`      |
-| `deploy_failure`                                                                  | `deploy`  | `failed`  |
-| `deploy_skipped`, `deploy_disabled`                                               | `deploy`  | `skipped` |
-| `scheduled-status`, `pin-mismatch`, `resident-identity-changed`, `runner.started` | `runner`  | null      |
+| `type`                                               | `kind`    | `status`  |
+| ---------------------------------------------------- | --------- | --------- |
+| `attempt`                                            | `attempt` | null      |
+| `blocked-main`, `blocked-fetch`, `blocked-load`      | `attempt` | `blocked` |
+| `gate_skipped`                                       | `gate`    | `skipped` |
+| `blocked-gate`                                       | `gate`    | `blocked` |
+| `blocked-full-gate`, `blocked-install`               | `gate`    | `failed`  |
+| `push`                                               | `push`    | `ok`      |
+| `blocked-push`                                       | `push`    | `blocked` |
+| `ci_pending`                                         | `ci`      | null      |
+| `ci_success`                                         | `ci`      | `ok`      |
+| `ci_failure`                                         | `ci`      | `failed`  |
+| `ci_auth_failed`                                     | `ci`      | `blocked` |
+| `ci_timeout`                                         | `ci`      | `timeout` |
+| `deploy_retry`                                       | `deploy`  | null      |
+| `deploy_success`                                     | `deploy`  | `ok`      |
+| `deploy_failure`                                     | `deploy`  | `failed`  |
+| `deploy_skipped`, `deploy_disabled`                  | `deploy`  | `skipped` |
+| `scheduled-status`, `pin-mismatch`, `runner.started` | `runner`  | null      |
 
 `blocked-full-gate` and `blocked-install` are failed gates: the SHA is never gated again.
 `blocked-gate` is a gate that could not run. `deploy_disabled` reports a push under
@@ -299,40 +299,56 @@ Upgrade or replace a supervised runner in a quiet window:
 4. Run `systemctl --user restart delivery-kit-GAME_ID.service`.
 5. Verify exactly one holder of each lock with `status` (`runner_lock_held`, `loop_lock_held`,
    `identity_status` `current`) and `runner.json`.
-6. Under an active work protocol, record observer adoption again for the new resident (see
+6. Confirm `observer_adoption` `current` once the new runner's `runner.started` is ingested (see
    [Observer adoption](#observer-adoption)), then observe the next normal slot.
 
 ## Observer adoption
 
-Under an active work protocol, the bus owner's `coordination-kit protocol observer-adoption` records the resident it
-inspected. The adopted identity is `resident.residentId` in the audit artifact that registry
-`operations.<game>.lastAdoption.evidenceRef` names; the audit must name the operation and match the
-registry's bus owner, adopted version and CLI digest. Every runner start writes a new identity
-token, so a start leaves the previous adoption stale until the bus owner refreshes it.
+Every runner start appends `runner.started`, keyed by the new identity token, once the startup
+CLI probe settles ([Event log](#event-log)). That line is the runner's identity record: the
+observer has adopted the running runner once the coordinator CLI has ingested it. There is no
+separate adoption record, owner attestation or identity-change event.
 
-- At startup, when the protocol is active and the recorded adoption names a different token, the
-  runner logs it and appends one `resident-identity-changed` event keyed by the new token. Ingest
-  delivers it to `reports.recipient`; it names the bus owner who must refresh observer adoption. Each token reports at most once. An absent, unreadable or
-  inconsistent adoption is logged, not reported.
-- `status --game ID` reports `observer_adoption`, read-only:
-  - `current`: the running identity is attested (`identity_status` `current`) and equals the
-    adopted token;
-  - `stale`: the running identity is attested and differs from the adopted token;
-  - `unknown`: neither can be compared. `observer_adoption_reason` is `runner_not_current`,
-    `protocol_inactive`, `protocol_unavailable`, `registry_unavailable`, `adoption_absent` or
-    `adoption_unreadable`, and null for `current` and `stale`.
+`status --game ID` reports `observer_adoption`, read only from `bus/` (no coordinator store, work
+protocol or registry read):
 
-Neither the event nor the field records adoption, changes the registry or authorises replacement.
+- The record is the latest complete `runner.started` line in `events.jsonl`, or in the newest
+  rotated `events.<epoch>.jsonl` when `events.jsonl` has none. Its token is the `token` field of
+  its detail.
+- `current`: the record carries the running runner's token (`identity_status` `current`),
+  `bus/seam.json`'s last seen coordinator CLI is inside `COORDINATOR_CLI_RANGE`, and
+  `events.cursor` names the record's file (by `firstId`, or inode and device for a file without
+  one) with an offset past the record's line.
+- `stale`: the record carries a different token, for example a previous runner's while the new
+  one's probe has not settled.
+- `unknown`: anything else.
+
+`observer_adoption_reason` is null only for `current`:
+
+| Reason               | Status    | Cause                                                                      |
+| -------------------- | --------- | -------------------------------------------------------------------------- |
+| `runner_not_current` | `unknown` | No running runner with a current identity                                  |
+| `log_unreadable`     | `unknown` | `events.jsonl`, the bus directory or the newest rotated log is unreadable  |
+| `no_runner_started`  | `unknown` | No complete `runner.started` line where the record is read                 |
+| `token_differs`      | `stale`   | The record's token is not the running runner's                             |
+| `cli_unseen`         | `unknown` | `bus/seam.json` holds no coordinator CLI identity                          |
+| `cli_out_of_range`   | `unknown` | The last seen coordinator CLI is outside `COORDINATOR_CLI_RANGE`           |
+| `not_ingested`       | `unknown` | The cursor is absent, invalid, names another file or stops before the line |
+
+Departures, reviews and ingest never depend on the field; it records nothing, changes nothing
+and authorises no replacement.
 
 ## Pin guard
 
 The bundles inline the coordination-kit utilities they use (layout, registry reads, locks,
-durable writes, configuration validation, IDs and the protocol read), so a game
+durable writes, configuration validation and IDs) from `build/registry`, `build/review` and
+`build/shared`, and nothing from `build/protocol`, so a game
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/bus/pin.ts`;
-delivery-kit 6.1.0 supports `>=2.0.0 <3.0.0` and bundles 2.0.1; the coordinator CLI it spawns
-needs `>=2.0.1 <3.0.0`. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
+delivery-kit 7.0.0 supports `>=2.0.1 <4.0.0` and bundles 2.0.1; the coordinator CLI it spawns
+needs `>=3.0.0 <4.0.0`. The bundled range spans 2.0.1 and 3.x because coordination-kit 3.0 keeps
+those subpaths unchanged, so moving the bundle to 3.x is a pin change only. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.
 

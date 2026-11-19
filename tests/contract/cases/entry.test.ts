@@ -130,7 +130,7 @@ suite("entry", () => {
       expect(status.code, status.stderr).toBe(0);
       expect(JSON.parse(status.stdout).coordination_kit).toEqual({
         bundled: bundledCoordinationKit(),
-        supported: ">=2.0.0 <3.0.0",
+        supported: ">=2.0.1 <4.0.0",
       });
       // Every runner case starts with no coordination-kit package in the game.
       expect(existsSync(join(ws.repo, "node_modules", "@andornaut", "coordination-kit"))).toBe(

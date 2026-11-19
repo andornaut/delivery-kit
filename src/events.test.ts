@@ -62,6 +62,16 @@ describe("the event type table", () => {
     expect(Object.keys(EVENT_TYPES).sort()).toEqual(emitted);
   });
 
+  it("no longer emits resident-identity-changed; runner.started replaces it", () => {
+    expect(emittedTypes()).not.toContain("resident-identity-changed");
+    expect(Object.hasOwn(EVENT_TYPES, "resident-identity-changed")).toBe(false);
+    expect(
+      sources(SRC).filter((path) =>
+        readFileSync(path, "utf8").includes('"resident-identity-changed"'),
+      ),
+    ).toEqual([join(SRC, "events.ts")]);
+  });
+
   it("gives each type one family and an outcome status or null", () => {
     expect(familyOf("ci_success")).toEqual({ kind: "ci", status: "ok" });
     expect(familyOf("blocked-full-gate")).toEqual({ kind: "gate", status: "failed" });
@@ -73,6 +83,7 @@ describe("the event type table", () => {
 
   it("maps legacy outbox kinds the runner no longer emits", () => {
     expect(familyOf("complete")).toEqual({ kind: "runner", status: "ok" });
+    expect(familyOf("resident-identity-changed")).toEqual({ kind: "runner", status: null });
     expect(familyOf("blocked-retired-stage")).toEqual({ kind: "attempt", status: "blocked" });
     expect(familyOf("retired-kind")).toEqual({ kind: "runner", status: null });
   });

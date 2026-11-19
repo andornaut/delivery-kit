@@ -2,7 +2,6 @@
 // with --resources the reporting-only resource information.
 import { dumpsJson, EXIT_OK, type Handler } from "@andornaut/coordination-kit/build/shared";
 
-import { adoptedResident } from "../bus/adoption.ts";
 import { resolveGame } from "../bus/command.ts";
 import { busContext } from "../bus/context.ts";
 import { resourceReport } from "../bus/resources.ts";
@@ -29,7 +28,6 @@ export const status: Handler = async (io, root, args) => {
     io.out(await resourceReport(context));
     return EXIT_OK;
   }
-  const adopted = adoptedResident(layout, game.id);
-  io.out(`${dumpsJson(statusReport(busPaths(game.busDir), game.repo, adopted))}\n`);
+  io.out(`${dumpsJson(statusReport(busPaths(game.busDir), game.repo))}\n`);
   return EXIT_OK;
 };

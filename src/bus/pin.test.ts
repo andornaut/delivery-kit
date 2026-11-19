@@ -4,6 +4,7 @@ import {
   COORDINATION_KIT_BUNDLED,
   COORDINATION_KIT_RANGE,
   coordinationKitReport,
+  COORDINATOR_CLI_RANGE,
   satisfies,
 } from "./pin.ts";
 
@@ -17,6 +18,25 @@ describe("satisfies", () => {
     expect(satisfies("=1.2.3", "1.2.3")).toBe(true);
     expect(satisfies(">1.2.3 <=1.2.4", "1.2.4")).toBe(true);
     expect(() => satisfies("^1.0.0", "1.0.0")).toThrow("unsupported range comparator: ^1.0.0");
+  });
+});
+
+describe("ranges", () => {
+  it("accept a 3.x coordinator CLI only, and a 2.0.1 or 3.x bundle", () => {
+    expect(COORDINATOR_CLI_RANGE).toBe(">=3.0.0 <4.0.0");
+    expect(COORDINATION_KIT_RANGE).toBe(">=2.0.1 <4.0.0");
+    for (const [version, cli, bundle] of [
+      ["2.0.0", false, false],
+      ["2.0.1", false, true],
+      ["2.9.9", false, true],
+      ["3.0.0", true, true],
+      ["3.12.4", true, true],
+      ["3.0.0-rc.1", false, false],
+      ["4.0.0", false, false],
+    ] as const) {
+      expect(satisfies(COORDINATOR_CLI_RANGE, version), version).toBe(cli);
+      expect(satisfies(COORDINATION_KIT_RANGE, version), version).toBe(bundle);
+    }
   });
 });
 

@@ -16,12 +16,16 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
-  `observer_adoption` compares the running identity token with the last observer adoption; see
-  [Observer adoption](runner.md#observer-adoption). `coordination_kit` reports the bundled
+  `observer_adoption` is `current`, `stale` or `unknown`, derived from bus/ alone: `current` when
+  the latest `runner.started` carries the running token, the cursor shows that line ingested and
+  the last seen coordinator CLI is in range, and `stale` when that token differs.
+  `observer_adoption_reason` is null for `current` and otherwise one of `runner_not_current`,
+  `log_unreadable`, `no_runner_started`, `token_differs`, `cli_unseen`, `cli_out_of_range` or
+  `not_ingested`; see [Observer adoption](runner.md#observer-adoption). `coordination_kit` reports the bundled
   coordination-kit version and the supported range; see [Pin guard](runner.md#pin-guard).
   `coordinator_cli` reports the last coordinator CLI identity a seam result carried, from
   `bus/seam.json`: `{version, distSha256, seenAt, supported}`, where `supported` tests `version`
-  against `>=2.0.1 <3.0.0`, and every field is null before the runner has seen one; see
+  against `>=3.0.0 <4.0.0`, and every field is null before the runner has seen one; see
   [Coordinator CLI seam](runner.md#coordinator-cli-seam).
   `events` reads the event log and its cursor, read-only: `{file, size, cursorOffset, rotated,
 torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffset` is null
