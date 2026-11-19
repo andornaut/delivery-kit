@@ -16,6 +16,7 @@ const VALUES: Readonly<Record<string, string>> = {
   reason: "TEXT",
   requester: "ROLE",
   state: "enabled|paused",
+  timeout: "SECONDS",
 };
 const GAME = { game: { type: "string" } } as const;
 /** Every command is a game operation: a top-level verb, or the runner group and its verb. */
@@ -44,6 +45,16 @@ export const SPECS = {
     forms: [["game"]],
     options: GAME,
     summary: "run one game's resident delivery runner",
+  },
+  "runner start": {
+    forms: [["game"]],
+    options: GAME,
+    summary: "start one runner for the game through its systemd user unit, or detached without one",
+  },
+  "runner stop": {
+    forms: [["game", "timeout?"]],
+    options: { ...GAME, timeout: { type: "string" } },
+    summary: "wait until the game's runner is idle and drained, then stop it",
   },
   "runner unit": {
     forms: [["game"]],

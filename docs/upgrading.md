@@ -10,9 +10,11 @@ CLI inside `>=3.0.0 <4.0.0` and derives `observer_adoption` from the runner's ow
 cursor, rotation, the 6.0 outbox import and the COMPLETE rules are unchanged, so a 6.0 runner can
 also move straight to 7.0.
 
-1. In one window, game-coordinator pins coordination-kit 3.x at the root and runs `npm ci`, and
-   each game pins delivery-kit 7.0.0, commits the lockfile integrity, runs `npm ci` and replaces
-   its runner while idle, after its own departure and outside a wake minute:
+Swap the root and the runners in one window, after the games' departures and outside a wake
+minute:
+
+1. Each game pins delivery-kit 7.0.0, commits the lockfile integrity and runs `npm ci`; the
+   running 6.1 runner keeps its loaded code and logs a pin mismatch:
 
    ```json
    "devDependencies": {
@@ -20,14 +22,24 @@ also move straight to 7.0.
    }
    ```
 
-   A 6.1 runner on a 3.0 root, and a 7.0 runner on a 2.x root, still start, depart and append
-   events, but defer every review and event ingest with `cli-version` until the other side is
-   swapped. Events stay in `events.jsonl` and are ingested once both match.
-
-2. Confirm with `status --game GAME_ID` that `coordinator_cli.supported` is `true`, that
+2. Each game runs `runner stop --game GAME_ID` from its new install. It waits until the 6.1
+   runner is idle and drained, which the 2.x root can still ingest, then stops it through its
+   active unit or by `SIGTERM`.
+3. game-coordinator pins coordination-kit 3.x at the root and runs `npm ci`.
+4. Each game runs `runner start --game GAME_ID`.
+5. Confirm with `status --game GAME_ID` that `coordinator_cli.supported` is `true`, that
    `events.drained` becomes `true` once the first ingest runs, and that `observer_adoption` is
    `current`.
 
+A 6.1 runner on a 3.0 root, and a 7.0 runner on a 2.x root, still start, depart and append
+events, but defer every review and event ingest with `cli-version` until the other side is
+swapped. Events stay in `events.jsonl` and are ingested once both match.
+
+- Commands: `runner stop --game ID [--timeout SECONDS]` waits until the runner is idle and
+  drained, then stops it through its active unit or by `SIGTERM`; `runner start --game ID`
+  starts one runner through the unit, or detached without one
+  ([Supervision](runner.md#supervision)). Both read only the bus status files, so they also stop
+  and start a 6.1 runner.
 - Status: `observer_adoption` is `current` when the latest `runner.started` carries the running
   token, the cursor shows that line ingested and the last seen coordinator CLI is in range;
   `stale` when that token differs; otherwise `unknown`. `observer_adoption_reason` is null only
@@ -43,7 +55,8 @@ also move straight to 7.0.
   `>=2.0.1 <4.0.0`); the bundle uses only `build/registry`, `build/review` and `build/shared`,
   which 3.0 keeps, so a later bundle move to 3.x is a pin change only.
 - Rollback: restore the coordination-kit 2.x pin at the root and the delivery-kit 6.1.1 pins in
-  the games together, run `npm ci` in each, and replace the runners while idle. The event log
+  the games together, run `npm ci` in each, and replace the runners while idle (`runner stop`
+  from the 7.0 install before its `npm ci`, then start the 6.1 runner as before). The event log
   formats are the same, so the 6.1 runners continue from the same `events.jsonl` and cursor.
 
 ## Upgrading to 6.1

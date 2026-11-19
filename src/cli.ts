@@ -29,7 +29,7 @@ import { workerParentProblems } from "./bus/parents.ts";
 import { control } from "./commands/control.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
-import { runnerUnit } from "./commands/runner.ts";
+import { runnerStart, runnerStop, runnerUnit } from "./commands/runner.ts";
 import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 declare const __DK_VERSION__: string;
@@ -45,6 +45,8 @@ export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.
 export const COMMANDS = [
   "run",
   "runner unit",
+  "runner stop",
+  "runner start",
   "status",
   "control",
   "check-config",
@@ -250,6 +252,8 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   control,
   request,
   run,
+  "runner start": runnerStart,
+  "runner stop": runnerStop,
   "runner unit": runnerUnit,
   status,
 };

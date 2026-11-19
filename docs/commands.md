@@ -36,6 +36,20 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
   cursor names a rotated log), `events_cursor_unmatched` (it names no file present),
   `events_unreadable` and `events_dir_unreadable`, plus `events_legacy_outbox` while a 6.0 `events/` outbox awaits import.
   `drained` at the top level also requires no idle blocker; see [Event log](runner.md#event-log).
+- `runner stop --game ID [--timeout SECONDS]`: waits up to `SECONDS` (default 900) until the
+  runner is idle and drained, then stops it through its active systemd user unit or with
+  `SIGTERM` to the `runner.json` PID while that PID holds the runner identity token, and waits
+  for `runner.lock` and `loop.lock` to be free. Stdout is one JSON line
+  `{schema, game, pid, method, stopped, locksFree}` with `method` `systemd`, `signal` or `none`.
+  Exit 0 when stopped with the locks free or when no runner runs; 1 on a timeout, a PID that does
+  not hold the identity or a runner that does not exit, leaving the runner untouched in the first
+  two cases. A `--timeout` that is not a positive whole number is a usage error. See
+  [Supervision](runner.md#supervision).
+- `runner start --game ID`: exits 1 and starts nothing while either lock is held. Starts the
+  systemd user unit when its file is installed, otherwise spawns the game's installed
+  `dist/cli.js run --game ID` detached with output appended to `bus/runner.out`. Stdout is one
+  JSON line `{schema, game, pid, method, status}` with `method` `systemd` or `spawn` and `status`
+  `{running, idle, coordinator_cli}`; a runner that is not up within 30 s exits 1.
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of

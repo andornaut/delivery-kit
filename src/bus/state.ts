@@ -42,6 +42,8 @@ export interface BusPaths {
   readonly seam: string;
   readonly resourcesLog: string;
   readonly runnerLog: string;
+  /** The stdout and stderr of a runner `runner start` spawned without a unit. */
+  readonly runnerOut: string;
 }
 
 export function busPaths(dir: string): BusPaths {
@@ -73,6 +75,7 @@ export function busPaths(dir: string): BusPaths {
     runnerJson: at("runner.json"),
     runnerLock: at("runner.lock"),
     runnerLog: at("runner.log"),
+    runnerOut: at("runner.out"),
     seam: at("seam.json"),
   };
 }

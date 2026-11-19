@@ -290,13 +290,40 @@ systemctl --user daemon-reload \
 Starting at boot without a login session needs lingering, which the user enables with
 `sudo loginctl enable-linger "$USER"`.
 
+`runner stop` and `runner start` replace a runner with or without the unit:
+
+- `runner stop --game GAME_ID [--timeout SECONDS]` polls `status` (default timeout 900 s) until
+  the runner is idle and drained: no active departure, deploy retry, CI watch or pending
+  request, and the event log ingested. It then runs
+  `systemctl --user stop delivery-kit-GAME_ID` when
+  `~/.config/systemd/user/delivery-kit-GAME_ID.service` exists and `systemctl --user is-active`
+  reports the unit active; otherwise it sends `SIGTERM` to the PID in `bus/runner.json`, but only while `runner.lock` holds the token `runner.identity.json`
+  records for that PID, so a recycled PID is never signalled. It waits up to 150 s for both locks
+  to be free and prints one JSON line `{schema, game, pid, method, stopped, locksFree}`, `method`
+  being `systemd`, `signal` or `none`. It exits 0 when the runner stopped with both locks free,
+  or when no runner was running (`method` `none`, `pid` null). On a timeout, or when the PID does
+  not hold the identity, it exits 1 and leaves the runner running and untouched.
+- `runner start --game GAME_ID` exits 1 and starts nothing while either lock is held. With the
+  unit file installed it runs `systemctl --user start delivery-kit-GAME_ID`. Otherwise it spawns
+  the running Node binary with the game's installed
+  `node_modules/@andornaut/delivery-kit/dist/cli.js run --game GAME_ID`, detached in its own
+  session, from the game checkout with `DELIVERY_KIT_ROOT` set and stdout and stderr appended to
+  `bus/runner.out`, never through `npx`. It waits up to 30 s for both locks, a current identity
+  and a `runner.json` naming that PID, then prints `{schema, game, pid, method, status}`, where
+  `method` is `systemd` or `spawn` and `status` is `{running, idle, coordinator_cli}`. A runner
+  that does not come up, or exits first, exits 1.
+
+Neither command changes desired delivery control or any coordination-kit state. Both read only
+the read-only status report and `runner.json`; two concurrent starts leave one runner, because
+the second is refused by the singleton locks.
+
 Upgrade or replace a supervised runner in a quiet window:
 
 1. Install the new pin in the game checkout: the devDependency bump, then `npm ci`.
 2. After a Node upgrade or a moved tool, run `runner unit` again, replace the unit file and run
    `systemctl --user daemon-reload`. A pin change alone keeps every path.
-3. Confirm with `status --game GAME_ID` that the runner is idle and drained.
-4. Run `systemctl --user restart delivery-kit-GAME_ID.service`.
+3. Run `runner stop --game GAME_ID`, which waits until the runner is idle and drained.
+4. Run `runner start --game GAME_ID`.
 5. Verify exactly one holder of each lock with `status` (`runner_lock_held`, `loop_lock_held`,
    `identity_status` `current`) and `runner.json`.
 6. Confirm `observer_adoption` `current` once the new runner's `runner.started` is ingested (see

@@ -22,7 +22,7 @@ when the work protocol is active:
   6.0 outbox with its `<sha>.state` files), `last-complete.sha` (the last commit the runner saw
   complete), `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
   `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
-  `runner.log`, `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
+  `runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 
