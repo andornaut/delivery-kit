@@ -17,12 +17,14 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 
 ## Work items
 
-| ID      | Title                                                       | Link                             |
-| ------- | ----------------------------------------------------------- | -------------------------------- |
-| dk-0003 | Move design documentation from the README into docs         | [dk-0003.md](../work/dk-0003.md) |
-| dk-0014 | Run only attribution and lint checks for docs-only changes  | [dk-0014.md](../work/dk-0014.md) |
-| dk-0015 | Adopt the work-file convention                              | [dk-0015.md](../work/dk-0015.md) |
-| dk-0018 | Split the coordination kit out of delivery-kit              | [dk-0018.md](../work/dk-0018.md) |
-| dk-0019 | Leave the event delivery contract cases to coordination-kit | [dk-0019.md](../work/dk-0019.md) |
-| dk-0020 | Check the bundled coordination-kit range at build time      | [dk-0020.md](../work/dk-0020.md) |
-| dk-0021 | Release 5.0.2 with coordination-kit 1.0.2                   | [dk-0021.md](../work/dk-0021.md) |
+| ID      | Title                                                                 | Link                             |
+| ------- | --------------------------------------------------------------------- | -------------------------------- |
+| dk-0003 | Move design documentation from the README into docs                   | [dk-0003.md](../work/dk-0003.md) |
+| dk-0014 | Run only attribution and lint checks for docs-only changes            | [dk-0014.md](../work/dk-0014.md) |
+| dk-0015 | Adopt the work-file convention                                        | [dk-0015.md](../work/dk-0015.md) |
+| dk-0018 | Split the coordination kit out of delivery-kit                        | [dk-0018.md](../work/dk-0018.md) |
+| dk-0019 | Leave the event delivery contract cases to coordination-kit           | [dk-0019.md](../work/dk-0019.md) |
+| dk-0020 | Check the bundled coordination-kit range at build time                | [dk-0020.md](../work/dk-0020.md) |
+| dk-0021 | Release 5.0.2 with coordination-kit 1.0.2                             | [dk-0021.md](../work/dk-0021.md) |
+| dk-0023 | Audit the documentation after the coordination-kit split              | [dk-0023.md](../work/dk-0023.md) |
+| dk-0024 | Run path-filtered CI jobs unless the classification reports docs-only | [dk-0024.md](../work/dk-0024.md) |
