@@ -145,7 +145,8 @@ the coordinator CLI's `events ingest` reads it. The schema lives in `src/events.
   cut at a character boundary and ends in `[truncated]`.
 - **Fields:** `{"schema":1,"id":ID,"game":G,"kind":K,"type":T,"key":KEY,"at":ISO,"sha":SHA|null,
 "status":S|null,"detail":TEXT,"work":[IDS]|null}`. `id` is the sha256 hex of
-  `${game}\n${type}\n${key}`; `sha` is the key when the key is a commit SHA; `at` is UTC to the
+  `${game}\n${type}\n${key}`; `sha` is the key when the key is a commit SHA, or is set explicitly
+  for `attempt-captured`. The `at` time is UTC to the
   second. `detail` is the operator-facing text, with the `<project> bus:` prefix the 6.0 outbox
   gave it.
 - **At most once:** per `(type, key)`, through an in-memory ID set rebuilt at startup from the
@@ -163,13 +164,19 @@ coordinationKitVersion, distSha256}`: the loaded delivery-kit and the coordinato
   keeps the last one in `bus/last-complete.sha`. Elsewhere `work` is null. A deploy event appended
   before an earlier commit completes can list items that commit also lists; ingest records each
   item once.
+- **Capture evidence:** `attempt` identifies the candidate before load and source checks.
+  `attempt-captured` retains its attempt key and records the full SHA after the gate verifies the
+  immutable source snapshot, before executing a gate. A docs-only departure records the SHA
+  selected for the pinned push after preflight, identified as docs-only in the event detail.
+  Idle slots, stale requests and failures before capture have no capture event. Gate, push, CI
+  and deploy outcomes retain their own evidence.
 - **COMPLETE:** a coordination-kit projection with a unique `(game, complete, sha)` key, formed
   when the gate passes (`gate_passed`) or a docs-only range skips it (`gate_skipped`), push and CI
   succeed and the deploy status is `ok` or `skipped`. The runner appends no `complete` event.
 
 | `type`                                               | `kind`    | `status`  |
 | ---------------------------------------------------- | --------- | --------- |
-| `attempt`                                            | `attempt` | null      |
+| `attempt`, `attempt-captured`                        | `attempt` | null      |
 | `blocked-main`, `blocked-fetch`, `blocked-load`      | `attempt` | `blocked` |
 | `gate_passed`                                        | `gate`    | `ok`      |
 | `gate_skipped`                                       | `gate`    | `skipped` |

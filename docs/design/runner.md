@@ -37,4 +37,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0031 | Bind the stock gate to the verified source identity                                | [dk-0031.md](../work/dk-0031.md) |
 | dk-0034 | Log a gate_passed event so every passed departure completes                        | [dk-0034.md](../work/dk-0034.md) |
 | dk-0035 | Word the slot report so an idle check does not read as a departure                 | [dk-0035.md](../work/dk-0035.md) |
-| dk-0036 | Expose the verified SHA captured for a departure | [dk-0036.md](../work/dk-0036.md) |
+| dk-0036 | Expose the verified SHA captured for a departure                                   | [dk-0036.md](../work/dk-0036.md) |
