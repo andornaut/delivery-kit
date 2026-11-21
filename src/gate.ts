@@ -186,6 +186,8 @@ export interface GateInput {
   readonly logs: string;
   /** The short departure SHA that names the gate container. */
   readonly departure: string;
+  /** Called with the verified snapshot commit before gate execution. */
+  readonly onCaptured?: (sha: string) => void;
 }
 
 /**
@@ -477,6 +479,7 @@ export async function runGate(
   try {
     // Complete source-only admission precedes any source-bound image or entrypoint.
     identity = await captureGateIdentity(context, input);
+    input.onCaptured?.(identity.manifest.commit);
     outcome = await gate(context, name, input, identity);
     if (outcome.ok) {
       // Checked before the outputs are copied into the worktree, so the copy is not a change.

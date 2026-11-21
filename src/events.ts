@@ -40,6 +40,7 @@ export type BlockedStage = "fetch" | "full-gate" | "gate" | "install" | "load" |
  */
 export const EVENT_TYPES = {
   attempt: { kind: "attempt", status: null },
+  "attempt-captured": { kind: "attempt", status: null },
   "blocked-fetch": { kind: "attempt", status: "blocked" },
   "blocked-full-gate": { kind: "gate", status: "failed" },
   "blocked-gate": { kind: "gate", status: "blocked" },
@@ -118,12 +119,13 @@ export function isoSeconds(epochMs: number): string {
   return new Date(epochMs).toISOString().replace(/\.\d{3}Z$/u, "Z");
 }
 
-/** Build an event; `sha` is the key when the key is a commit SHA. */
+/** Build an event, deriving `sha` from a commit key when omitted. */
 export function makeEvent(
   fields: {
     readonly game: string;
     readonly at: string;
     readonly detail: string;
+    readonly sha?: string | null;
     readonly work?: readonly string[] | null;
   },
   type: string,
@@ -140,7 +142,7 @@ export function makeEvent(
     type,
     key,
     at: fields.at,
-    sha: SHA40.test(key) ? key : null,
+    sha: fields.sha === undefined ? (SHA40.test(key) ? key : null) : fields.sha,
     status: family.status,
     detail: fields.detail,
     work: fields.work ?? null,

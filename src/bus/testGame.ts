@@ -64,18 +64,18 @@ export function commitFile(
 }
 
 export interface RecordedEvents extends Events {
-  readonly list: [string, string, string][];
+  readonly list: [string, string, string, string?][];
   readonly starts: [string, RunnerStarted][];
   ingests: number;
   opens: number;
 }
 
 export function recordingEvents(): RecordedEvents {
-  const list: [string, string, string][] = [];
+  const list: RecordedEvents["list"] = [];
   const starts: [string, RunnerStarted][] = [];
   const events = {
-    emit(type: string, key: string, message: string) {
-      list.push([type, key, message]);
+    emit(type: string, key: string, message: string, sha?: string) {
+      list.push(sha === undefined ? [type, key, message] : [type, key, message, sha]);
     },
     ingest() {
       events.ingests += 1;

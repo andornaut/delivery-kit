@@ -461,16 +461,20 @@ export class EventLog {
   }
 
   /** Append one event at most once per (type, key); false when it was a duplicate or failed. */
-  append(type: EventType, key: string, detail: string): boolean {
+  append(
+    type: EventType,
+    key: string,
+    detail: string,
+    sha = SHA40.test(key) ? key : null,
+  ): boolean {
     try {
       this.#ensureOpen();
       const { game } = this.#options;
-      const sha = SHA40.test(key) ? key : null;
       if (this.#ids.has(eventId(game, type, key))) {
         return false;
       }
       const event = makeEvent(
-        { at: this.#at(), detail: cleanDetail(detail), game, work: this.#work(type, sha) },
+        { at: this.#at(), detail: cleanDetail(detail), game, sha, work: this.#work(type, sha) },
         type,
         key,
       );

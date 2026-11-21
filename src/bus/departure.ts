@@ -389,6 +389,12 @@ async function pushDocs(context: BusContext, attempt: Attempt, head: string): Pr
   const { config } = context;
   const reason = `every changed path is under ${DOCS_PREFIX}`;
   context.log(`${attempt.when} bus departs with main ${head}; ${reason}: no gate, no deployment`);
+  context.events.emit(
+    "attempt-captured",
+    attempt.key,
+    `${attempt.when} captured main ${head} for a docs-only pinned push.`,
+    head,
+  );
   const failed = await pushHead(context, attempt, head);
   if (failed !== undefined) {
     return failed;
@@ -426,10 +432,25 @@ async function gateAndPush(
   writeLines(join(logs, "commit.sha"), head);
   context.log(`${attempt.when} bus departs with main ${head}; gate logs: ${logs}`);
   const before = await treeFingerprint(context, work);
-  const outcome = await runGate(context, { departure: short, logs, sha: head, work }, async () =>
-    (await treeFingerprint(context, work)) === before
-      ? undefined
-      : "gate discarded: Git status or reported-file fingerprints changed during checks",
+  const outcome = await runGate(
+    context,
+    {
+      departure: short,
+      logs,
+      onCaptured: (sha) =>
+        context.events.emit(
+          "attempt-captured",
+          attempt.key,
+          `${attempt.when} captured verified gate snapshot for main ${sha}.`,
+          sha,
+        ),
+      sha: head,
+      work,
+    },
+    async () =>
+      (await treeFingerprint(context, work)) === before
+        ? undefined
+        : "gate discarded: Git status or reported-file fingerprints changed during checks",
   );
   if (!outcome.ok) {
     context.log(outcome.reason);

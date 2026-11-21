@@ -25,7 +25,7 @@ export interface Events {
   /** Prepare the log at runner start: torn-tail repair, dedupe rebuild, legacy outbox import. */
   open(): void;
   /** Append one event at most once per (type, key) and request an ingest. */
-  emit(type: EventType, key: string, message: string): void;
+  emit(type: EventType, key: string, message: string, sha?: string): void;
   /** Append `runner.started` for this start, keyed by the runner token. */
   started(key: string, started: RunnerStarted): void;
   /** Request a `coordination-kit events ingest`. */
@@ -87,8 +87,8 @@ function busEvents(
   options: { readonly coordinator: Coordinator; readonly project: string },
 ): Events {
   return {
-    emit(type, key, message) {
-      if (log.append(type, key, `${options.project} bus: ${message}`)) {
+    emit(type, key, message, sha) {
+      if (log.append(type, key, `${options.project} bus: ${message}`, sha)) {
         this.ingest();
       }
     },

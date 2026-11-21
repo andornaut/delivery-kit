@@ -84,6 +84,7 @@ describe("EventLog appends", () => {
     log.open();
     expect(log.append("push", SHA, "Archie bus: pushed")).toBe(true);
     expect(log.append("attempt", "1800000000", "Archie bus: attempt")).toBe(true);
+    expect(log.append("attempt-captured", "1800000000", "Archie bus: captured", SHA)).toBe(true);
     expect(loggedEvents(h.test)).toEqual([
       {
         at: "2027-01-15T08:00:00Z",
@@ -99,6 +100,19 @@ describe("EventLog appends", () => {
         work: null,
       },
       expect.objectContaining({ kind: "attempt", sha: null, status: null, type: "attempt" }),
+      {
+        at: "2027-01-15T08:00:00Z",
+        detail: "Archie bus: captured",
+        game: GAME,
+        id: eventId(GAME, "attempt-captured", "1800000000"),
+        key: "1800000000",
+        kind: "attempt",
+        schema: 1,
+        sha: SHA,
+        status: null,
+        type: "attempt-captured",
+        work: null,
+      },
     ]);
   });
 

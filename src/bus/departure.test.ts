@@ -118,18 +118,38 @@ describe("slotDetail", () => {
 
 describe("trunk-based departures", () => {
   it("gates and pushes a fast-forward main HEAD, then watches its CI", async () => {
-    const { context, exec, kinds, started, test } = setup();
+    const { context, events, exec, kinds, started, test } = setup();
     const head = mergeFastForward(test, "feature");
-    expect(await depart(context)).toBe(0);
+    const capturesAtCreate: (typeof events.list)[number][] = [];
+    expect(
+      await depart({
+        ...context,
+        exec: (spec) => {
+          if (spec.command === "docker" && spec.args[0] === "create") {
+            capturesAtCreate.push(...events.list.filter(([kind]) => kind === "attempt-captured"));
+          }
+          return exec(spec);
+        },
+      }),
+    ).toBe(0);
     expect(originMain(test)).toBe(head);
     expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
     expect(started).toEqual([head]);
     expect(kinds()).toEqual([
       "scheduled-status",
       "attempt",
+      "attempt-captured",
       "gate_passed",
       "push",
       "deploy_disabled",
+    ]);
+    expect(capturesAtCreate).toEqual([
+      [
+        "attempt-captured",
+        events.list.find(([kind]) => kind === "attempt")?.[1],
+        expect.stringContaining("verified gate snapshot"),
+        head,
+      ],
     ]);
     const create = exec.calls.find((call) => call.args[0] === "create")?.args ?? [];
     expect(create[2]).toBe(`delivery-kit-gate-archies-dog-walks-${head.slice(0, 12)}`);
@@ -155,11 +175,11 @@ describe("trunk-based departures", () => {
     const head = mergeFastForward(test, "feature");
     const remoteAtGate: string[] = [];
     const record = events.emit.bind(events);
-    events.emit = (type, key, message) => {
+    events.emit = (type, key, message, sha) => {
       if (type === "gate_passed") {
         remoteAtGate.push(originMain(test));
       }
-      record(type, key, message);
+      record(type, key, message, sha);
     };
     expect(await depart(context)).toBe(0);
     expect(events.list.filter(([kind]) => kind === "gate_passed")).toEqual([
@@ -223,6 +243,26 @@ describe("trunk-based departures", () => {
     expect(originMain(test)).toBe(head);
   });
 
+  it("emits no capture when gate snapshot verification fails", async () => {
+    const { context, creates, exec, kinds, test } = setup();
+    const head = mergeFastForward(test, "feature");
+    const work = join(test.game.busDir, `gate-${head}`);
+    expect(
+      await depart({
+        ...context,
+        exec: (spec) =>
+          spec.command === "git" &&
+          spec.args[1] === work &&
+          spec.args[2] === "rev-parse" &&
+          spec.args[3] === "HEAD"
+            ? Promise.resolve({ status: 0, stderr: "", stdout: `${"0".repeat(40)}\n` })
+            : exec(spec),
+      }),
+    ).toBe(1);
+    expect(kinds()).toEqual(["scheduled-status", "attempt", "blocked-gate"]);
+    expect(creates()).toBe(0);
+  });
+
   it("reports a non-fast-forward rejection and pushes nothing", async () => {
     const { context, events, test } = setup();
     // Someone else advanced the remote main with a commit this checkout does not have.
@@ -261,7 +301,8 @@ describe("trunk-based departures", () => {
     expect(receipt).toBe(`{"head": "${head}", "id": "r1", "state": "pending"}\n`);
     expect(await depart(context, { requestId: "r1" })).toBe(0);
     expect(originMain(test)).toBe(head);
-    expect(kinds()).toEqual(["attempt", "gate_passed", "push", "deploy_disabled"]);
+    const completed = ["attempt", "attempt-captured", "gate_passed", "push", "deploy_disabled"];
+    expect(kinds()).toEqual(completed);
     await expect(captureRequest(requestStore(context), "r2")).rejects.toThrow(
       "nothing new to depart",
     );
@@ -269,6 +310,7 @@ describe("trunk-based departures", () => {
     await captureRequest(requestStore(context), "r3");
     mergeFastForward(test, "later");
     expect(await depart(context, { requestId: "r3" })).toBe(1);
+    expect(kinds()).toEqual(completed);
     expect(
       JSON.parse(readFileSync(join(test.game.busDir, "requests", "r3.json"), "utf8")),
     ).toMatchObject({
@@ -285,21 +327,40 @@ function mergeDocs(test: TestGame, name: string): string {
 
 describe("docs-only departures", () => {
   it("pushes a range under docs/ without a gate, watches CI and never deploys", async () => {
-    const { context, creates, events, kinds, started, test } = setup("wrangler");
+    const { context, creates, events, exec, kinds, started, test } = setup("wrangler");
     mergeDocs(test, "guide");
     const head = mergeDocs(test, "notes");
-    expect(await depart(context)).toBe(0);
+    const capturesAtPush: (typeof events.list)[number][] = [];
+    expect(
+      await depart({
+        ...context,
+        exec: (spec) => {
+          if (spec.command === "git" && spec.args.includes("push")) {
+            capturesAtPush.push(...events.list.filter(([kind]) => kind === "attempt-captured"));
+          }
+          return exec(spec);
+        },
+      }),
+    ).toBe(0);
     expect(creates()).toBe(0);
     expect(originMain(test)).toBe(head);
     expect(readFileSync(context.paths.lastPushSha, "utf8")).toBe(`${head}\n`);
     expect(started).toEqual([head]);
-    // A skipped gate appends gate_skipped alone, never gate_passed.
     expect(kinds()).toEqual([
       "scheduled-status",
       "attempt",
+      "attempt-captured",
       "gate_skipped",
       "push",
       "deploy_skipped",
+    ]);
+    expect(capturesAtPush).toEqual([
+      [
+        "attempt-captured",
+        events.list.find(([kind]) => kind === "attempt")?.[1],
+        expect.stringContaining("docs-only pinned push"),
+        head,
+      ],
     ]);
     const push = events.list.find(([kind]) => kind === "push")?.[2] ?? "";
     expect(push).toContain("docs-only range, gate skipped; CI pending; no deployment.");
@@ -354,6 +415,7 @@ describe("departures at high load", () => {
     expect(kinds()).toEqual([
       "scheduled-status",
       "attempt",
+      "attempt-captured",
       "gate_passed",
       "push",
       "deploy_disabled",
@@ -528,7 +590,11 @@ describe("shutdown", () => {
     const { context, events } = interruptible(test, gate, killed);
     expect(await depart(context)).toBe(1);
     expect(existsSync(join(test.game.busDir, "gate-failed", head))).toBe(false);
-    expect(events.list.map(([kind]) => kind)).toEqual(["scheduled-status", "attempt"]);
+    expect(events.list.map(([kind]) => kind)).toEqual([
+      "scheduled-status",
+      "attempt",
+      "attempt-captured",
+    ]);
     expect(originMain(test)).not.toBe(head);
   });
 });
