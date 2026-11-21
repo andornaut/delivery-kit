@@ -177,8 +177,7 @@ describe("scheduled-slot reports", () => {
     const events = recordingEvents();
     const coordinator = recordingCoordinator();
     const controller = new AbortController();
-    const slotReports = (): [string, string, string][] =>
-      events.list.filter(([type]) => type === "scheduled-status");
+    const slotReports = () => events.list.filter(([type]) => type === "scheduled-status");
     const inner = fakeExec(gateDocker());
     // The departure stays active until the observer has reported its slot.
     const exec: Exec = async (spec) => {
