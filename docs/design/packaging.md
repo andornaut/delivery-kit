@@ -28,6 +28,6 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | dk-0021 | Release 5.0.2 with coordination-kit 1.0.2                             | [dk-0021.md](../work/dk-0021.md) |
 | dk-0023 | Audit the documentation after the coordination-kit split              | [dk-0023.md](../work/dk-0023.md) |
 | dk-0024 | Run path-filtered CI jobs unless the classification reports docs-only | [dk-0024.md](../work/dk-0024.md) |
-| dk-0030 | Reduce the test suite by 20 percent                                   | [dk-0030.md](../work/dk-0030.md) |
+| dk-0030 | Prune redundant tests and measure the result                          | [dk-0030.md](../work/dk-0030.md) |
 | dk-0037 | Cap release packaging containers at 4 GiB                             | [dk-0037.md](../work/dk-0037.md) |
 | dk-0039 | Simplify Delivery Kit without changing active contracts               | [dk-0039.md](../work/dk-0039.md) |
