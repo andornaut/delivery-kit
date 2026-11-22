@@ -1,7 +1,6 @@
 .DEFAULT_GOAL := check
 
 NODE_IMAGE := node:$(shell sed 's/^v//' .nvmrc)
-SHELLCHECK_IMAGE := koalaman/shellcheck:v0.11.0
 CHECK_MEMORY ?= 4g
 
 # The checkout is bound read-only; the Node checks run in a tmpfs copy without Git metadata,
@@ -19,8 +18,6 @@ NODE_RUN = $(DOCKER_RUN) --workdir /work $(NODE_IMAGE) sh -ec '\
 	npm ci --ignore-scripts --no-audit --no-fund; \
 	npm --prefix tests/contract ci --ignore-scripts --no-audit --no-fund; \
 	$(1)'
-SHELLCHECK_RUN := $(DOCKER_RUN) --network none --workdir /source $(SHELLCHECK_IMAGE) \
-	-x -P SCRIPTDIR scripts/check.sh scripts/pack.sh tests/contract/run.sh
 
 LINT := npm run check && npm run lint:node && npm run lint:markdown
 TEST := npm run contract && npm test
@@ -29,10 +26,8 @@ BUILD := npm run build && npm run package:check
 .PHONY: check lint test build
 check:
 	$(call NODE_RUN,$(LINT) && $(TEST) && npm run package:check)
-	$(SHELLCHECK_RUN)
 lint:
 	$(call NODE_RUN,$(LINT))
-	$(SHELLCHECK_RUN)
 test:
 	$(call NODE_RUN,$(TEST))
 build:

@@ -55,9 +55,6 @@ export function workerArguments(args: readonly string[]): string[] {
 export function lint(root: string): void {
   run(root, "npm", ["run", "check"]);
   run(root, "npm", ["run", "lint"]);
-  for (const wrapper of ["scripts/check.sh", "scripts/pack.sh", "tests/contract/run.sh"]) {
-    run(root, "bash", ["-n", wrapper]);
-  }
 }
 
 export function test(root: string, args: readonly string[]): void {

@@ -94,22 +94,21 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 
 ## Developing
 
-| Target               | Does                                                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `make`, `make check` | Complete verification: root and contract types, lint, one build, contracts, unit tests and package inspection, then ShellCheck |
-| `make lint`          | Root and contract types, Prettier, ESLint and Markdown lint, then ShellCheck                                                   |
-| `make test`          | Build once, then run the complete native contract suite and unit tests                                                         |
-| `make build`         | Build, then package inspection                                                                                                 |
+| Target               | Does                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `make`, `make check` | Complete verification: root and contract types, lint, one build, contracts, unit tests and package inspection |
+| `make lint`          | Root and contract types, Prettier, ESLint and Markdown lint                                                   |
+| `make test`          | Build once, then run the complete native contract suite and unit tests                                        |
+| `make build`         | Build, then package inspection                                                                                |
 
-Every target runs in stock images: the Node version pinned in `.nvmrc` and
-`koalaman/shellcheck:v0.11.0`. No image is built. Each container binds the checkout read-only, runs as the host user with four
-CPUs and 4 GiB memory (`CHECK_MEMORY`), a read-only root filesystem and no capabilities. The
-Node container copies the source without `.git`, dependencies or build output into tmpfs,
-installs the root and contract dependencies with `npm ci`, then runs the native npm checks.
-ShellCheck reads the bound source directly with no network.
+Every target runs in the stock Node image pinned in `.nvmrc`. The container binds the checkout
+read-only and runs as the host user with four CPUs, 4 GiB memory (`CHECK_MEMORY`), a read-only
+root filesystem and no capabilities. It copies source into tmpfs, excluding `.git`, dependencies
+and build output. It installs the root and contract dependencies with `npm ci` and runs the
+native npm checks.
 
 Native npm commands run directly wherever they are invoked. Local prerequisites are the
-pinned Node version, root and contract dependencies, and ShellCheck 0.11.0.
+pinned Node version and the root and contract dependencies.
 Install dependencies with `npm ci` and `npm --prefix tests/contract ci`.
 
 WORKAROUND: root overrides keep `markdownlint-cli2` 0.24.0 on patched Markdown and math
@@ -117,34 +116,36 @@ dependencies for [GHSA-gg6h-894w-4m9c](https://github.com/advisories/GHSA-gg6h-8
 and [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
 Remove them when upstream resolves the patched versions without overrides.
 
-| Command                 | Checks                                                                                                   |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| `npm run verify`        | Root and contract types, lint, wrapper syntax, build, unit tests, full contracts and package inspection. |
-| `npm run check`         | Root and contract types.                                                                                 |
-| `npm run lint`          | Prettier, ESLint, Markdown and ShellCheck with `-x -P SCRIPTDIR`.                                        |
-| `npm run build`         | Build the CLI and public build API bundles and declarations.                                             |
-| `npm test`              | Unit tests, using at most four workers by default; build first.                                          |
-| `npm run contract`      | Build, contract types and the complete native contract suite.                                            |
-| `npm run package:check` | Inspect the extracted CLI, canonical/alias API identity and strict NodeNext declarations.                |
+| Command                 | Checks                                                                                       |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| `npm run verify`        | Root and contract types, lint, one build, unit tests, full contracts and package inspection. |
+| `npm run check`         | Root and contract types.                                                                     |
+| `npm run lint`          | Prettier, ESLint and Markdown lint.                                                          |
+| `npm run build`         | Build the CLI and public build API bundles and declarations.                                 |
+| `npm test`              | Unit tests, using at most four workers by default; build first.                              |
+| `npm run contract`      | Build, contract types and the complete native contract suite.                                |
+| `npm run package:check` | Inspect the extracted CLI, canonical/alias API identity and strict NodeNext declarations.    |
 
 Explicit source or contract paths passed to `npm run verify --` select the corresponding
 suite; unscoped filters apply to both. Standalone `npm run contract -- --lock` regenerates
 the contract lockfile with native npm. Ordinary Git commits run serial local lint-staged,
 with direct Prettier and ESLint fixes that preserve Git's staged/unstaged workflow.
 
-CI runs the same native npm commands directly on the runner with the pinned Node version and
-the pinned ShellCheck step. Its `lint` job (types, Prettier, ESLint, Markdown lint and
-ShellCheck) runs for every push and pull request. The `build`, `test`, `contract` and `package`
-jobs run only when a path outside `docs/` changed, and otherwise report as skipped. A forced
-push, a new branch or a base the clone does not have runs every job.
+CI runs the same native npm commands directly on the runner with the pinned Node version.
+Its `lint` job (types, Prettier, ESLint and Markdown lint) runs for every push and pull request.
+The `build`, `test`, `contract` and `package` jobs run only when a path outside `docs/` changed,
+and otherwise report as skipped. A forced push, a new branch or a base the clone does not have
+runs every job.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native
 inspection without that metadata invents no commit or source hash. Inspection writes its
 archive and `CHECK_CONTEXT.json` to a fresh temporary directory and prints that location.
 
-The thin wrappers `scripts/check.sh`, `scripts/pack.sh` and `tests/contract/run.sh` invoke native
-Node helpers.
+Use `npm run verify --` for the former `scripts/check.sh`, `npm run contract --` for
+`tests/contract/run.sh`, and `npm run pack --` for `scripts/pack.sh`. Pass the same arguments
+after `--`.
+
 The separately invoked `npm run pack -- EXACT_COMMIT_SHA /new/absolute/directory` is the
 explicit host release-controller exception: it archives the requested commit and starts
 its own offline release container with the pinned Node image and the read-only
