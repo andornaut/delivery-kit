@@ -1,5 +1,7 @@
 // runner start and runner stop on a real runner in the fixture workspace. The workspace HOME has
 // no systemd user unit, so start spawns the installed CLI detached and stop signals it.
+import { rmSync } from "node:fs";
+
 import { expect } from "vitest";
 
 import { cli } from "../lib/adapter.ts";
@@ -35,11 +37,18 @@ function reap(ws: Workspace): void {
 suite("runner lifecycle", () => {
   const workspace = workspaces();
 
-  contract(
-    "runner start spawns one runner and runner stop stops it once it is idle and drained",
-    async () => {
-      const ws = workspace();
+  contract.each([
+    { bus: "an existing bus directory", deliveryState: "enabled", desiredState: "enabled" },
+    { bus: "no bus directory", deliveryState: null, desiredState: "unknown" },
+  ] as const)(
+    "runner start spawns one runner with $bus and runner stop stops it once idle and drained",
+    async ({ deliveryState, desiredState }) => {
+      const ws = workspace({ deliveryState });
       quiet(ws);
+      if (deliveryState === null) {
+        rmSync(ws.state, { recursive: true });
+        expect(ws.exists()).toBe(false);
+      }
       let stoppedCleanly = false;
       try {
         const started = await cli(ws, ["runner", "start"]);
@@ -75,7 +84,7 @@ suite("runner lifecycle", () => {
         const status = JSON.parse((await cli(ws, ["status"])).stdout) as Record<string, unknown>;
         expect([status.runner_lock_held, status.loop_lock_held]).toEqual([false, false]);
         // Neither command touches desired delivery control.
-        expect((status.control as Record<string, unknown>).desired_state).toBe("enabled");
+        expect((status.control as Record<string, unknown>).desired_state).toBe(desiredState);
 
         const idle = await cli(ws, ["runner", "stop"]);
         expect(idle.code).toBe(0);

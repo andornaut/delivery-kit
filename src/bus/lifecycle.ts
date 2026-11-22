@@ -5,9 +5,9 @@
 // interaction is an injected seam.
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-import { type BusPaths } from "./state.ts";
+import { type BusPaths, ensureDir } from "./state.ts";
 import { statusReport } from "./status.ts";
 
 /** Default `runner stop --timeout`, in seconds. */
@@ -265,6 +265,7 @@ export function systemLifecycle(paths: BusPaths, repo: string): Lifecycle {
         setTimeout(resolve, milliseconds);
       }),
     spawnRunner(spec) {
+      ensureDir(dirname(spec.output));
       const output = openSync(spec.output, "a", 0o600);
       try {
         const child = spawn(spec.node, [spec.cliPath, "run", "--game", spec.game], {
