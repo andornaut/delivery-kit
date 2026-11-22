@@ -51,9 +51,11 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   sides of a rename). A push whose every changed path matches it skips deployment. A range that
   changes only `docs/` paths departs without a gate or a deployment whatever this pattern says
   (see [runner.md](runner.md#departures)).
-- `reports`: `project` (must equal the game's `name` in `config.json`), `scheduledTicks`, and
+- `reports`: `project` (required by the current validator and must equal the game's
+  `name` in `config.json`), `scheduledTicks`, and
   `recipient` and `workerParents`, each a registered role key. `recipient` receives the game's
-  events and, when the game hosts the route, its scheduled reviews. `scheduledTicks` (boolean)
+  events and, when the game hosts the route, its scheduled reviews. Event text uses the game's
+  name from `config.json`. `scheduledTicks` (boolean)
   adds one `scheduled-status` report per departure slot. When `var/registry.json` exists,
   `check-config` requires each `workerParents` role to resolve to a canonical conversation UUID
   that no other parent shares.

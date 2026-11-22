@@ -80,15 +80,15 @@ const systemClock: Clock = {
 /**
  * Events appended to bus/events.jsonl and ingested by the coordinator CLI. A failed append is
  * logged and never stops a departure; every appended event requests an ingest. The detail keeps
- * the operator-facing `<project> bus: ` prefix the 6.0 outbox gave each message.
+ * the operator-facing `<game name> bus: ` prefix.
  */
 function busEvents(
   log: EventLog,
-  options: { readonly coordinator: Coordinator; readonly project: string },
+  options: { readonly coordinator: Coordinator; readonly gameName: string },
 ): Events {
   return {
     emit(type, key, message, sha) {
-      if (log.append(type, key, `${options.project} bus: ${message}`, sha)) {
+      if (log.append(type, key, `${options.gameName} bus: ${message}`, sha)) {
         this.ingest();
       }
     },
@@ -161,7 +161,7 @@ export function busContext(
           paths,
           repo: game.repo,
         }),
-        { coordinator, project: config.reports.project },
+        { coordinator, gameName: game.name },
       ),
     exec: options.exec ?? spawnExec,
     game,
