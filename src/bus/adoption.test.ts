@@ -117,7 +117,7 @@ describe("observerAdoption", () => {
   it("is stale when the latest runner.started carries another token", () => {
     const paths = bus();
     append(paths.eventsLog, startedLine(TOKEN) + otherLine("1") + startedLine(OTHER));
-    seen(paths, "3.0.0");
+    seen(paths, "4.0.2");
     cursorAt(paths, paths.eventsLog);
     expect(observerAdoption(paths, TOKEN)).toEqual({ reason: "token_differs", status: "stale" });
     expect(observerAdoption(paths, OTHER)).toEqual({ reason: null, status: "current" });
@@ -136,9 +136,9 @@ describe("observerAdoption", () => {
       reason: "cli_out_of_range",
       status: "unknown",
     });
-    seen(paths, "4.0.0");
+    seen(paths, "5.0.0");
     expect(observerAdoption(paths, TOKEN).reason).toBe("cli_out_of_range");
-    seen(paths, "3.0.0");
+    seen(paths, "4.0.2");
     expect(observerAdoption(paths, TOKEN)).toEqual({ reason: "not_ingested", status: "unknown" });
     // A cursor short of the line's end has not ingested it.
     const size = statSync(paths.eventsLog).size;
@@ -160,7 +160,7 @@ describe("observerAdoption", () => {
     writeFileSync(older, startedLine(OTHER));
     writeFileSync(newest, otherLine("1") + startedLine(TOKEN) + otherLine("2"));
     writeFileSync(paths.eventsLog, otherLine("3"));
-    seen(paths, "3.0.0");
+    seen(paths, "4.0.2");
     expect(latestStart(paths)).toEqual({
       end: Buffer.byteLength(otherLine("1") + startedLine(TOKEN)),
       file: newest,
@@ -197,7 +197,7 @@ describe("observerAdoption", () => {
         observer_adoption_reason: "no_runner_started",
       });
       append(paths.eventsLog, startedLine(token));
-      seen(paths, "3.0.0");
+      seen(paths, "4.0.2");
       cursorAt(paths, paths.eventsLog);
       expect(statusReport(paths)).toMatchObject({
         observer_adoption: "current",
