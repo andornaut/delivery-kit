@@ -3,8 +3,6 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { Layout } from "@andornaut/coordination-kit/build/shared";
-
 export const CLAUDE_TECH = "00000000-0000-4000-8000-000000000001";
 export const CODEX_TECH = "00000000-0000-4000-8000-000000000002";
 export const CLAUDE_COORDINATOR = "00000000-0000-4000-8000-000000000003";
@@ -111,16 +109,4 @@ export function makeFixture(): Fixture {
 
 export function writeFixtureJson(path: string, value: unknown): void {
   writeJson(path, value);
-}
-
-/** An active work protocol at generation 1: fixture configuration only, never a migration. */
-export function activateProtocolFixture(layout: Layout): string {
-  const stateRoot = mkdtempSync(join(tmpdir(), "protocol-runtime-state-"));
-  const workspace = { generation: 1, schema: 1, workspaceId: "fixture" };
-  mkdirSync(layout.varDir, { recursive: true });
-  writeFileSync(join(stateRoot, "workspace.json"), JSON.stringify(workspace));
-  for (const name of ["work-protocol-fence.json", "work-protocol.json"]) {
-    writeFileSync(join(layout.varDir, name), JSON.stringify({ ...workspace, stateRoot }));
-  }
-  return stateRoot;
 }

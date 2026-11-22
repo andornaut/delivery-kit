@@ -41,10 +41,6 @@ export function unbindDeliveryRunner(context: BusContext): void {
   sessions.delete(context);
 }
 
-export function hasDeliveryRunner(context: BusContext): boolean {
-  return sessions.has(context);
-}
-
 /** Internal direct calls use the same singleton exclusion as the resident runner. */
 export async function withDeliveryRunner<T>(
   context: BusContext,

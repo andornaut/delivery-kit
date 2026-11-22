@@ -8,7 +8,6 @@ import { createHash } from "node:crypto";
 export const EVENT_SCHEMA = 1;
 export const EVENTS_FILE = "events.jsonl";
 export const CURSOR_FILE = "events.cursor";
-export const QUARANTINE_FILE = "events.quarantine.jsonl";
 /** The legacy 6.0 outbox directory is renamed to this prefix plus epoch seconds when imported. */
 export const IMPORTED_PREFIX = "events.imported-";
 /** Each line, its newline included, is one write() of fewer than this many bytes. */
