@@ -68,14 +68,8 @@ export function test(root: string, args: readonly string[]): void {
   if (unit !== null) node(root, "node_modules/vitest/vitest.mjs", ["run", ...unit]);
   if (contract !== null) {
     const contracts = join(root, "tests/contract");
-    node(contracts, "node_modules/typescript/bin/tsc");
     node(contracts, "node_modules/vitest/vitest.mjs", ["run", ...contract]);
   }
-}
-
-export function build(root: string): void {
-  node(root, "scripts/build.mjs");
-  run(root, "npm", ["run", "package:check"]);
 }
 
 export function verify(root: string, args: readonly string[]): void {

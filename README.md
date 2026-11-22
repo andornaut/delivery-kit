@@ -60,10 +60,7 @@ explicit; it is never inferred from the working directory.
 | `request --game ID --id SAFE_ID`                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
 | `help`, `--help`, `--version`                                              | Usage and version.                                                                                                                                               |
 
-The `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` groups moved to
-coordination-kit in 5.0: each exits 2 with a one-line hint naming the `coordination-kit` command
-([Upgrading to 5.0](docs/upgrading.md#upgrading-to-50)). Per-command semantics are in
-[docs/commands.md](docs/commands.md).
+See the [command reference](docs/commands.md) for details and commands moved to Coordination Kit.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition or an unavailable
 read, 2 for a usage error or an unexpected failure, and 3 for a refused runner start (another runner

@@ -2,8 +2,7 @@
 // coordination-kit modules it uses and imports only node: builtins, so a running process never
 // reads its package, or coordination-kit's, again after startup.
 import { execFileSync } from "node:child_process";
-import { chmodSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 
 import { build } from "vite";
 
@@ -48,11 +47,4 @@ chmodSync("dist/cli.js", 0o755);
 execFileSync(process.execPath, ["node_modules/typescript/bin/tsc", "-p", "tsconfig.types.json"], {
   stdio: "inherit",
 });
-// Declarations keep the source's relative .ts specifiers; consumers resolve the emitted .js names.
-for (const name of readdirSync("dist/types", { recursive: true })) {
-  if (name.endsWith(".d.ts")) {
-    const path = join("dist/types", name);
-    writeFileSync(path, readFileSync(path, "utf8").replace(/"(\.{1,2}\/[^"]+)\.ts"/g, '"$1.js"'));
-  }
-}
 writeFileSync("dist/source-identity.d.ts", 'export * from "./types/source-identity.js";\n');
