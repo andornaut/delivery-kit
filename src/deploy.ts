@@ -17,20 +17,23 @@ import {
   setObservedDelivery,
   updateDeliveryActivity,
 } from "./bus/control.ts";
-import { gitOk, WRANGLER_ENTRY } from "./bus/exec.ts";
+import { gitOk, Interrupted, WRANGLER_ENTRY } from "./bus/exec.ts";
 import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "./bus/state.ts";
 import { remoteMain } from "./bus/trunk.ts";
 
 interface DeliverySession {
+  readonly pending: PendingLifecycle;
   readonly token: string;
   claimed: boolean;
+  release?: () => void;
+  users: number;
 }
 
 const sessions = new WeakMap<BusContext, DeliverySession>();
 
 /** Bind only after acquiring the runner singleton locks. */
 export function bindDeliveryRunner(context: BusContext, token: string = randomUUID()): void {
-  sessions.set(context, { claimed: false, token });
+  sessions.set(context, { claimed: false, pending: { tail: Promise.resolve() }, token, users: 0 });
   deliveryRunnerReady(context);
 }
 
@@ -47,19 +50,38 @@ export async function withDeliveryRunner<T>(
   context: BusContext,
   run: () => Promise<T>,
 ): Promise<T> {
-  if (hasDeliveryRunner(context)) {
-    return run();
+  const session = sessions.get(context) ?? holdDeliveryRunner(context);
+  session.users += 1;
+  try {
+    return await run();
+  } finally {
+    session.users -= 1;
+    if (session.users === 0) {
+      session.release?.();
+    }
   }
+}
+
+function holdDeliveryRunner(context: BusContext): DeliverySession {
   const runner = holdLock(context.paths.runnerLock, { nonBlocking: true });
   let loop;
   try {
-    loop = holdLock(context.paths.loopLock, { nonBlocking: true });
+    const heldLoop = holdLock(context.paths.loopLock, { nonBlocking: true });
+    loop = heldLoop;
     bindDeliveryRunner(context);
-    return await run();
-  } finally {
+    const session = sessions.get(context)!;
+    // Keep a direct caller's singleton through overlapping or nested uses of this session.
+    session.release = () => {
+      unbindDeliveryRunner(context);
+      heldLoop.release();
+      runner.release();
+    };
+    return session;
+  } catch (error) {
     unbindDeliveryRunner(context);
     loop?.release();
     runner.release();
+    throw error;
   }
 }
 
@@ -155,6 +177,33 @@ export interface PendingDeploy {
   readonly work: string;
 }
 
+interface DeploymentAttempt {
+  readonly pending: PendingDeploy;
+  readonly result: Promise<boolean>;
+}
+
+interface PendingLifecycle {
+  tail: Promise<void>;
+  lastAttempt?: DeploymentAttempt;
+}
+
+/** The runner singleton excludes other processes. Queue only pending deployment operations. */
+function withPendingLifecycle<T>(
+  context: BusContext,
+  run: (lifecycle: PendingLifecycle, prior: DeploymentAttempt | undefined) => Promise<T>,
+): Promise<T> {
+  return withDeliveryRunner(context, () => {
+    const lifecycle = sessions.get(context)!.pending;
+    const prior = lifecycle.lastAttempt;
+    const result = lifecycle.tail.then(() => run(lifecycle, prior));
+    lifecycle.tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  });
+}
+
 export function readPending(context: BusContext): PendingDeploy | undefined {
   const text = readText(context.paths.deployPending);
   if (text === undefined || text === "") {
@@ -205,12 +254,18 @@ async function finishPending(context: BusContext, pending: PendingDeploy): Promi
     context.log(`deployment pending for ${sha}; deploy.mode must be wrangler before retrying`);
     return false;
   }
-  const current = await remoteMain(
-    context.exec,
-    context.game.repo,
-    config.git.remote,
-    config.git.main,
-  );
+  let current: string | undefined;
+  try {
+    current = await remoteMain(context.exec, context.game.repo, config.git.remote, config.git.main);
+  } catch (error) {
+    if (error instanceof Interrupted) {
+      throw error;
+    }
+    context.log(
+      `deployment pending ${sha}; remote main lookup failed (${String(error)}); retained`,
+    );
+    return false;
+  }
   if (current !== sha) {
     context.log(
       `deployment pending ${sha} differs from the remote main (${current ?? "absent"}); retained`,
@@ -307,7 +362,7 @@ async function attempt(context: BusContext, pending: PendingDeploy): Promise<boo
     failureEvent(context, pending.sha);
     return false;
   } catch (error) {
-    if (activity !== undefined) {
+    if (!(error instanceof Interrupted) && activity !== undefined) {
       updateDeliveryWork(context, activity, "failed", pending.sha);
     }
     throw error;
@@ -318,13 +373,37 @@ async function attempt(context: BusContext, pending: PendingDeploy): Promise<boo
   }
 }
 
+function attemptOnce(
+  context: BusContext,
+  lifecycle: PendingLifecycle,
+  prior: DeploymentAttempt | undefined,
+  pending: PendingDeploy,
+): Promise<boolean> {
+  const last = lifecycle.lastAttempt;
+  if (
+    last !== undefined &&
+    last !== prior &&
+    last.pending.sha === pending.sha &&
+    last.pending.work === pending.work
+  ) {
+    return last.result;
+  }
+  const result = attempt(context, pending);
+  return result.finally(() => {
+    // A trigger queued during this attempt sees its outcome. A later departure can retry.
+    lifecycle.lastAttempt = { pending, result };
+  });
+}
+
 /** After CI passes for `sha`: deploy it when it is the pending deployment. */
 export async function deployAfterCi(context: BusContext, sha: string): Promise<boolean> {
-  const pending = readPending(context);
-  if (pending?.sha !== sha) {
-    return false;
-  }
-  return withDeliveryRunner(context, () => attempt(context, pending));
+  return withPendingLifecycle(context, async (lifecycle, prior) => {
+    const pending = readPending(context);
+    if (pending?.sha !== sha) {
+      return false;
+    }
+    return attemptOnce(context, lifecycle, prior, pending);
+  });
 }
 
 /**
@@ -332,20 +411,22 @@ export async function deployAfterCi(context: BusContext, sha: string): Promise<b
  * CI has not passed yet, or the retry deployed. A red CI waits for a fix merged on main.
  */
 export async function retryDeploy(context: BusContext): Promise<boolean> {
-  const pending = readPending(context);
-  if (pending === undefined) {
-    return true;
-  }
-  const ci = readTrimmed(ciStatusFile(context.paths, pending.sha));
-  if (ci !== "success") {
-    if (ci === "failure") {
-      context.log(
-        `deployment pending ${pending.sha} has failing CI; it waits for a fix merged on main`,
-      );
+  return withPendingLifecycle(context, async (lifecycle, prior) => {
+    const pending = readPending(context);
+    if (pending === undefined) {
+      return true;
     }
-    return true;
-  }
-  return attempt(context, pending);
+    const ci = readTrimmed(ciStatusFile(context.paths, pending.sha));
+    if (ci !== "success") {
+      if (ci === "failure") {
+        context.log(
+          `deployment pending ${pending.sha} has failing CI; it waits for a fix merged on main`,
+        );
+      }
+      return true;
+    }
+    return attemptOnce(context, lifecycle, prior, pending);
+  });
 }
 
 /** Supersede an older pending deployment by a newer push: keep its record, drop its worktree. */
@@ -380,6 +461,14 @@ export function skipDeploy(context: BusContext, sha: string, reason: string): vo
  * and drop the worktree. Never deploys before CI.
  */
 export async function stageDeploy(
+  context: BusContext,
+  pending: PendingDeploy,
+  needed: boolean,
+): Promise<void> {
+  return withPendingLifecycle(context, () => stagePending(context, pending, needed));
+}
+
+async function stagePending(
   context: BusContext,
   pending: PendingDeploy,
   needed: boolean,
