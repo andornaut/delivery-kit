@@ -60,7 +60,7 @@
     "package:check": "node scripts/package-check.ts"
   },
   "devDependencies": {
-    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v3.0.0/coordination-kit-3.0.0.tgz",
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v3.4.4/coordination-kit-3.4.4.tgz",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "eslint": "^10.14.0",

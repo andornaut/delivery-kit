@@ -75,10 +75,22 @@ describe("check-config", () => {
     );
   });
 
-  it("rejects a project name that differs from config.json and limits checks with --game", async () => {
+  it("accepts a game config without reports.project", async () => {
+    const { base, root } = makeFixture();
+    withRegistry(root);
+    const config = projectConfig("Chibi");
+    const reports = config.reports as Record<string, unknown>;
+    delete reports.project;
+    writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), config);
+    expect(await run(root, "check-config")).toMatchObject({ code: EXIT_OK, err: "" });
+  });
+
+  it("rejects a mismatched reports.project and limits checks with --game", async () => {
     const { base, root } = makeFixture();
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));
-    expect((await run(root, "check-config")).err).toContain("/reports/project must be Chibi");
+    const result = await run(root, "check-config");
+    expect(result.code).toBe(EXIT_INVALID);
+    expect(result.err).toContain("/reports/project must be Chibi");
     expect((await run(root, "check-config", "--game", "archies-dog-walks")).code).toBe(EXIT_OK);
     expect((await run(root, "check-config", "--game", "nope")).code).toBe(EXIT_USAGE);
   });

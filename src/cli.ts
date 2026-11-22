@@ -85,7 +85,7 @@ function checkGame(
     return [errorMessage(error)];
   }
   const problems: string[] = [];
-  if (config.reports.project !== entry.name) {
+  if (config.reports.project !== undefined && config.reports.project !== entry.name) {
     problems.push(
       `${entry.configFile}: /reports/project must be ${entry.name}, the name in config.json`,
     );
