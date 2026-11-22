@@ -2,6 +2,14 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 7.1
+
+Install Coordination Kit 3.1.0 at the coordinator before replacing runners with Delivery Kit
+7.1.0. It retains capture events without a standalone notice, reports actionable failures,
+and sends one routine COMPLETE for a successful departure. Pin the new package and replace
+each runner while idle and drained. The event schema, cursor, controls and schedule stay the
+same. See [capture evidence](runner.md#event-log).
+
 ## Upgrading to 7.0
 
 7.0.0 reads no coordination-kit work protocol state. It accepts results only from a coordinator
