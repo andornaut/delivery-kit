@@ -39,3 +39,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0035 | Word the slot report so an idle check does not read as a departure                 | [dk-0035.md](../work/dk-0035.md) |
 | dk-0036 | Expose the verified SHA captured for a departure                                   | [dk-0036.md](../work/dk-0036.md) |
 | dk-0038 | Fix departure, retry and verification review findings                              | [dk-0038.md](../work/dk-0038.md) |
+| dk-0040 | Qualify Coordination Kit 4.x at the runner seam                                    | [dk-0040.md](../work/dk-0040.md) |
