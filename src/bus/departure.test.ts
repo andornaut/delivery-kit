@@ -82,7 +82,7 @@ function ciStatus(test: TestGame, sha: string, value: string): void {
 describe("slotDetail", () => {
   // 22:10 EST.
   const slot = Date.UTC(2026, 10, 4, 3, 10, 0) / 1000;
-  const own = "this slot's departure is running; attempt outcomes are reported separately.";
+  const own = "this slot's departure is checking main; any attempt is reported separately.";
   const earlier =
     "a departure is still checking or finishing; this observer starts no new push or deployment; " +
     "attempt outcomes are reported separately.";

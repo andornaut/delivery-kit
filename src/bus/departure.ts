@@ -65,7 +65,7 @@ export function slotDetail(context: BusContext, slot: number): string {
   if (nonEmpty(paths.activeDeparture)) {
     const started = activeDepartureStart(context);
     if (started !== undefined && started >= slot) {
-      return "this slot's departure is running; attempt outcomes are reported separately.";
+      return "this slot's departure is checking main; any attempt is reported separately.";
     }
     return [
       "a departure is still checking or finishing; this observer starts no new push or deployment;",

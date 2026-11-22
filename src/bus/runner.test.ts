@@ -208,7 +208,7 @@ describe("scheduled-slot reports", () => {
         "scheduled-status",
         String(slot),
         expect.stringContaining(
-          "scheduled slot: this slot's departure is running; attempt outcomes are reported separately.",
+          "scheduled slot: this slot's departure is checking main; any attempt is reported separately.",
         ),
       ],
       [
