@@ -4,6 +4,12 @@ Breaking changes between major versions, the edits each one needs, and the remov
 
 ## Upgrading to 8.0
 
+8.0 accepts coordinator CLIs in `>=3.0.0 <5.0.0`. For the 4.x cutover, qualify and replace
+each idle, drained game runner on the current 3.4.4 coordinator first. Confirm each runner
+reports the expected pin and supports its coordinator CLI. Then upgrade the coordinator to 4.0.2
+and verify both schema-1 runner seams at the existing scheduled boundaries. Keep the existing
+game configuration fields during the transition.
+
 Removed command names now print standard CLI usage and exit 2. Removed options fail normal
 argument validation. Update callers using the [removed command forms](#removed-command-forms).
 

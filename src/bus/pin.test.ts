@@ -22,8 +22,8 @@ describe("satisfies", () => {
 });
 
 describe("ranges", () => {
-  it("accept a 3.x coordinator CLI only, and a 2.0.1 or 3.x bundle", () => {
-    expect(COORDINATOR_CLI_RANGE).toBe(">=3.0.0 <4.0.0");
+  it("accept 3.x and 4.x coordinator CLIs and a 2.0.1 or 3.x bundle", () => {
+    expect(COORDINATOR_CLI_RANGE).toBe(">=3.0.0 <5.0.0");
     expect(COORDINATION_KIT_RANGE).toBe(">=2.0.1 <4.0.0");
     for (const [version, cli, bundle] of [
       ["2.0.0", false, false],
@@ -32,7 +32,9 @@ describe("ranges", () => {
       ["3.0.0", true, true],
       ["3.12.4", true, true],
       ["3.0.0-rc.1", false, false],
-      ["4.0.0", false, false],
+      ["4.0.2", true, false],
+      ["4.99.0", true, false],
+      ["5.0.0", false, false],
     ] as const) {
       expect(satisfies(COORDINATOR_CLI_RANGE, version), version).toBe(cli);
       expect(satisfies(COORDINATION_KIT_RANGE, version), version).toBe(bundle);
