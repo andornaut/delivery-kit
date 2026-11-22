@@ -13,7 +13,7 @@ import {
   slotDetail,
 } from "./departure.ts";
 import type { Exec, ExecResult, ExecSpec } from "./exec.ts";
-import { captureRequest } from "./requests.ts";
+import { captureRequest, claimRequest, finishRequest } from "./requests.ts";
 import {
   commitFile,
   type ContextParts,
@@ -316,6 +316,93 @@ describe("trunk-based departures", () => {
     ).toMatchObject({
       reason: "main moved since the request",
       state: "rejected",
+    });
+  });
+
+  it.each(["requested", "scheduled"] as const)(
+    "selects the correct SHA for a %s departure when main advances during deployment retry",
+    async (kind) => {
+      const { context, events, exec, started, test } = setup("wrangler");
+      const first = mergeFastForward(test, "first");
+      expect(await depart(context)).toBe(0);
+      ciStatus(test, first, "success");
+
+      const head = mergeFastForward(test, "feature");
+      const options = kind === "requested" ? { requestId: "r1" } : {};
+      if (options.requestId !== undefined) {
+        const store = requestStore(context);
+        await captureRequest(store, options.requestId);
+        expect(await claimRequest(store)).toBe(options.requestId);
+      }
+      const mainReads: string[] = [];
+      const result = await depart(
+        {
+          ...context,
+          exec: async (spec) => {
+            const result = await exec(spec);
+            if (spec.command === process.execPath) {
+              mergeFastForward(test, "later");
+            }
+            if (spec.command === "git" && spec.args.includes("refs/heads/main^{commit}")) {
+              mainReads.push(result.stdout.trim());
+            }
+            return result;
+          },
+        },
+        options,
+      );
+
+      const later = gitSync(test.repo, "rev-parse", "main");
+      expect(later).not.toBe(head);
+      const expected = kind === "requested" ? head : later;
+      expect(result).toBe(0);
+      expect(mainReads).toEqual([expected]);
+      expect(originMain(test)).toBe(expected);
+      expect(events.list.filter(([event]) => event === "attempt-captured").at(-1)).toEqual([
+        "attempt-captured",
+        kind === "requested" ? "request-r1" : expect.any(String),
+        expect.stringContaining(`verified gate snapshot for main ${expected}`),
+        expected,
+      ]);
+      expect(started).toEqual([first, expected]);
+    },
+  );
+
+  it("blocks an unreadable main for a claimed request without marking the receipt stale", async () => {
+    const { context, events, exec, started, test } = setup();
+    const before = originMain(test);
+    const head = mergeFastForward(test, "feature");
+    const store = requestStore(context);
+    await captureRequest(store, "r1");
+    expect(await claimRequest(store)).toBe("r1");
+    const receipt = join(context.paths.requestsDir, "r1.json");
+    const claimed = readFileSync(receipt, "utf8");
+
+    const result = await depart(
+      {
+        ...context,
+        exec: (spec) =>
+          spec.command === "git" && spec.args.includes("refs/heads/main^{commit}")
+            ? Promise.resolve({ status: 128, stderr: "fatal: unable to read ref", stdout: "" })
+            : exec(spec),
+      },
+      { requestId: "r1" },
+    );
+
+    expect(result).toBe(1);
+    expect(readFileSync(receipt, "utf8")).toBe(claimed);
+    expect(originMain(test)).toBe(before);
+    expect(started).toEqual([]);
+    expect(events.list).toEqual([
+      ["blocked-main", "request-r1", expect.stringContaining("local main is unreadable")],
+    ]);
+    await finishRequest(store, "r1", result);
+    expect(JSON.parse(readFileSync(receipt, "utf8"))).toEqual({
+      completion: "departure flow only; consult exact-commit CI and deployment state",
+      departure_exit: 1,
+      head,
+      id: "r1",
+      state: "finished",
     });
   });
 });

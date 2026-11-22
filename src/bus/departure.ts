@@ -187,23 +187,21 @@ async function departAdmitted(context: BusContext, options: DepartOptions): Prom
   }
 }
 
-async function departLocked(context: BusContext, attempt: Attempt): Promise<number> {
-  const { config, paths } = context;
-  const scheduled = attempt.requestId === undefined;
-  if (
-    attempt.requestId !== undefined &&
-    !(await validateRequest(requestStore(context), attempt.requestId))
-  ) {
-    context.log(
-      `${attempt.when} bus: request ${attempt.requestId} rejected: main moved since the request`,
-    );
-    return 1;
-  }
+async function retryPendingDelivery(context: BusContext): Promise<void> {
   // A watch that timed out or lost authentication resumes, so a pending deployment can follow.
-  resumeStoppedCi(context, [readPending(context)?.sha, readTrimmed(paths.lastPushSha)]);
+  resumeStoppedCi(context, [readPending(context)?.sha, readTrimmed(context.paths.lastPushSha)]);
   if (deployPendingExists(context)) {
     // A failed retry is reported and kept; it does not hold back a newer main.
     await retryDeploy(context);
+  }
+}
+
+async function departLocked(context: BusContext, attempt: Attempt): Promise<number> {
+  const { config, paths } = context;
+  const { requestId } = attempt;
+  const scheduled = requestId === undefined;
+  if (scheduled) {
+    await retryPendingDelivery(context);
   }
   let head: string;
   try {
@@ -217,6 +215,16 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
       `local ${config.git.main} is unreadable (${String(error)})`,
       REMEDY.operator,
     );
+  }
+  if (requestId !== undefined) {
+    // This same SHA is gated and pushed even if main advances during the retry below.
+    if (!(await validateRequest(requestStore(context), requestId, head))) {
+      context.log(
+        `${attempt.when} bus: request ${requestId} rejected: main moved since the request`,
+      );
+      return 1;
+    }
+    await retryPendingDelivery(context);
   }
   let remote: string | undefined;
   // This serialized departure is the only writer of its attempt's resolved SHA.

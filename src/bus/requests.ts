@@ -135,17 +135,12 @@ export function recoverRequests(store: RequestStore): Promise<void> {
   });
 }
 
-/** Called under departure.lock. A main HEAD that moved since capture rejects the request. */
-export function validateRequest(store: RequestStore, id: string): Promise<boolean> {
-  return withRequests(store, async () => {
+/** Called under departure.lock with the exact main SHA selected for this departure. */
+export function validateRequest(store: RequestStore, id: string, head: string): Promise<boolean> {
+  return withRequests(store, () => {
     const path = recordPath(store, id);
     const record = readRecord(path);
-    let matches: boolean;
-    try {
-      matches = (await mainHead(store.exec, store.repo, store.main)) === record.head;
-    } catch {
-      matches = false;
-    }
+    const matches = head === record.head;
     if (!matches) {
       record.state = "rejected";
       record.reason = "main moved since the request";

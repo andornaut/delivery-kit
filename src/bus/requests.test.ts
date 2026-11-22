@@ -51,11 +51,11 @@ describe("one-off requests", () => {
 
   it("claims, validates, finishes and recovers through the documented states", async () => {
     const requests = store();
-    mergeFastForward(requests.test, "feature");
+    const head = mergeFastForward(requests.test, "feature");
     await captureRequest(requests, "a1");
     await captureRequest(requests, "b1");
     expect(await claimRequest(requests)).toBe("a1");
-    expect(await validateRequest(requests, "a1")).toBe(true);
+    expect(await validateRequest(requests, "a1", head)).toBe(true);
     await finishRequest(requests, "a1", 0);
     expect(JSON.parse(readFileSync(requests.file("a1"), "utf8"))).toMatchObject({
       completion: "departure flow only; consult exact-commit CI and deployment state",
@@ -72,8 +72,8 @@ describe("one-off requests", () => {
     const requests = store();
     mergeFastForward(requests.test, "feature");
     await captureRequest(requests, "r1");
-    mergeFastForward(requests.test, "later");
-    expect(await validateRequest(requests, "r1")).toBe(false);
+    const later = mergeFastForward(requests.test, "later");
+    expect(await validateRequest(requests, "r1", later)).toBe(false);
     expect(JSON.parse(readFileSync(requests.file("r1"), "utf8"))).toMatchObject({
       reason: "main moved since the request",
       state: "rejected",
