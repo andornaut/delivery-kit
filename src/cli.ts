@@ -1,5 +1,4 @@
 // delivery-kit command dispatcher. Every verb is a game operation; the runner group takes a verb.
-// The coordination groups moved to coordination-kit and are refused with the equivalent command.
 // Every command resolves game-coordinator from --root (in any position, once), DELIVERY_KIT_ROOT or
 // the working directory, in that order.
 import { parseArgs } from "node:util";
@@ -53,46 +52,6 @@ export const COMMANDS = [
   "request",
 ] as const satisfies readonly Command[];
 export type { Command };
-/** The command groups that moved to coordination-kit in 5.0.0, with their known verbs. */
-export const MOVED_GROUPS: Readonly<Record<string, readonly string[]>> = {
-  claude: ["channel", "ready"],
-  codex: ["ready"],
-  harness: ["doctor", "ready", "select"],
-  inbox: ["ack", "snapshot"],
-  ledger: ["apply", "boundary", "coverage", "history", "intake", "reconcile", "report", "show"],
-  message: ["dispatch", "reconcile", "retire-spool", "send", "status"],
-  protocol: [
-    "activate",
-    "artifact-put",
-    "artifact-read",
-    "backup",
-    "boundary",
-    "claim",
-    "declare",
-    "dry-run",
-    "enroll",
-    "enrollment-report",
-    "import",
-    "import-originals",
-    "inbox",
-    "intake",
-    "inventory",
-    "message-observe",
-    "message-original",
-    "message-publish",
-    "message-receipt",
-    "message-withdraw",
-    "observer-adoption",
-    "restore",
-    "role",
-    "status",
-    "work-accept",
-    "work-publish",
-    "work-read",
-    "work-receipt",
-    "work-submit",
-  ],
-};
 /** Help text, generated from each command's parser options. */
 export const USAGE = [
   "usage: delivery-kit COMMAND [options] [--root COORDINATOR_ROOT]",
@@ -103,64 +62,12 @@ export const USAGE = [
     `      ${SPECS[command].summary}`,
   ]),
   "",
-  "The inbox, message, ledger, harness, protocol, claude and codex groups moved to",
-  "coordination-kit: run `coordination-kit GROUP VERB ...` with the same options.",
-  "",
   "  help, --help    print this text",
   "  --version       print the version",
   "",
   "game-coordinator is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
   "",
 ].join("\n");
-/** Removed 1.x command forms and the current form that replaces each. */
-const REMOVED: Readonly<Record<string, string>> = {
-  channel: "coordination-kit claude channel",
-  "monitor-ack": "coordination-kit inbox ack",
-  "monitor-snapshot": "coordination-kit inbox snapshot",
-  "resource-report": "delivery-kit status --game ID --resources",
-};
-/** Command forms removed in 3.0.0, with their replacements. */
-const REMOVED_3: Readonly<Record<string, string>> = {
-  "monitor ack": "coordination-kit inbox ack",
-  "monitor snapshot": "coordination-kit inbox snapshot",
-};
-/** The removed form a command line uses, with its replacement, or undefined. */
-function removedForm(args: readonly string[]): string | undefined {
-  const [first, second] = args;
-  if (first === undefined) {
-    return undefined;
-  }
-  if (first === "monitor") {
-    const form = `monitor ${second ?? ""}`.trim();
-    const replacement = REMOVED_3[form] ?? "coordination-kit inbox snapshot|ack";
-    return `"${form}" was removed in 3.0.0; use "${replacement}"`;
-  }
-  if (
-    first === "claude" &&
-    second === "channel" &&
-    args.some((arg) => arg === "--monitor" || arg.startsWith("--monitor="))
-  ) {
-    return '"claude channel --monitor" was removed in 3.0.0; use "coordination-kit claude channel --conversation UUID"';
-  }
-  if (first === "status" && args.includes("--harness")) {
-    const harness = args[args.indexOf("--harness") + 1];
-    const word = harness === "codex" ? "codex" : "claude";
-    return `"status --harness" was removed in 2.0.0; use "coordination-kit ${word} ready"`;
-  }
-  return Object.hasOwn(REMOVED, first)
-    ? `"${first}" was removed in 2.0.0; use "${REMOVED[first] ?? ""}"`
-    : undefined;
-}
-/** The one-line hint for a command group that moved to coordination-kit, or undefined. */
-function movedForm(args: readonly string[]): string | undefined {
-  const [first = "", second = ""] = args;
-  if (!Object.hasOwn(MOVED_GROUPS, first)) {
-    return undefined;
-  }
-  const verbs = MOVED_GROUPS[first] ?? [];
-  const form = verbs.includes(second) ? `${first} ${second}` : first;
-  return `\`${form}\` moved to coordination-kit; run \`coordination-kit ${form} ...\``;
-}
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -309,11 +216,6 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
   if (word === "--version") {
     io.out(`${VERSION}\n`);
     return EXIT_OK;
-  }
-  const removed = removedForm(args) ?? movedForm(args);
-  if (removed !== undefined) {
-    io.err(`delivery-kit: ${removed}\n`);
-    return EXIT_USAGE;
   }
   const found = commandOf(args);
   if (found === undefined) {

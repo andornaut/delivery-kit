@@ -34,8 +34,10 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
   its end, with no rotated log and no torn line. Its reporter blockers are `events_uningested:BYTES`, `events_rotated:N`,
   `events_torn`, `events_cursor_invalid`, `events_cursor_ahead`, `events_cursor_rotated` (the
   cursor names a rotated log), `events_cursor_unmatched` (it names no file present),
-  `events_unreadable` and `events_dir_unreadable`, plus `events_legacy_outbox` while a 6.0 `events/` outbox awaits import.
-  `drained` at the top level also requires no idle blocker; see [Event log](runner.md#event-log).
+  `events_unreadable` and `events_dir_unreadable`. The reporter blocker `events_legacy_outbox`
+  indicates a 6.0 `bus/events` outbox that needs the [6.1.2 migration](upgrading.md#upgrading-to-80).
+  `events_legacy_outbox_unreadable` means the path could not be checked. Top-level `drained`
+  requires no reporter or idle blockers. See [Event log](runner.md#event-log).
 - `runner stop --game ID [--timeout SECONDS]`: waits up to `SECONDS` (default 900) until the
   runner is idle and drained, then stops it through its active systemd user unit or with
   `SIGTERM` to the `runner.json` PID while that PID holds the runner identity token, and waits
@@ -45,10 +47,12 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
   not hold the identity or a runner that does not exit, leaving the runner untouched in the first
   two cases. A `--timeout` that is not a positive whole number is a usage error. See
   [Supervision](runner.md#supervision).
-- `runner start --game ID`: exits 1 and starts nothing while either lock is held. Starts the
-  systemd user unit when its file is installed, otherwise spawns the game's installed
-  `dist/cli.js run --game ID` detached with output appended to `bus/runner.out`. Stdout is one
-  JSON line `{schema, game, pid, method, status}` with `method` `systemd` or `spawn` and `status`
+- `run --game ID`: exits 3 before writing runner state if the legacy outbox check fails.
+- `runner start --game ID`: exits 1 and starts nothing while either lock is held or the legacy
+  outbox check fails. Starts the systemd user unit when its file is installed, otherwise spawns
+  the game's installed `dist/cli.js run --game ID` detached with output appended to
+  `bus/runner.out`. Stdout is one JSON line `{schema, game, pid, method, status}` with
+  `method` `systemd` or `spawn` and `status`
   `{running, idle, coordinator_cli}`; a runner that is not up within 30 s exits 1.
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
@@ -59,13 +63,5 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
 ## Moved commands
 
 The `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` groups moved to
-coordination-kit in 5.0. delivery-kit refuses each with exit 2 and a one-line hint naming the
-equivalent command, for example:
-
-```text
-delivery-kit: `protocol status` moved to coordination-kit; run `coordination-kit protocol status ...`
-```
-
-The hint names the group and, for a verb that group had, the verb. Options, JSON output and exit
-codes are unchanged under `coordination-kit`. The mapping is in
-[Upgrading to 5.0](upgrading.md#upgrading-to-50).
+Coordination Kit in 5.0. From 8.0, their former Delivery Kit forms exit 2 with standard usage.
+See the command mapping in [Upgrading to 5.0](upgrading.md#upgrading-to-50).

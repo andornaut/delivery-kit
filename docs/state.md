@@ -18,11 +18,15 @@ when the work protocol is active:
   `deploy-pending`, `last-push*`, `last-deploy*`,
   `events.jsonl` (the runner's event log), `events.cursor` (the ingest cursor, written only by
   `coordination-kit events ingest`, naming its file by first line ID, inode and device), `events.quarantine.jsonl` (malformed lines ingest set aside),
-  `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (the imported
-  6.0 outbox with its `<sha>.state` files), `last-complete.sha` (the last commit the runner saw
-  complete), `requests/`, `unblock/` (coordination-kit's delivery spool), `runner.json`, `runner.identity.json`,
+  `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (a retained
+  6.0 outbox archive with its `<sha>.state` files), `last-complete.sha` (the last commit the
+  runner saw complete), `requests/`, `unblock/` (coordination-kit's delivery spool),
+  `runner.json`, `runner.identity.json`,
   `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
   `runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
+
+An unmigrated `games/<g>/bus/events` outbox blocks startup and remains in place. Use the
+[6.1.2 migration bridge](upgrading.md#upgrading-to-80) to import and drain it.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 

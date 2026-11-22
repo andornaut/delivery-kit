@@ -147,8 +147,7 @@ the coordinator CLI's `events ingest` reads it. The schema lives in `src/events.
 "status":S|null,"detail":TEXT,"work":[IDS]|null}`. `id` is the sha256 hex of
   `${game}\n${type}\n${key}`; `sha` is the key when the key is a commit SHA, or is set explicitly
   for `attempt-captured`. The `at` time is UTC to the
-  second. `detail` is the operator-facing text, with the `<project> bus:` prefix the 6.0 outbox
-  gave it.
+  second. `detail` carries the operator-facing text.
 - **At most once:** per `(type, key)`, through an in-memory ID set rebuilt at startup from the
   unrotated log; coordination-kit's store keeps the older IDs unique. A failed append logs
   `bus: event TYPE KEY not appended to events.jsonl (...); operator review required` to
@@ -232,27 +231,12 @@ fragment becomes a malformed complete line that ingest quarantines. Leaving it u
 merge the next append into it and lose that event to quarantine. After a failed append the runner
 checks the tail the same way before its next append.
 
-### Import of the 6.0 outbox
+### Unmigrated 6.0 outbox
 
-At its first start, before the loop, a 6.1 runner appends the unsent `bus/events/*.json` outbox
-files to `events.jsonl` in creation order, keeping each kind as `type` with its family, then
-renames `bus/events` to `bus/events.imported-<epoch>`. The `<sha>.state` files stay in the renamed
-directory; the most recently completed one seeds `last-complete.sha`. An interrupted import
-repeats safely: events already in the log are skipped by ID. A 6.0 `complete` event imports as
-type `complete`, kind `runner`, status `ok`. Unreadable files stay in the renamed directory and
-the runner logs their count.
-
-After the outbox events and before the rename, when `bus/last-push.sha` differs from
-`last-complete.sha`, the runner appends a `push` line for that SHA: status `ok`, the SHA as key,
-as the original push event's key was, and `detail` `imported at 6.1 start`. Its ID equals the
-original's, so an imported original or a repeated import adds nothing. This lets COMPLETE form
-for a commit pushed under 6.0 whose CI or deployment finishes under 6.1.
-
-### Rollback to 6.0
-
-Run `coordination-kit events ingest --game GAME_ID` once with the 2.0 CLI to drain
-`events.jsonl`, confirm `status --game GAME_ID` reports `events.drained`, then start the 6.0
-runner. The 2.0 CLI keeps `events flush` working on a 6.0 outbox.
+Startup refuses a game with a `bus/events` outbox before changing runner state. Use the
+[6.1.2 migration bridge](upgrading.md#upgrading-to-80) to import and drain it. Previously
+imported schema-1 records remain readable, and archived `events.imported-<epoch>/` directories
+are left in place.
 
 ## Supervision
 
@@ -311,9 +295,10 @@ Starting at boot without a login session needs lingering, which the user enables
   being `systemd`, `signal` or `none`. It exits 0 when the runner stopped with both locks free,
   or when no runner was running (`method` `none`, `pid` null). On a timeout, or when the PID does
   not hold the identity, it exits 1 and leaves the runner running and untouched.
-- `runner start --game GAME_ID` exits 1 and starts nothing while either lock is held. With the
-  unit file installed it runs `systemctl --user start delivery-kit-GAME_ID`. Otherwise it spawns
-  the running Node binary directly, with the game's installed
+- `runner start --game GAME_ID` exits 1 and starts nothing while either lock is held or the
+  legacy outbox check fails. With the unit file installed it runs
+  `systemctl --user start delivery-kit-GAME_ID`. Otherwise it spawns the running Node binary
+  directly, with the game's installed
   `node_modules/@andornaut/delivery-kit/dist/cli.js run --game GAME_ID`, detached in its own
   session, from the game checkout with `DELIVERY_KIT_ROOT` set and stdout and stderr appended to
   `bus/runner.out`, creating its parent directory if needed. It waits up to 30 s for both locks,
@@ -322,8 +307,8 @@ Starting at boot without a login session needs lingering, which the user enables
   that does not come up, or exits first, exits 1.
 
 Neither command changes desired delivery control or any coordination-kit state. Both read only
-the read-only status report and `runner.json`; two concurrent starts leave one runner, because
-the second is refused by the singleton locks.
+the read-only status report and `runner.json`, and startup checks the legacy outbox path.
+When starts race, the singleton locks admit only one runner.
 
 Upgrade or replace a supervised runner in a quiet window:
 

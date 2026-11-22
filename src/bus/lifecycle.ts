@@ -1,13 +1,13 @@
 // `runner stop` and `runner start`: stop a game's runner once it is idle and drained, and start a
 // single instance, through its systemd user unit when one is installed, otherwise by signal or a
-// detached spawn. Both read only the read-only status report and bus/runner.json; neither touches
-// the delivery control record or any coordination-kit state. Every process, systemctl and clock
-// interaction is an injected seam.
+// detached spawn. Startup checks the legacy outbox path before starting a process. Neither command
+// touches the delivery control record or coordination-kit state. Process, systemctl and clock
+// interactions are injected.
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { type BusPaths, ensureDir } from "./state.ts";
+import { type BusPaths, ensureDir, legacyOutboxIssue } from "./state.ts";
 import { statusReport } from "./status.ts";
 
 /** Default `runner stop --timeout`, in seconds. */
@@ -193,9 +193,9 @@ export interface StartResult {
 export class StartRefused extends Error {}
 
 /**
- * Start one runner: refused while either lock is held. The unit when it is installed, otherwise a
- * detached spawn of the game's installed CLI. Resolves once the runner holds both locks with a
- * current identity that runner.json records, within START_WAIT_SECONDS.
+ * Refuse startup while either lock is held or the legacy outbox check fails. Start the installed
+ * unit or spawn the game's CLI detached. Resolve once both locks and a current runner.json
+ * identity attest startup, within START_WAIT_SECONDS.
  */
 export async function startRunner(
   lifecycle: Lifecycle,
@@ -204,6 +204,10 @@ export async function startRunner(
   const { game, paths } = target;
   if (running(lifecycle.status())) {
     throw new StartRefused(`a runner for ${game} is already running; nothing started`);
+  }
+  const legacy = legacyOutboxIssue(paths);
+  if (legacy !== undefined) {
+    throw new StartRefused(legacy.detail);
   }
   let method: StartMethod;
   let child: { readonly pid: number; exited(): boolean } | undefined;

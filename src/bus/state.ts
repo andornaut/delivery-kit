@@ -1,6 +1,6 @@
 // The bus state layout under var/games/<g>/bus/. File names and encodings are persisted game
 // state.
-import { mkdirSync, readFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeDurable } from "@andornaut/coordination-kit/build/shared";
@@ -31,7 +31,7 @@ export interface BusPaths {
   readonly eventsLog: string;
   /** The ingest cursor, written only by `coordination-kit events ingest`. */
   readonly eventsCursor: string;
-  /** The 6.0 event outbox, imported into eventsLog at the first 6.1 start. */
+  /** The unmigrated 6.0 event outbox. Its presence blocks startup. */
   readonly legacyOutbox: string;
   /** The last SHA the runner saw complete: the base of the next deploy event's work range. */
   readonly lastCompleteSha: string;
@@ -77,6 +77,31 @@ export function busPaths(dir: string): BusPaths {
     runnerLog: at("runner.log"),
     runnerOut: at("runner.out"),
     seam: at("seam.json"),
+  };
+}
+
+/** Check the old outbox path without following symlinks or reading its contents. */
+export function legacyOutboxIssue(paths: BusPaths):
+  | {
+      readonly blocker: "events_legacy_outbox" | "events_legacy_outbox_unreadable";
+      readonly detail: string;
+    }
+  | undefined {
+  try {
+    if (lstatSync(paths.legacyOutbox, { throwIfNoEntry: false }) === undefined) {
+      return undefined;
+    }
+  } catch (error) {
+    return {
+      blocker: "events_legacy_outbox_unreadable",
+      detail: `cannot check the legacy event outbox at ${paths.legacyOutbox} (${String(error)})`,
+    };
+  }
+  return {
+    blocker: "events_legacy_outbox",
+    detail:
+      `legacy event outbox at ${paths.legacyOutbox}. Run Delivery Kit 6.1.2 with Coordination Kit ` +
+      ">=2.0.1 <3.0.0 to import and drain it before starting this version",
   };
 }
 

@@ -5,7 +5,7 @@ import { createRegistry, type Registry } from "@andornaut/coordination-kit/build
 import { loadLayout } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main } from "./cli.ts";
+import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main, USAGE } from "./cli.ts";
 import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
 
 async function run(
@@ -91,33 +91,38 @@ describe("dispatcher", () => {
     expect(help.code).toBe(EXIT_OK);
     expect(help.out).toContain("control --game ID --state enabled|paused --reason TEXT");
     expect(help.out).toContain("status --game ID [--resources]");
-    expect(help.out).not.toContain("message dispatch");
+    expect(help.out).not.toContain("moved to coordination-kit");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
     expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
   });
 
-  it("refuses every coordination verb with the equivalent coordination-kit command", async () => {
+  it.each([
+    ["channel"],
+    ["monitor-snapshot"],
+    ["monitor-ack"],
+    ["resource-report", "--game", "x"],
+    ["monitor", "ack"],
+    ["monitor", "snapshot"],
+    ["migrate"],
+    ["protocol", "status"],
+    ["inbox", "snapshot", "--game", "x"],
+    ["message", "send"],
+    ["ledger", "apply"],
+    ["harness", "select"],
+    ["claude", "ready"],
+    ["claude", "channel", "--monitor", "x"],
+    ["codex", "ready"],
+    ["constructor"],
+  ])("prints standard usage for an invalid command %s", async (...argv) => {
     const { root } = makeFixture();
-    const cases = [
-      [["protocol"], "`protocol` moved to coordination-kit; run `coordination-kit protocol ...`"],
-      [["protocol", "status"], "run `coordination-kit protocol status ...`"],
-      [["inbox", "snapshot", "--game", "x"], "run `coordination-kit inbox snapshot ...`"],
-      [["message", "send"], "run `coordination-kit message send ...`"],
-      [["ledger", "apply"], "run `coordination-kit ledger apply ...`"],
-      [["harness", "select"], "run `coordination-kit harness select ...`"],
-      [["claude", "ready"], "run `coordination-kit claude ready ...`"],
-      [["claude", "channel"], "run `coordination-kit claude channel ...`"],
-      [["codex", "ready"], "run `coordination-kit codex ready ...`"],
-      [["codex", "unknown"], "`codex` moved to coordination-kit; run `coordination-kit codex ...`"],
-    ] as const;
-    const results = await Promise.all(cases.map(([argv]) => run(root, ...argv)));
-    cases.forEach(([, hint], index) => {
-      const result = results[index];
-      expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
-      expect(result?.err).toMatch(/^delivery-kit: /);
-      expect(result?.err).toContain(hint);
-      expect(result?.err.trim().split("\n")).toHaveLength(1);
-    });
-    expect((await run(root, "constructor")).err).toMatch(/^usage:/);
+    expect(await run(root, ...argv)).toEqual({ code: EXIT_USAGE, err: USAGE, out: "" });
+  });
+
+  it("rejects status --harness as an unknown option", async () => {
+    const { root } = makeFixture();
+    const result = await run(root, "status", "--game", "archies-dog-walks", "--harness", "codex");
+    expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
+    expect(result.err).toContain("Unknown option '--harness'");
+    expect(result.err).toContain("usage: delivery-kit status --game ID [--resources]");
   });
 });

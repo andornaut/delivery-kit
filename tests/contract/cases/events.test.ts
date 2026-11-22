@@ -1,21 +1,20 @@
 // Runner-side bus events: the lines a departure appends to bus/events.jsonl, the ingest the resident
 // observer requests from the coordinator CLI, the cursor that makes status drained, rotation,
-// torn-line repair and the import of the 6.0 outbox. Ingest deduplication, quarantine and the
-// COMPLETE projection are coordination-kit's contract; the fake CLI consumes lines per the cursor
-// contract so these cases exercise both sides of the file seam.
+// torn-line repair and refusal of an unmigrated 6.0 outbox. Ingest deduplication, quarantine and
+// the COMPLETE projection are coordination-kit's contract. The fake CLI consumes lines per the
+// cursor contract so these cases exercise both sides of the file seam.
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 
 import { expect } from "vitest";
 
-import { cli, impl, type Resident, startRunner } from "../lib/adapter.ts";
-import { contract, suite, workspaces } from "../lib/cases.ts";
+import { cli, execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
+import { contract, EXIT_INVALID, EXIT_REFUSED, suite, workspaces } from "../lib/cases.ts";
 import { at, sleep } from "../lib/time.ts";
 import { type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 const EVERY_MINUTE = Array.from({ length: 60 }, (_, m) => String(m).padStart(2, "0"));
-const SHA = "c".repeat(40);
 
 function bus(ws: Workspace, options: { github?: string } = {}): void {
   ws.config.schedule = { departures: EVERY_MINUTE, timezone: "America/Toronto" };
@@ -246,10 +245,11 @@ suite("events", () => {
     expect(report.events).toMatchObject({ drained: true, rotated: [], torn: false });
   });
 
-  contract("a torn last line is terminated at start and ingest quarantines it", async () => {
+  contract("ingest keeps historical JSONL and quarantines a repaired torn tail", async () => {
     const ws = workspace();
     idle(ws);
-    const whole = line(ws, "scheduled-status", "before-crash");
+    const whole = line(ws, "resident-identity-changed", "before-crash");
+    ws.write("events.imported-1800000000/archived.json", "{}\n");
     ws.write("events.jsonl", `${whole}{"schema":1,"id":"ab`);
     const runner = start(ws);
     try {
@@ -262,55 +262,37 @@ suite("events", () => {
     );
     expect(ws.read("events.quarantine.jsonl")).toBe('{"schema":1,"id":"ab\n');
     expect(ws.ingested().map((event) => event.type)).toEqual([
-      "scheduled-status",
+      "resident-identity-changed",
       "runner.started",
     ]);
     expect((await status(ws)).drained).toBe(true);
+    expect(ws.read("events.imported-1800000000/archived.json")).toBe("{}\n");
   });
 
-  contract(
-    "the first start imports the 6.0 outbox in creation order before runner.started",
-    async () => {
-      const ws = workspace();
-      idle(ws);
-      const legacy = (name: string, fields: Record<string, unknown>, created: number) =>
-        ws.write(
-          `events/${name}.json`,
-          `${JSON.stringify({
-            key: SHA,
-            message: `Fixture bus: ${name}`,
-            sent: false,
-            ...fields,
-          }).replace(/^\{/u, `{"created":${created},`)}\n`,
-        );
-      legacy("second", { kind: "ci_success" }, 2);
-      legacy("first", { kind: "push" }, 1);
-      legacy("delivered", { kind: "attempt", sent: true }, 0);
-      ws.write(`events/${SHA}.state`, '{"ci":"pending","deploy":"pending","pushed":true}\n');
-      // The last push, whose CI failed, never completed: the import adds its push line.
-      const last = "d".repeat(40);
-      ws.write("last-push.sha", `${last}\n`);
-      ws.write(`ci/${last}.status`, "failure\n");
-      const runner = start(ws);
-      try {
-        await runner.until(() => types(ws).includes("runner.started") && drained(ws));
-      } finally {
-        await runner.stop();
-      }
-      expect(
-        ws.events().map((event) => [event.type, event.kind, event.status, event.detail]),
-      ).toEqual([
-        ["push", "push", "ok", "Fixture bus: first"],
-        ["ci_success", "ci", "ok", "Fixture bus: second"],
-        ["push", "push", "ok", "imported at 6.1 start"],
-        ["runner.started", "runner", null, expect.any(String)],
-      ]);
-      expect(ws.events()[2]!.key).toBe(last);
-      expect(ws.exists("events")).toBe(false);
-      const imported = ws.list().filter((name) => name.startsWith("events.imported-"));
-      expect(imported).toHaveLength(1);
-      expect(ws.list(imported[0]!)).toContain(`${SHA}.state`);
-      expect((await status(ws)).drained).toBe(true);
-    },
-  );
+  contract("both startup paths refuse an unmigrated outbox before writing bus state", async () => {
+    const ws = workspace();
+    idle(ws);
+    const outbox = '{"kind":"attempt","key":"old","message":"pending","sent":false}\n';
+    const torn = '{"schema":1,"id":"ab';
+    ws.write("events/pending.json", outbox);
+    ws.write("events.jsonl", torn);
+    const sha = "c".repeat(40);
+    const deploy = `${sha}\n${ws.path(`gate-${sha}`)}\n`;
+    ws.write("deploy-pending", deploy);
+    const before = ws.list();
+
+    const run = await execute(impl.run(ws));
+    const start = await cli(ws, ["runner", "start"]);
+    expect(run).toMatchObject({ code: EXIT_REFUSED, stdout: "" });
+    expect(start).toMatchObject({ code: EXIT_INVALID, stdout: "" });
+    for (const result of [run, start]) {
+      expect(result.stderr).toContain(ws.path("events"));
+      expect(result.stderr).toContain("Delivery Kit 6.1.2 with Coordination Kit >=2.0.1 <3.0.0");
+    }
+    expect(ws.list()).toEqual(before);
+    expect(ws.list("events")).toEqual(["pending.json"]);
+    expect(ws.read("events/pending.json")).toBe(outbox);
+    expect(ws.read("events.jsonl")).toBe(torn);
+    expect(ws.read("deploy-pending")).toBe(deploy);
+  });
 });

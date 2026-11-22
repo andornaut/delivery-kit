@@ -2,6 +2,24 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 8.0
+
+Removed command names now print standard CLI usage and exit 2. Removed options fail normal
+argument validation. Update callers using the [removed command forms](#removed-command-forms).
+
+Before starting 8.0, check `status --game GAME_ID` for the `events_legacy_outbox` reporter
+blocker. If present, use Delivery Kit 6.1.2 with a coordinator CLI in `>=2.0.1 <3.0.0` to import
+and drain the outbox. Follow the [6.1.2 upgrade procedure](https://github.com/andornaut/delivery-kit/blob/v6.1.2/docs/upgrading.md#upgrading-to-61)
+during an idle replacement window. The bridge imports the unsent records, preserves the
+original outbox at `bus/events.imported-<epoch>/` and carries forward the completion state.
+With 6.1.2 still running, confirm `coordinator_cli.supported` and `events.drained` are both
+`true` and `events_legacy_outbox` is absent. Then proceed with the idle, drained replacement
+and the compatible 3.x coordinator CLI.
+
+8.0 refuses to start while `bus/events` exists, before repairing the JSONL tail or writing
+runner state. It continues to read schema-1 event logs, including records imported by earlier
+releases, and uses the existing ingest cursor.
+
 ## Upgrading to 7.1
 
 Install Coordination Kit 3.1.0 at the coordinator before replacing runners with Delivery Kit
@@ -285,9 +303,8 @@ game and game-coordinator) moves to 3.0.0 in the same idle replacement window.
 
 ## Removed command forms
 
-A removed form exits 2; there are no aliases. Each prints a one-line hint naming its replacement,
-except `migrate`, which prints the usage text, and `request --request-id`, which is refused as an
-unknown option with the `request` usage line.
+In 8.0, removed commands exit 2 with standard usage. Removed options exit 2 with the
+applicable command usage and an unknown-option diagnostic.
 
 | Removed form                                                                       | Removed in | Current form                                                                 |
 | ---------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------- |

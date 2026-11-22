@@ -1,7 +1,7 @@
 // The runner's append-only event log, bus/events.jsonl: O_APPEND single-write lines with fsync,
-// at most once per (type, key), rotation after ingest, torn-tail repair at startup and the one-time
-// import of the 6.0 outbox. The runner process is the only writer. A failed append is logged and
-// never stops a departure. The schema is src/events.ts.
+// at most once per (type, key), rotation after ingest and torn-tail repair at startup. The runner
+// process is the only writer. A failed append is logged and never stops a departure. The schema
+// is src/events.ts.
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
@@ -25,13 +25,12 @@ import {
   cleanDetail,
   completesDeploy,
   cursorRefersTo,
+  EVENT_TYPES,
   type EventCursor,
   eventId,
   EVENTS_FILE,
   type EventType,
-  familyOf,
   formatLine,
-  IMPORTED_PREFIX,
   isoSeconds,
   LINE_LIMIT,
   type LogIdentity,
@@ -223,55 +222,6 @@ export function workDone(repo: string, base: string, sha: string): string[] | nu
   return done.sort();
 }
 
-/** One legacy outbox event in creation order. */
-interface LegacyEvent {
-  readonly created: bigint;
-  readonly name: string;
-  readonly kind: string;
-  readonly key: string;
-  readonly message: string;
-}
-
-function legacyEvent(directory: string, name: string): LegacyEvent | null | undefined {
-  const text = readFileSync(join(directory, name), "utf8");
-  const value = JSON.parse(text) as Record<string, unknown>;
-  if (value.sent === true || value.suppressed === true) {
-    return undefined;
-  }
-  const { key, kind, message } = value;
-  if (typeof kind !== "string" || typeof key !== "string" || typeof message !== "string") {
-    return null;
-  }
-  const created = /"created":\s*(-?\d+)\b/u.exec(text)?.[1];
-  return { created: BigInt(created ?? 0), key, kind, message, name };
-}
-
-/** The legacy `<sha>.state` that completed most recently, by modification time. */
-function legacyComplete(directory: string, names: readonly string[]): string | undefined {
-  let best: { sha: string; at: number } | undefined;
-  for (const name of names) {
-    const sha = name.slice(0, -".state".length);
-    if (!name.endsWith(".state") || !SHA40.test(sha)) {
-      continue;
-    }
-    try {
-      const path = join(directory, name);
-      const state = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-      const complete =
-        state.pushed === true &&
-        state.ci === "success" &&
-        (state.deploy === "success" || state.deploy === "skipped");
-      const at = statSync(path).mtimeMs;
-      if (complete && (best === undefined || at > best.at)) {
-        best = { at, sha };
-      }
-    } catch {
-      // An unreadable state file names no completion.
-    }
-  }
-  return best?.sha;
-}
-
 /** The runner's event log writer. */
 export class EventLog {
   readonly #options: EventLogOptions;
@@ -294,22 +244,9 @@ export class EventLog {
 
   /**
    * Prepare the log at runner start, before any append: terminate a torn last line, rebuild the
-   * dedupe set and commit progress from the unrotated log, then import the 6.0 outbox. Failures
-   * are logged; the runner starts either way.
+   * dedupe set and commit progress from the unrotated log.
    */
   open(): void {
-    this.#ensureOpen();
-    try {
-      this.#importLegacy();
-    } catch (error) {
-      this.#tailSuspect = true;
-      this.#fail(
-        `legacy event outbox not imported (${String(error)}); it is retried at the next start`,
-      );
-    }
-  }
-
-  #ensureOpen(): void {
     if (this.#opened) {
       return;
     }
@@ -453,8 +390,8 @@ export class EventLog {
   }
 
   /** The work range of a deploy event that can complete `sha`: null when the base is unknown. */
-  #work(type: string, sha: string | null): string[] | null {
-    if (!completesDeploy(familyOf(type)) || sha === null || this.#lastComplete === undefined) {
+  #work(type: EventType, sha: string | null): string[] | null {
+    if (!completesDeploy(EVENT_TYPES[type]) || sha === null || this.#lastComplete === undefined) {
       return null;
     }
     return workDone(this.#options.repo, this.#lastComplete, sha);
@@ -468,7 +405,7 @@ export class EventLog {
     sha = SHA40.test(key) ? key : null,
   ): boolean {
     try {
-      this.#ensureOpen();
+      this.open();
       const { game } = this.#options;
       if (this.#ids.has(eventId(game, type, key))) {
         return false;
@@ -485,94 +422,6 @@ export class EventLog {
       this.#fail(`event ${type} ${key} not appended to ${EVENTS_FILE} (${String(error)})`);
       return false;
     }
-  }
-
-  /**
-   * A push that has not completed by cutover gets a `push` line, so the COMPLETE projection can
-   * form when its CI and deployment finish under 6.1. Its key is the pushed SHA, as the original
-   * push event's was, so an imported original and a repeated import deduplicate.
-   */
-  #importLastPush(): void {
-    const pushed = readTrimmed(this.#options.paths.lastPushSha);
-    if (pushed === undefined || !SHA40.test(pushed) || pushed === this.#lastComplete) {
-      return;
-    }
-    const { game } = this.#options;
-    if (!this.#ids.has(eventId(game, "push", pushed))) {
-      this.#append(
-        makeEvent({ at: this.#at(), detail: "imported at 6.1 start", game }, "push", pushed),
-      );
-    }
-  }
-
-  /**
-   * Append the 6.0 outbox's unsent events in creation order, keeping each kind as `type`, then
-   * rename bus/events to events.imported-<epoch>. Duplicates by ID are skipped, so an interrupted
-   * import repeats safely; `<sha>.state` files stay in the renamed directory.
-   */
-  #importLegacy(): void {
-    const { dir, legacyOutbox } = this.#options.paths;
-    let names: string[];
-    try {
-      names = readdirSync(legacyOutbox).sort();
-    } catch (error) {
-      if (errno(error) === "ENOENT") {
-        return;
-      }
-      throw error;
-    }
-    const events: LegacyEvent[] = [];
-    let unreadable = 0;
-    for (const name of names.filter((entry) => entry.endsWith(".json"))) {
-      try {
-        const event = legacyEvent(legacyOutbox, name);
-        if (event === null) {
-          unreadable += 1;
-        } else if (event !== undefined) {
-          events.push(event);
-        }
-      } catch {
-        unreadable += 1;
-      }
-    }
-    events.sort((a, b) =>
-      a.created === b.created ? (a.name < b.name ? -1 : 1) : a.created < b.created ? -1 : 1,
-    );
-    let imported = 0;
-    const { game } = this.#options;
-    for (const legacy of events) {
-      const event = makeEvent(
-        {
-          at: isoSeconds(Number(legacy.created / 1_000_000n)),
-          detail: cleanDetail(legacy.message),
-          game,
-        },
-        legacy.kind,
-        legacy.key,
-      );
-      if (!this.#ids.has(event.id)) {
-        this.#append(event);
-        imported += 1;
-      }
-    }
-    if (this.#lastComplete === undefined) {
-      const seed = legacyComplete(legacyOutbox, names);
-      if (seed !== undefined) {
-        this.#recordComplete(seed);
-      }
-    }
-    this.#importLastPush();
-    let epoch = this.#options.now();
-    while (existsSync(join(dir, `${IMPORTED_PREFIX}${epoch}`))) {
-      epoch += 1;
-    }
-    const target = `${IMPORTED_PREFIX}${epoch}`;
-    renameSync(legacyOutbox, join(dir, target));
-    fsyncDirectory(dir);
-    this.#options.log(
-      `bus: imported ${imported} unsent legacy outbox events into ${EVENTS_FILE}; bus/events is now ` +
-        `${target}${unreadable > 0 ? ` (${unreadable} unreadable, kept there)` : ""}`,
-    );
   }
 }
 

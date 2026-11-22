@@ -23,7 +23,14 @@ import { lockHeld } from "./locks.ts";
 import { coordinationKitReport } from "./pin.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
 import { coordinatorCliReport } from "./seam.ts";
-import { type BusPaths, ciStatusFile, readText, readTrimmed, sortKeys } from "./state.ts";
+import {
+  type BusPaths,
+  ciStatusFile,
+  legacyOutboxIssue,
+  readText,
+  readTrimmed,
+  sortKeys,
+} from "./state.ts";
 
 export interface IdentityInput {
   readonly cliSha256?: string | null;
@@ -318,9 +325,9 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   }
   const events = eventLogReport(paths);
   const reporters = [...events.blockers];
-  // A 6.0 outbox that the first 6.1 start has not imported yet.
-  if (existsSync(paths.legacyOutbox)) {
-    reporters.push("events_legacy_outbox");
+  const legacy = legacyOutboxIssue(paths);
+  if (legacy !== undefined) {
+    reporters.push(legacy.blocker);
   }
   const gateFailed = jsonFiles(paths.gateFailedDir, "");
   if (gateFailed === null) {

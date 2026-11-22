@@ -25,7 +25,7 @@ import { COORDINATION_KIT_BUNDLED, loadedIdentity, pinGuard, recordPin } from ".
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
 import { DEFERRED_PREFIX, type SeamOutcome } from "./seam.ts";
-import { ensureDir, truncate, writeLines } from "./state.ts";
+import { ensureDir, legacyOutboxIssue, truncate, writeLines } from "./state.ts";
 import { recordIdentity } from "./status.ts";
 import { currentMinuteSlot, minuteSlots, untilMinuteAfter, untilNext } from "./time.ts";
 
@@ -311,11 +311,15 @@ export async function runRunner(
   const signal = AbortSignal.any([options.signal, stop.signal]);
   const tasks = new CiTasks(signal);
   const context: BusContext = makeContext((sha) => tasks.start(context, sha));
+  const legacy = legacyOutboxIssue(context.paths);
+  if (legacy !== undefined) {
+    throw new RunnerRefused(legacy.detail);
+  }
   ensureDir(context.paths.dir);
   const locks = holdSingleton(context);
   let failed = false;
   try {
-    // Before any append: torn-tail repair, dedupe rebuild and the 6.0 outbox import.
+    // Before any append: torn-tail repair and dedupe rebuild.
     context.events.open();
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));

@@ -8,8 +8,6 @@ import { createHash } from "node:crypto";
 export const EVENT_SCHEMA = 1;
 export const EVENTS_FILE = "events.jsonl";
 export const CURSOR_FILE = "events.cursor";
-/** The legacy 6.0 outbox directory is renamed to this prefix plus epoch seconds when imported. */
-export const IMPORTED_PREFIX = "events.imported-";
 /** Each line, its newline included, is one write() of fewer than this many bytes. */
 export const LINE_LIMIT = 4096;
 /** The runner rotates a fully ingested log larger than this. */
@@ -67,28 +65,6 @@ export const EVENT_TYPES = {
 
 export type EventType = keyof typeof EVENT_TYPES;
 
-/**
- * 6.x kinds the runner no longer appends; migration keeps them as `type`. `runner.started`, appended
- * on every start, replaces `resident-identity-changed`.
- */
-const LEGACY_TYPES: Readonly<Record<string, EventFamily>> = {
-  complete: { kind: "runner", status: "ok" },
-  "resident-identity-changed": { kind: "runner", status: null },
-};
-
-/** The family of any type: a current one, a legacy outbox kind, or an unknown legacy kind. */
-export function familyOf(type: string): EventFamily {
-  if (Object.hasOwn(EVENT_TYPES, type)) {
-    return EVENT_TYPES[type as EventType];
-  }
-  if (Object.hasOwn(LEGACY_TYPES, type)) {
-    return LEGACY_TYPES[type] as EventFamily;
-  }
-  return type.startsWith("blocked-")
-    ? { kind: "attempt", status: "blocked" }
-    : { kind: "runner", status: null };
-}
-
 /** A deploy event that can complete its commit carries the `work` array. */
 export function completesDeploy(family: EventFamily): boolean {
   return family.kind === "deploy" && (family.status === "ok" || family.status === "skipped");
@@ -127,10 +103,10 @@ export function makeEvent(
     readonly sha?: string | null;
     readonly work?: readonly string[] | null;
   },
-  type: string,
+  type: EventType,
   key: string,
 ): RunnerEvent {
-  const family = familyOf(type);
+  const family = EVENT_TYPES[type];
   // The line's field order follows the contract's listing.
   /* eslint-disable sort-keys */
   return {
@@ -194,7 +170,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** One complete line (without its newline) as an event, or undefined when it is not one. */
+/** Read a complete schema-1 line, including types written by earlier runners. */
 export function parseLine(text: string): RunnerEvent | undefined {
   let value: unknown;
   try {
