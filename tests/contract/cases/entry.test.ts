@@ -121,6 +121,16 @@ suite("entry", () => {
     expect(ws.calls()).toEqual([]);
   });
 
+  contract("the built CLI accepts a game configuration without reports.project", async () => {
+    const ws = workspace();
+    minimal(ws);
+    roles(ws, { "game-coordinator": FIRST });
+    ws.config.reports = { project: undefined };
+    const result = await execute(impl.checkConfig(ws));
+    expect(result.code, result.stderr).toBe(0);
+    expect(ws.calls()).toEqual([]);
+  });
+
   contract(
     "status reports the bundled coordination-kit, which the game does not install",
     async () => {
