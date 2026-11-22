@@ -116,13 +116,13 @@ function encodeRows(rows: ReturnType<typeof latestRuns>, required: ReadonlySet<s
 }
 
 /** The required checks by state: no run yet, a run not completed, a completed run that failed. */
-export interface RequiredState {
+interface RequiredState {
   readonly missing: readonly string[];
   readonly incomplete: readonly string[];
   readonly failed: readonly string[];
 }
 
-function requiredState(
+export function requiredState(
   rows: ReturnType<typeof latestRuns>,
   required: ReadonlySet<string>,
 ): RequiredState {
@@ -157,20 +157,11 @@ function timeoutDetail(state: RequiredState): string {
  * required run completed without passing, success once every required run completed and passed,
  * otherwise undefined (keep polling). Runs of other names never decide it.
  */
-export function requiredDecision(
-  rows: ReturnType<typeof latestRuns>,
-  required: ReadonlySet<string>,
-): "failure" | "success" | undefined {
-  const decisive = rows.filter((row) => required.has(row.name));
-  if (decisive.some((row) => row.status === "completed" && !PASSING.has(row.conclusion ?? ""))) {
+export function requiredDecision(state: RequiredState): "failure" | "success" | undefined {
+  if (state.failed.length > 0) {
     return "failure";
   }
-  const passed = new Set(
-    decisive
-      .filter((row) => row.status === "completed" && PASSING.has(row.conclusion ?? ""))
-      .map((row) => row.name),
-  );
-  return [...required].every((name) => passed.has(name)) ? "success" : undefined;
+  return state.missing.length === 0 && state.incomplete.length === 0 ? "success" : undefined;
 }
 
 interface PollResult {
@@ -218,7 +209,7 @@ async function poll(
         last = encoded;
       }
       state = requiredState(rows, required);
-      const decision = requiredDecision(rows, required);
+      const decision = requiredDecision(state);
       if (decision !== undefined) {
         return { result: decision, state };
       }

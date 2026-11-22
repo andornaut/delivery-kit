@@ -174,11 +174,6 @@ export async function observer(
   }
 }
 
-export interface LoopHooks {
-  /** Called before every departure; the pin guard. */
-  readonly beforeDeparture?: () => void;
-}
-
 function pendingRequest(context: BusContext): boolean {
   try {
     return readdirSync(context.paths.requestsDir).some((name) => {
@@ -201,7 +196,7 @@ function pendingRequest(context: BusContext): boolean {
 /** Serialized scheduled and requested departures until `signal` aborts. */
 async function departureLoop(
   context: BusContext,
-  hooks: LoopHooks,
+  beforeDeparture: () => void,
   signal: AbortSignal,
 ): Promise<void> {
   const { config, paths } = context;
@@ -235,7 +230,7 @@ async function departureLoop(
         if (request !== undefined) {
           try {
             writeLines(paths.activeDeparture, String(now));
-            hooks.beforeDeparture?.();
+            beforeDeparture();
             // eslint-disable-next-line no-await-in-loop
             const result = await depart(context, { admission, requestId: request, signal });
             // eslint-disable-next-line no-await-in-loop
@@ -262,7 +257,7 @@ async function departureLoop(
         continue;
       }
       writeLines(paths.activeDeparture, String(now));
-      hooks.beforeDeparture?.();
+      beforeDeparture();
       // eslint-disable-next-line no-await-in-loop
       await depart(context, { signal });
       truncate(paths.activeDeparture);
@@ -367,7 +362,7 @@ export async function runRunner(
     ];
     let backgroundFailure: PromiseRejectedResult | undefined;
     try {
-      await departureLoop(context, { beforeDeparture: () => guard.check() }, signal);
+      await departureLoop(context, () => guard.check(), signal);
     } finally {
       stop.abort();
       context.coordinator.stop();
