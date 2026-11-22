@@ -88,6 +88,8 @@ function main(args: string[]): number {
         "none",
         "--cpus",
         "4",
+        "--memory",
+        "4g",
         "--user",
         `${CONTAINER_ID}:${CONTAINER_ID}`,
         "-e",

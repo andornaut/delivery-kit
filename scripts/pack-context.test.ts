@@ -113,6 +113,7 @@ describe("offline pack", () => {
     expect(create).toContain(`SOURCE_REVISION=${fixture.sha}`);
     expect(create.some((arg) => /^SOURCE_DATE_EPOCH=\d+$/.test(arg))).toBe(true);
     expect(create[create.indexOf("--network") + 1]).toBe("none");
+    expect(create[create.indexOf("--memory") + 1]).toBe("4g");
     expect(create[create.indexOf("--user") + 1]).toBe("19001:19001");
     expect(create.some((arg) => arg.startsWith("type=bind,") && arg.endsWith(",readonly"))).toBe(
       true,

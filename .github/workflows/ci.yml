@@ -150,9 +150,16 @@ jobs:
       # reads the npm cache volume filled here from the lockfile.
       - name: Build the npm release asset offline
         run: |
-          docker run --rm --user 19001:19001 --env HOME=/tmp \
+          docker run --rm --memory 4g --user 19001:19001 --env HOME=/tmp \
             --mount type=volume,src=delivery-kit-npm-check,dst=/var/tmp \
             --mount type=bind,src="$PWD",dst=/source,readonly \
             "node:$(sed 's/^v//' .nvmrc)" sh -ec \
-            'cp /source/package.json /source/package-lock.json /tmp && cd /tmp && npm ci --ignore-scripts --no-audit --no-fund --cache /var/tmp/npm'
+            'limit=/sys/fs/cgroup/memory.max
+              if [ ! -r "$limit" ]; then limit=/sys/fs/cgroup/memory/memory.limit_in_bytes; fi
+              bytes=$(cat "$limit")
+              printf "Release cache-seed memory limit: %s bytes\n" "$bytes"
+              test "$bytes" = 4294967296
+              cp /source/package.json /source/package-lock.json /tmp
+              cd /tmp
+              npm ci --ignore-scripts --no-audit --no-fund --cache /var/tmp/npm'
           npm run pack -- "$GITHUB_SHA" "$RUNNER_TEMP/release"
