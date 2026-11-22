@@ -23,7 +23,7 @@ SHELLCHECK_RUN := $(DOCKER_RUN) --network none --workdir /source $(SHELLCHECK_IM
 	-x -P SCRIPTDIR scripts/check.sh scripts/pack.sh tests/contract/run.sh
 
 LINT := npm run check && npm run lint:node && npm run lint:markdown
-TEST := npm run build && npm test && npm run contract
+TEST := npm run contract && npm test
 BUILD := npm run build && npm run package:check
 
 .PHONY: check lint test build

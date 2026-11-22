@@ -97,12 +97,12 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 
 ## Developing
 
-| Target               | Does                                                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `make`, `make check` | Complete verification: root and contract types, lint, build, unit tests, contracts and package inspection, then ShellCheck |
-| `make lint`          | Root and contract types, Prettier, ESLint and Markdown lint, then ShellCheck                                               |
-| `make test`          | Build, unit tests and the complete native contract suite                                                                   |
-| `make build`         | Build, then package inspection                                                                                             |
+| Target               | Does                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `make`, `make check` | Complete verification: root and contract types, lint, one build, contracts, unit tests and package inspection, then ShellCheck |
+| `make lint`          | Root and contract types, Prettier, ESLint and Markdown lint, then ShellCheck                                                   |
+| `make test`          | Build once, then run the complete native contract suite and unit tests                                                         |
+| `make build`         | Build, then package inspection                                                                                                 |
 
 Every target runs in stock images: the Node version pinned in `.nvmrc` and
 `koalaman/shellcheck:v0.11.0`. No image is built. Each container binds the checkout read-only, runs as the host user with four
