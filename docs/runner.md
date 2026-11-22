@@ -316,7 +316,7 @@ Starting at boot without a login session needs lingering, which the user enables
   the running Node binary with the game's installed
   `node_modules/@andornaut/delivery-kit/dist/cli.js run --game GAME_ID`, detached in its own
   session, from the game checkout with `DELIVERY_KIT_ROOT` set and stdout and stderr appended to
-  `bus/runner.out`, never through `npx`. It waits up to 30 s for both locks, a current identity
+  `bus/runner.out`, creating its parent directory if needed. It waits up to 30 s for both locks, a current identity
   and a `runner.json` naming that PID, then prints `{schema, game, pid, method, status}`, where
   `method` is `systemd` or `spawn` and `status` is `{running, idle, coordinator_cli}`. A runner
   that does not come up, or exits first, exits 1.
@@ -510,13 +510,15 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   the remote `main` is still that SHA, it runs `node_modules/wrangler/bin/wrangler.js deploy
 --config wrangler.jsonc --no-bundle` in the gate worktree with the gated `dist/`, so the
   deployment uses the Wrangler locked in the gated commit. A worktree without that entry is not
-  deployed: the runner logs the missing path and keeps the deployment pending. A failure keeps the
-  assets and is retried at a later departure. A deployment that cannot be staged after its push
+  deployed: the runner logs the missing path and keeps the deployment pending. The CI completion
+  and scheduled retry paths serialize access to the pending deployment. A failure, including an
+  unavailable remote ref lookup, keeps the assets for a later retry. A deployment that cannot be staged after its push
   is reported as `deploy_failure` with the cause, so a pushed SHA never goes undeployed silently.
 - **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
   rules and receipts, including the 15-minute load wait, which starts when the request departs. A
-  HEAD that is the last pushed SHA or failed its gate is refused, and a request whose HEAD moved
-  before it departs is rejected.
+  HEAD that is the last pushed SHA or failed its gate is refused. At departure, the runner compares
+  the captured SHA with the local ref and uses that exact SHA for gate and push. A changed ref
+  rejects the request. An unavailable ref is a main-read failure.
 
 ## Gate container
 
