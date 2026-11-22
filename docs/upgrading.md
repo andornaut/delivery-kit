@@ -2,6 +2,17 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 8.1
+
+Delivery Kit 8.1 accepts an omitted `reports.project` and uses the coordinator game name
+for event text. A supplied field must still equal that name. Install the new package and
+qualify each reader before dropping the old field. Keep the field while any deployed or
+rollback reader still requires it. To roll back to a pin that requires it, first restore
+the equal field in the game configuration.
+
+The coordinator CLI range stays `>=3.0.0 <5.0.0`. Existing cadence, controls and schema-1
+events persist across the idle and drained runner replacement.
+
 ## Upgrading to 8.0
 
 8.0 accepts coordinator CLIs in `>=3.0.0 <5.0.0`. For the 4.x cutover, qualify and replace
