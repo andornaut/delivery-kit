@@ -312,7 +312,9 @@ suite("public source identity", () => {
       const before = fingerprint(work);
       expect(restore(test, manifest, work, "0".repeat(64))).toEqual({ ok: false });
       expect(existsSync(join(work, ".git"))).toBe(false);
-      writeFileSync(join(test.artifact, "objects.pack"), "not a Git pack");
+      const packPath = join(test.artifact, "objects.pack");
+      const pack = readFileSync(packPath);
+      writeFileSync(packPath, "not a Git pack");
       const badPack = {
         ...manifest,
         packSha256: createHash("sha256").update("not a Git pack").digest("hex"),
@@ -320,11 +322,14 @@ suite("public source identity", () => {
       rewriteManifest(test, badPack);
       expect(restore(test, badPack, work)).toEqual({ ok: false });
       expect(fingerprint(work)).toBe(before);
-      rmSync(test.artifact, { recursive: true });
-      const fresh = snapshot(test);
-      fresh.objects = fresh.objects.filter((object) => object.oid !== test.commit);
-      rewriteManifest(test, fresh);
-      expect(restore(test, fresh, work)).toEqual({ ok: false });
+      expect(existsSync(join(work, ".git"))).toBe(false);
+      writeFileSync(packPath, pack);
+      const wrongInventory = {
+        ...manifest,
+        objects: manifest.objects.filter((object) => object.oid !== test.commit),
+      };
+      rewriteManifest(test, wrongInventory);
+      expect(restore(test, wrongInventory, work)).toEqual({ ok: false });
       expect(fingerprint(work)).toBe(before);
       expect(existsSync(join(work, ".git"))).toBe(false);
     },

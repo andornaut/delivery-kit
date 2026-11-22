@@ -158,33 +158,6 @@ describe("runGate", () => {
     expect(test.exec.calls.some((call) => call.args.includes("sh"))).toBe(false);
   });
 
-  it("mounts only verified source staging without any original Git metadata", async () => {
-    const test = makeGame();
-    let inspected = false;
-    const exec = fakeExec((spec) => {
-      if (spec.args[0] === "create") {
-        const mount = spec.args.find((arg) => arg.endsWith("dst=/src,readonly"));
-        const path = /src=([^,]+)/u.exec(mount ?? "")?.[1];
-        expect(path).toBeDefined();
-        expect(path).not.toBe(test.repo);
-        expect(lstatSync(path!).isDirectory()).toBe(true);
-        expect(existsSync(join(path!, ".git"))).toBe(false);
-        expect(readdirSync(path!).sort()).toEqual(["README.md", "delivery-kit.json"]);
-        inspected = true;
-      }
-      return gateDocker()(spec);
-    });
-    expect(
-      await runGate(testContext(test, { exec }), {
-        departure: "masked",
-        work: test.repo,
-        sha: gitSync(test.repo, "rev-parse", "HEAD"),
-        logs: mkdtempSync(join(tmpdir(), "logs-")),
-      }),
-    ).toMatchObject({ ok: true });
-    expect(inspected).toBe(true);
-  });
-
   it("ignores inherited image Git redirections and injected configuration during source proof", async () => {
     const test = setup({
       environment: {
@@ -229,6 +202,9 @@ describe("runGate", () => {
       reason: "source HEAD mismatch",
     });
     expect(verbs(test.exec)).not.toContain("create");
+    expect(verbs(test.exec)).not.toContain("exec");
+    expect(existsSync(join(test.test.repo, "dist"))).toBe(false);
+    expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("new source\n");
   });
 
   it("rejects a changed container source after the independent copy-tree check", async () => {
@@ -323,9 +299,11 @@ describe("runGate", () => {
       reason: "gate source identity copy is dirty",
     });
     expect(verbs(test.exec)).not.toContain("create");
+    expect(verbs(test.exec)).not.toContain("exec");
+    expect(existsSync(join(test.test.repo, "dist"))).toBe(false);
     expect(gitSync(test.test.repo, "status", "--porcelain")).toContain("M README.md");
     expect(gitSync(test.test.repo, "diff", "--cached", "--name-only")).toBe("");
-    expect(test.exec.calls.some((call) => call.args.at(-1)?.includes("npm ci"))).toBe(false);
+    expect(readFileSync(join(test.test.repo, "README.md"), "utf8")).toBe("uncommitted change\n");
   });
 
   it("rejects a corrupted binary metadata transfer before extraction and install", async () => {
@@ -538,20 +516,40 @@ describe("runGate", () => {
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
   });
 
-  it("verifies the tree before any output is copied into it", async () => {
-    const { context, exec, input, test } = setup({});
-    const seen: boolean[] = [];
+  it("mounts source-only staging and verifies the tree before copying outputs", async () => {
+    const test = makeGame();
     let stage = "";
+    const transport = gateDocker();
+    const exec = fakeExec((spec) => {
+      if (spec.args[0] === "create") {
+        const mount = spec.args.find((arg) => arg.endsWith("dst=/src,readonly"));
+        stage = /src=([^,]+)/u.exec(mount ?? "")?.[1] ?? "";
+        expect(stage).not.toBe("");
+        expect(stage).not.toBe(test.repo);
+        expect(lstatSync(stage).isDirectory()).toBe(true);
+        expect(existsSync(join(stage, ".git"))).toBe(false);
+        expect(readdirSync(stage).sort()).toEqual(["README.md", "delivery-kit.json"]);
+      }
+      return transport(spec);
+    });
+    const seen: boolean[] = [];
     const verify = () => {
-      const mount = exec.calls
-        .find((call) => call.args[0] === "create")
-        ?.args.find((arg) => arg.endsWith("dst=/src,readonly"));
-      stage = /src=([^,]+)/u.exec(mount ?? "")?.[1] ?? "";
       expect(existsSync(stage)).toBe(true);
       seen.push(existsSync(join(test.repo, "dist")), existsSync(join(test.repo, "node_modules")));
       return Promise.resolve(undefined);
     };
-    expect(await runGate(context, input, verify)).toMatchObject({ ok: true });
+    expect(
+      await runGate(
+        testContext(test, { exec }),
+        {
+          departure: "departure-1",
+          logs: mkdtempSync(join(tmpdir(), "logs-")),
+          sha: gitSync(test.repo, "rev-parse", "HEAD"),
+          work: test.repo,
+        },
+        verify,
+      ),
+    ).toMatchObject({ ok: true });
     expect(seen).toEqual([false, false]);
     expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
     expect(existsSync(stage)).toBe(false);

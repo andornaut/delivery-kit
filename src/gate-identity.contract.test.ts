@@ -210,7 +210,6 @@ writeFileSync('dist/proof.json',JSON.stringify({commit,tree,detached,commits,wor
   );
   git(game.repo, ["add", "."]);
   git(game.repo, ["-c", "core.hooksPath=/dev/null", "commit", "-qm", "Initial fixture source"]);
-  const parent = git(game.repo, ["rev-parse", "HEAD"]);
   writeFileSync(join(game.repo, "source.txt"), "current source\n");
   git(game.repo, ["add", "."]);
   git(game.repo, ["-c", "core.hooksPath=/dev/null", "commit", "-qm", "Current fixture source"]);
@@ -232,7 +231,6 @@ writeFileSync('dist/proof.json',JSON.stringify({commit,tree,detached,commits,wor
   mkdirSync(logs);
   return {
     game,
-    parent,
     commit,
     tree,
     docker,
@@ -259,40 +257,26 @@ describe("stock gate genuine source identity", () => {
     expect(test.docker.calls.at(-1)?.slice(0, 2)).toEqual(["rm", "--force"]);
   });
 
-  it.each(["dirty", "ignored", "missing", "mismatched"] as const)(
+  it.each(["ignored", "missing"] as const)(
     "refuses %s source identity before any gate step",
     async (fault) => {
       const test = fixture();
-      if (fault === "dirty") {
-        writeFileSync(join(test.game.repo, "source.txt"), "dirty copied source\n");
-      }
       if (fault === "missing") {
         rmSync(join(test.game.repo, ".git"), { recursive: true });
-      }
-      if (fault === "ignored") {
+      } else {
         mkdirSync(join(test.game.repo, "node_modules"));
         writeFileSync(
           join(test.game.repo, "node_modules", "fixture.txt"),
           "ignored fixture cache\n",
         );
       }
-      const input = fault === "mismatched" ? { ...test.input, sha: test.parent } : test.input;
       const before = readFileSync(join(test.game.repo, "source.txt"));
-      const result = await runGate(test.context, input);
+      const result = await runGate(test.context, test.input);
       expect(result).toMatchObject({ ok: false, failure: "infrastructure" });
       expect(existsSync(join(test.game.repo, "dist/proof.json"))).toBe(false);
       expect(readFileSync(join(test.game.repo, "source.txt"))).toEqual(before);
-      if (fault === "ignored") {
-        expect(test.docker.calls.some((args) => args[0] === "create")).toBe(false);
-      }
-      expect(
-        test.docker.calls.some((args) => args.some((arg) => arg.includes("node check.mjs"))),
-      ).toBe(false);
-      if (test.docker.calls.some((args) => args[0] === "create")) {
-        expect(test.docker.calls.at(-1)?.slice(0, 2)).toEqual(["rm", "--force"]);
-      } else {
-        expect(test.docker.calls.some((args) => args[0] === "exec")).toBe(false);
-      }
+      expect(test.docker.calls.some((args) => args[0] === "create")).toBe(false);
+      expect(test.docker.calls.some((args) => args[0] === "exec")).toBe(false);
     },
   );
 });
