@@ -24,8 +24,8 @@ from disk after startup except configuration and state. Its child processes are 
 
 ## Install and pin
 
-Games and game-coordinator pin the release asset as a devDependency and commit the lockfile
-integrity. The bundles inline coordination-kit's utilities, so a game pins only delivery-kit;
+Games and game-coordinator pin the released asset as a devDependency and commit the lockfile
+integrity. The example uses the published 7.1.0 pin. The bundles inline coordination-kit's utilities, so a game pins only delivery-kit;
 delivery-kit 7.1.0 bundles coordination-kit 3.0.0, inside `>=2.0.1 <4.0.0`
 ([Pin guard](docs/runner.md#pin-guard)). game-coordinator also pins coordination-kit directly
 for the roles' CLI, the channel MCP server and the reviews and event ingest each runner spawns,
@@ -63,8 +63,8 @@ explicit; it is never inferred from the working directory.
 See the [command reference](docs/commands.md) for details and commands moved to Coordination Kit.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition or an unavailable
-read, 2 for a usage error or an unexpected failure, and 3 for a refused runner start (another runner
-holds `runner.lock` or `loop.lock`). `run` exits 130 on `SIGINT` and 143 on `SIGTERM`. Errors, a
+read, 2 for a usage error or an unexpected failure, and 3 for a refused `run` (held singleton locks or an
+unmigrated legacy outbox). `run` exits 130 on `SIGINT` and 143 on `SIGTERM`. Errors, a
 refused runner start and a refused request go to stderr prefixed `delivery-kit:`. `--help` is
 generated from each command's parser options, so it lists every flag a command accepts.
 
