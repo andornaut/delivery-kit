@@ -2,6 +2,15 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 8.2
+
+8.2 accepts coordinator CLIs in `>=3.0.0 <6.0.0` and retains the bundled
+validator pin. For a 5.0 cutover, first qualify and replace each idle, drained
+runner on the current 4.x coordinator CLI. Verify the new runner pin, observer
+status, event ingest and a scheduled review before moving the coordinator CLI
+to 5.0. Then verify those seams again on the current checkpoint. Upgrade all
+readers and writers before selecting a later checkpoint that requires 5.0.
+
 ## Upgrading to 8.1
 
 Delivery Kit 8.1 accepts an omitted `reports.project` and uses the coordinator game name
