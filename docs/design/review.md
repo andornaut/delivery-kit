@@ -15,3 +15,4 @@ Reference: [review](../review.md), [coordination-kit review](https://github.com/
 | ------- | ----------------------------------------------------- | -------------------------------- |
 | dk-0001 | Accept Claude route targets in inbox snapshot and ack | [dk-0001.md](../work/dk-0001.md) |
 | dk-0005 | Accept shell and waiting Claude session statuses      | [dk-0005.md](../work/dk-0005.md) |
+| dk-0041 | Retry reviews deferred by store compaction            | [dk-0041.md](../work/dk-0041.md) |
