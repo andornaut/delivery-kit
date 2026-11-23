@@ -18,8 +18,9 @@ Use the canonical path in new integrations.
 
 The registry, transport, accounting and protocol subpaths and their unprefixed aliases moved to
 `@andornaut/coordination-kit/build/registry`, `/build/transport`, `/build/accounting` and
-`/build/protocol` in 5.0 ([coordination-kit libraries](https://github.com/andornaut/coordination-kit/blob/main/docs/libraries.md),
-[upgrading to 5.0](upgrading.md#upgrading-to-50)). delivery-kit does not re-export them.
+`/build/protocol` in Delivery Kit 5.0 ([upgrading to 5.0](upgrading.md#upgrading-to-50)).
+Coordination Kit 3.0 removed the transport, accounting and protocol subpaths. See the current
+[Coordination Kit libraries](https://github.com/andornaut/coordination-kit/blob/main/docs/libraries.md).
 
 There is no root barrel, wildcard export, public runtime API or public test API. Fixtures,
 harnesses and private modules are not exported. The `./package.json` export is package metadata,

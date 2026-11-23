@@ -12,15 +12,12 @@ delivery-kit reads no coordination-kit store or work protocol state. The residen
 coordinator-installed coordination-kit CLI, appends its bus events to a per-game event log and asks
 that CLI to ingest them ([Event log](docs/runner.md#event-log)).
 
-The `game-coordinator` role coordinates from the `game-coordinator` repository.
-
-The package is `@andornaut/delivery-kit`. Its operator build tool is the `delivery-kit` CLI,
+The `@andornaut/delivery-kit` package provides the operator CLI,
 bundled into `dist/cli.js` with the coordination-kit modules it uses. The bundle imports only
 `node:` builtins, has no dynamic `import()`,
-relative `require`, worker threads or source maps, never spawns its own files, and reads nothing
-from disk after startup except configuration and state. Its child processes are `git`, `docker`,
-`gh`, and, run by the same Node binary, the game's own Wrangler and the coordinator root's
-`coordination-kit` CLI, which in turn runs `flock` and `claude agents --json`.
+relative `require`, worker threads or source maps. The runner reads the installed package and
+lockfile again before each departure. It runs the game's installed Wrangler and the coordinator
+root's `coordination-kit` CLI with the same Node binary.
 
 ## Install and pin
 
@@ -60,7 +57,8 @@ explicit; it is never inferred from the working directory.
 | `request --game ID --id SAFE_ID`                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
 | `help`, `--help`, `--version`                                              | Usage and version.                                                                                                                                               |
 
-See the [command reference](docs/commands.md) for details and commands moved to Coordination Kit.
+`check-config` validates the registry and route when those files are present. See the
+[command reference](docs/commands.md) for details and commands moved to Coordination Kit.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition or an unavailable
 read, 2 for a usage error or an unexpected failure, and 3 for a refused `run` (held singleton locks or an
@@ -88,7 +86,7 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 | [docs/libraries.md](docs/libraries.md)                   | The public build API subpath and alias and the source identity library; the subpaths that moved                                                                                                                               |
 | [docs/request-accounting.md](docs/request-accounting.md) | Pointer: the request ledger moved to coordination-kit                                                                                                                                                                         |
 | [docs/work-protocol.md](docs/work-protocol.md)           | Pointer: the work protocol moved to coordination-kit                                                                                                                                                                          |
-| [docs/upgrading.md](docs/upgrading.md)                   | Upgrading to 7.0, 6.1, 6.0, 5.0, 4.7, 4.0 and 3.0, and the removed command forms                                                                                                                                              |
+| [docs/upgrading.md](docs/upgrading.md)                   | Version-specific upgrade procedures, the legacy outbox bridge and removed command forms                                                                                                                                       |
 | [docs/design/](docs/design/README.md)                    | Design area summaries, each linking its topic docs and indexing its work items                                                                                                                                                |
 | [docs/work/](docs/work/README.md)                        | The work-file convention and one file per approved task (repository only, not packaged)                                                                                                                                       |
 
@@ -104,8 +102,8 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 Every target runs in the stock Node image pinned in `.nvmrc`. The container binds the checkout
 read-only and runs as the host user with four CPUs, 4 GiB memory (`CHECK_MEMORY`), a read-only
 root filesystem and no capabilities. It copies source into tmpfs, excluding `.git`, dependencies
-and build output. It installs the root and contract dependencies with `npm ci` and runs the
-native npm checks.
+and build output. It installs the root and contract dependencies with `npm ci --ignore-scripts`
+and runs the native npm checks.
 
 Native npm commands run directly wherever they are invoked. Local prerequisites are the
 pinned Node version and the root and contract dependencies.
@@ -132,10 +130,10 @@ the contract lockfile with native npm. Ordinary Git commits run serial local lin
 with direct Prettier and ESLint fixes that preserve Git's staged/unstaged workflow.
 
 CI runs the same native npm commands directly on the runner with the pinned Node version.
-Its `lint` job (types, Prettier, ESLint and Markdown lint) runs for every push and pull request.
-The `build`, `test`, `contract` and `package` jobs run only when a path outside `docs/` changed,
-and otherwise report as skipped. A forced push, a new branch or a base the clone does not have
-runs every job.
+Its `lint` job (types, Prettier, ESLint and Markdown lint) runs on pushes to `main` and
+`release-*` branches and on pull requests. The `build`, `test`, `contract` and `package` jobs
+skip when the classifier finds a non-empty diff entirely under `docs/`. A change to the root
+`README.md`, an empty diff, a forced push, a new branch or an unverified base runs every job.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native

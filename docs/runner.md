@@ -30,9 +30,9 @@ in each pass and never replays a missed slot.
 
 A departure slot's `scheduled-status` report comes from whichever of the observer and that slot's
 departure appends it first. The observer compares the start epoch in `active-departure` with the
-slot start: a departure that started at or after the slot is the slot's own and still running,
-and only one that started earlier, or an unreadable epoch, is reported as still checking or
-finishing from before the slot.
+slot start. A departure that started at or after the slot is reported as checking `main`, with
+any attempt reported separately. An earlier start or an unreadable epoch is reported as a
+departure still checking or finishing.
 
 The recipient's instruction contract for every caller-configured scheduled review pass is:
 
@@ -45,7 +45,7 @@ The recipient's instruction contract for every caller-configured scheduled revie
   worker-queue access remains unknown. Report capability limits and require owner reconciliation
   without bypassing refusals or forcing session loads.
 - Acknowledge only exact unchanged originals with evidence of actual handling or supersession.
-  Native or channel acceptance proves delivery, not handling.
+  Native or channel acceptance records transport only.
 - Retain guarded items and unanswered decisions with their owner, reason and next review boundary.
   Never interrupt or clear an unanswered question, or treat silence as an answer.
 - Use native live delivery only for confirmed unblockers; send ordinary independent work through
@@ -438,7 +438,9 @@ cherry-pick, rewrite or revert. Each scheduled or requested departure, under `de
 
 1. Restarts the CI watch of the pending deployment or the last push when it timed out or lost
    GitHub authentication, then retries a pending deployment whose CI has passed.
-2. Reads `refs/heads/main` in the canonical checkout and the remote `main` with `git ls-remote`.
+2. Reads the branch named by `git.main` in the canonical checkout and its remote counterpart
+   with `git ls-remote`. A request verifies its captured SHA against the local ref before step 1
+   and keeps that SHA through gate and push.
 3. Skips when HEAD is the remote `main` or the last pushed SHA, or has a `gate-failed/<sha>`
    record. Nothing new means nothing departs.
 4. Waits while the one-minute load is at or above `loadLimit`, re-checking it every 60 seconds
@@ -472,9 +474,9 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
 - **Gate infrastructure:** when Docker is unavailable, the image cannot be pulled, the container
   cannot be created or started, install fails with an npm network code (HTTP 5xx, `ETIMEDOUT`,
   `ECONNRESET`, `ECONNREFUSED`, `EAI_AGAIN`, `ENOTFOUND`, `ESOCKETTIMEDOUT`), the network cannot be
-  detached, more than loopback remains, a `docker cp` fails or the worktree fingerprint changes,
-  the departure reports `blocked-gate` with
-  the cause, writes no `gate-failed` record and gates the same SHA again at the next departure.
+  detached, more than loopback remains, copying the deployment outputs fails or the worktree
+  fingerprint changes, the departure reports `blocked-gate` with the cause. It writes no
+  `gate-failed` record and retries the same SHA at the next departure.
 - **CI:** polls the check runs of the exact pushed commit through the existing `gh` login, or the
   public GitHub API (User-Agent `delivery-kit`) when `gh` is not installed. Only the runs named in
   `requiredNames` decide the result, from the latest run of each name: the watch fails once a
@@ -526,12 +528,12 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
   verifies its digest, genuine detached HEAD, raw/index tree, exact object inventory and clean
   status before install. Original Git configuration, history, refs, remotes, hooks and
   credentials are not copied;
-- runs `install` with network;
-- repeats read-only identity and clean-source validation after install, before gate categories.
-  Changed or unavailable identity fails closed without resetting, cleaning or rewriting source;
-- disconnects the container from every network and confirms only loopback remains, then runs
-  each step in order under `sh -c` with `set -e`, logging to `NN-<name>.log`;
-- gives install and the steps four hours each.
+- runs `install` with network access.
+- disconnects the Docker bridge and confirms only loopback remains.
+- repeats read-only identity and clean-source validation before running the gate steps. Changed
+  or unavailable identity fails closed without resetting, cleaning or rewriting source.
+- runs the ordered steps in one `sh -c` script with `set -e`, logging to `NN-<name>.log`.
+- allows up to four hours for install and four hours for the entire step sequence.
 
 The identity bridge runs in the Node runner and adds no gate-image tool requirement. Builds
 read genuine Git identity alongside the existing `WORKERS_CI_COMMIT_SHA`; no synthetic commit,
@@ -541,11 +543,12 @@ Installers may change only `core.hooksPath` in the generated Git configuration; 
 configuration and source-identity fields remain pinned. Validation disables hooks and
 fsmonitor only for its own Git commands, leaving installer and category configuration untouched.
 
-After a gate the host copies the logs out with `docker cp` and removes the container, also after a
-failure or timeout. Git status and the content of every file it reports are fingerprinted before
-and after; a change discards the gate. Only a passing gate whose fingerprint is unchanged also
-copies `dist/` and `node_modules/` into the worktree, before any deployment. Leftover gate
-containers for the game are removed before the next gate.
+After a gate the host attempts to copy the logs and remove the container, including after a
+failure or timeout. A passing gate compares Git status and the contents of the files it reports
+with the pre-gate fingerprint. A change discards the result. After that check, the runner copies
+`dist/` and `node_modules/` into the gate worktree when those directories exist. If container
+removal cannot be confirmed, it retains the source stage and blocks an otherwise passing gate.
+The next gate attempts to remove leftover containers for the game.
 
 ## Test overrides
 

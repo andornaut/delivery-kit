@@ -1,10 +1,9 @@
 # Work protocol
 
 The filesystem work protocol, its publications, message originals, handling receipts, enrollment
-and migration moved to coordination-kit in delivery-kit 5.0. The `protocol` commands are
-`coordination-kit protocol ...` with the same options and output. From 7.0, delivery-kit reads no
-work protocol state: `status` derives observer adoption from the runner's own `runner.started`
-record; see [Observer adoption](runner.md#observer-adoption).
+and migration moved to coordination-kit in delivery-kit 5.0. Coordination Kit 3.0 retired the
+legacy `protocol` commands. See the [Coordination Kit 3.0 migration](https://github.com/andornaut/coordination-kit/blob/main/docs/upgrading.md#from-21)
+and [upgrading to Delivery Kit 5.0](upgrading.md#upgrading-to-50).
 
-Reference: [coordination-kit work protocol](https://github.com/andornaut/coordination-kit/blob/main/docs/work-protocol.md),
-[upgrading to 5.0](upgrading.md#upgrading-to-50).
+From Delivery Kit 7.0, `status` derives [observer adoption](runner.md#observer-adoption) from
+the runner's own `runner.started` event, the ingest cursor and the last seen coordinator CLI.

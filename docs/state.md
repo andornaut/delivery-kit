@@ -30,16 +30,14 @@ An unmigrated `games/<g>/bus/events` outbox blocks startup and remains in place.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
 
-An active work protocol uses its external `stateRoot` for publications and artifacts,
-`<stateRoot>/accounting` for the request ledger and intake, and
-`<stateRoot>/transport/messages` for derived message transport state and recipient spools.
-The configuration pointer and cutover fence remain under `var/`.
+Coordination Kit owns the external coordination state root. The legacy protocol used
+`<stateRoot>/accounting` and `<stateRoot>/transport/messages`. See the [Coordination Kit 3.0 migration](https://github.com/andornaut/coordination-kit/blob/main/docs/upgrading.md#from-21)
+for retirement and the current configuration pointer.
 
-Every state write is a temp file, fsync, rename, then a directory fsync. The event log is the
-exception: an append-only file whose lines are single `O_APPEND` writes followed by fsync
-([Event log](runner.md#event-log)). Locks are `flock(1)` on
-files under the selected state directories. Runners read `<game>/delivery-kit.json` and write only to their own
-`var/games/<g>/bus/`. delivery-kit writes nothing under any `.claude/` directory.
+Durable record replacement uses a temporary file, file fsync, rename and directory fsync. The
+[event log](runner.md#event-log) uses single `O_APPEND` writes followed by fsync. Locks use
+`flock(1)`. Runners read `<game>/delivery-kit.json` and keep their bus state under
+`var/games/<g>/bus/`. Gates also create detached worktrees and use a Docker cache volume.
 
 ## Desired and observed delivery control
 

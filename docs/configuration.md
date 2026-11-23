@@ -49,13 +49,12 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
 - `deploy`: `mode` is `wrangler` or `none`; the optional `skipPattern` is a regular expression
   over the paths changed in the pushed range (the previous remote `main` to the pushed SHA, both
   sides of a rename). A push whose every changed path matches it skips deployment. A range that
-  changes only `docs/` paths departs without a gate or a deployment whatever this pattern says
-  (see [runner.md](runner.md#departures)).
-- `reports`: optional legacy `project`, `scheduledTicks`, and
-  `recipient` and `workerParents`, each a registered role key. `recipient` receives the game's
-  events and, when the game hosts the route, its scheduled reviews. Event text uses the game's
-  `name` from `config.json`. If supplied, `project` must match that name. Keep it while
-  any current or rollback reader still requires it. `scheduledTicks` (boolean)
-  adds one `scheduled-status` report per departure slot. When `var/registry.json` exists,
-  `check-config` requires each `workerParents` role to resolve to a canonical conversation UUID
-  that no other parent shares.
+  changes only `docs/` paths skips the gate and deployment when there is no pending deployment.
+  This shortcut applies independently of `skipPattern` ([Departures](runner.md#departures)).
+- `reports` requires a `scheduledTicks` boolean, a `recipient` role key and a `workerParents`
+  array of unique role keys. The recipient receives delivery reports and the scheduled reviews
+  when the game hosts the route. Enabling `scheduledTicks` adds one `scheduled-status` event
+  per departure slot. Reports use the game's `name` from `config.json`. The optional legacy
+  `project` must match that name when supplied. Keep it while a current or rollback reader
+  requires it. When `var/registry.json` exists, `check-config` requires each `workerParents`
+  role to resolve to a canonical conversation UUID that no other parent shares.

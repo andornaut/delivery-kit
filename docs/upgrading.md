@@ -320,10 +320,11 @@ game and game-coordinator) moves to 3.0.0 in the same idle replacement window.
 
 ## Removed command forms
 
-In 8.0, removed commands exit 2 with standard usage. Removed options exit 2 with the
-applicable command usage and an unknown-option diagnostic.
+From 8.0, removed commands exit 2 with standard usage. An unknown option on a supported
+command exits 2 with a diagnostic. Commands that share the game argument parser also print
+command usage.
 
-| Removed form                                                                       | Removed in | Current form                                                                 |
+| Removed form                                                                       | Removed in | Replacement or migration                                                     |
 | ---------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------- |
 | `channel ...`                                                                      | 2.0.0      | `coordination-kit claude channel ...`                                        |
 | `monitor-snapshot ...`                                                             | 2.0.0      | `coordination-kit inbox snapshot ...`                                        |
@@ -337,3 +338,5 @@ applicable command usage and an unknown-option diagnostic.
 | `monitor ack ...`                                                                  | 3.0.0      | `coordination-kit inbox ack ...`                                             |
 | `claude channel --monitor UUID`                                                    | 3.0.0      | `coordination-kit claude channel --conversation UUID`                        |
 | `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` commands | 5.0.0      | `coordination-kit GROUP VERB ...` (see [Upgrading to 5.0](#upgrading-to-50)) |
+
+For supported forms, see the [current Coordination Kit commands](https://github.com/andornaut/coordination-kit/blob/main/docs/commands.md).

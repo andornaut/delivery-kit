@@ -4,9 +4,10 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
 
 ## Command semantics
 
-- `request`: `SAFE_ID` is an ASCII letter or digit, then up to 63 letters, digits, underscores or
-  hyphens.
-- `control`: `game-coordinator` writes desired control; Tech owns runner adoption. The command changes
+- `request` takes a `SAFE_ID` starting with an ASCII letter or digit, followed by up to 63
+  ASCII letters, digits, underscores or hyphens. Reusing an ID returns its existing receipt.
+  An invalid ID exits 1. Omitting `--id` exits 2.
+- `control` persists the desired state approved for the game. The command changes
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
@@ -40,12 +41,13 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
   requires no reporter or idle blockers. See [Event log](runner.md#event-log).
 - `runner stop --game ID [--timeout SECONDS]`: waits up to `SECONDS` (default 900) until the
   runner is idle and drained, then stops it through its active systemd user unit or with
-  `SIGTERM` to the `runner.json` PID while that PID holds the runner identity token, and waits
-  for `runner.lock` and `loop.lock` to be free. Stdout is one JSON line
-  `{schema, game, pid, method, stopped, locksFree}` with `method` `systemd`, `signal` or `none`.
+  `SIGTERM` to the `runner.json` PID while that PID holds the runner identity token. After the
+  stop action it waits up to another 150 s for `runner.lock` and `loop.lock` to be free. The
+  result is one JSON line `{schema, game, pid, method, stopped, locksFree}` with `method`
+  `systemd`, `signal` or `none`.
   Exit 0 when stopped with the locks free or when no runner runs; 1 on a timeout, a PID that does
   not hold the identity or a runner that does not exit, leaving the runner untouched in the first
-  two cases. A `--timeout` that is not a positive whole number is a usage error. See
+  two cases. `--timeout` accepts 1 to 9999999 seconds in decimal without leading zeros. See
   [Supervision](runner.md#supervision).
 - `run --game ID`: exits 3 before writing runner state if the legacy outbox check fails.
 - `runner start --game ID`: exits 1 and starts nothing while either lock is held or the legacy
@@ -53,7 +55,8 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
   the game's installed `dist/cli.js run --game ID` detached with output appended to
   `bus/runner.out`. Stdout is one JSON line `{schema, game, pid, method, status}` with
   `method` `systemd` or `spawn` and `status`
-  `{running, idle, coordinator_cli}`; a runner that is not up within 30 s exits 1.
+  `{running, idle, coordinator_cli}`. After the launch call returns, the command waits up to
+  30 s to attest startup. It exits 1 if attestation fails.
 - `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
   nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of

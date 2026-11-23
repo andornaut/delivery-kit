@@ -20,8 +20,8 @@ decided or delivered, and why, in a line or two each.
 - Only `main` edits design index tables and approved scope. Approval commits the work-file stub
   and its index row on `main`, and that commit allocates the ID.
 - Workers edit only their own work file and the design prose that ships with their feature.
-  The commit that lands the item sets `status: done`; a release tag containing that commit marks
-  it deployed.
+  The integration commit sets `status: done`. A release tag identifies a release revision.
+  Record publication, consumer adoption and deployment with their own evidence.
 - A changed or reverted decision is a new work item with `supersedes`. A finished item's outcome
   is never rewritten.
 - Work files are public: no session IDs, hostnames, local home-directory paths or quoted

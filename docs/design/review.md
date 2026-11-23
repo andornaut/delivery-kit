@@ -5,7 +5,7 @@ coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit
 runner's observer decides when a `wakeMinutes` slot is due and, from 6.0, spawns the
 coordinator-installed `coordination-kit review deliver` ([dk-0022](../work/dk-0022.md)) and, from
 6.1, appends its bus events to a per-game log that `coordination-kit events ingest` reads
-([dk-0025](../work/dk-0025.md)). The work items below shipped in delivery-kit before the move.
+([dk-0025](../work/dk-0025.md)).
 
 Reference: [review](../review.md), [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/design/review.md).
 
