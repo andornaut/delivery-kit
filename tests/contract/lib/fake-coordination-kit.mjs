@@ -7,8 +7,8 @@
 //
 // S is an ISO 8601 minute start with an offset and is echoed as given. A typed review result is
 // recorded at ROOT/var/games/G/bus/unblock/review-deliver/<epoch seconds>.json and printed again
-// for a repeat call; recipient-busy (lock contention) is not recorded. A nonzero exit prints no
-// stdout and one `coordination-kit:` stderr line.
+// for a repeat call. Lock contention and compaction reservation refusals leave no record.
+// A nonzero exit prints no stdout and one `coordination-kit:` stderr line.
 //
 // `events ingest` follows the event log contract: it finds the file the cursor names by its first
 // line ID (inode and device for a file without one) among the rotated `events.<epoch>.jsonl` logs
@@ -274,9 +274,9 @@ if (rest[0] === "--version" && rest[1] === "--json") {
     slot,
     status,
   });
-  // Lock contention (recipient-busy) and failures are not recorded.
+  const reserved = status === "deferred" && result.reason === "compaction-reserved";
   const typed = (behaviour.exit ?? 0) === 0 && behaviour.stdout === undefined;
-  if (typed && behaviour.hang !== true && result.reason !== "recipient-busy") {
+  if (typed && behaviour.hang !== true && result.reason !== "recipient-busy" && !reserved) {
     mkdirSync(records, { recursive: true });
     writeFileSync(record, `${JSON.stringify(result)}\n`);
   }

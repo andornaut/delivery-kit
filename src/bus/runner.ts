@@ -24,7 +24,7 @@ import { depart, reportScheduledTick, requestStore, slotDetail } from "./departu
 import { COORDINATION_KIT_BUNDLED, loadedIdentity, pinGuard, recordPin } from "./pin.ts";
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
-import { DEFERRED_PREFIX, type SeamOutcome } from "./seam.ts";
+import { COMPACTION_RESERVED, DEFERRED_PREFIX, type SeamOutcome } from "./seam.ts";
 import { ensureDir, legacyOutboxIssue, truncate, writeLines } from "./state.ts";
 import { recordIdentity } from "./status.ts";
 import { currentMinuteSlot, minuteSlots, untilMinuteAfter, untilNext } from "./time.ts";
@@ -118,26 +118,47 @@ export function reviewLine(
   }
 }
 
+/** Retry only a confirmed refusal that left no review result to reconcile. */
+async function observeReview(
+  context: BusContext,
+  slot: number,
+  reservedSlots: Set<number>,
+  signal?: AbortSignal,
+): Promise<void> {
+  let outcome: SeamOutcome;
+  try {
+    outcome = await context.coordinator.review(slot, signal);
+  } catch (error) {
+    outcome = { claimed: false, why: String(error) };
+  }
+  if (outcome.claimed && outcome.status === "deferred" && outcome.reason === COMPACTION_RESERVED) {
+    reservedSlots.add(slot);
+  } else {
+    reservedSlots.delete(slot);
+  }
+  const report = reviewLine(slot, outcome);
+  context.log(report.line);
+  if (report.stderr) {
+    process.stderr.write(`${report.line}\n`);
+  }
+}
+
 /** One observer pass: scheduled reviews, scheduled-slot reports and an event ingest. */
 async function observe(
   context: BusContext,
   after: number,
   now: number,
-  signal?: AbortSignal,
+  reservedSlots: Set<number>,
+  signal: AbortSignal,
 ): Promise<void> {
   const { config, layout } = context;
   const wake = currentMinuteSlot(layout.config.timezone, layout.config.wakeMinutes, after, now);
+  const retry = reservedSlots.values().next().value;
   if (wake !== undefined) {
-    let report: ReturnType<typeof reviewLine>;
-    try {
-      report = reviewLine(wake, await context.coordinator.review(wake, signal));
-    } catch (error) {
-      report = reviewLine(wake, { claimed: false, why: String(error) });
-    }
-    context.log(report.line);
-    if (report.stderr) {
-      process.stderr.write(`${report.line}\n`);
-    }
+    await observeReview(context, wake, reservedSlots, signal);
+  }
+  if (retry !== undefined && retry !== wake && !signal.aborted) {
+    await observeReview(context, retry, reservedSlots, signal);
   }
   if (config.reports.scheduledTicks) {
     const minutes = config.schedule.departures.map((departure) => Number.parseInt(departure, 10));
@@ -158,6 +179,7 @@ export async function observer(
   signal: AbortSignal,
   beforePass: () => void,
 ): Promise<void> {
+  const reservedSlots = new Set<number>();
   let previous = context.clock.now();
   while (!signal.aborted) {
     deliveryRunnerReady(context);
@@ -165,7 +187,7 @@ export async function observer(
     const now = context.clock.now();
     // The observer is sequential by design.
     // eslint-disable-next-line no-await-in-loop
-    await observe(context, previous, now, signal).catch((error: unknown) =>
+    await observe(context, previous, now, reservedSlots, signal).catch((error: unknown) =>
       context.log(`bus: observer: ${String(error)}`),
     );
     previous = now;

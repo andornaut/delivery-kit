@@ -23,6 +23,7 @@ export const COORDINATOR_CLI = join(
 export const SEAM_TIMEOUT_MS = 45_000;
 /** The runner log prefix of a deferred review, on its own line and on stderr. */
 export const DEFERRED_PREFIX = "bus: review deferred: ";
+export const COMPACTION_RESERVED = "compaction-reserved";
 /** Reason tokens the seam defines; any other token is treated as a deferral. */
 export const KNOWN_REASONS: ReadonlySet<string> = new Set([
   "route-unavailable",
@@ -35,6 +36,7 @@ export const KNOWN_REASONS: ReadonlySet<string> = new Set([
   "nothing-due",
   "no-events",
   "cli-error",
+  COMPACTION_RESERVED,
 ]);
 /** Reasons the runner itself reports without a CLI result. */
 export const CLI_UNAVAILABLE = "cli-unavailable";

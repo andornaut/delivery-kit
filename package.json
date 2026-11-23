@@ -1,6 +1,6 @@
 {
   "name": "@andornaut/delivery-kit",
-  "version": "8.1.0",
+  "version": "8.1.1",
   "description": "Local scheduled Git delivery with an isolated gate, exact-commit CI watch and deployment.",
   "license": "MIT",
   "type": "module",

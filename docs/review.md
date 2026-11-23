@@ -12,6 +12,14 @@ records the slot result. `check-config` validates `var/route.json` when present.
 observer and the seam are in
 [runner.md](runner.md#coordinator-cli-seam).
 
+The observer keeps the exact slot epoch in memory when the CLI returns a valid deferred
+`compaction-reserved` result. On each existing minute pass it attempts a fresh due slot first,
+then retries at most one older pending slot with its original `--slot`. Another
+`compaction-reserved` deferral retains the slot. Any other outcome, including an ambiguous
+receipt or a failed CLI call, ends the retry. Starting the runner begins with an empty retry
+queue and skips scheduled slots already underway or missed. Coordination Kit owns the durable
+result and deduplication for each slot.
+
 ## Events
 
 The runner appends each bus event to `bus/events.jsonl` ([Event log](runner.md#event-log)). Each

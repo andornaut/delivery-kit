@@ -1,6 +1,6 @@
 // Wall-clock review cadence, independent of release ticks. The seam is the fake coordination-kit CLI
-// at the coordinator root: the runner spawns `review deliver` once per due slot and prints the
-// line for its typed result. Route resolution, briefs and native delivery are coordination-kit's
+// at the coordinator root: the runner spawns `review deliver` for due slots and retries exact
+// slots deferred by compaction. Route resolution, briefs and native delivery are coordination-kit's
 // contract.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { expect } from "vitest";
 
-import { cli, execute, impl, startRunnerAt } from "../lib/adapter.ts";
+import { cli, execute, impl, type Runner, startRunner, startRunnerAt } from "../lib/adapter.ts";
 import { CASE_TIMEOUT_MS, contract, suite, workspaces } from "../lib/cases.ts";
 import { iso, occurrences, reviewCalls, tick, virtualNow } from "../lib/review.ts";
 import { at } from "../lib/time.ts";
@@ -57,6 +57,22 @@ function pushes(ws: Workspace): number {
   return ws.calls("git").filter((call) => call.args.includes("push")).length;
 }
 
+const RESERVED = { detail: "journal reserved", reason: "compaction-reserved", status: "deferred" };
+
+function ingestCalls(ws: Workspace): number {
+  return ws.coordinatorCalls().filter((call) => call.args[0] === "events").length;
+}
+
+/** Step the held clock and wait for the ingest request that follows the pass's reviews. */
+async function reviewPass(ws: Workspace, runner: Runner, seconds = 60): Promise<string[]> {
+  const beforeIngest = ingestCalls(ws);
+  const beforeReview = reviewCalls(ws).length;
+  ws.advanceClock(seconds);
+  await runner.until(() => ingestCalls(ws) > beforeIngest);
+  expect(ingestCalls(ws)).toBe(beforeIngest + 1);
+  return reviewCalls(ws).slice(beforeReview);
+}
+
 suite("review cadence", () => {
   const workspace = workspaces();
 
@@ -94,6 +110,75 @@ suite("review cadence", () => {
       expect(runner.output().stdout).toContain("bus: scheduled 00 10 (America/Toronto)");
     },
     CASE_TIMEOUT_MS,
+  );
+
+  contract("compaction retries exact slots on later passes after any fresh due slot", async () => {
+    const ws = workspace();
+    cadenceGame(ws);
+    ws.updateCoordinatorConfig({ wakeMinutes: [19, 20, 21] });
+    ws.scriptCoordinator({ review: RESERVED, ingest: { ...RESERVED, consume: false } });
+    // Minute :19 is already underway at startup. Hold each subsequent minute until ingest.
+    ws.holdClock(at(19, 30));
+    const runner = startRunner(ws);
+    try {
+      await runner.armed();
+      // The initial observer pass and runner.started append each request an ingest.
+      await runner.until(() => ingestCalls(ws) >= 2);
+      expect(reviewCalls(ws)).toEqual([]);
+      expect(await reviewPass(ws, runner, 31)).toEqual([iso(at(20))]);
+      expect(await reviewPass(ws, runner)).toEqual([iso(at(21)), iso(at(20))]);
+      expect(ws.exists("events.cursor")).toBe(false);
+
+      ws.scriptCoordinator({ review: { status: "delivered" } });
+      // Both slots are pending. Each of the next two passes retries exactly one.
+      const first = await reviewPass(ws, runner);
+      const second = await reviewPass(ws, runner);
+      expect(first).toHaveLength(1);
+      expect(second).toHaveLength(1);
+      expect([...first, ...second].sort()).toEqual([iso(at(20)), iso(at(21))]);
+      expect(await reviewPass(ws, runner)).toEqual([]);
+      await runner.until(
+        () => ws.exists("events.cursor") && ws.readJson("events.cursor").lines === 1,
+      );
+      expect(ws.readJson("events.cursor").offset).toBe(Buffer.byteLength(ws.read("events.jsonl")));
+      expect(ws.ingested().map((event) => event.type)).toEqual(["runner.started"]);
+    } finally {
+      await runner.stop();
+    }
+    const { stdout } = runner.output();
+    for (const slot of [at(20), at(21)]) {
+      expect(
+        occurrences(stdout, `bus: scheduled review ${slot}: review ${iso(slot)} delivered`),
+      ).toBe(1);
+    }
+  });
+
+  contract.each([
+    { label: "ambiguous", result: { status: "deferred", reason: "receipt-ambiguous" } },
+    { label: "failed", result: { ...RESERVED, exit: 1 } },
+    { label: "malformed", result: { ...RESERVED, override: { slot: "wrong slot" } } },
+    { label: "non-deferred", result: { ...RESERVED, status: "skipped" } },
+  ])(
+    "a $label review result clears a retry and does not schedule a new one",
+    async ({ result }) => {
+      const ws = workspace();
+      cadenceGame(ws, RESERVED);
+      ws.updateCoordinatorConfig({ wakeMinutes: [20, 23] });
+      ws.holdClock(at(19, 30));
+      const runner = startRunner(ws);
+      try {
+        await runner.armed();
+        await runner.until(() => ingestCalls(ws) >= 2);
+        expect(await reviewPass(ws, runner, 31)).toEqual([iso(at(20))]);
+        ws.scriptCoordinator({ review: result });
+        expect(await reviewPass(ws, runner)).toEqual([iso(at(20))]);
+        expect(await reviewPass(ws, runner)).toEqual([]);
+        expect(await reviewPass(ws, runner)).toEqual([iso(at(23))]);
+        expect(await reviewPass(ws, runner)).toEqual([]);
+      } finally {
+        await runner.stop();
+      }
+    },
   );
 
   contract(

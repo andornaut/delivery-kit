@@ -25,8 +25,10 @@ For each due slot the observer calls the coordinator-installed `coordination-kit
 logs the line for its result, reports scheduled slots when `scheduledTicks` is set, then requests
 an event ingest ([Coordinator CLI seam](#coordinator-cli-seam)). coordination-kit composes and
 delivers the review and owns the per-slot receipt: a repeated call for a slot returns the recorded
-outcome without another send. The runner keeps no slot receipt, calls at most once per due slot
-in each pass and never replays a missed slot.
+outcome without another send. The runner keeps no slot receipt. A typed
+`compaction-reserved` deferral retains the exact observed slot in memory for retry in a
+later pass. Each pass handles a newly due slot first and retries at most one retained slot.
+The runner never replays a missed slot.
 
 A departure slot's `scheduled-status` report comes from whichever of the observer and that slot's
 departure appends it first. The observer compares the start epoch in `active-departure` with the
@@ -72,11 +74,11 @@ The runner spawns the coordinator root's
 (`process.execPath`, never `npx`), the coordinator root it resolved from `--root` or
 `DELIVERY_KIT_ROOT` as `--root` and as the working directory, and its own environment:
 
-| Call                                        | When                                                                  |
-| ------------------------------------------- | --------------------------------------------------------------------- |
-| `review deliver --game GAME_ID --slot SLOT` | Once per due `wakeMinutes` slot                                       |
-| `events ingest --game GAME_ID`              | Once per observer pass and after each appended event                  |
-| `--version --json`                          | At startup, and before a call while the last seen CLI is out of range |
+| Call                                        | When                                                                   |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| `review deliver --game GAME_ID --slot SLOT` | At a due `wakeMinutes` slot or to retry a retained compaction deferral |
+| `events ingest --game GAME_ID`              | Once per observer pass and after each appended event                   |
+| `--version --json`                          | At startup, and before a call while the last seen CLI is out of range  |
 
 `SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
 `2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
