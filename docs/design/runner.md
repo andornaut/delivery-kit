@@ -40,3 +40,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0036 | Expose the verified SHA captured for a departure                                   | [dk-0036.md](../work/dk-0036.md) |
 | dk-0038 | Fix departure, retry and verification review findings                              | [dk-0038.md](../work/dk-0038.md) |
 | dk-0040 | Qualify Coordination Kit 4.x at the runner seam                                    | [dk-0040.md](../work/dk-0040.md) |
+| dk-0042 | Qualify Coordination Kit 5.x at the runner seam                                    | [dk-0042.md](../work/dk-0042.md) |
