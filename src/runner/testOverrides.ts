@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import type { Clock } from "./context.ts";
+import { type Clock, sleepMs } from "../lib/clock.ts";
 
 const TEST_CLOCK_VARIABLE = "DELIVERY_KIT_TEST_CLOCK";
 
@@ -50,24 +50,6 @@ function readClockFile(file: string): ClockFile {
   return value;
 }
 
-function wait(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted === true) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(resolve, Math.max(0, milliseconds));
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
-}
-
 export function testClock(env: NodeJS.ProcessEnv): Clock | undefined {
   const file = env[TEST_CLOCK_VARIABLE];
   if (file === undefined || file === "") {
@@ -103,7 +85,7 @@ export function testClock(env: NodeJS.ProcessEnv): Clock | undefined {
         const slice = (remaining * 1000) / speed;
         // Sequential slices are the mechanism.
         // eslint-disable-next-line no-await-in-loop
-        await wait(
+        await sleepMs(
           maxRealSleep === undefined ? slice : Math.min(slice, maxRealSleep * 1000),
           signal,
         );

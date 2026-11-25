@@ -1,7 +1,7 @@
-// The resident runner for one game: singleton locks, identity, the
-// serialized scheduled and requested departure loop, the 60 s observer, the 1800 s resource
-// sampler and the in-runner CI watches. Events are appended to bus/events.jsonl (eventlog.ts);
-// scheduled reviews and event ingest go through the coordinator CLI seam (seam.ts). No timer
+// The resident runner for one game: singleton locks, identity, the serialized scheduled and
+// requested departure loop, the 60 s observer (observer.ts), the 1800 s resource sampler and the
+// in-runner CI watches. Events are appended to bus/events.jsonl (state/eventlog.ts); scheduled
+// reviews and event ingest go through the coordinator CLI seam (seam/coordinator.ts). No timer
 // outlives the process.
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,26 +9,32 @@ import { dirname, join } from "node:path";
 import { holdLock, LockBusy, type LockHandle } from "@andornaut/coordination-kit/build/shared";
 
 import { COORDINATION_KIT_BUNDLED, VERSION } from "../compatibility.ts";
-import { currentMinuteSlot, minuteSlots, untilMinuteAfter, untilNext } from "../lib/time.ts";
-import { COMPACTION_RESERVED, DEFERRED_PREFIX, type SeamOutcome } from "../seam/coordinator.ts";
-import { ensureDir, legacyOutboxIssue, truncate, writeLines } from "../state/paths.ts";
-import { loadedIdentity, pinGuard, recordPin } from "../state/pin.ts";
-import { recordIdentity } from "../status/status.ts";
+import { ensureDir, truncate, writeLines } from "../lib/files.ts";
+import { untilNext } from "../lib/time.ts";
+import { recordIdentity } from "../state/identity.ts";
+import { legacyOutboxIssue } from "../state/paths.ts";
+import {
+  installedIdentity,
+  loadedIdentity,
+  type PinIdentity,
+  pinMismatch,
+  recordPin,
+} from "../state/pin.ts";
 import { unfinishedCi, watchCi } from "./ci.ts";
 import type { BusContext } from "./context.ts";
-import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
+import { depart, requestStore } from "./departure.ts";
+import { deployAfterCi } from "./deploy.ts";
+import { observer } from "./observer.ts";
+import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
+import { sampleResources } from "./resources.ts";
 import {
   beginDeliveryWork,
   bindDeliveryRunner,
-  deliveryRunnerReady,
-  deployAfterCi,
   endDeliveryWork,
   settleDeliveryRunner,
   unbindDeliveryRunner,
   updateDeliveryWork,
-} from "./deploy.ts";
-import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
-import { sampleResources } from "./resources.ts";
+} from "./session.ts";
 
 /** In-runner CI watches, at most one per SHA. Aborted watches resume in the next runner. */
 class CiTasks {
@@ -85,112 +91,6 @@ class CiTasks {
 
   async drain(): Promise<void> {
     await Promise.all(this.#running.values());
-  }
-}
-
-/**
- * The runner log line for a review outcome. A `nothing-due` skip is logged too, so a runner that
- * does not host the route still shows each call.
- */
-export function reviewLine(
-  wake: number,
-  outcome: SeamOutcome,
-): { readonly line: string; readonly stderr: boolean } {
-  if (!outcome.claimed) {
-    return {
-      line: `bus: scheduled review ${wake} unavailable (${outcome.why}); no delivery claimed`,
-      stderr: false,
-    };
-  }
-  const detail = outcome.detail === "" ? "" : `: ${outcome.detail}`;
-  switch (outcome.status) {
-    case "delivered":
-      return { line: `bus: scheduled review ${wake}: ${outcome.detail}`, stderr: false };
-    case "deferred":
-      return { line: `${DEFERRED_PREFIX}${outcome.reason ?? "unknown"}${detail}`, stderr: true };
-    default:
-      return {
-        line: `bus: scheduled review ${wake}: skipped ${outcome.reason ?? "unknown"}${detail}`,
-        stderr: false,
-      };
-  }
-}
-
-/** Retry only a confirmed refusal that left no review result to reconcile. */
-async function observeReview(
-  context: BusContext,
-  slot: number,
-  reservedSlots: Set<number>,
-  signal?: AbortSignal,
-): Promise<void> {
-  let outcome: SeamOutcome;
-  try {
-    outcome = await context.coordinator.review(slot, signal);
-  } catch (error) {
-    outcome = { claimed: false, why: String(error) };
-  }
-  if (outcome.claimed && outcome.status === "deferred" && outcome.reason === COMPACTION_RESERVED) {
-    reservedSlots.add(slot);
-  } else {
-    reservedSlots.delete(slot);
-  }
-  const report = reviewLine(slot, outcome);
-  context.log(report.line);
-  if (report.stderr) {
-    process.stderr.write(`${report.line}\n`);
-  }
-}
-
-/** One observer pass: scheduled reviews, scheduled-slot reports and an event ingest. */
-async function observe(
-  context: BusContext,
-  after: number,
-  now: number,
-  reservedSlots: Set<number>,
-  signal: AbortSignal,
-): Promise<void> {
-  const { config, layout } = context;
-  const wake = currentMinuteSlot(layout.config.timezone, layout.config.wakeMinutes, after, now);
-  const retry = reservedSlots.values().next().value;
-  if (wake !== undefined) {
-    await observeReview(context, wake, reservedSlots, signal);
-  }
-  if (retry !== undefined && retry !== wake && !signal.aborted) {
-    await observeReview(context, retry, reservedSlots, signal);
-  }
-  if (config.reports.scheduledTicks) {
-    const minutes = config.schedule.departures.map((departure) => Number.parseInt(departure, 10));
-    for (const slot of minuteSlots(config.schedule.timezone, minutes, after, now)) {
-      reportScheduledTick(context, slot, slotDetail(context, slot));
-    }
-  }
-  context.events.ingest();
-}
-
-/**
- * One observer pass per minute, each after `beforePass`. Each wakeup is at the start of the minute
- * after the previous pass's reading, so a pass that runs past a minute boundary still observes
- * that minute.
- */
-export async function observer(
-  context: BusContext,
-  signal: AbortSignal,
-  beforePass: () => void,
-): Promise<void> {
-  const reservedSlots = new Set<number>();
-  let previous = context.clock.now();
-  while (!signal.aborted) {
-    deliveryRunnerReady(context);
-    beforePass();
-    const now = context.clock.now();
-    // The observer is sequential by design.
-    // eslint-disable-next-line no-await-in-loop
-    await observe(context, previous, now, reservedSlots, signal).catch((error: unknown) =>
-      context.log(`bus: observer: ${String(error)}`),
-    );
-    previous = now;
-    // eslint-disable-next-line no-await-in-loop
-    await context.clock.sleep(untilMinuteAfter(now, context.clock.now()), signal);
   }
 }
 
@@ -289,6 +189,22 @@ async function departureLoop(
   }
 }
 
+/** Compare the loaded package with the installed one; log each mismatch, report each new one. */
+function pinGuard(context: BusContext, loaded: PinIdentity): () => void {
+  let reported: string | undefined;
+  return () => {
+    const mismatch = pinMismatch(loaded, installedIdentity(context.game.repo));
+    if (mismatch === undefined) {
+      return;
+    }
+    context.log(mismatch.logLine);
+    if (reported !== mismatch.key) {
+      reported = mismatch.key;
+      context.events.emit("pin-mismatch", mismatch.key, mismatch.detail);
+    }
+  };
+}
+
 export class RunnerRefused extends Error {}
 
 export interface RunnerOptions {
@@ -362,7 +278,11 @@ export async function runRunner(
       );
     }
     bindDeliveryRunner(context, runnerToken);
-    recordPin(context, loaded, cliPath);
+    recordPin(
+      context.paths.runnerJson,
+      { cliPath, pid: process.pid, startedAt: context.clock.now() },
+      loaded,
+    );
     const guard = pinGuard(context, loaded);
     for (const sha of unfinishedCi(context)) {
       tasks.start(context, sha);
@@ -386,7 +306,7 @@ export async function runRunner(
     ];
     let backgroundFailure: PromiseRejectedResult | undefined;
     try {
-      await departureLoop(context, () => guard.check(), signal);
+      await departureLoop(context, guard, signal);
     } finally {
       stop.abort();
       context.coordinator.stop();

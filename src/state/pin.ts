@@ -1,7 +1,8 @@
-// The pin guard. At startup the runner records the loaded version, the bundled coordination-kit
-// version, the game lockfile's integrity for the package and the sha256 of the loaded dist/cli.js
-// in runner.json. At each departure it compares them with the installed copy; on a mismatch it
-// logs, emits one deduplicated pin-mismatch event and finishes on the loaded code.
+// The package pin: the identity of the loaded and the installed delivery-kit. At startup the
+// runner records the loaded version, the bundled coordination-kit version, the game lockfile's
+// integrity for the package and the sha256 of the loaded dist/cli.js in runner.json. At each
+// departure it compares them with the installed copy; on a mismatch it logs, emits one
+// deduplicated pin-mismatch event and finishes on the loaded code.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,22 +10,13 @@ import { dirname, join } from "node:path";
 import { writeJsonDurable } from "@andornaut/coordination-kit/build/shared";
 
 import { COORDINATION_KIT_BUNDLED, PACKAGE } from "../compatibility.ts";
-import type { BusContext } from "../runner/context.ts";
-import { readTrimmed } from "./paths.ts";
+import { fileSha256, readTrimmed } from "../lib/files.ts";
 
 export interface PinIdentity {
   readonly version: string | null;
   readonly integrity: string | null;
   readonly sourceCommit: string | null;
   readonly cliSha256: string | null;
-}
-
-function sha256(path: string): string | null {
-  try {
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
-  } catch {
-    return null;
-  }
 }
 
 function jsonField(path: string, pick: (value: Record<string, unknown>) => unknown): string | null {
@@ -53,7 +45,7 @@ function lockIntegrity(repo: string): string | null {
 export function installedIdentity(repo: string): PinIdentity {
   const installed = join(repo, "node_modules", PACKAGE);
   return {
-    cliSha256: sha256(join(installed, "dist", "cli.js")),
+    cliSha256: fileSha256(join(installed, "dist", "cli.js")),
     integrity: lockIntegrity(repo),
     sourceCommit: sourceCommit(installed),
     version: jsonField(join(installed, "package.json"), (manifest) =>
@@ -65,24 +57,29 @@ export function installedIdentity(repo: string): PinIdentity {
 /** The running code: its embedded version, startup bundle digest and metadata. */
 export function loadedIdentity(version: string, cliPath: string, repo: string): PinIdentity {
   return {
-    cliSha256: sha256(cliPath),
+    cliSha256: fileSha256(cliPath),
     integrity: lockIntegrity(repo),
     sourceCommit: sourceCommit(dirname(dirname(cliPath))),
     version,
   };
 }
 
-export function recordPin(context: BusContext, loaded: PinIdentity, cliPath: string): void {
+/** Write runner.json: the loaded identity, the bundled coordination-kit and this process. */
+export function recordPin(
+  file: string,
+  run: { readonly cliPath: string; readonly pid: number; readonly startedAt: number },
+  loaded: PinIdentity,
+): void {
   writeJsonDurable(
-    context.paths.runnerJson,
+    file,
     {
-      cliPath,
+      cliPath: run.cliPath,
       cliSha256: loaded.cliSha256,
       coordinationKitVersion: COORDINATION_KIT_BUNDLED,
       integrity: loaded.integrity,
-      pid: process.pid,
+      pid: run.pid,
       schema: 1,
-      startedAt: new Date(context.clock.now() * 1000).toISOString(),
+      startedAt: new Date(run.startedAt * 1000).toISOString(),
       version: loaded.version,
     },
     { mode: 0o644 },
@@ -95,35 +92,34 @@ function describe(identity: PinIdentity): string {
   })`;
 }
 
-function samePin(a: PinIdentity, b: PinIdentity): boolean {
-  return a.version === b.version && a.cliSha256 === b.cliSha256 && a.integrity === b.integrity;
+export interface PinMismatch {
+  /** The sha256 of the loaded and installed descriptions: the pin-mismatch event key. */
+  readonly key: string;
+  readonly logLine: string;
+  readonly detail: string;
 }
 
-/** A guard bound to the loaded identity; check() returns false on a mismatch. */
-export function pinGuard(context: BusContext, loaded: PinIdentity): { check(): boolean } {
-  let reported: string | undefined;
+/**
+ * The mismatch between the loaded and the installed package, or undefined when the version, the
+ * bundle digest and the lockfile integrity all agree.
+ */
+export function pinMismatch(loaded: PinIdentity, installed: PinIdentity): PinMismatch | undefined {
+  if (
+    loaded.version === installed.version &&
+    loaded.cliSha256 === installed.cliSha256 &&
+    loaded.integrity === installed.integrity
+  ) {
+    return undefined;
+  }
+  const pair = `loaded ${describe(loaded)}, installed ${describe(installed)}`;
   return {
-    check(): boolean {
-      const installed = installedIdentity(context.game.repo);
-      if (samePin(loaded, installed)) {
-        return true;
-      }
-      const key = `${describe(loaded)} -> ${describe(installed)}`;
-      context.log(
-        `bus: pin mismatch: loaded ${describe(loaded)}, installed ${describe(installed)}; finishing on the loaded code`,
-      );
-      if (reported !== key) {
-        reported = key;
-        context.events.emit(
-          "pin-mismatch",
-          createHash("sha256").update(key).digest("hex"),
-          [
-            `Runner pin mismatch: loaded ${describe(loaded)}, installed ${describe(installed)};`,
-            "the runner finishes on the loaded code until a controlled idle replacement.",
-          ].join(" "),
-        );
-      }
-      return false;
-    },
+    detail: [
+      `Runner pin mismatch: ${pair};`,
+      "the runner finishes on the loaded code until a controlled idle replacement.",
+    ].join(" "),
+    key: createHash("sha256")
+      .update(`${describe(loaded)} -> ${describe(installed)}`)
+      .digest("hex"),
+    logLine: `bus: pin mismatch: ${pair}; finishing on the loaded code`,
   };
 }

@@ -7,7 +7,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { type BusPaths, ensureDir, legacyOutboxIssue } from "../state/paths.ts";
+import { ensureDir } from "../lib/files.ts";
+import { type BusPaths, legacyOutboxIssue } from "../state/paths.ts";
 import { statusReport } from "../status/status.ts";
 
 /** Default `runner stop --timeout`, in seconds. */

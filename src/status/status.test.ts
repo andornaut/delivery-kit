@@ -11,9 +11,10 @@ import {
   setDesiredDelivery,
   setObservedDelivery,
 } from "../state/control.ts";
+import { recordIdentity } from "../state/identity.ts";
 import { busPaths } from "../state/paths.ts";
 import { makeGame } from "../testing/game.ts";
-import { recordIdentity, statusReport } from "./status.ts";
+import { statusReport } from "./status.ts";
 
 function paths() {
   return busPaths(makeGame().game.busDir);

@@ -11,7 +11,8 @@ import {
   writeDurable,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { ciStatusFile, ensureDir, readTrimmed, writeLines } from "../state/paths.ts";
+import { ensureDir, readTrimmed, writeLines } from "../lib/files.ts";
+import { ciStatusFile } from "../state/paths.ts";
 import type { BusContext } from "./context.ts";
 
 export type CiResult = "busy" | "failure" | "success" | "timeout" | "unauthenticated";

@@ -21,6 +21,7 @@ import { join } from "node:path";
 
 import { fsyncDirectory } from "@andornaut/coordination-kit/build/shared";
 
+import { readText, readTrimmed, writeLines } from "../lib/files.ts";
 import {
   cleanDetail,
   completesDeploy,
@@ -43,7 +44,7 @@ import {
   WORK_FILE,
   workStatus,
 } from "./events.ts";
-import { type BusPaths, readText, readTrimmed, writeLines } from "./paths.ts";
+import { type BusPaths } from "./paths.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/u;
 const GIT_TIMEOUT_MS = 10_000;

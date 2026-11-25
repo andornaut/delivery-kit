@@ -6,25 +6,28 @@ import { holdLockAsync } from "@andornaut/coordination-kit/build/shared";
 
 import { runGate, treeFingerprint } from "../gate/gate.ts";
 import { assertNotInterrupted, git, Interrupted } from "../lib/exec.ts";
+import { ensureDir, nonEmpty, readTrimmed, writeLines } from "../lib/files.ts";
 import { latestScheduledSlot, stamp } from "../lib/time.ts";
 import type { BlockedStage } from "../state/events.ts";
-import { ensureDir, gateFailedFile, nonEmpty, readTrimmed, writeLines } from "../state/paths.ts";
+import { gateFailedFile } from "../state/paths.ts";
 import { resumeStoppedCi } from "./ci.ts";
 import { type BusContext, loadOk } from "./context.ts";
 import {
-  beginDeliveryWork,
   deployNeeded,
   deployPendingExists,
-  endDeliveryWork,
   readPending,
   removeWorktree,
   retryDeploy,
   skipDeploy,
   stageDeploy,
-  updateDeliveryWork,
-  withDeliveryRunner,
 } from "./deploy.ts";
 import { type RequestStore, validateRequest } from "./requests.ts";
+import {
+  beginDeliveryWork,
+  endDeliveryWork,
+  updateDeliveryWork,
+  withDeliveryRunner,
+} from "./session.ts";
 import { changedPaths, DOCS_PREFIX, docsOnly, mainHead, remoteMain, skipReason } from "./trunk.ts";
 
 export function requestStore(context: BusContext): RequestStore {
@@ -439,7 +442,7 @@ async function gateAndPush(
   const logs = mkdtempSync(join(gateDir, "attempt."));
   writeLines(join(logs, "commit.sha"), head);
   context.log(`${attempt.when} bus departs with main ${head}; gate logs: ${logs}`);
-  const before = await treeFingerprint(context, work);
+  const before = await treeFingerprint(context.exec, work);
   const outcome = await runGate(
     context,
     {
@@ -456,7 +459,7 @@ async function gateAndPush(
       work,
     },
     async () =>
-      (await treeFingerprint(context, work)) === before
+      (await treeFingerprint(context.exec, work)) === before
         ? undefined
         : "gate discarded: Git status or reported-file fingerprints changed during checks",
   );

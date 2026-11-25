@@ -23,8 +23,9 @@ import {
   validateProjectConfig,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { type Clock } from "../lib/clock.ts";
 import { type Exec, type ExecResult, type ExecSpec, spawnExec } from "../lib/exec.ts";
-import { type BusContext, busContext, type Clock, type Events } from "../runner/context.ts";
+import { type BusContext, busContext, type Events } from "../runner/context.ts";
 import type { Coordinator } from "../seam/coordinator.ts";
 import { setDesiredDelivery } from "../state/control.ts";
 import type { RunnerEvent, RunnerStarted } from "../state/events.ts";

@@ -4,7 +4,8 @@
 import { existsSync } from "node:fs";
 
 import { assertNotInterrupted, type Exec, git } from "../lib/exec.ts";
-import { type BusPaths, gateFailedFile, readTrimmed } from "../state/paths.ts";
+import { readTrimmed } from "../lib/files.ts";
+import { type BusPaths, gateFailedFile } from "../state/paths.ts";
 
 /** The exact commit local main points at. */
 export function mainHead(exec: Exec, repo: string, main: string): Promise<string> {

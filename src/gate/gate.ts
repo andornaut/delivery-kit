@@ -14,10 +14,9 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
-import { type GateStep } from "@andornaut/coordination-kit/build/shared";
+import { type GateStep, type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 
-import { assertNotInterrupted, type ExecResult, Interrupted } from "../lib/exec.ts";
-import type { BusContext } from "../runner/context.ts";
+import { assertNotInterrupted, type Exec, type ExecResult, Interrupted } from "../lib/exec.ts";
 import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
 import {
   approvedGateConfigBlob,
@@ -30,6 +29,14 @@ import {
   type GateIdentity,
   releaseGateIdentity,
 } from "./identity.ts";
+
+/** What a gate needs from the runner: its child processes, log, game and gate settings. */
+export interface GateContext {
+  readonly exec: Exec;
+  readonly log: (line: string) => void;
+  readonly game: { readonly id: string };
+  readonly config: Pick<ProjectConfig, "gate" | "resources">;
+}
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -65,9 +72,9 @@ export function gateScript(steps: readonly GateStep[]): string {
  * Digest of Git status plus the content of every file it reports, tracked and untracked, never
  * ignored stores. Compared before and after the gate.
  */
-export async function treeFingerprint(context: BusContext, work: string): Promise<string> {
+export async function treeFingerprint(exec: Exec, work: string): Promise<string> {
   // Untrimmed: a porcelain row may begin with a space.
-  const status = await context.exec({
+  const status = await exec({
     args: ["-C", work, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
     command: "git",
   });
@@ -114,7 +121,7 @@ function gateContainerName(game: string, departure: string): string {
 }
 
 function createArgs(
-  context: BusContext,
+  context: GateContext,
   name: string,
   input: GateInput,
   identity: GateIdentity,
@@ -142,7 +149,7 @@ function createArgs(
 }
 
 async function docker(
-  context: BusContext,
+  context: GateContext,
   args: readonly string[],
   logFile?: string,
   timeoutMs?: number,
@@ -161,7 +168,7 @@ async function docker(
  * Remove every gate container left for this game, for example by a stopped runner. Called
  * under departure.lock, so no gate of this game is running.
  */
-async function removeLeftoverGates(context: BusContext): Promise<string[]> {
+async function removeLeftoverGates(context: GateContext): Promise<string[]> {
   const listed = await docker(context, [
     "ps",
     "--all",
@@ -272,7 +279,7 @@ const COPY_SCRIPT = [
 
 /** Copy the checkout in; the reason it could not, or undefined. */
 async function copyIn(
-  context: BusContext,
+  context: GateContext,
   name: string,
   identity: GateIdentity,
 ): Promise<string | undefined> {
@@ -310,7 +317,7 @@ async function copyIn(
 
 /** Verify exact metadata and actual source without rewriting either. */
 async function verifyIdentity(
-  context: BusContext,
+  context: GateContext,
   name: string,
   identity: GateIdentity,
   script = GATE_VERIFY_IDENTITY_SCRIPT,
@@ -361,7 +368,7 @@ async function verifyIdentity(
 const GATE_OUTPUTS = ["dist", "node_modules"] as const;
 
 async function copyOut(
-  context: BusContext,
+  context: GateContext,
   name: string,
   input: GateInput,
   built: boolean,
@@ -391,7 +398,7 @@ async function copyOut(
 }
 
 async function gate(
-  context: BusContext,
+  context: GateContext,
   name: string,
   input: GateInput,
   identity: GateIdentity,
@@ -468,7 +475,7 @@ async function gate(
  * `verify` runs after a passing gate and returns a reason to discard it.
  */
 export async function runGate(
-  context: BusContext,
+  context: GateContext,
   input: GateInput,
   verify: () => Promise<string | undefined> = () => Promise.resolve(undefined),
 ): Promise<GateOutcome> {
@@ -478,7 +485,7 @@ export async function runGate(
   let identity: GateIdentity | undefined;
   try {
     // Complete source-only admission precedes any source-bound image or entrypoint.
-    identity = await captureGateIdentity(context, input);
+    identity = await captureGateIdentity(context.exec, input);
     input.onCaptured?.(identity.manifest.commit);
     outcome = await gate(context, name, input, identity);
     if (outcome.ok) {

@@ -9,17 +9,12 @@ import {
   type ProjectConfig,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { type Clock, systemClock } from "../lib/clock.ts";
 import { type Exec, spawnExec } from "../lib/exec.ts";
 import { type Coordinator, CoordinatorCli } from "../seam/coordinator.ts";
 import { EventLog } from "../state/eventlog.ts";
 import { type EventType, type RunnerStarted, startedDetail } from "../state/events.ts";
 import { type BusPaths, busPaths } from "../state/paths.ts";
-
-export interface Clock {
-  /** Epoch seconds. */
-  now(): number;
-  sleep(seconds: number, signal?: AbortSignal): Promise<void>;
-}
 
 export interface Events {
   /** Prepare the log at runner start: torn-tail repair, dedupe rebuild, legacy outbox import. */
@@ -56,26 +51,6 @@ export interface BusContext {
   /** Start the in-runner CI watch for a pushed SHA. */
   readonly startCi: (sha: string) => void;
 }
-
-const systemClock: Clock = {
-  now: () => Math.floor(Date.now() / 1000),
-  sleep: (seconds, signal) =>
-    new Promise((resolve) => {
-      if (signal?.aborted === true) {
-        resolve();
-        return;
-      }
-      const timer = setTimeout(resolve, Math.max(0, seconds) * 1000);
-      signal?.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
-    }),
-};
 
 /**
  * Events appended to bus/events.jsonl and ingested by the coordinator CLI. A failed append is

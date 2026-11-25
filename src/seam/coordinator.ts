@@ -3,13 +3,22 @@
 // or unreadable result, a nonzero exit, a timeout or an abort claims no delivery. The CLI owns the
 // per-slot receipt and dedupe; the runner keeps no slot receipt and never reads brief content.
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeJsonDurable } from "@andornaut/coordination-kit/build/shared";
-
 import { COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
-import { zonedParts } from "../lib/time.ts";
+import { type CliIdentity, writeSeamRecord } from "../state/seam.ts";
+import {
+  CLI_UNAVAILABLE,
+  CLI_VERSION,
+  type Expected,
+  oneLine,
+  parseResult,
+  parseVersion,
+  type SeamOutcome,
+  type SeamResult,
+  slotIso,
+} from "./result.ts";
 
 /** The CLI path under the coordinator root; `npm ci` there replaces it in place. */
 export const COORDINATOR_CLI = join(
@@ -21,93 +30,8 @@ export const COORDINATOR_CLI = join(
 );
 /** Each spawn's deadline, under the 60 s observer pass. */
 export const SEAM_TIMEOUT_MS = 45_000;
-/** The runner log prefix of a deferred review, on its own line and on stderr. */
-export const DEFERRED_PREFIX = "bus: review deferred: ";
-export const COMPACTION_RESERVED = "compaction-reserved";
-/** Reason tokens the seam defines; any other token is treated as a deferral. */
-export const KNOWN_REASONS: ReadonlySet<string> = new Set([
-  "route-unavailable",
-  "recipient-unavailable",
-  "recipient-busy",
-  "question-pending",
-  "held",
-  "receipt-ambiguous",
-  "already-delivered",
-  "nothing-due",
-  "no-events",
-  "cli-error",
-  COMPACTION_RESERVED,
-]);
-/** Reasons the runner itself reports without a CLI result. */
-export const CLI_UNAVAILABLE = "cli-unavailable";
-export const CLI_VERSION = "cli-version";
-
 const MAX_STDOUT = 1024 * 1024;
 const STDERR_TAIL = 2000;
-const SHA256 = /^[a-f0-9]{64}$/u;
-const TOKEN = /^[a-z][a-z0-9-]*$/u;
-
-export interface CliIdentity {
-  readonly version: string;
-  readonly distSha256: string;
-}
-
-export type SeamStatus = "delivered" | "deferred" | "skipped";
-
-/** A typed result, or a runner-side deferral (`cli` absent) for a missing or out-of-range CLI. */
-export interface SeamResult {
-  readonly claimed: true;
-  readonly status: SeamStatus;
-  readonly reason: string | null;
-  readonly detail: string;
-  readonly cli?: CliIdentity;
-  /** An ingest result's counts, each present only when the CLI reported it. */
-  readonly counts?: Readonly<Partial<Record<IngestCount, number>>>;
-}
-
-/**
- * The counts an events-ingest result may carry: lines ingested, quarantined, COMPLETE reports
- * formed, lines committed (`delivered`) and `held` (1 while a torn tail is pending).
- */
-export const INGEST_COUNTS = ["completed", "delivered", "held", "ingested", "quarantined"] as const;
-export type IngestCount = (typeof INGEST_COUNTS)[number];
-
-/** No delivery claimed: the spawn, its exit or its result was unusable. */
-export interface SeamUnclaimed {
-  readonly claimed: false;
-  readonly why: string;
-}
-
-export type SeamOutcome = SeamResult | SeamUnclaimed;
-
-/**
- * The slot start the seam passes as `--slot` and expects echoed: ISO 8601 minute start in
- * `timezone`, with its offset, such as `2026-11-18T16:30:00-05:00`.
- */
-export function slotIso(timezone: string, slot: number): string {
-  const p = zonedParts(timezone, slot);
-  const minute = String(p.minute).padStart(2, "0");
-  const second = String(p.second).padStart(2, "0");
-  const local = Date.UTC(
-    Number(p.year),
-    Number(p.month) - 1,
-    Number(p.day),
-    Number(p.hour),
-    p.minute,
-    p.second,
-  );
-  const offset = Math.round((local - slot * 1000) / 60_000);
-  const sign = offset < 0 ? "-" : "+";
-  const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
-  const minutes = String(Math.abs(offset) % 60).padStart(2, "0");
-  return `${p.year}-${p.month}-${p.day}T${p.hour}:${minute}:${second}${sign}${hours}:${minutes}`;
-}
-
-/** One log line: control characters, including newlines, become spaces. */
-function oneLine(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim();
-}
 
 type Spawned =
   | { readonly kind: "missing" }
@@ -205,153 +129,6 @@ function runCli(
   });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** The single JSON object stdout holds, or why it is not one. */
-function resultLine(stdout: string): Record<string, unknown> | string {
-  const text = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
-  if (text.trim() === "") {
-    return "no result on stdout";
-  }
-  if (text.includes("\n")) {
-    return "stdout holds more than one line";
-  }
-  try {
-    const value = JSON.parse(text) as unknown;
-    return isRecord(value) ? value : "the result is not a JSON object";
-  } catch {
-    return "the result is not JSON";
-  }
-}
-
-function identity(value: unknown): CliIdentity | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const { distSha256, version } = value;
-  return typeof version === "string" &&
-    version !== "" &&
-    typeof distSha256 === "string" &&
-    SHA256.test(distSha256)
-    ? { distSha256, version }
-    : undefined;
-}
-
-/** The expected fields of a review-deliver or events-ingest result. */
-type Expected =
-  | { readonly kind: "review-deliver"; readonly game: string; readonly slot: string }
-  | { readonly kind: "events-ingest"; readonly game: string };
-
-/** Validate one result; an unknown reason token turns any status into a deferral. */
-export function parseResult(expected: Expected, stdout: string): SeamOutcome {
-  const value = resultLine(stdout);
-  if (typeof value === "string") {
-    return { claimed: false, why: value };
-  }
-  const mismatch = (field: string): SeamUnclaimed => ({
-    claimed: false,
-    why: `malformed result: ${field}`,
-  });
-  if (value.schema !== 1) {
-    return mismatch("schema is not 1");
-  }
-  if (value.kind !== expected.kind) {
-    return mismatch(`kind is not ${expected.kind}`);
-  }
-  if (value.game !== expected.game) {
-    return mismatch("game differs");
-  }
-  if (expected.kind === "review-deliver" && value.slot !== expected.slot) {
-    return mismatch("slot differs");
-  }
-  const { detail, reason, status } = value;
-  if (status !== "delivered" && status !== "deferred" && status !== "skipped") {
-    return mismatch("status");
-  }
-  if (reason !== null && (typeof reason !== "string" || !TOKEN.test(reason))) {
-    return mismatch("reason");
-  }
-  if (status !== "delivered" && reason === null) {
-    return mismatch("reason is null for a result that is not delivered");
-  }
-  if (typeof detail !== "string") {
-    return mismatch("detail");
-  }
-  const cli = identity(value.cli);
-  if (cli === undefined) {
-    return mismatch("cli");
-  }
-  const counts: Partial<Record<IngestCount, number>> = {};
-  if (expected.kind === "events-ingest") {
-    for (const name of INGEST_COUNTS) {
-      const field = value[name];
-      if (field === undefined) {
-        continue;
-      }
-      if (!Number.isSafeInteger(field) || (field as number) < 0) {
-        return mismatch(name);
-      }
-      counts[name] = field as number;
-    }
-  }
-  const known = reason === null || KNOWN_REASONS.has(reason);
-  return {
-    claimed: true,
-    cli,
-    detail: oneLine(detail),
-    reason,
-    status: known ? status : "deferred",
-    ...(Object.keys(counts).length === 0 ? {} : { counts }),
-  };
-}
-
-/** The `--version --json` identity, or why it is unusable. */
-export function parseVersion(stdout: string): CliIdentity | string {
-  const value = resultLine(stdout);
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value.schema !== 1) {
-    return "malformed result: schema is not 1";
-  }
-  return identity(value) ?? "malformed result: version or distSha256";
-}
-
-/** bus/seam.json: the last CLI identity a seam result carried and when this runner saw it. */
-export interface SeamRecord {
-  readonly schema: 1;
-  readonly version: string;
-  readonly distSha256: string;
-  readonly seenAt: string;
-}
-
-/** The read-only `coordinator_cli` status field. */
-export interface CoordinatorCliReport {
-  readonly version: string | null;
-  readonly distSha256: string | null;
-  readonly seenAt: string | null;
-  readonly supported: boolean | null;
-}
-
-export function coordinatorCliReport(seamFile: string): CoordinatorCliReport {
-  try {
-    const value = JSON.parse(readFileSync(seamFile, "utf8")) as unknown;
-    const cli = isRecord(value) && value.schema === 1 ? identity(value) : undefined;
-    if (cli !== undefined && isRecord(value) && typeof value.seenAt === "string") {
-      return {
-        ...cli,
-        seenAt: value.seenAt,
-        supported: satisfies(COORDINATOR_CLI_RANGE, cli.version),
-      };
-    }
-  } catch {
-    // Absent or unreadable: nothing seen.
-  }
-  return { distSha256: null, seenAt: null, supported: null, version: null };
-}
-
 /** What the runner needs from the seam; the observer and the event log call it. */
 export interface Coordinator {
   /** Deliver one due review slot. */
@@ -437,14 +214,8 @@ export class CoordinatorCli implements Coordinator {
     const now = this.#options.now();
     const key = `${cli.version}:${cli.distSha256}`;
     if (this.#written?.key !== key || now - this.#written.at >= 60) {
-      const record: SeamRecord = {
-        distSha256: cli.distSha256,
-        schema: 1,
-        seenAt: new Date(now * 1000).toISOString().replace(/\.\d{3}Z$/u, "Z"),
-        version: cli.version,
-      };
       try {
-        writeJsonDurable(this.#options.seamFile, record, { mode: 0o644 });
+        writeSeamRecord(this.#options.seamFile, cli, now);
         this.#written = { at: now, key };
       } catch (error) {
         this.#options.log(`bus: ${this.#options.seamFile} not written (${String(error)})`);

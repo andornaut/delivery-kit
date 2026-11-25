@@ -12,6 +12,15 @@ commands natively. Releases are cut from `main` only after every
 required CI workflow passes on the exact commit, and a published tag is never moved. Public
 interfaces follow semver.
 
+The source is layered, and each module imports only its own directory and lower layers:
+`src/lib/` (child processes, files, clock and zoned time), `src/compatibility.ts` and
+`src/source-identity.ts`; then `src/state/` (the bus directory's files); then `src/status/` (the
+read-only report), `src/seam/` (the coordinator CLI) and `src/gate/` (the gate container); then
+`src/runner/` (the resident process, departures, CI and deployment) and `src/supervision/` (runner
+start, stop and the systemd unit); then `src/commands/`, `src/cli.ts` and `src/bin.ts`.
+`src/testing/` holds test fixtures. `scripts/imports.test.ts` refuses an import cycle, type-only
+imports included, and an import that leaves its layer upward.
+
 Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 [Developing](../../README.md#developing), [Compatibility and releases](../../README.md#compatibility-and-releases).
 

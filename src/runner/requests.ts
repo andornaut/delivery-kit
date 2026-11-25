@@ -12,7 +12,8 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import type { Exec } from "../lib/exec.ts";
-import { type BusPaths, ensureDir } from "../state/paths.ts";
+import { ensureDir } from "../lib/files.ts";
+import { type BusPaths } from "../state/paths.ts";
 import { mainHead, skipReason } from "./trunk.ts";
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;

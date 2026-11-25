@@ -4,7 +4,8 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { type Coordinator, COORDINATOR_CLI, type SeamOutcome } from "../seam/coordinator.ts";
+import { type Coordinator, COORDINATOR_CLI } from "../seam/coordinator.ts";
+import { type SeamOutcome } from "../seam/result.ts";
 
 /** The fake CLI the unit and contract suites share. */
 export const FAKE_COORDINATOR_CLI = fileURLToPath(

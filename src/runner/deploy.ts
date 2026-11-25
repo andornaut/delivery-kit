@@ -1,203 +1,29 @@
 // Deployment of already-gated assets after the exact pushed SHA passes CI. The gated worktree
 // is kept with its pending pointer until the deployment succeeds; a failed deployment is
 // retried at a later departure, and a newer push supersedes it.
-import { randomUUID } from "node:crypto";
 import { existsSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { fsyncDirectory, holdLock, SHA_PATTERN } from "@andornaut/coordination-kit/build/shared";
+import { fsyncDirectory, SHA_PATTERN } from "@andornaut/coordination-kit/build/shared";
 
 import { gitOk, Interrupted, WRANGLER_ENTRY } from "../lib/exec.ts";
-import {
-  beginDeliveryActivity,
-  claimDeliveryRunner,
-  endDeliveryActivity,
-  readDeliveryControl,
-  resumeDeliveryActivity,
-  setObservedDelivery,
-  updateDeliveryActivity,
-} from "../state/control.ts";
-import { ciStatusFile, ensureDir, readText, readTrimmed, writeLines } from "../state/paths.ts";
+import { ensureDir, readText, readTrimmed, writeLines } from "../lib/files.ts";
+import { ciStatusFile } from "../state/paths.ts";
 import type { BusContext } from "./context.ts";
+import {
+  beginDeliveryWork,
+  type DeploymentAttempt,
+  endDeliveryWork,
+  type PendingLifecycle,
+  updateDeliveryWork,
+  withPendingLifecycle,
+} from "./session.ts";
 import { remoteMain } from "./trunk.ts";
-
-interface DeliverySession {
-  readonly pending: PendingLifecycle;
-  readonly token: string;
-  claimed: boolean;
-  release?: () => void;
-  users: number;
-}
-
-const sessions = new WeakMap<BusContext, DeliverySession>();
-
-/** Bind only after acquiring the runner singleton locks. */
-export function bindDeliveryRunner(context: BusContext, token: string = randomUUID()): void {
-  sessions.set(context, { claimed: false, pending: { tail: Promise.resolve() }, token, users: 0 });
-  deliveryRunnerReady(context);
-}
-
-export function unbindDeliveryRunner(context: BusContext): void {
-  sessions.delete(context);
-}
-
-/** Internal direct calls use the same singleton exclusion as the resident runner. */
-export async function withDeliveryRunner<T>(
-  context: BusContext,
-  run: () => Promise<T>,
-): Promise<T> {
-  const session = sessions.get(context) ?? holdDeliveryRunner(context);
-  session.users += 1;
-  try {
-    return await run();
-  } finally {
-    session.users -= 1;
-    if (session.users === 0) {
-      session.release?.();
-    }
-  }
-}
-
-function holdDeliveryRunner(context: BusContext): DeliverySession {
-  const runner = holdLock(context.paths.runnerLock, { nonBlocking: true });
-  let loop;
-  try {
-    const heldLoop = holdLock(context.paths.loopLock, { nonBlocking: true });
-    loop = heldLoop;
-    bindDeliveryRunner(context);
-    const session = sessions.get(context)!;
-    // Keep a direct caller's singleton through overlapping or nested uses of this session.
-    session.release = () => {
-      unbindDeliveryRunner(context);
-      heldLoop.release();
-      runner.release();
-    };
-    return session;
-  } catch (error) {
-    unbindDeliveryRunner(context);
-    loop?.release();
-    runner.release();
-    throw error;
-  }
-}
-
-function controlStore(context: BusContext) {
-  return { dir: context.paths.dir, now: () => new Date(context.clock.now() * 1000).toISOString() };
-}
-
-/** Missing control blocks admission while the existing runner continues observing. */
-export function deliveryRunnerReady(context: BusContext): boolean {
-  const session = sessions.get(context);
-  if (session === undefined) {
-    return false;
-  }
-  if (!session.claimed) {
-    try {
-      claimDeliveryRunner(controlStore(context), session.token);
-      session.claimed = true;
-    } catch (error) {
-      context.log(`bus: delivery control unavailable; admission blocked (${String(error)})`);
-    }
-  }
-  return session.claimed;
-}
-
-export function beginDeliveryWork(
-  context: BusContext,
-  state: "checking" | "deploying",
-  sha: string | null,
-  resume = false,
-): string | undefined {
-  if (!deliveryRunnerReady(context)) {
-    return undefined;
-  }
-  const session = sessions.get(context)!;
-  const id = randomUUID();
-  try {
-    const begin = resume ? resumeDeliveryActivity : beginDeliveryActivity;
-    return begin(controlStore(context), session.token, { id, sha, state }) ? id : undefined;
-  } catch (error) {
-    context.log(`bus: delivery control unavailable; admission blocked (${String(error)})`);
-    return undefined;
-  }
-}
-
-export function updateDeliveryWork(
-  context: BusContext,
-  id: string,
-  state: "checking" | "deploying" | "failed",
-  sha: string | null,
-): void {
-  const session = sessions.get(context);
-  if (session !== undefined) {
-    try {
-      updateDeliveryActivity(controlStore(context), session.token, { id, sha, state });
-    } catch (error) {
-      context.log(`bus: delivery observation unavailable (${String(error)})`);
-    }
-  }
-}
-
-export function endDeliveryWork(context: BusContext, id: string): void {
-  const session = sessions.get(context);
-  if (session !== undefined) {
-    try {
-      endDeliveryActivity(controlStore(context), session.token, id);
-    } catch (error) {
-      context.log(`bus: delivery observation unavailable (${String(error)})`);
-    }
-  }
-}
-
-export function settleDeliveryRunner(
-  context: BusContext,
-  state: "idle" | "stopped" | "failed",
-): void {
-  const session = sessions.get(context);
-  if (session?.claimed === true) {
-    try {
-      const sha =
-        state === "failed"
-          ? (readDeliveryControl(controlStore(context)).observed?.sha ?? null)
-          : null;
-      setObservedDelivery(controlStore(context), session.token, { sha, state });
-    } catch (error) {
-      context.log(`bus: delivery observation unavailable (${String(error)})`);
-    }
-  }
-}
 
 export interface PendingDeploy {
   readonly sha: string;
   /** The detached gate worktree holding the gated dist/ and node_modules/. */
   readonly work: string;
-}
-
-interface DeploymentAttempt {
-  readonly pending: PendingDeploy;
-  readonly result: Promise<boolean>;
-}
-
-interface PendingLifecycle {
-  tail: Promise<void>;
-  lastAttempt?: DeploymentAttempt;
-}
-
-/** The runner singleton excludes other processes. Queue only pending deployment operations. */
-function withPendingLifecycle<T>(
-  context: BusContext,
-  run: (lifecycle: PendingLifecycle, prior: DeploymentAttempt | undefined) => Promise<T>,
-): Promise<T> {
-  return withDeliveryRunner(context, () => {
-    const lifecycle = sessions.get(context)!.pending;
-    const prior = lifecycle.lastAttempt;
-    const result = lifecycle.tail.then(() => run(lifecycle, prior));
-    lifecycle.tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  });
 }
 
 export function readPending(context: BusContext): PendingDeploy | undefined {

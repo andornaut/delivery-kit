@@ -21,8 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { assertNotInterrupted, git } from "../lib/exec.ts";
-import type { BusContext } from "../runner/context.ts";
+import { assertNotInterrupted, type Exec, git } from "../lib/exec.ts";
 import {
   restoreSourceIdentity,
   snapshotSourceIdentity,
@@ -86,14 +85,14 @@ function sourceOnly(
 
 /** GateInput already selects the entire exact tracked tree, not a new public content policy. */
 export async function captureGateIdentity(
-  context: Pick<BusContext, "exec">,
+  exec: Exec,
   input: { readonly work: string; readonly sha: string },
 ): Promise<GateIdentity> {
   const directory = mkdtempSync(join(tmpdir(), "delivery-gate-identity-"));
   try {
     const inventory = assertNotInterrupted(
       "git ls-tree",
-      await context.exec({
+      await exec({
         args: ["-C", input.work, "ls-tree", "-r", "-z", "--name-only", input.sha],
         command: "git",
       }),
@@ -147,7 +146,7 @@ export async function captureGateIdentity(
       }
     }
     sourceOnly(input.work, manifest.entries);
-    if ((await git(context.exec, input.work, ["rev-parse", "HEAD"])) !== input.sha) {
+    if ((await git(exec, input.work, ["rev-parse", "HEAD"])) !== input.sha) {
       throw new Error("gate source HEAD changed during staging");
     }
     const captured = { artifact, copied, directory, manifest };

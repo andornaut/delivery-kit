@@ -7,9 +7,10 @@ import { describe, expect, it } from "vitest";
 
 import { logIdentity } from "../state/eventlog.ts";
 import { EVENTS_FILE, formatLine, makeEvent, startedDetail } from "../state/events.ts";
+import { recordIdentity } from "../state/identity.ts";
 import { type BusPaths, busPaths } from "../state/paths.ts";
 import { latestStart, observerAdoption } from "./adoption.ts";
-import { recordIdentity, statusReport } from "./status.ts";
+import { statusReport } from "./status.ts";
 
 const GAME = "archies-dog-walks";
 const TOKEN = "1234:1794994070515000000:d23faae9-397f-4aaa-abbe-b78d21512112";

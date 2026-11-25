@@ -1,6 +1,7 @@
 // The relative import graph of src/ and scripts/ has no cycles, type-only imports included: a
 // module in a cycle can run before what it imports has loaded, and a type cycle still ties two
-// modules' interfaces together.
+// modules' interfaces together. Each source module imports only its own directory and the layers
+// below it, so dependencies point from the CLI down to the domain-free helpers.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,47 @@ import { describe, expect, it } from "vitest";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 type Graph = ReadonlyMap<string, readonly string[]>;
+
+/**
+ * The source layers, lowest first. A module may import its own group and any group in a lower
+ * layer, never one in its own layer or above. testing/ holds test fixtures, which no source module
+ * imports.
+ */
+const LAYERS: readonly (readonly string[])[] = [
+  ["src/lib", "src/compatibility.ts", "src/source-identity.ts"],
+  ["src/state"],
+  ["src/status", "src/seam", "src/gate"],
+  ["src/runner", "src/supervision"],
+  ["src/commands"],
+  ["src/cli.ts"],
+  ["src/bin.ts"],
+];
+
+/** A module's group: its directory under src/, or the file itself at the top of src/. */
+function group(path: string): string {
+  const [top, second = ""] = path.split("/");
+  return `${top}/${second}`;
+}
+
+function layer(path: string): number {
+  return LAYERS.findIndex((groups) => groups.includes(group(path)));
+}
+
+function isTest(path: string): boolean {
+  return /\.test\.ts$/u.test(path) || group(path) === "src/testing";
+}
+
+/** Each import of a source module that leaves its group for one at the same layer or above. */
+function upwardImports(graph: Graph): string[] {
+  return [...graph].flatMap(([from, targets]) => {
+    if (!from.startsWith("src/") || isTest(from)) {
+      return [];
+    }
+    return targets
+      .filter((to) => group(to) !== group(from) && !(layer(to) >= 0 && layer(to) < layer(from)))
+      .map((to) => `${from} -> ${to}`);
+  });
+}
 
 function sources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -138,5 +180,29 @@ describe("the import graph", () => {
 
   it("has no cycles in src/ or scripts/", () => {
     expect(cycles(graph)).toEqual([]);
+  });
+
+  it("places every source module in a layer", () => {
+    const unplaced = [...graph.keys()].filter(
+      (path) => path.startsWith("src/") && !isTest(path) && layer(path) < 0,
+    );
+    expect(unplaced).toEqual([]);
+  });
+
+  it("imports only the module's own group and lower layers", () => {
+    expect(upwardImports(graph)).toEqual([]);
+    expect(
+      upwardImports(
+        new Map([
+          ["src/state/a.ts", ["src/runner/b.ts", "src/lib/c.ts", "src/state/d.ts"]],
+          ["src/status/e.ts", ["src/seam/f.ts", "src/testing/g.ts"]],
+          ["src/runner/h.test.ts", ["src/commands/i.ts"]],
+        ]),
+      ),
+    ).toEqual([
+      "src/state/a.ts -> src/runner/b.ts",
+      "src/status/e.ts -> src/seam/f.ts",
+      "src/status/e.ts -> src/testing/g.ts",
+    ]);
   });
 });

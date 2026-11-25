@@ -5,10 +5,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { coordinatorCliReport } from "../seam/coordinator.ts";
 import { logIdentity, readCursor, rotatedLogs } from "../state/eventlog.ts";
 import { cursorRefersTo, type EventCursor, parseLine } from "../state/events.ts";
 import type { BusPaths } from "../state/paths.ts";
+import { coordinatorCliReport } from "../state/seam.ts";
 
 export type ObserverAdoption = "current" | "stale" | "unknown";
 export type ObserverAdoptionReason =
