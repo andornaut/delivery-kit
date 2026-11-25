@@ -100,7 +100,7 @@ export function latestRuns(
 }
 
 /** The ci/<sha>.json rows: every latest run, each marked whether it is a required check. */
-function encodeRows(rows: ReturnType<typeof latestRuns>, required: ReadonlySet<string>): string {
+function encodeRows(required: ReadonlySet<string>, rows: ReturnType<typeof latestRuns>): string {
   return `[${rows
     .map((row) =>
       [
@@ -121,8 +121,8 @@ interface RequiredState {
 }
 
 export function requiredState(
-  rows: ReturnType<typeof latestRuns>,
   required: ReadonlySet<string>,
+  rows: ReturnType<typeof latestRuns>,
 ): RequiredState {
   const byName = new Map(rows.map((row) => [row.name, row]));
   const missing: string[] = [];
@@ -227,19 +227,19 @@ async function poll(
     appendFileSync(logFile, `${isoSeconds(context.clock.now() * 1000)} ${line}\n`);
   const required = new Set(ci.requiredNames);
   let last: string | undefined;
-  let state = requiredState([], required);
+  let state = requiredState(required, []);
   while (context.clock.now() < deadline && options.signal?.aborted !== true) {
     try {
       // Sequential polling is the mechanism.
       // eslint-disable-next-line no-await-in-loop
       const rows = latestRuns(await (options.checks ?? githubChecks)(context, sha));
-      const encoded = encodeRows(rows, required);
+      const encoded = encodeRows(required, rows);
       if (encoded !== last) {
         say(encoded);
         writeDurable(join(context.paths.ciDir, `${sha}.json`), `${encoded}\n`, { mode: 0o644 });
         last = encoded;
       }
-      state = requiredState(rows, required);
+      state = requiredState(required, rows);
       const decision = requiredDecision(state);
       if (decision !== undefined) {
         return { result: decision, state };

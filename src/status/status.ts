@@ -82,9 +82,9 @@ type IdentityStatus = "absent" | "current" | "stale" | "unattested" | "unreadabl
  * it is free, and `absent` or `unreadable` for the file itself.
  */
 export function identityStatus(
-  read: Record<string, unknown> | "unreadable" | null,
   running: boolean,
   lockToken: string | undefined,
+  read: Record<string, unknown> | "unreadable" | null,
 ): IdentityStatus {
   if (read === "unreadable") {
     return "unreadable";
@@ -202,7 +202,7 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
   const lockToken = readTrimmed(paths.runnerLock);
-  const status = identityStatus(read, running, lockToken);
+  const status = identityStatus(running, lockToken, read);
   const blockers: string[] = [];
   if (read === "unreadable") {
     blockers.push("identity_unreadable");
@@ -273,7 +273,7 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
     loop_lock_held: loopHeld,
     observer_adoption: adoption.status,
     observer_adoption_reason: adoption.reason,
-    provenance: provenanceReport({ identity, identityStatus: status, loopHeld }, repo),
+    provenance: provenanceReport(repo, { identity, identityStatus: status, loopHeld }),
     reporter_blockers: reporters,
     runner_lock_held: running,
     status: running ? "running" : "not running",

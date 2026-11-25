@@ -1,4 +1,4 @@
-// Small file reads and durable writes shared by the state, status and runner modules.
+// Small file reads, checks and durable writes.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 

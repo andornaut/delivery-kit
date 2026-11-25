@@ -55,7 +55,7 @@ export function installedIdentity(repo: string): PinIdentity {
 }
 
 /** The running code: its embedded version, startup bundle digest and metadata. */
-export function loadedIdentity(version: string, cliPath: string, repo: string): PinIdentity {
+export function loadedIdentity(repo: string, version: string, cliPath: string): PinIdentity {
   return {
     cliSha256: fileSha256(cliPath),
     integrity: lockIntegrity(repo),

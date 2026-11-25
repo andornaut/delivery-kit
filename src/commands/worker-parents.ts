@@ -26,9 +26,9 @@ function conversation(registry: Json, role: string): unknown {
 }
 
 export function workerParentProblems(
+  rawRegistry: unknown,
   configFile: string,
   config: ProjectConfig,
-  rawRegistry: unknown,
 ): string[] {
   const registry = object(rawRegistry);
   if (registry === undefined) {

@@ -70,7 +70,7 @@ describe("watchCi", () => {
   it("decides from the latest run of each required name alone", () => {
     const required = new Set(["Lint", "Test"]);
     const decide = (rows: CheckRun[]) =>
-      requiredDecision(requiredState(latestRuns(rows), required));
+      requiredDecision(requiredState(required, latestRuns(rows)));
     const lint = run(1, "Lint", "completed", "success");
     expect(decide([lint])).toBeUndefined();
     expect(decide([lint, run(2, "Test", "in_progress", null)])).toBeUndefined();

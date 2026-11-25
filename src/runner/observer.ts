@@ -46,9 +46,9 @@ export function retriesLater(outcome: SeamOutcome): boolean {
 /** Review one slot, retaining it for a retry when the CLI reserved it. */
 async function observeReview(
   context: BusContext,
-  slot: number,
   reservedSlots: Set<number>,
-  signal?: AbortSignal,
+  signal: AbortSignal,
+  slot: number,
 ): Promise<void> {
   let outcome: SeamOutcome;
   try {
@@ -80,10 +80,10 @@ async function observe(
   const wake = currentMinuteSlot(layout.config.timezone, layout.config.wakeMinutes, after, now);
   const retry = reservedSlots.values().next().value;
   if (wake !== undefined) {
-    await observeReview(context, wake, reservedSlots, signal);
+    await observeReview(context, reservedSlots, signal, wake);
   }
   if (retry !== undefined && retry !== wake && !signal.aborted) {
-    await observeReview(context, retry, reservedSlots, signal);
+    await observeReview(context, reservedSlots, signal, retry);
   }
   if (config.reports.scheduledTicks) {
     const minutes = config.schedule.departures.map((departure) => Number.parseInt(departure, 10));

@@ -208,7 +208,7 @@ export class CoordinatorCli implements Coordinator {
     const key = `${cli.version}:${cli.distSha256}`;
     if (this.#written?.key !== key || now - this.#written.at >= 60) {
       try {
-        writeSeamRecord(this.#options.seamFile, cli, now);
+        writeSeamRecord(this.#options.seamFile, now, cli);
         this.#written = { at: now, key };
       } catch (error) {
         this.#options.log(`bus: ${this.#options.seamFile} not written (${String(error)})`);

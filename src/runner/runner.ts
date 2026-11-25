@@ -252,7 +252,7 @@ export async function runRunner(
     context.events.open();
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));
-    const loaded = loadedIdentity(VERSION, cliPath, context.game.repo);
+    const loaded = loadedIdentity(context.game.repo, VERSION, cliPath);
     let runnerToken: string | undefined;
     try {
       const identity = recordIdentity(context.paths, {

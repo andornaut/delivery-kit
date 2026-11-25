@@ -39,7 +39,7 @@ function fixture() {
   const bus = busPaths(game.busDir);
   mkdirSync(bus.dir, { recursive: true });
   const cli = install(game.repo);
-  const loaded = loadedIdentity("3.0.1", cli, game.repo);
+  const loaded = loadedIdentity(game.repo, "3.0.1", cli);
   const runner = holdLock(bus.runnerLock);
   const loop = holdLock(bus.loopLock);
   const identity = recordIdentity(bus, {

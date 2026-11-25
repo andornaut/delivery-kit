@@ -12,14 +12,10 @@ import { workerParentProblems } from "./worker-parents.ts";
 
 function problems(raw: unknown, parents: readonly string[]) {
   const config = projectConfig("Archie") as unknown as ProjectConfig;
-  return workerParentProblems(
-    "delivery-kit.json",
-    {
-      ...config,
-      reports: { ...config.reports, workerParents: parents },
-    },
-    raw,
-  );
+  return workerParentProblems(raw, "delivery-kit.json", {
+    ...config,
+    reports: { ...config.reports, workerParents: parents },
+  });
 }
 
 function registry() {

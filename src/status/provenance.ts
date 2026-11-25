@@ -41,7 +41,10 @@ function compare(resident: string | null, installed: string | null): Comparison 
   return resident === installed ? "match" : "different";
 }
 
-export function provenanceReport(attestation: Attestation, repo?: string): ProvenanceReport {
+export function provenanceReport(
+  repo: string | undefined,
+  attestation: Attestation,
+): ProvenanceReport {
   const { identity, identityStatus, loopHeld } = attestation;
   const startup = evidence(identity);
   const attested = identityStatus === "current" && loopHeld && startup.cli_sha256 !== null;

@@ -406,13 +406,13 @@ describe("identityStatus", () => {
   const identity = { pid: 1, token: "t-1" };
 
   it("attests the identity only while runner.lock is held with its token", () => {
-    expect(identityStatus("unreadable", true, "t-1")).toBe("unreadable");
-    expect(identityStatus(null, true, "t-1")).toBe("absent");
-    expect(identityStatus(identity, false, "t-1")).toBe("stale");
-    expect(identityStatus(identity, true, "t-1")).toBe("current");
-    expect(identityStatus(identity, true, "t-2")).toBe("unattested");
-    expect(identityStatus(identity, true, undefined)).toBe("unattested");
-    expect(identityStatus({ token: "" }, true, "")).toBe("unattested");
+    expect(identityStatus(true, "t-1", "unreadable")).toBe("unreadable");
+    expect(identityStatus(true, "t-1", null)).toBe("absent");
+    expect(identityStatus(false, "t-1", identity)).toBe("stale");
+    expect(identityStatus(true, "t-1", identity)).toBe("current");
+    expect(identityStatus(true, "t-2", identity)).toBe("unattested");
+    expect(identityStatus(true, undefined, identity)).toBe("unattested");
+    expect(identityStatus(true, "", { token: "" })).toBe("unattested");
   });
 });
 

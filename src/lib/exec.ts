@@ -121,13 +121,10 @@ export async function git(exec: Exec, cwd: string, args: readonly string[]): Pro
 }
 
 class GitError extends Error {
-  readonly result: ExecResult;
-
   constructor(args: readonly string[], result: ExecResult) {
     const detail = result.stderr.trim() || `exit ${String(result.status)}`;
     super(`git ${args.join(" ")} failed: ${detail}`);
     this.name = "GitError";
-    this.result = result;
   }
 }
 

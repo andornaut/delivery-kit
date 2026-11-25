@@ -45,7 +45,7 @@ function checkGame(
       `${entry.configFile}: /reports/project must be ${entry.name}, the name in config.json`,
     );
   }
-  problems.push(...workerParentProblems(entry.configFile, config, rawRegistry));
+  problems.push(...workerParentProblems(rawRegistry, entry.configFile, config));
   if (registry !== undefined) {
     for (const role of addressedRoles(config)) {
       try {

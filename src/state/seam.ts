@@ -62,7 +62,7 @@ export function coordinatorCliReport(seamFile: string): CoordinatorCliReport {
 }
 
 /** Write the identity and the time it was seen, to the second, in UTC. */
-export function writeSeamRecord(file: string, cli: CliIdentity, now: number): void {
+export function writeSeamRecord(file: string, now: number, cli: CliIdentity): void {
   const record: SeamRecord = {
     distSha256: cli.distSha256,
     schema: 1,
