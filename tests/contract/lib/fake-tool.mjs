@@ -156,7 +156,7 @@ function plantWrangler(nodeModules) {
 }
 
 /**
- * The 1.0 gate protocol (src/gate.ts): create, start, exec copy with EXPECTED_TREE, exec install,
+ * The 1.0 gate protocol (src/gate/gate.ts): create, start, exec copy with EXPECTED_TREE, exec install,
  * network disconnect, exec the loopback check, exec the gate script, cp logs, dist and
  * node_modules out, rm.
  * Container state lives in DK_FAKE_DIR/containers/<name>.json.
