@@ -77,7 +77,8 @@ describe("status report", () => {
         ["3.4.2", true],
         ["4.0.2", true],
         ["5.0.0", true],
-        ["6.0.0", false],
+        ["6.0.0", true],
+        ["7.0.0", false],
       ] as const) {
         writeFileSync(
           bus.seam,
