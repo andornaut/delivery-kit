@@ -9,9 +9,14 @@ import { makeGame, mergeFastForward, type TestGame } from "../testing/game.ts";
 import {
   captureRequest,
   claimRequest,
+  finishedRecord,
   finishRequest,
+  interruptedRecord,
   recoverRequests,
+  rejectedRecord,
+  type RequestRecord,
   type RequestStore,
+  startedRecord,
   validateRequest,
 } from "./requests.ts";
 
@@ -27,6 +32,44 @@ function store(): RequestStore & { file: (id: string) => string; test: TestGame 
     test,
   };
 }
+
+describe("request record transitions", () => {
+  const pending: RequestRecord = { head: "abc", id: "r1", state: "pending" };
+  const started: RequestRecord = { ...pending, state: "started" };
+
+  it("starts only a pending record and leaves the input unchanged", () => {
+    expect(startedRecord(pending)).toEqual(started);
+    expect(pending.state).toBe("pending");
+    expect(startedRecord(started)).toBeUndefined();
+  });
+
+  it("interrupts only a started record", () => {
+    expect(interruptedRecord(started)).toEqual({ ...pending, state: "interrupted" });
+    expect(interruptedRecord(pending)).toBeUndefined();
+    expect(started.state).toBe("started");
+  });
+
+  it("rejects a record only when main moved from its captured HEAD", () => {
+    expect(rejectedRecord("abc", started)).toBeUndefined();
+    expect(rejectedRecord("def", started)).toEqual({
+      ...pending,
+      reason: "main moved since the request",
+      state: "rejected",
+    });
+    expect(started).not.toHaveProperty("reason");
+  });
+
+  it("finishes only a started record with the departure exit", () => {
+    expect(finishedRecord(3, started)).toEqual({
+      ...pending,
+      completion: "departure flow only; consult exact-commit CI and deployment state",
+      departure_exit: 3,
+      state: "finished",
+    });
+    expect(finishedRecord(0, pending)).toBeUndefined();
+    expect(started).not.toHaveProperty("departure_exit");
+  });
+});
 
 describe("one-off requests", () => {
   it("captures the current main HEAD once per ID and refuses one with nothing new", async () => {

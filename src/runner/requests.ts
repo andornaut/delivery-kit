@@ -20,7 +20,7 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 type RequestState = "finished" | "interrupted" | "pending" | "rejected" | "started";
 
-interface RequestRecord {
+export interface RequestRecord {
   id: string;
   state: RequestState;
   /** The exact local main SHA captured at request time. */
@@ -108,6 +108,35 @@ export function captureRequest(store: RequestStore, id: string): Promise<string>
   });
 }
 
+/** The pending record started, or undefined when it is not pending. */
+export function startedRecord(record: RequestRecord): RequestRecord | undefined {
+  return record.state === "pending" ? { ...record, state: "started" } : undefined;
+}
+
+/** The started record interrupted, or undefined when it is not started. */
+export function interruptedRecord(record: RequestRecord): RequestRecord | undefined {
+  return record.state === "started" ? { ...record, state: "interrupted" } : undefined;
+}
+
+/** The record rejected because main moved from its captured HEAD, or undefined when it matches. */
+export function rejectedRecord(head: string, record: RequestRecord): RequestRecord | undefined {
+  return head === record.head
+    ? undefined
+    : { ...record, reason: "main moved since the request", state: "rejected" };
+}
+
+/** The started record finished with the departure's exit, or undefined when it is not started. */
+export function finishedRecord(exit: number, record: RequestRecord): RequestRecord | undefined {
+  return record.state === "started"
+    ? {
+        ...record,
+        completion: "departure flow only; consult exact-commit CI and deployment state",
+        departure_exit: exit,
+        state: "finished",
+      }
+    : undefined;
+}
+
 /** Whether a request receipt is pending; read without the lock, since claiming re-reads under it. */
 export function hasPendingRequest(paths: BusPaths): boolean {
   try {
@@ -129,11 +158,10 @@ export function hasPendingRequest(paths: BusPaths): boolean {
 export function claimRequest(store: RequestStore): Promise<string | undefined> {
   return withRequests(store, () => {
     for (const path of recordFiles(store)) {
-      const record = readRecord(path);
-      if (record.state === "pending") {
-        record.state = "started";
-        writeRecord(path, record);
-        return record.id;
+      const started = startedRecord(readRecord(path));
+      if (started !== undefined) {
+        writeRecord(path, started);
+        return started.id;
       }
     }
     return undefined;
@@ -144,10 +172,9 @@ export function claimRequest(store: RequestStore): Promise<string | undefined> {
 export function recoverRequests(store: RequestStore): Promise<void> {
   return withRequests(store, () => {
     for (const path of recordFiles(store)) {
-      const record = readRecord(path);
-      if (record.state === "started") {
-        record.state = "interrupted";
-        writeRecord(path, record);
+      const interrupted = interruptedRecord(readRecord(path));
+      if (interrupted !== undefined) {
+        writeRecord(path, interrupted);
       }
     }
   });
@@ -157,28 +184,20 @@ export function recoverRequests(store: RequestStore): Promise<void> {
 export function validateRequest(store: RequestStore, id: string, head: string): Promise<boolean> {
   return withRequests(store, () => {
     const path = recordPath(store, id);
-    const record = readRecord(path);
-    const matches = head === record.head;
-    if (!matches) {
-      record.state = "rejected";
-      record.reason = "main moved since the request";
-      writeRecord(path, record);
+    const rejected = rejectedRecord(head, readRecord(path));
+    if (rejected !== undefined) {
+      writeRecord(path, rejected);
     }
-    return matches;
+    return rejected === undefined;
   });
 }
 
 export function finishRequest(store: RequestStore, id: string, exit: number): Promise<void> {
   return withRequests(store, () => {
     const path = recordPath(store, id);
-    const record = readRecord(path);
-    if (record.state === "started") {
-      Object.assign(record, {
-        completion: "departure flow only; consult exact-commit CI and deployment state",
-        departure_exit: exit,
-        state: "finished",
-      });
-      writeRecord(path, record);
+    const finished = finishedRecord(exit, readRecord(path));
+    if (finished !== undefined) {
+      writeRecord(path, finished);
     }
   });
 }
