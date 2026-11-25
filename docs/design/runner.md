@@ -43,3 +43,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0042 | Qualify Coordination Kit 5.x at the runner seam                                    | [dk-0042.md](../work/dk-0042.md) |
 | dk-0043 | Qualify Coordination Kit 6.x at the runner seam                                    | [dk-0043.md](../work/dk-0043.md) |
 | dk-0044 | Refactor for structure, encapsulation and simplicity                               | [dk-0044.md](../work/dk-0044.md) |
+| dk-0045 | Finish the refactor follow-ups                                                     | [dk-0045.md](../work/dk-0045.md) |
