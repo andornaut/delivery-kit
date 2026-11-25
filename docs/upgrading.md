@@ -2,6 +2,14 @@
 
 Breaking changes between major versions, the edits each one needs, and the removed command forms.
 
+## Upgrading to 8.4
+
+8.4 accepts coordinator CLIs in `>=3.0.0 <8.0.0` and keeps the bundled
+coordination-kit pin. For the 7.0 cutover, first replace each idle, drained
+runner with 8.4 while the coordinator CLI is still on 6.x. Verify the runner
+pin, observer status, event ingest and a scheduled review. Then move the
+coordinator CLI to 7.0 and verify those seams again.
+
 ## Upgrading to 8.3
 
 8.3 accepts coordinator CLIs in `>=3.0.0 <7.0.0` and retains the bundled
