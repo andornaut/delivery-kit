@@ -29,6 +29,7 @@ import {
 } from "../testing/game.ts";
 import { bindMount } from "./container.ts";
 import { gateScript, installOutcome, noVerification, runGate, stepLogName } from "./gate.ts";
+import { PLATFORM_SCRIPT } from "./optional-packages.ts";
 
 describe("gateScript", () => {
   it("runs steps in order, logs each and stops at the first failure", () => {
@@ -679,6 +680,118 @@ describe("runGate", () => {
     });
     expect(exec.calls.some((call) => call.args.at(-1)?.startsWith("set -e") === true)).toBe(false);
     expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+});
+
+describe("runGate optional package check", () => {
+  const NAME = "delivery-kit-gate-archies-dog-walks-departure-1";
+  const NATIVE = "node_modules/@skia-canvas/linux-x64-glibc";
+  const LOCK = {
+    lockfileVersion: 3,
+    packages: {
+      "": { devDependencies: { "skia-canvas": "4.0.0" }, name: "game" },
+      "node_modules/@skia-canvas/linux-x64-glibc": {
+        cpu: ["x64"],
+        dev: true,
+        libc: ["glibc"],
+        optional: true,
+        os: ["linux"],
+      },
+      "node_modules/@skia-canvas/linux-x64-musl": {
+        cpu: ["x64"],
+        dev: true,
+        libc: ["musl"],
+        optional: true,
+        os: ["linux"],
+      },
+      "node_modules/skia-canvas": {
+        dev: true,
+        optionalDependencies: {
+          "@skia-canvas/linux-x64-glibc": "4.0.0",
+          "@skia-canvas/linux-x64-musl": "4.0.0",
+        },
+      },
+    },
+  };
+  const PLATFORM = '{"cpu":"x64","libc":"glibc","node":"24.11.1","npm":"11.6.2","os":"linux"}\n';
+
+  /** A game whose HEAD commits `lock`, gated by a docker that reports `probe` and `present`. */
+  async function gateWithLock(lock: unknown, probe: ExecResult, present: string) {
+    const test = makeGame();
+    if (lock !== undefined) {
+      commitFile(test.repo, "package-lock.json", `${JSON.stringify(lock)}\n`, "lock");
+    }
+    const exec = fakeExec((spec) => {
+      if (spec.args[0] === "exec" && spec.args.includes(PLATFORM_SCRIPT)) {
+        return probe;
+      }
+      if (spec.args[0] === "exec" && spec.args.includes(NATIVE)) {
+        return ok(present);
+      }
+      return gateDocker()(spec);
+    });
+    const logs = mkdtempSync(join(tmpdir(), "logs-"));
+    const outcome = await runGate(testContext(test, { exec }), noVerification, {
+      departure: "departure-1",
+      logs,
+      sha: gitSync(test.repo, "rev-parse", "HEAD"),
+      work: test.repo,
+    });
+    return { exec, logs, outcome, test };
+  }
+  const ranSteps = (exec: { calls: { args: readonly string[] }[] }) =>
+    exec.calls.some((call) => call.args.at(-1)?.startsWith("set -e") === true);
+  const probed = (exec: { calls: { args: readonly string[] }[] }) =>
+    exec.calls.some((call) => call.args.includes(PLATFORM_SCRIPT));
+
+  it("blocks a gate whose install skipped an optional package the lock lists for the platform", async () => {
+    const { exec, logs, outcome, test } = await gateWithLock(LOCK, ok(PLATFORM), "");
+    expect(outcome).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason:
+        "install skipped optional packages that package-lock.json lists for linux x64 glibc: " +
+        `${NATIVE}; see ${join(logs, "install.log")}`,
+    });
+    const listing = exec.calls.find((call) => call.args.includes(NATIVE))?.args ?? [];
+    expect(listing.slice(-2)).toEqual(["sh", NATIVE]);
+    expect(ranSteps(exec)).toBe(false);
+    expect(exec.calls.map((call) => call.args[0])).not.toContain("network");
+    expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
+    expect(exec.calls.at(-1)?.args).toEqual(["rm", "--force", NAME]);
+  });
+
+  it("gates normally when every expected optional package is installed", async () => {
+    const { exec, outcome } = await gateWithLock(LOCK, ok(PLATFORM), `${NATIVE}\n`);
+    expect(outcome).toEqual({ ok: true, output: "lint ok\ntest ok\n" });
+    expect(ranSteps(exec)).toBe(true);
+  });
+
+  it("reads no platform without a lock or without optional packages in it", async () => {
+    for (const lock of [undefined, { lockfileVersion: 3, packages: { "": { name: "game" } } }]) {
+      // eslint-disable-next-line no-await-in-loop
+      const { exec, outcome } = await gateWithLock(lock, ok(PLATFORM), "");
+      expect(outcome).toMatchObject({ ok: true });
+      expect(probed(exec)).toBe(false);
+    }
+  });
+
+  it("blocks when the image has no node or its platform cannot be read", async () => {
+    const missing = await gateWithLock(LOCK, { status: 3, stderr: "", stdout: "node\n" }, "");
+    expect(missing.outcome).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason:
+        "the gate image node:24.21.0 has no node; checking the optional packages in " +
+        "package-lock.json needs it",
+    });
+    const garbled = await gateWithLock(LOCK, ok("not json\n"), "");
+    expect(garbled.outcome).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason: "reading the gate container's platform failed: not json",
+    });
+    expect(ranSteps(missing.exec) || ranSteps(garbled.exec)).toBe(false);
   });
 });
 

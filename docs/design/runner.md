@@ -13,7 +13,9 @@ that line, the cursor and the last seen CLI, reading no store or work protocol.
 
 Each departure gates local `main` HEAD in an isolated container, pushes that exact SHA without
 force, watches CI for it and deploys on a pass. Fixes go forward: a red gate records
-`gate-failed/<sha>` and the next departure waits for a new commit. Only the one-minute load
+`gate-failed/<sha>` and the next departure waits for a new commit. An install that exits 0 but
+leaves out an optional package the commit's lock lists for the container's platform blocks the
+gate as infrastructure, so the next departure retries it. Only the one-minute load
 admits a departure; CPU and memory settings cap execution. The package check refuses a build
 whose bundled coordination-kit is outside the supported range, and `status` reports the bundled
 version; before each departure the runner compares the loaded package with the installed one

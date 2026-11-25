@@ -5,8 +5,10 @@
 // the departure gates, is bound read-only; the container copies it into its own /tmp/work and
 // verifies that the copy's tree is the commit's tree, so the gate never writes the checkout and
 // runs on the exact commit.
-// The install step runs with network access, the container is then disconnected from every
-// network, and the gate steps run. The host copies the gate logs out with docker cp, and, from a
+// The install step runs with network access. When it passes and the commit's package-lock.json
+// lists optional packages, the container must hold each one npm installs on its platform
+// (optional-packages.ts). The container is then disconnected from every network, and the gate
+// steps run. The host copies the gate logs out with docker cp, and, from a
 // passing and verified gate only, dist/ and node_modules/, so the deployment runs the Wrangler
 // locked in the gated commit. The container is removed, also after a failure or timeout. The npm
 // cache lives in the game's named volume.
@@ -30,6 +32,15 @@ import {
   type GateIdentity,
   releaseGateIdentity,
 } from "./identity.ts";
+import {
+  expectedOptionalPackages,
+  hasOptionalPackages,
+  NO_NODE,
+  parseInstallPlatform,
+  PLATFORM_SCRIPT,
+  presenceScript,
+  skippedOptionalReason,
+} from "./optional-packages.ts";
 
 /** What a gate needs from the runner: its child processes, log, game and gate settings. */
 interface GateContext {
@@ -201,8 +212,8 @@ interface GateInput {
 /**
  * A `step` failure is install or a gate step exiting non-zero inside the running container: the
  * departure records gate-failed for the SHA. An `infrastructure` failure (Docker, the image, the
- * container, its network, an install that could not reach the registry, a copy or the
- * fingerprint check) records nothing, so the next
+ * container, its network, an install that could not reach the registry or skipped a locked
+ * optional package, a copy or the fingerprint check) records nothing, so the next
  * departure gates the same SHA again.
  */
 type GateOutcome =
@@ -275,6 +286,61 @@ export function installOutcome(log: string, install: InstallResult): GateOutcome
     return failed("install", `install ${expired ? "TIMED OUT" : "FAIL"}; see ${log}`);
   }
   return undefined;
+}
+
+/** The checkout's package-lock.json, parsed, or undefined when it has none or it is not JSON. */
+function readLock(root: string): unknown {
+  try {
+    return JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * After a passing install, the reason the gate container lacks an optional package that the
+ * commit's package-lock.json lists for the container's platform, or undefined. `log` names the
+ * install log.
+ */
+async function optionalPackagesProblem(
+  context: GateContext,
+  name: string,
+  log: string,
+  identity: GateIdentity,
+): Promise<string | undefined> {
+  const lock = readLock(identity.copied);
+  if (!hasOptionalPackages(lock)) {
+    return undefined;
+  }
+  const probe = await docker(context, ["exec", name, "sh", "-c", PLATFORM_SCRIPT]);
+  if (probe.status === NO_NODE) {
+    return (
+      `the gate image ${context.config.gate.image} has no node; ` +
+      "checking the optional packages in package-lock.json needs it"
+    );
+  }
+  const platform = probe.status === 0 ? parseInstallPlatform(probe.stdout) : undefined;
+  if (platform === undefined) {
+    return `reading the gate container's platform failed: ${diagnostic(probe)}`;
+  }
+  const expected = expectedOptionalPackages(platform, lock);
+  if (expected.length === 0) {
+    return undefined;
+  }
+  const listed = await docker(context, [
+    "exec",
+    name,
+    "sh",
+    "-c",
+    presenceScript(GATE_WORK),
+    "sh",
+    ...expected,
+  ]);
+  if (listed.status !== 0) {
+    return `listing the installed optional packages failed: ${diagnostic(listed)}`;
+  }
+  const present = listed.stdout.split("\n").filter((line) => line !== "");
+  return skippedOptionalReason(log, platform, expected, present);
 }
 
 /** Tools the gate image provides besides sh, for the copy, the loopback check and step logs. */
@@ -457,6 +523,10 @@ async function gate(
     });
     if (outcome !== undefined) {
       return outcome;
+    }
+    const skipped = await optionalPackagesProblem(context, name, log, identity);
+    if (skipped !== undefined) {
+      return blockedGate(skipped);
     }
   }
   // Every gate step runs without network: disconnect, then confirm only loopback remains.

@@ -27,8 +27,11 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
 - `schedule`: `departures`, a non-empty list of two-digit minute strings such as `"00"`, and
   `timezone`, which defaults to the `config.json` timezone.
 - `gate`: `image`, `install` and ordered `steps` (`name`, `run`). Any image and install command
-  are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`; a departure names
-  the tool an image lacks. An empty `install` skips the install step, and an empty `steps` list
+  are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`, plus `node` when
+  `install` is set and `package-lock.json` lists optional packages; a departure names the tool an
+  image lacks. A passing install must leave every optional package the lock lists for the
+  container's platform ([gate container](runner.md#gate-container)). An empty `install` skips
+  the install step, and an empty `steps` list
   gates with no checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
   rejected. Every step is treated alike: each needs a unique name (a letter or digit, then up
   to 63 letters, digits, `_`, `.` or `-`), steps run in list order, and the first failure stops

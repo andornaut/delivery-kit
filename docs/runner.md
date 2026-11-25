@@ -475,7 +475,9 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   configured.
 - **Gate infrastructure:** when Docker is unavailable, the image cannot be pulled, the container
   cannot be created or started, install fails with an npm network code (HTTP 5xx, `ETIMEDOUT`,
-  `ECONNRESET`, `ECONNREFUSED`, `EAI_AGAIN`, `ENOTFOUND`, `ESOCKETTIMEDOUT`), the network cannot be
+  `ECONNRESET`, `ECONNREFUSED`, `EAI_AGAIN`, `ENOTFOUND`, `ESOCKETTIMEDOUT`), a passing install
+  skipped an optional package that `package-lock.json` lists for the container's platform (see
+  [Gate container](#gate-container)), the network cannot be
   detached, more than loopback remains, copying the deployment outputs fails or the worktree
   fingerprint changes, the departure reports `blocked-gate` with the cause. It writes no
   `gate-failed` record and retries the same SHA at the next departure.
@@ -531,6 +533,18 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
   status before install. Original Git configuration, history, refs, remotes, hooks and
   credentials are not copied;
 - runs `install` with network access.
+- after a passing install, when the commit's `package-lock.json` (lockfileVersion 2 or 3) lists
+  optional packages, checks that each one npm installs on the container's platform is present,
+  because npm skips an optional package whose fetch or build fails and still exits 0. `node` in
+  the container reports the platform (`process.platform`, `process.arch`, npm's libc detection)
+  and the Node and npm versions, so such a commit needs `node` in the image. Expected are the
+  `optional` entries the root and workspace folders reach whose `os`, `cpu`, `libc` and
+  `engines` match; an unmatched or unreadable entry is skipped together with what only it
+  reaches. `devOptional` entries are not checked, since npm fails the install when one fails,
+  nor are bundled entries. The check assumes an install that omits no optional, dev or peer
+  packages, as `npm ci` does by default. A missing package blocks the gate with a reason naming
+  it and the install log. An empty install, a failing install and a commit without such a lock
+  run no check.
 - disconnects the Docker bridge and confirms only loopback remains.
 - repeats read-only identity and clean-source validation before running the gate steps. Changed
   or unavailable identity fails closed without resetting, cleaning or rewriting source.
