@@ -6,12 +6,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  effectiveOmit,
   expectedOptionalPackages,
   hasOptionalPackages,
+  installCommandOmit,
   type InstallPlatform,
   NO_NODE,
   parseInstallPlatform,
-  PLATFORM_SCRIPT,
+  parseOmitList,
+  platformScript,
   presenceScript,
   skippedOptionalReason,
 } from "./optional-packages.ts";
@@ -21,6 +24,7 @@ const GLIBC: InstallPlatform = {
   libc: "glibc",
   node: "24.11.1",
   npm: "11.6.2",
+  omit: [],
   os: "linux",
 };
 const MUSL: InstallPlatform = { ...GLIBC, libc: "musl" };
@@ -228,6 +232,88 @@ describe("expectedOptionalPackages", () => {
   });
 });
 
+describe("omit", () => {
+  it("parses npm config get omit output", () => {
+    expect(parseOmitList("")).toEqual([]);
+    expect(parseOmitList("dev\n")).toEqual(["dev"]);
+    expect(parseOmitList("peer,dev\noptional,bogus")).toEqual(["dev", "optional", "peer"]);
+  });
+
+  it.each([
+    ["npm ci", [], []],
+    ["npm ci --omit=dev", ["dev"], []],
+    ["npm ci --omit dev --omit=peer", ["dev", "peer"], []],
+    ["npm ci --omit=optional,dev", ["dev", "optional"], []],
+    ["npm ci --production", ["dev"], []],
+    ["npm ci --only=prod", ["dev"], []],
+    ["npm ci --only=production", ["dev"], []],
+    ["npm ci --only=dev", [], []],
+    ["npm ci --no-optional", ["optional"], []],
+    ["NODE_ENV=production npm ci", ["dev"], []],
+    ["npm ci --omit=dev --include=dev --include optional", ["dev"], ["dev", "optional"]],
+    ['npm ci "--omit=peer" --omit=bogus', ["peer"], []],
+  ])("reads the omit flags of %s", (install, omit, include) => {
+    expect(installCommandOmit(install)).toEqual({ include, omit });
+  });
+
+  it("joins the configured omit and the command's, less what the command includes", () => {
+    expect(effectiveOmit([], "npm ci")).toEqual([]);
+    expect(effectiveOmit(["dev"], "npm ci")).toEqual(["dev"]);
+    expect(effectiveOmit(["dev"], "npm ci --omit=optional")).toEqual(["dev", "optional"]);
+    expect(effectiveOmit(["dev"], "npm ci --include=dev")).toEqual([]);
+    expect(effectiveOmit([], "npm ci --omit=peer --include=peer")).toEqual([]);
+  });
+
+  it("leaves out omitted kinds and what only they reach", () => {
+    const packages = {
+      lockfileVersion: 3,
+      packages: {
+        "": {
+          dependencies: { app: "1.0.0", "peer-host": "1.0.0" },
+          devDependencies: { "dev-tool": "1.0.0", "skia-native": "1.0.0", "two-way": "1.0.0" },
+          optionalDependencies: { "two-way": "1.0.0" },
+        },
+        "node_modules/app": { optionalDependencies: { "app-native": "1.0.0" } },
+        "node_modules/app-native": { optional: true },
+        "node_modules/dev-tool": { dev: true, optionalDependencies: { "tool-native": "1.0.0" } },
+        "node_modules/peer-host": { optionalDependencies: { "peer-native": "1.0.0" }, peer: true },
+        "node_modules/peer-native": { optional: true, peer: true },
+        "node_modules/skia-native": { dev: true, optional: true },
+        "node_modules/tool-native": { dev: true, optional: true },
+        "node_modules/two-way": {
+          devOptional: true,
+          optionalDependencies: { "two-way-native": "1.0.0" },
+        },
+        "node_modules/two-way-native": { optional: true },
+      },
+    };
+    const expected = (omit: InstallPlatform["omit"]) =>
+      expectedOptionalPackages({ ...GLIBC, omit }, packages);
+    const all = [
+      "node_modules/app-native",
+      "node_modules/peer-native",
+      "node_modules/skia-native",
+      "node_modules/tool-native",
+      "node_modules/two-way-native",
+    ];
+    expect(expected([])).toEqual(all);
+    // A devOptional entry stays while only dev is omitted, so what it reaches is still expected.
+    expect(expected(["dev"])).toEqual([
+      "node_modules/app-native",
+      "node_modules/peer-native",
+      "node_modules/two-way-native",
+    ]);
+    expect(expected(["optional"])).toEqual([]);
+    expect(expected(["peer"])).toEqual(all.filter((key) => key !== "node_modules/peer-native"));
+    expect(expected(["dev", "peer"])).toEqual([
+      "node_modules/app-native",
+      "node_modules/two-way-native",
+    ]);
+    // With both dev and optional omitted, the devOptional entry goes too.
+    expect(expected(["dev", "optional"])).toEqual([]);
+  });
+});
+
 describe("skippedOptionalReason", () => {
   const log = "/logs/install.log";
 
@@ -256,24 +342,53 @@ describe("skippedOptionalReason", () => {
         "node_modules/a, node_modules/b, node_modules/c, node_modules/d, node_modules/e " +
         "and 2 more; see /logs/install.log",
     );
+    expect(
+      skippedOptionalReason(log, { ...GLIBC, omit: ["dev", "peer"] }, ["node_modules/a"], []),
+    ).toBe(
+      "install skipped optional packages that package-lock.json lists for linux x64 glibc " +
+        "(omit: dev, peer): node_modules/a; see /logs/install.log",
+    );
   });
 });
 
 describe("container scripts", () => {
-  it("reads this process's platform with the platform script", () => {
-    const result = spawnSync("sh", ["-c", PLATFORM_SCRIPT], { encoding: "utf8" });
-    expect(result.status).toBe(0);
-    const platform = parseInstallPlatform(result.stdout);
+  /** Run the platform script in a fresh project, with npm's omit settings only from `env`. */
+  function probe(env: Record<string, string>) {
+    const work = mkdtempSync(join(tmpdir(), "work-"));
+    writeFileSync(join(work, "package.json"), '{"name":"game","version":"1.0.0"}\n');
+    const inherited = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) =>
+          key !== "NODE_ENV" &&
+          !/^npm_config_(?:include|omit|only|optional|production)$/iu.test(key),
+      ),
+    );
+    const result = spawnSync("sh", ["-c", platformScript(work)], {
+      encoding: "utf8",
+      env: { ...inherited, ...env },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    return parseInstallPlatform(result.stdout);
+  }
+
+  it("reads this process's platform and npm's omit with the platform script", () => {
+    const platform = probe({});
     expect(platform).toMatchObject({
       cpu: process.arch,
       node: process.versions.node,
+      omit: [],
       os: process.platform,
     });
     expect(["glibc", "musl", undefined]).toContain(platform?.libc);
   });
 
+  it("reads the omit that NODE_ENV=production and npm_config_omit configure", () => {
+    expect(probe({ NODE_ENV: "production" })?.omit).toEqual(["dev"]);
+    expect(probe({ npm_config_omit: "optional" })?.omit).toEqual(["optional"]);
+  });
+
   it("names node when the image has none", () => {
-    const result = spawnSync("/bin/sh", ["-c", PLATFORM_SCRIPT], {
+    const result = spawnSync("/bin/sh", ["-c", platformScript("/tmp")], {
       encoding: "utf8",
       env: { PATH: "/nonexistent" },
     });
@@ -283,8 +398,17 @@ describe("container scripts", () => {
 
   it("parses only a platform record", () => {
     expect(
-      parseInstallPlatform('{"cpu":"x64","libc":null,"node":"24.0.0","npm":null,"os":"linux"}\n'),
-    ).toEqual({ cpu: "x64", libc: undefined, node: "24.0.0", npm: undefined, os: "linux" });
+      parseInstallPlatform(
+        '{"cpu":"x64","libc":null,"node":"24.0.0","npm":null,"omit":"dev","os":"linux"}\n',
+      ),
+    ).toEqual({
+      cpu: "x64",
+      libc: undefined,
+      node: "24.0.0",
+      npm: undefined,
+      omit: ["dev"],
+      os: "linux",
+    });
     expect(parseInstallPlatform("")).toBeUndefined();
     expect(parseInstallPlatform('{"cpu":"x64"}')).toBeUndefined();
   });

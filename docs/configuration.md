@@ -30,7 +30,8 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`, plus `node` when
   `install` is set and `package-lock.json` lists optional packages; a departure names the tool an
   image lacks. A passing install must leave every optional package the lock lists for the
-  container's platform ([gate container](runner.md#gate-container)). An empty `install` skips
+  container's platform and npm's effective omit, including omit flags in `install`
+  ([gate container](runner.md#gate-container)). An empty `install` skips
   the install step, and an empty `steps` list
   gates with no checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
   rejected. Every step is treated alike: each needs a unique name (a letter or digit, then up

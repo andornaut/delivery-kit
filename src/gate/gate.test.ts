@@ -29,7 +29,7 @@ import {
 } from "../testing/game.ts";
 import { bindMount } from "./container.ts";
 import { gateScript, installOutcome, noVerification, runGate, stepLogName } from "./gate.ts";
-import { PLATFORM_SCRIPT } from "./optional-packages.ts";
+import { platformScript } from "./optional-packages.ts";
 
 describe("gateScript", () => {
   it("runs steps in order, logs each and stops at the first failure", () => {
@@ -686,6 +686,7 @@ describe("runGate", () => {
 describe("runGate optional package check", () => {
   const NAME = "delivery-kit-gate-archies-dog-walks-departure-1";
   const NATIVE = "node_modules/@skia-canvas/linux-x64-glibc";
+  const PLATFORM_SCRIPT = platformScript("/tmp/work");
   const LOCK = {
     lockfileVersion: 3,
     packages: {
@@ -716,8 +717,12 @@ describe("runGate optional package check", () => {
   const PLATFORM = '{"cpu":"x64","libc":"glibc","node":"24.11.1","npm":"11.6.2","os":"linux"}\n';
 
   /** A game whose HEAD commits `lock`, gated by a docker that reports `probe` and `present`. */
-  async function gateWithLock(lock: unknown, probe: ExecResult, present: string) {
-    const test = makeGame();
+  async function gateWithLock(lock: unknown, probe: ExecResult, present: string, install?: string) {
+    const test = makeGame((config) => {
+      if (install !== undefined) {
+        config.gate!.install = install;
+      }
+    });
     if (lock !== undefined) {
       commitFile(test.repo, "package-lock.json", `${JSON.stringify(lock)}\n`, "lock");
     }
@@ -765,6 +770,24 @@ describe("runGate optional package check", () => {
     const { exec, outcome } = await gateWithLock(LOCK, ok(PLATFORM), `${NATIVE}\n`);
     expect(outcome).toEqual({ ok: true, output: "lint ok\ntest ok\n" });
     expect(ranSteps(exec)).toBe(true);
+  });
+
+  it("follows npm's omit from the container config and the install command", async () => {
+    const configured = PLATFORM.replace('"npm"', '"omit":"dev","npm"');
+    for (const [probe, install] of [
+      [configured, undefined],
+      [PLATFORM, "npm ci --omit=dev"],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop
+      const { exec, outcome } = await gateWithLock(LOCK, ok(probe), "", install);
+      expect(outcome, install).toMatchObject({ ok: true });
+      expect(exec.calls.some((call) => call.args.includes(NATIVE))).toBe(false);
+    }
+    const peer = await gateWithLock(LOCK, ok(PLATFORM), "", "npm ci --omit=peer");
+    expect(peer.outcome).toMatchObject({
+      failure: "infrastructure",
+      reason: expect.stringContaining("linux x64 glibc (omit: peer): node_modules/@skia-canvas"),
+    });
   });
 
   it("reads no platform without a lock or without optional packages in it", async () => {

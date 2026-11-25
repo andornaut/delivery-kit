@@ -10,8 +10,10 @@
 // walking up node_modules/ directories, and skips an optional entry whose os, cpu, libc or
 // engines do not match, together with what only it reaches. An entry whose engines range cannot
 // be read is treated as skipped, so the check never requires a package npm might have skipped.
-// The expectation assumes npm's default selection, as `npm ci` makes it: an install that omits
-// optional, dev or peer packages leaves out entries this check requires.
+// It follows npm's effective omit: the `omit` npm config reads in the container (a project
+// .npmrc, npm_config_omit, NODE_ENV=production), plus the omit flags in the install command,
+// which a separate config read cannot see. An omitted entry is not expected, nor is what only it
+// reaches.
 import { isRecord } from "../lib/values.ts";
 import { satisfiesRange } from "./version-range.ts";
 
@@ -27,6 +29,80 @@ export interface InstallPlatform {
   readonly node: string;
   /** The npm version, or undefined when the image has no npm. */
   readonly npm: string | undefined;
+  /** The dependency kinds npm omits, sorted. */
+  readonly omit: readonly OmitKind[];
+}
+
+/** A dependency kind npm's `omit` and `include` name. */
+export type OmitKind = "dev" | "optional" | "peer";
+const OMIT_KINDS: readonly string[] = ["dev", "optional", "peer"];
+
+function omitKinds(values: readonly string[]): OmitKind[] {
+  const kinds = values.filter((value): value is OmitKind => OMIT_KINDS.includes(value));
+  return [...new Set(kinds)].sort();
+}
+
+/** The kinds in `npm config get omit` output: a comma, space or newline separated list. */
+export function parseOmitList(text: string): OmitKind[] {
+  return omitKinds(text.split(/[\s,]+/u));
+}
+
+/**
+ * The kinds an install command line omits and includes, read on a best-effort basis from its
+ * whitespace-separated words: `--omit=X` and `--omit X` (repeatable), `--production`,
+ * `--only=prod` and `--only=production` (also `--only X`), `--no-optional`, an inline
+ * `NODE_ENV=production` (omit dev) and `--include=X` or `--include X`. Quoting, variables and
+ * nested shells are not interpreted.
+ */
+export function installCommandOmit(install: string): {
+  readonly include: OmitKind[];
+  readonly omit: OmitKind[];
+} {
+  const words = install
+    .split(/\s+/u)
+    .filter((word) => word !== "")
+    .map((word) => word.replace(/^["']|["']$/gu, ""));
+  const omit: string[] = [];
+  const include: string[] = [];
+  words.forEach((word, index) => {
+    const [flag = "", inline] = word.split(/=(.*)/su);
+    const value = inline ?? words[index + 1] ?? "";
+    const values = value.split(",");
+    if (flag === "--omit") {
+      omit.push(...values);
+    } else if (flag === "--include") {
+      include.push(...values);
+    } else if (flag === "--only" && /^prod(?:uction)?$/u.test(value)) {
+      omit.push("dev");
+    } else if (word === "--production" || word === "NODE_ENV=production") {
+      omit.push("dev");
+    } else if (word === "--no-optional") {
+      omit.push("optional");
+    }
+  });
+  return { include: omitKinds(include), omit: omitKinds(omit) };
+}
+
+/**
+ * npm's effective omit: the kinds `configured` in the container plus those the `install` command
+ * omits, less those it includes.
+ */
+export function effectiveOmit(configured: readonly OmitKind[], install: string): OmitKind[] {
+  const flags = installCommandOmit(install);
+  return omitKinds([...configured, ...flags.omit]).filter((kind) => !flags.include.includes(kind));
+}
+
+/**
+ * Whether npm leaves an entry out for `omit`, by its lock flags. A `devOptional` entry is
+ * omitted only when both dev and optional are, since either kind alone still needs it.
+ */
+function omitted(omit: readonly OmitKind[], entry: LockEntry): boolean {
+  return (
+    (entry.peer === true && omit.includes("peer")) ||
+    (entry.dev === true && omit.includes("dev")) ||
+    (entry.optional === true && omit.includes("optional")) ||
+    (entry.devOptional === true && omit.includes("dev") && omit.includes("optional"))
+  );
 }
 
 type LockEntry = Readonly<Record<string, unknown>>;
@@ -174,7 +250,7 @@ export function expectedOptionalPackages(platform: InstallPlatform, lock: unknow
     }
     reached.add(key);
     // A link's target is a folder of the checkout, which is a starting point already.
-    if (entry.link === true) {
+    if (entry.link === true || omitted(platform.omit, entry)) {
       continue;
     }
     if (entry.optional === true) {
@@ -218,13 +294,14 @@ export function skippedOptionalReason(
   const more =
     missing.length > NAMED_LIMIT ? ` and ${String(missing.length - NAMED_LIMIT)} more` : "";
   const target = [platform.os, platform.cpu, platform.libc].filter((part) => part !== undefined);
+  const omit = platform.omit.length > 0 ? ` (omit: ${platform.omit.join(", ")})` : "";
   return (
-    `install skipped optional packages that package-lock.json lists for ${target.join(" ")}: ` +
-    `${named}${more}; see ${log}`
+    `install skipped optional packages that package-lock.json lists for ${target.join(" ")}` +
+    `${omit}: ${named}${more}; see ${log}`
   );
 }
 
-/** PLATFORM_SCRIPT's exit status when the image has no node, which it prints. */
+/** The platform script's exit status when the image has no node, which it prints. */
 export const NO_NODE = 3;
 
 // Print npm's view of the container as JSON. The libc family follows npm's detection: the text
@@ -245,17 +322,27 @@ const PLATFORM_JS = [
   "  }",
   "}",
   "console.log(JSON.stringify({ cpu: process.arch, libc, node: process.versions.node,",
-  "  npm: process.env.NPM_VERSION || null, os: process.platform }));",
+  '  npm: process.env.NPM_VERSION || null, omit: process.env.NPM_OMIT || "", os: process.platform }));',
 ].join("\n");
 
-/** Reads the container's platform; exits NO_NODE, printing `node`, when the image has none. */
-export const PLATFORM_SCRIPT = [
-  `command -v node >/dev/null 2>&1 || { echo node; exit ${String(NO_NODE)}; }`,
-  "NPM_VERSION=$(npm_config_update_notifier=false npm --version 2>/dev/null || true)",
-  `NPM_VERSION="$NPM_VERSION" node -e '${PLATFORM_JS}'`,
-].join("\n");
+/**
+ * Prints the container's platform and the `omit` npm config reads in the working copy `work`;
+ * exits NO_NODE, printing `node`, when the image has none.
+ */
+export function platformScript(work: string): string {
+  return [
+    `command -v node >/dev/null 2>&1 || { echo node; exit ${String(NO_NODE)}; }`,
+    "export npm_config_update_notifier=false",
+    "NPM_VERSION=$(npm --version 2>/dev/null || true)",
+    `NPM_OMIT=$(cd ${work} && npm config get omit 2>/dev/null || true)`,
+    `NPM_VERSION="$NPM_VERSION" NPM_OMIT="$NPM_OMIT" node -e '${PLATFORM_JS}'`,
+  ].join("\n");
+}
 
-/** The InstallPlatform PLATFORM_SCRIPT printed, or undefined when its output is not one. */
+/**
+ * The InstallPlatform the platform script printed, with npm's configured omit, or undefined when
+ * its output is not one.
+ */
 export function parseInstallPlatform(stdout: string): InstallPlatform | undefined {
   let value: unknown;
   try {
@@ -276,6 +363,7 @@ export function parseInstallPlatform(stdout: string): InstallPlatform | undefine
     libc: typeof value.libc === "string" ? value.libc : undefined,
     node: value.node,
     npm: typeof value.npm === "string" && value.npm !== "" ? value.npm : undefined,
+    omit: typeof value.omit === "string" ? parseOmitList(value.omit) : [],
     os: value.os,
   };
 }

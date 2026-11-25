@@ -33,11 +33,12 @@ import {
   releaseGateIdentity,
 } from "./identity.ts";
 import {
+  effectiveOmit,
   expectedOptionalPackages,
   hasOptionalPackages,
   NO_NODE,
   parseInstallPlatform,
-  PLATFORM_SCRIPT,
+  platformScript,
   presenceScript,
   skippedOptionalReason,
 } from "./optional-packages.ts";
@@ -312,17 +313,18 @@ async function optionalPackagesProblem(
   if (!hasOptionalPackages(lock)) {
     return undefined;
   }
-  const probe = await docker(context, ["exec", name, "sh", "-c", PLATFORM_SCRIPT]);
+  const probe = await docker(context, ["exec", name, "sh", "-c", platformScript(GATE_WORK)]);
   if (probe.status === NO_NODE) {
     return (
       `the gate image ${context.config.gate.image} has no node; ` +
       "checking the optional packages in package-lock.json needs it"
     );
   }
-  const platform = probe.status === 0 ? parseInstallPlatform(probe.stdout) : undefined;
-  if (platform === undefined) {
+  const probed = probe.status === 0 ? parseInstallPlatform(probe.stdout) : undefined;
+  if (probed === undefined) {
     return `reading the gate container's platform failed: ${diagnostic(probe)}`;
   }
+  const platform = { ...probed, omit: effectiveOmit(probed.omit, context.config.gate.install) };
   const expected = expectedOptionalPackages(platform, lock);
   if (expected.length === 0) {
     return undefined;
