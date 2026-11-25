@@ -40,3 +40,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | dk-0030 | Prune redundant tests and measure the result                          | [dk-0030.md](../work/dk-0030.md) |
 | dk-0037 | Cap release packaging containers at 4 GiB                             | [dk-0037.md](../work/dk-0037.md) |
 | dk-0039 | Simplify Delivery Kit without changing active contracts               | [dk-0039.md](../work/dk-0039.md) |
+| dk-0046 | Reject import cycles in scripts and tests                             | [dk-0046.md](../work/dk-0046.md) |
