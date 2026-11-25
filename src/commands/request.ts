@@ -9,6 +9,7 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import { spawnExec } from "../lib/exec.ts";
+import { errorMessage } from "../lib/values.ts";
 import { captureRequest } from "../runner/requests.ts";
 import { busPaths } from "../state/paths.ts";
 import { resolveGame } from "./game.ts";
@@ -36,7 +37,7 @@ export const request: Handler = async (io, root, args) => {
     io.out(await captureRequest(store, id));
     return EXIT_OK;
   } catch (error) {
-    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
 };

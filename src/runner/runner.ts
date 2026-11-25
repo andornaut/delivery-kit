@@ -3,8 +3,8 @@
 // in-runner CI watches. Events are appended to bus/events.jsonl (state/eventlog.ts); scheduled
 // reviews and event ingest go through the coordinator CLI seam (seam/coordinator.ts). No timer
 // outlives the process.
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { holdLock, LockBusy, type LockHandle } from "@andornaut/coordination-kit/build/shared";
 
@@ -25,7 +25,7 @@ import type { BusContext } from "./context.ts";
 import { depart, requestStore } from "./departure.ts";
 import { deployAfterCi } from "./deploy.ts";
 import { observer } from "./observer.ts";
-import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
+import { claimRequest, finishRequest, hasPendingRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
 import {
   beginDeliveryWork,
@@ -94,25 +94,6 @@ class CiTasks {
   }
 }
 
-function pendingRequest(context: BusContext): boolean {
-  try {
-    return readdirSync(context.paths.requestsDir).some((name) => {
-      if (!name.endsWith(".json")) {
-        return false;
-      }
-      const record = JSON.parse(readFileSync(join(context.paths.requestsDir, name), "utf8")) as {
-        state?: string;
-      };
-      return record.state === "pending";
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
 /** Serialized scheduled and requested departures until `signal` aborts. */
 async function departureLoop(
   context: BusContext,
@@ -134,7 +115,7 @@ async function departureLoop(
     while (!signal.aborted) {
       let now = context.clock.now();
       if (now < next) {
-        const admission = pendingRequest(context)
+        const admission = hasPendingRequest(context.paths)
           ? beginDeliveryWork(context, "checking", null)
           : undefined;
         let request: string | undefined;

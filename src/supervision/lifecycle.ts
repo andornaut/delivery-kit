@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { sleepMs } from "../lib/clock.ts";
 import { ensureDir } from "../lib/files.ts";
 import { type BusPaths, legacyOutboxIssue } from "../state/paths.ts";
 import { statusReport } from "../status/status.ts";
@@ -265,10 +266,7 @@ export function systemLifecycle(paths: BusPaths, repo: string): Lifecycle {
     fileExists: existsSync,
     kill: (pid, signal) => process.kill(pid, signal),
     now: () => Date.now(),
-    sleep: (milliseconds) =>
-      new Promise((resolve) => {
-        setTimeout(resolve, milliseconds);
-      }),
+    sleep: (milliseconds) => sleepMs(milliseconds),
     spawnRunner(spec) {
       ensureDir(dirname(spec.output));
       const output = openSync(spec.output, "a", 0o600);

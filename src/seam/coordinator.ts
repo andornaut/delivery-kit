@@ -3,10 +3,10 @@
 // or unreadable result, a nonzero exit, a timeout or an abort claims no delivery. The CLI owns the
 // per-slot receipt and dedupe; the runner keeps no slot receipt and never reads brief content.
 import { type ChildProcess, spawn } from "node:child_process";
-import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import { COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
+import { isFile } from "../lib/files.ts";
 import { type CliIdentity, writeSeamRecord } from "../state/seam.ts";
 import {
   CLI_UNAVAILABLE,
@@ -46,14 +46,6 @@ function killGroup(child: ChildProcess): void {
     process.kill(-child.pid, "SIGKILL");
   } catch {
     // The group has already exited.
-  }
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
   }
 }
 

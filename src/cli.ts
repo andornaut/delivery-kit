@@ -16,6 +16,7 @@ import { runnerStart, runnerStop, runnerUnit } from "./commands/runner.ts";
 import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import { VERSION } from "./compatibility.ts";
+import { errorMessage } from "./lib/values.ts";
 export {
   EXIT_INVALID,
   EXIT_OK,
@@ -51,9 +52,6 @@ export const USAGE = [
   "game-coordinator is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
   "",
 ].join("\n");
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 const HANDLERS: Readonly<Record<Command, Handler>> = {
   "check-config": checkConfig,
   control,

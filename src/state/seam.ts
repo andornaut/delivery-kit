@@ -5,16 +5,13 @@ import { readFileSync } from "node:fs";
 import { writeJsonDurable } from "@andornaut/coordination-kit/build/shared";
 
 import { COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
+import { isoSeconds, isRecord } from "../lib/values.ts";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 
 export interface CliIdentity {
   readonly version: string;
   readonly distSha256: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** A `{version, distSha256}` identity, or undefined when the value is not one. */
@@ -69,7 +66,7 @@ export function writeSeamRecord(file: string, cli: CliIdentity, now: number): vo
   const record: SeamRecord = {
     distSha256: cli.distSha256,
     schema: 1,
-    seenAt: new Date(now * 1000).toISOString().replace(/\.\d{3}Z$/u, "Z"),
+    seenAt: isoSeconds(now * 1000),
     version: cli.version,
   };
   writeJsonDurable(file, record, { mode: 0o644 });

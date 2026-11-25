@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { type GateStep, type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 
 import { assertNotInterrupted, type Exec, type ExecResult, Interrupted } from "../lib/exec.ts";
+import { errorMessage } from "../lib/values.ts";
 import { checkoutMount, npmCacheArgs, npmVolume, userArgs } from "./container.ts";
 import {
   approvedGateConfigBlob,
@@ -503,7 +504,7 @@ export async function runGate(
     }
     // A step failure stays one; anything thrown around it (a docker cp, a git read) is not.
     if (outcome.ok || outcome.failure === "infrastructure") {
-      outcome = blockedGate(error instanceof Error ? error.message : String(error));
+      outcome = blockedGate(errorMessage(error));
     }
   } finally {
     const removed = await docker(context, ["rm", "--force", name]);

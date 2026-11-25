@@ -12,6 +12,7 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import { ensureDir, readTrimmed, writeLines } from "../lib/files.ts";
+import { isoSeconds } from "../lib/values.ts";
 import { ciStatusFile } from "../state/paths.ts";
 import type { BusContext } from "./context.ts";
 
@@ -41,10 +42,6 @@ export interface CheckRun {
 export type CheckSource = (context: BusContext, sha: string) => Promise<CheckRun[]>;
 
 const PASSING = new Set(["neutral", "skipped", "success"]);
-
-function isoNow(context: BusContext): string {
-  return new Date(context.clock.now() * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
 
 function onPath(command: string): boolean {
   return (process.env.PATH ?? "").split(delimiter).some((directory) => {
@@ -194,7 +191,8 @@ async function poll(
 ): Promise<PollResult> {
   const { ci } = context.config;
   const logFile = join(context.paths.ciDir, `${sha}.log`);
-  const say = (line: string): void => appendFileSync(logFile, `${isoNow(context)} ${line}\n`);
+  const say = (line: string): void =>
+    appendFileSync(logFile, `${isoSeconds(context.clock.now() * 1000)} ${line}\n`);
   const required = new Set(ci.requiredNames);
   let last: string | undefined;
   let state = requiredState([], required);

@@ -8,6 +8,7 @@ import { runGate, treeFingerprint } from "../gate/gate.ts";
 import { assertNotInterrupted, git, Interrupted } from "../lib/exec.ts";
 import { ensureDir, nonEmpty, readTrimmed, writeLines } from "../lib/files.ts";
 import { latestScheduledSlot, stamp } from "../lib/time.ts";
+import { errorMessage } from "../lib/values.ts";
 import type { BlockedStage } from "../state/events.ts";
 import { gateFailedFile } from "../state/paths.ts";
 import { resumeStoppedCi } from "./ci.ts";
@@ -518,7 +519,7 @@ async function gateAndPush(
     rethrowInterrupted(error);
     // Never leave a pushed SHA undeployed without a report.
     updateDeliveryWork(context, attempt.activity, "failed", head);
-    const cause = error instanceof Error ? error.message : String(error);
+    const cause = errorMessage(error);
     context.log(`bus: deployment staging failed: ${cause}`);
     context.events.emit(
       "deploy_failure",

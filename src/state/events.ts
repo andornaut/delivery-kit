@@ -5,6 +5,8 @@
 // lives here so a contract change touches one module.
 import { createHash } from "node:crypto";
 
+import { isRecord } from "../lib/values.ts";
+
 export const EVENT_SCHEMA = 1;
 export const EVENTS_FILE = "events.jsonl";
 export const CURSOR_FILE = "events.cursor";
@@ -89,11 +91,6 @@ export interface RunnerEvent {
   readonly work: readonly string[] | null;
 }
 
-/** ISO 8601 UTC to the second. */
-export function isoSeconds(epochMs: number): string {
-  return new Date(epochMs).toISOString().replace(/\.\d{3}Z$/u, "Z");
-}
-
 /** Build an event, deriving `sha` from a commit key when omitted. */
 export function makeEvent(
   fields: {
@@ -164,10 +161,6 @@ export function formatLine(event: RunnerEvent): string {
     }
   }
   return fits(low) as string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Read a complete schema-1 line, including types written by earlier runners. */

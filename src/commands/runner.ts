@@ -1,7 +1,6 @@
 // The runner group. `runner unit --game ID` prints the explicit systemd user unit for one game's
 // resident runner and installs nothing. `runner stop` and `runner start` stop a game's runner once
 // it is idle and drained and start a single instance (src/supervision/lifecycle.ts).
-import { statSync } from "node:fs";
 import { homedir } from "node:os";
 
 import {
@@ -13,9 +12,9 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import { VERSION } from "../compatibility.ts";
+import { isDirectory, isFile } from "../lib/files.ts";
 import { busPaths } from "../state/paths.ts";
 import {
-  type Lifecycle,
   StartRefused,
   startRunner,
   STOP_TIMEOUT_SECONDS,
@@ -34,26 +33,10 @@ import {
 import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
-const USAGE = commandUsage("runner unit");
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
+const UNIT_USAGE = commandUsage("runner unit");
 
 export const runnerUnit: Handler = (io, root, args) => {
-  const resolved = resolveGame(io, root, SPECS["runner unit"].options, USAGE, args);
+  const resolved = resolveGame(io, root, SPECS["runner unit"].options, UNIT_USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }
@@ -96,74 +79,66 @@ export const runnerUnit: Handler = (io, root, args) => {
   return EXIT_OK;
 };
 
-/** The process, systemctl and clock seams; tests replace them. */
-export type LifecycleFactory = (paths: ReturnType<typeof busPaths>, repo: string) => Lifecycle;
-
 function home(env: NodeJS.ProcessEnv): string {
   return env.HOME !== undefined && env.HOME !== "" ? env.HOME : homedir();
 }
 
-export function runnerStopWith(makeLifecycle: LifecycleFactory): Handler {
-  const usage = commandUsage("runner stop");
-  return async (io, root, args) => {
-    const resolved = resolveGame(io, root, SPECS["runner stop"].options, usage, args);
-    if (typeof resolved === "number") {
-      return resolved;
+const STOP_USAGE = commandUsage("runner stop");
+
+export const runnerStop: Handler = async (io, root, args) => {
+  const resolved = resolveGame(io, root, SPECS["runner stop"].options, STOP_USAGE, args);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
+  const { game, values } = resolved;
+  let timeout = STOP_TIMEOUT_SECONDS;
+  if (values.timeout !== undefined) {
+    const text = String(values.timeout);
+    if (!/^[1-9]\d{0,6}$/u.test(text)) {
+      io.err(`delivery-kit: --timeout must be a positive whole number of seconds\n${STOP_USAGE}\n`);
+      return EXIT_USAGE;
     }
-    const { game, values } = resolved;
-    let timeout = STOP_TIMEOUT_SECONDS;
-    if (values.timeout !== undefined) {
-      const text = String(values.timeout);
-      if (!/^[1-9]\d{0,6}$/u.test(text)) {
-        io.err(`delivery-kit: --timeout must be a positive whole number of seconds\n${usage}\n`);
-        return EXIT_USAGE;
-      }
-      timeout = Number(text);
-    }
-    const paths = busPaths(game.busDir);
-    const result = await stopRunner(
-      makeLifecycle(paths, game.repo),
-      { game: game.id, paths, unitFile: unitFile(home(io.env), game.id) },
-      timeout,
-    );
+    timeout = Number(text);
+  }
+  const paths = busPaths(game.busDir);
+  const result = await stopRunner(
+    systemLifecycle(paths, game.repo),
+    { game: game.id, paths, unitFile: unitFile(home(io.env), game.id) },
+    timeout,
+  );
+  io.out(`${dumpsJson(result)}\n`);
+  return result.stopped && result.locksFree ? EXIT_OK : EXIT_INVALID;
+};
+
+const START_USAGE = commandUsage("runner start");
+
+export const runnerStart: Handler = async (io, root, args) => {
+  const resolved = resolveGame(io, root, SPECS["runner start"].options, START_USAGE, args);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
+  const { game, layout } = resolved;
+  const paths = busPaths(game.busDir);
+  try {
+    const result = await startRunner(systemLifecycle(paths, game.repo), {
+      game: game.id,
+      paths,
+      spawn: {
+        cliPath: installedCli(game.repo),
+        coordinatorRoot: layout.root,
+        cwd: game.repo,
+        env: io.env,
+        node: process.execPath,
+      },
+      unitFile: unitFile(home(io.env), game.id),
+    });
     io.out(`${dumpsJson(result)}\n`);
-    return result.stopped && result.locksFree ? EXIT_OK : EXIT_INVALID;
-  };
-}
-
-export function runnerStartWith(makeLifecycle: LifecycleFactory): Handler {
-  const usage = commandUsage("runner start");
-  return async (io, root, args) => {
-    const resolved = resolveGame(io, root, SPECS["runner start"].options, usage, args);
-    if (typeof resolved === "number") {
-      return resolved;
+    return EXIT_OK;
+  } catch (error) {
+    if (error instanceof StartRefused) {
+      io.err(`delivery-kit: runner start: ${error.message}\n`);
+      return EXIT_INVALID;
     }
-    const { game, layout } = resolved;
-    const paths = busPaths(game.busDir);
-    try {
-      const result = await startRunner(makeLifecycle(paths, game.repo), {
-        game: game.id,
-        paths,
-        spawn: {
-          cliPath: installedCli(game.repo),
-          coordinatorRoot: layout.root,
-          cwd: game.repo,
-          env: io.env,
-          node: process.execPath,
-        },
-        unitFile: unitFile(home(io.env), game.id),
-      });
-      io.out(`${dumpsJson(result)}\n`);
-      return EXIT_OK;
-    } catch (error) {
-      if (error instanceof StartRefused) {
-        io.err(`delivery-kit: runner start: ${error.message}\n`);
-        return EXIT_INVALID;
-      }
-      throw error;
-    }
-  };
-}
-
-export const runnerStop: Handler = runnerStopWith(systemLifecycle);
-export const runnerStart: Handler = runnerStartWith(systemLifecycle);
+    throw error;
+  }
+};

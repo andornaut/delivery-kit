@@ -14,6 +14,8 @@ import {
   type ProjectConfig,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { errorMessage } from "../lib/values.ts";
+
 export interface ResolvedGame {
   readonly layout: Layout;
   readonly game: GameLayout;
@@ -22,10 +24,6 @@ export interface ResolvedGame {
 }
 
 type Options = NonNullable<ParseArgsConfig["options"]>;
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Resolve `--game ID` plus `extra` options, or print the problem and return an exit code. */
 export function resolveGame(
@@ -40,7 +38,7 @@ export function resolveGame(
     values = parseArgs({ args, options: { game: { type: "string" }, ...extra }, strict: true })
       .values as Record<string, string | boolean | undefined>;
   } catch (error) {
-    io.err(`delivery-kit: ${message(error)}\n${usage}\n`);
+    io.err(`delivery-kit: ${errorMessage(error)}\n${usage}\n`);
     return EXIT_USAGE;
   }
   if (typeof values.game !== "string") {
@@ -51,7 +49,7 @@ export function resolveGame(
   try {
     layout = loadLayout(root);
   } catch (error) {
-    io.err(`delivery-kit: ${message(error)}\n`);
+    io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
   if (!Object.hasOwn(layout.config.games, values.game)) {
@@ -62,7 +60,7 @@ export function resolveGame(
   try {
     return { config: loadProjectConfig(game.configFile), game, layout, values };
   } catch (error) {
-    io.err(`delivery-kit: ${message(error)}\n`);
+    io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
 }

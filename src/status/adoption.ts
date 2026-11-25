@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { errnoCode } from "../lib/files.ts";
 import { logIdentity, readCursor, rotatedLogs } from "../state/eventlog.ts";
 import { cursorRefersTo, type EventCursor, parseLine } from "../state/events.ts";
 import type { BusPaths } from "../state/paths.ts";
@@ -33,16 +34,12 @@ export interface StartRecord {
   readonly token: string | null;
 }
 
-function errno(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code;
-}
-
 /** The file's bytes; undefined when it does not exist. */
 function readLog(path: string): Buffer | undefined {
   try {
     return readFileSync(path);
   } catch (error) {
-    if (errno(error) === "ENOENT") {
+    if (errnoCode(error) === "ENOENT") {
       return undefined;
     }
     throw error;

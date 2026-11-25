@@ -21,7 +21,8 @@ import { join } from "node:path";
 
 import { fsyncDirectory } from "@andornaut/coordination-kit/build/shared";
 
-import { readText, readTrimmed, writeLines } from "../lib/files.ts";
+import { errnoCode, readText, readTrimmed, writeLines } from "../lib/files.ts";
+import { isoSeconds } from "../lib/values.ts";
 import {
   cleanDetail,
   completesDeploy,
@@ -32,7 +33,6 @@ import {
   EVENTS_FILE,
   type EventType,
   formatLine,
-  isoSeconds,
   LINE_LIMIT,
   type LogIdentity,
   makeEvent,
@@ -66,15 +66,11 @@ interface CommitProgress {
   deploy: boolean;
 }
 
-function errno(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code;
-}
-
 function sizeOf(path: string): number | undefined {
   try {
     return statSync(path).size;
   } catch (error) {
-    if (errno(error) === "ENOENT") {
+    if (errnoCode(error) === "ENOENT") {
       return undefined;
     }
     throw error;
@@ -114,7 +110,7 @@ export function readCursor(path: string): EventCursor | "invalid" | undefined {
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    return errno(error) === "ENOENT" ? undefined : "invalid";
+    return errnoCode(error) === "ENOENT" ? undefined : "invalid";
   }
   return parseCursor(text) ?? "invalid";
 }
@@ -125,7 +121,7 @@ export function firstLineId(path: string): string | null | undefined {
   try {
     head = readAt(path, 0, LINE_LIMIT);
   } catch (error) {
-    if (errno(error) === "ENOENT") {
+    if (errnoCode(error) === "ENOENT") {
       return undefined;
     }
     throw error;
@@ -140,7 +136,7 @@ export function logIdentity(path: string): LogIdentity | undefined {
   try {
     stat = statSync(path);
   } catch (error) {
-    if (errno(error) === "ENOENT") {
+    if (errnoCode(error) === "ENOENT") {
       return undefined;
     }
     throw error;

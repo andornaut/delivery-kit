@@ -7,6 +7,7 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { errorMessage } from "../lib/values.ts";
 import { busContext } from "../runner/context.ts";
 import { RunnerRefused, runRunner } from "../runner/runner.ts";
 import { testOptions } from "../runner/testOverrides.ts";
@@ -27,7 +28,7 @@ export const run: Handler = async (io, root, args) => {
     readRegistry(layout);
   } catch (error) {
     if (!(error instanceof RegistryMissing)) {
-      io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+      io.err(`delivery-kit: ${errorMessage(error)}\n`);
       return EXIT_INVALID;
     }
   }

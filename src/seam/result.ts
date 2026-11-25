@@ -2,6 +2,7 @@
 // validation of a review-deliver, events-ingest or version result line. Pure; the spawn is in
 // coordinator.ts.
 import { zonedParts } from "../lib/time.ts";
+import { isRecord } from "../lib/values.ts";
 import { type CliIdentity, cliIdentity } from "../state/seam.ts";
 
 /** The runner log prefix of a deferred review, on its own line and on stderr. */
@@ -82,10 +83,6 @@ export function slotIso(timezone: string, slot: number): string {
 export function oneLine(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** The single JSON object stdout holds, or why it is not one. */

@@ -1,6 +1,6 @@
 // Small file reads and durable writes shared by the state, status and runner modules.
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 
 import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
@@ -44,5 +44,26 @@ export function fileSha256(path: string): string | null {
     return createHash("sha256").update(readFileSync(path)).digest("hex");
   } catch {
     return null;
+  }
+}
+
+/** The error's `errno` code, such as ENOENT, when it has one. */
+export function errnoCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+export function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
   }
 }

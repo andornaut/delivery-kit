@@ -11,6 +11,7 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { errorMessage } from "../lib/values.ts";
 import { setDesiredDelivery } from "../state/control.ts";
 import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
@@ -44,7 +45,7 @@ export const control: Handler = (io, root, args) => {
     io.out(`${dumpsJson(record.desired)}\n`);
     return EXIT_OK;
   } catch (error) {
-    io.err(`delivery-kit: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
 };

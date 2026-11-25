@@ -22,12 +22,9 @@ import {
   readJsonIfExists,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { errorMessage } from "../lib/values.ts";
 import { SPECS } from "./spec.ts";
 import { workerParentProblems } from "./worker-parents.ts";
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function checkGame(
   layout: Layout,

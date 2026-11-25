@@ -12,7 +12,7 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import type { Exec } from "../lib/exec.ts";
-import { ensureDir } from "../lib/files.ts";
+import { ensureDir, errnoCode } from "../lib/files.ts";
 import { type BusPaths } from "../state/paths.ts";
 import { mainHead, skipReason } from "./trunk.ts";
 
@@ -106,6 +106,23 @@ export function captureRequest(store: RequestStore, id: string): Promise<string>
     writeRecord(path, record);
     return `${dumpsJson(record)}\n`;
   });
+}
+
+/** Whether a request receipt is pending; read without the lock, since claiming re-reads under it. */
+export function hasPendingRequest(paths: BusPaths): boolean {
+  try {
+    return readdirSync(paths.requestsDir).some((name) => {
+      if (!name.endsWith(".json")) {
+        return false;
+      }
+      return readRecord(join(paths.requestsDir, name)).state === "pending";
+    });
+  } catch (error) {
+    if (errnoCode(error) === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /** Mark the first pending request started and return its ID. */

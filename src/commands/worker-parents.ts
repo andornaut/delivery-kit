@@ -4,12 +4,12 @@
 // that fails its own validation still points at the parent that caused it.
 import { CANONICAL_UUID, type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 
+import { isRecord } from "../lib/values.ts";
+
 type Json = Record<string, unknown>;
 
 function object(value: unknown): Json | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined;
+  return isRecord(value) ? value : undefined;
 }
 
 /** The selected ID of a registered role, without accepting an invalid override. */

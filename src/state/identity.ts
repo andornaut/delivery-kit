@@ -6,6 +6,7 @@ import { closeSync, constants, existsSync, fsyncSync, openSync, writeSync } from
 import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
 import { fileSha256, readText } from "../lib/files.ts";
+import { isoSeconds } from "../lib/values.ts";
 import type { BusPaths } from "./paths.ts";
 
 export interface IdentityInput {
@@ -29,7 +30,7 @@ function nowNs(): bigint {
 export function recordIdentity(paths: BusPaths, input: IdentityInput): Record<string, unknown> {
   const started = input.startedNs ?? nowNs();
   const token = `${input.pid}:${started}:${randomUUID()}`;
-  const startedAt = new Date(Number(started / 1_000_000n)).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const startedAt = isoSeconds(Number(started / 1_000_000n));
   const identity = {
     cli_sha256: input.cliSha256 ?? null,
     config: input.config,

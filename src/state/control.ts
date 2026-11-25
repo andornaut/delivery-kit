@@ -7,6 +7,8 @@ import {
   writeJsonDurable,
 } from "@andornaut/coordination-kit/build/shared";
 
+import { isRecord } from "../lib/values.ts";
+
 export type DesiredDeliveryState = "enabled" | "paused";
 export type DeliveryActivityState = "checking" | "deploying" | "failed";
 export type ObservedDeliveryState = DeliveryActivityState | "stopped" | "idle";
@@ -71,10 +73,6 @@ export class ControlInvalid extends Error {
   }
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function text(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
 }
@@ -93,7 +91,7 @@ function revision(value: unknown): value is number {
 
 function activity(value: unknown, observed = false): boolean {
   return (
-    object(value) &&
+    isRecord(value) &&
     (value.sha === null || (typeof value.sha === "string" && /^[0-9a-f]{40}$/.test(value.sha))) &&
     timestamp(value.updatedAt) &&
     (value.state === "checking" ||
@@ -123,23 +121,23 @@ export function validateDeliveryControl(store: ControlStore, value: unknown): De
     throw new ControlInvalid(join(store.dir, "delivery-control.json"));
   };
   if (
-    !object(value) ||
+    !isRecord(value) ||
     value.schema !== 1 ||
     !revision(value.revision) ||
-    !object(value.desired) ||
+    !isRecord(value.desired) ||
     !revision(value.desired.revision) ||
     value.desired.revision > value.revision ||
     !timestamp(value.desired.updatedAt) ||
     !text(value.desired.reason) ||
     !text(value.desired.requester) ||
     (value.desired.state !== "enabled" && value.desired.state !== "paused") ||
-    !object(value.activities)
+    !isRecord(value.activities)
   ) {
     return invalid();
   }
   if (
     value.observed !== null &&
-    (!object(value.observed) ||
+    (!isRecord(value.observed) ||
       !activity(value.observed, true) ||
       !identifier(value.observed.runnerToken))
   ) {
