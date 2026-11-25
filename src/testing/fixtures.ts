@@ -7,7 +7,7 @@ export const CLAUDE_TECH = "00000000-0000-4000-8000-000000000001";
 export const CODEX_TECH = "00000000-0000-4000-8000-000000000002";
 export const CLAUDE_COORDINATOR = "00000000-0000-4000-8000-000000000003";
 
-export function coordinatorConfig(): Record<string, unknown> {
+function coordinatorConfig(): Record<string, unknown> {
   return {
     games: {
       "archies-dog-walks": {
@@ -81,7 +81,7 @@ export function registryInput(): Record<string, unknown> {
   };
 }
 
-export interface Fixture {
+interface Fixture {
   /** The game-coordinator root. */
   readonly root: string;
   readonly base: string;

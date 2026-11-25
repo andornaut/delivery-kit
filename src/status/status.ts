@@ -48,7 +48,7 @@ function configStatus(identity: Record<string, unknown>): "changed" | "loaded" |
   return onDisk === loaded ? "loaded" : "changed";
 }
 
-export interface StatusReport {
+interface StatusReport {
   readonly provenance: ProvenanceReport;
   readonly [key: string]: unknown;
 }

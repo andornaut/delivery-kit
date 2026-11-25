@@ -18,9 +18,9 @@ import { mainHead, skipReason } from "./trunk.ts";
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-export type RequestState = "finished" | "interrupted" | "pending" | "rejected" | "started";
+type RequestState = "finished" | "interrupted" | "pending" | "rejected" | "started";
 
-export interface RequestRecord {
+interface RequestRecord {
   id: string;
   state: RequestState;
   /** The exact local main SHA captured at request time. */

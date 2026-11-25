@@ -20,8 +20,8 @@ export const START_WAIT_SECONDS = 30;
 export const EXIT_WAIT_SECONDS = 150;
 const POLL_MS = 1000;
 
-export type StopMethod = "systemd" | "signal" | "none";
-export type StartMethod = "systemd" | "spawn";
+type StopMethod = "systemd" | "signal" | "none";
+type StartMethod = "systemd" | "spawn";
 
 /** The summary each status poll needs; statusReport provides it. */
 export interface RunnerStatus {
@@ -49,7 +49,7 @@ export interface Lifecycle {
   readonly sleep: (milliseconds: number) => Promise<void>;
 }
 
-export interface SpawnSpec {
+interface SpawnSpec {
   readonly node: string;
   readonly cliPath: string;
   readonly game: string;
@@ -68,7 +68,7 @@ export interface Target {
 }
 
 /** The unit name `runner unit` output is installed under. */
-export function unitName(game: string): string {
+function unitName(game: string): string {
   return `delivery-kit-${game}`;
 }
 
@@ -82,7 +82,7 @@ function running(report: RunnerStatus): boolean {
 }
 
 /** The PID bus/runner.json records, or null when it is absent or unreadable. */
-export function recordedPid(paths: BusPaths): number | null {
+function recordedPid(paths: BusPaths): number | null {
   try {
     const value = JSON.parse(readFileSync(paths.runnerJson, "utf8")) as { pid?: unknown };
     return Number.isSafeInteger(value.pid) && (value.pid as number) > 0
@@ -108,7 +108,7 @@ function unitActive(lifecycle: Lifecycle, target: Target): boolean {
   );
 }
 
-export interface StopResult {
+interface StopResult {
   readonly schema: 1;
   readonly game: string;
   readonly pid: number | null;
@@ -180,7 +180,7 @@ export async function stopRunner(
   return result({ locksFree: freed, method, pid, stopped: freed });
 }
 
-export interface StartResult {
+interface StartResult {
   readonly schema: 1;
   readonly game: string;
   readonly pid: number;

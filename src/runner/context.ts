@@ -28,7 +28,7 @@ export interface Events {
 }
 
 /** A game's configuration with the schedule timezone resolved from config.json when omitted. */
-export type BusConfig = ProjectConfig & {
+type BusConfig = ProjectConfig & {
   readonly schedule: ProjectConfig["schedule"] & { readonly timezone: string };
 };
 
@@ -85,7 +85,7 @@ function fileLog(path: string): (line: string) => void {
   return (line) => appendFileSync(path, `${line}\n`, { mode: 0o600 });
 }
 
-export interface ContextOptions {
+interface ContextOptions {
   readonly exec?: Exec;
   readonly clock?: Clock;
   readonly events?: Events;

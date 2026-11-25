@@ -114,9 +114,9 @@ describe("watchCi", () => {
 
   it("treats only a missing ci/ directory as nothing to resume", () => {
     const { context } = setup();
-    expect(unfinishedCi(context)).toEqual([]);
+    expect(unfinishedCi(context.paths)).toEqual([]);
     writeFileSync(context.paths.ciDir, "");
-    expect(() => unfinishedCi(context)).toThrow(/ENOTDIR/);
+    expect(() => unfinishedCi(context.paths)).toThrow(/ENOTDIR/);
   });
 
   it("resumes a running watch with its original deadline", async () => {
@@ -126,7 +126,7 @@ describe("watchCi", () => {
     writeFileSync(status, "running\n");
     const started = clock.time - context.config.ci.timeoutSeconds + 120;
     utimesSync(status, started, started);
-    expect(unfinishedCi(context)).toEqual([SHA]);
+    expect(unfinishedCi(context.paths)).toEqual([SHA]);
     let polls = 0;
     const result = await watchCi(context, SHA, {
       checks: () => {

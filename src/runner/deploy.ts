@@ -8,7 +8,7 @@ import { fsyncDirectory, SHA_PATTERN } from "@andornaut/coordination-kit/build/s
 
 import { gitOk, Interrupted, WRANGLER_ENTRY } from "../lib/exec.ts";
 import { ensureDir, readText, readTrimmed, writeLines } from "../lib/files.ts";
-import { ciStatusFile } from "../state/paths.ts";
+import { type BusPaths, ciStatusFile } from "../state/paths.ts";
 import type { BusContext } from "./context.ts";
 import {
   beginDeliveryWork,
@@ -20,14 +20,14 @@ import {
 } from "./session.ts";
 import { remoteMain } from "./trunk.ts";
 
-export interface PendingDeploy {
+interface PendingDeploy {
   readonly sha: string;
   /** The detached gate worktree holding the gated dist/ and node_modules/. */
   readonly work: string;
 }
 
-export function readPending(context: BusContext): PendingDeploy | undefined {
-  const text = readText(context.paths.deployPending);
+export function readPending(paths: BusPaths): PendingDeploy | undefined {
+  const text = readText(paths.deployPending);
   if (text === undefined || text === "") {
     return undefined;
   }
@@ -35,16 +35,18 @@ export function readPending(context: BusContext): PendingDeploy | undefined {
   return { sha, work };
 }
 
-export function deployPendingExists(context: BusContext): boolean {
-  return existsSync(context.paths.deployPending) && readPending(context) !== undefined;
+export function deployPendingExists(paths: BusPaths): boolean {
+  return existsSync(paths.deployPending) && readPending(paths) !== undefined;
 }
 
 /**
  * The pushed range changes a file outside the configured skip pattern. An unknown range (a first
  * push, or a previous remote SHA this checkout does not have) always needs a deployment.
  */
-export function deployNeeded(context: BusContext, changed: readonly string[] | undefined): boolean {
-  const pattern = context.config.deploy.skipPattern;
+export function deployNeeded(
+  pattern: string | undefined,
+  changed: readonly string[] | undefined,
+): boolean {
   if (pattern === undefined || pattern === "" || changed === undefined) {
     return true;
   }
@@ -220,7 +222,7 @@ function attemptOnce(
 /** After CI passes for `sha`: deploy it when it is the pending deployment. */
 export async function deployAfterCi(context: BusContext, sha: string): Promise<boolean> {
   return withPendingLifecycle(context, async (lifecycle, prior) => {
-    const pending = readPending(context);
+    const pending = readPending(context.paths);
     if (pending?.sha !== sha) {
       return false;
     }
@@ -234,7 +236,7 @@ export async function deployAfterCi(context: BusContext, sha: string): Promise<b
  */
 export async function retryDeploy(context: BusContext): Promise<boolean> {
   return withPendingLifecycle(context, async (lifecycle, prior) => {
-    const pending = readPending(context);
+    const pending = readPending(context.paths);
     if (pending === undefined) {
       return true;
     }
@@ -253,7 +255,7 @@ export async function retryDeploy(context: BusContext): Promise<boolean> {
 
 /** Supersede an older pending deployment by a newer push: keep its record, drop its worktree. */
 async function supersede(context: BusContext, sha: string): Promise<void> {
-  const previous = readPending(context);
+  const previous = readPending(context.paths);
   if (previous === undefined || previous.sha === sha) {
     return;
   }

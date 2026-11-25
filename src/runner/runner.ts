@@ -188,7 +188,7 @@ function pinGuard(context: BusContext, loaded: PinIdentity): () => void {
 
 export class RunnerRefused extends Error {}
 
-export interface RunnerOptions {
+interface RunnerOptions {
   /** The loaded bundle, for the pin guard; defaults to the running script. */
   readonly cliPath?: string;
   readonly signal: AbortSignal;
@@ -265,7 +265,7 @@ export async function runRunner(
       loaded,
     );
     const guard = pinGuard(context, loaded);
-    for (const sha of unfinishedCi(context)) {
+    for (const sha of unfinishedCi(context.paths)) {
       tasks.start(context, sha);
     }
     // The seam never delays startup or a departure: the probe logs the CLI identity early, and

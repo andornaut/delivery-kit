@@ -11,8 +11,8 @@ import { cursorRefersTo, type EventCursor, parseLine } from "../state/events.ts"
 import type { BusPaths } from "../state/paths.ts";
 import { coordinatorCliReport } from "../state/seam.ts";
 
-export type ObserverAdoption = "current" | "stale" | "unknown";
-export type ObserverAdoptionReason =
+type ObserverAdoption = "current" | "stale" | "unknown";
+type ObserverAdoptionReason =
   | "runner_not_current"
   | "log_unreadable"
   | "no_runner_started"
@@ -21,14 +21,14 @@ export type ObserverAdoptionReason =
   | "cli_out_of_range"
   | "not_ingested";
 
-export interface ObserverAdoptionReport {
+interface ObserverAdoptionReport {
   readonly status: ObserverAdoption;
   /** Null only when current. */
   readonly reason: ObserverAdoptionReason | null;
 }
 
 /** The latest `runner.started` line: its file, the byte offset after it and its token. */
-export interface StartRecord {
+interface StartRecord {
   readonly file: string;
   readonly end: number;
   readonly token: string | null;
@@ -98,7 +98,7 @@ export function latestStart(paths: BusPaths): StartRecord | null {
 }
 
 /** Whether the cursor names the record's file and has consumed the record's line. */
-export function ingested(cursor: EventCursor | "invalid" | undefined, start: StartRecord): boolean {
+function ingested(cursor: EventCursor | "invalid" | undefined, start: StartRecord): boolean {
   if (cursor === undefined || cursor === "invalid" || cursor.offset < start.end) {
     return false;
   }

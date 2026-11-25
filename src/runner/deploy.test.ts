@@ -79,7 +79,7 @@ describe("pending deployment lifecycle", () => {
       await expect(Promise.all([first, second])).resolves.toEqual([false, false]);
       expect(wranglerCalls).toEqual([pending.work]);
       expect(events.list.filter(([kind]) => kind === "deploy_retry")).toHaveLength(1);
-      expect(readPending(context)).toEqual(pending);
+      expect(readPending(context.paths)).toEqual(pending);
       expect(existsSync(pending.work)).toBe(true);
 
       await expect(scheduled()).resolves.toBe(false);
@@ -108,7 +108,7 @@ describe("pending deployment lifecycle", () => {
     expect(wranglerCalls).toEqual([pending.work]);
     const completed = join(context.paths.deployDir, `${pending.sha}.completed`);
     expect(readFileSync(completed, "utf8")).toBe(`${pending.sha}\n${pending.work}\n`);
-    expect(readPending(context)).toEqual(next);
+    expect(readPending(context.paths)).toEqual(next);
     expect(existsSync(pending.work)).toBe(false);
     expect(existsSync(next.work)).toBe(true);
   });
@@ -158,7 +158,7 @@ describe("pending deployment lifecycle", () => {
     remote.result = failed;
 
     await expect(retryDeploy(context)).resolves.toBe(false);
-    expect(readPending(context)).toEqual(pending);
+    expect(readPending(context.paths)).toEqual(pending);
     expect(existsSync(pending.work)).toBe(true);
     expect(wranglerCalls).toEqual([]);
     expect(context.lines).toContainEqual(expect.stringContaining("remote main lookup failed"));
@@ -170,7 +170,7 @@ describe("pending deployment lifecycle", () => {
     remote.result = healthy;
     await expect(retryDeploy(context)).resolves.toBe(true);
     expect(wranglerCalls).toEqual([pending.work]);
-    expect(readPending(context)).toBeUndefined();
+    expect(readPending(context.paths)).toBeUndefined();
   });
 
   it("propagates an interrupted remote lookup and releases the lifecycle lock", async () => {
@@ -180,7 +180,7 @@ describe("pending deployment lifecycle", () => {
     remote.result = { signal: "SIGTERM", status: null, stderr: "", stdout: "" };
 
     await expect(deployAfterCi(context, pending.sha)).rejects.toBeInstanceOf(Interrupted);
-    expect(readPending(context)).toEqual(pending);
+    expect(readPending(context.paths)).toEqual(pending);
     expect(wranglerCalls).toEqual([]);
     expect(events.list).toEqual([]);
     expect(readDeliveryControl({ dir: context.paths.dir }).lastFailure).toBeNull();

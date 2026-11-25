@@ -6,8 +6,6 @@ import {
   usageText,
 } from "@andornaut/coordination-kit/build/shared";
 
-export type { CommandSpec } from "@andornaut/coordination-kit/build/shared";
-
 const BINARY = "delivery-kit";
 /** The placeholder each string option shows in help. */
 const VALUES: Readonly<Record<string, string>> = {

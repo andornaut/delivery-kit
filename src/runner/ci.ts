@@ -13,10 +13,10 @@ import {
 
 import { ensureDir, readTrimmed, writeLines } from "../lib/files.ts";
 import { isoSeconds } from "../lib/values.ts";
-import { ciStatusFile } from "../state/paths.ts";
+import { type BusPaths, ciStatusFile } from "../state/paths.ts";
 import type { BusContext } from "./context.ts";
 
-export type CiResult = "busy" | "failure" | "success" | "timeout" | "unauthenticated";
+type CiResult = "busy" | "failure" | "success" | "timeout" | "unauthenticated";
 
 /** Watch results the next departure restarts: the checks may still finish or become readable. */
 const RESUMABLE: ReadonlySet<string> = new Set(["timeout", "unauthenticated"]);
@@ -39,7 +39,7 @@ export interface CheckRun {
   readonly conclusion: string | null;
 }
 
-export type CheckSource = (context: BusContext, sha: string) => Promise<CheckRun[]>;
+type CheckSource = (context: BusContext, sha: string) => Promise<CheckRun[]>;
 
 const PASSING = new Set(["neutral", "skipped", "success"]);
 
@@ -167,7 +167,7 @@ interface PollResult {
   readonly state: RequiredState;
 }
 
-export interface WatchOptions {
+interface WatchOptions {
   readonly checks?: CheckSource;
   readonly signal?: AbortSignal;
 }
@@ -313,13 +313,13 @@ export function resumeStoppedCi(context: BusContext, shas: readonly (string | un
 }
 
 /** SHAs whose watch must resume: every running status, plus a last push with no status yet. */
-export function unfinishedCi(context: BusContext): string[] {
+export function unfinishedCi(paths: BusPaths): string[] {
   const shas = new Set<string>();
   try {
-    for (const name of readdirSync(context.paths.ciDir).sort()) {
+    for (const name of readdirSync(paths.ciDir).sort()) {
       if (
         name.endsWith(".status") &&
-        ["pending", "running"].includes(readTrimmed(join(context.paths.ciDir, name)) ?? "")
+        ["pending", "running"].includes(readTrimmed(join(paths.ciDir, name)) ?? "")
       ) {
         shas.add(name.slice(0, -".status".length));
       }
@@ -330,11 +330,11 @@ export function unfinishedCi(context: BusContext): string[] {
       throw error;
     }
   }
-  const pushed = readTrimmed(context.paths.lastPushSha);
+  const pushed = readTrimmed(paths.lastPushSha);
   if (
     pushed !== undefined &&
     SHA_PATTERN.test(pushed) &&
-    readTrimmed(ciStatusFile(context.paths, pushed)) === undefined
+    readTrimmed(ciStatusFile(paths, pushed)) === undefined
   ) {
     shas.add(pushed);
   }

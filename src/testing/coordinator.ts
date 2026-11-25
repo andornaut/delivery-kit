@@ -8,11 +8,11 @@ import { type Coordinator, COORDINATOR_CLI } from "../seam/coordinator.ts";
 import { type SeamOutcome } from "../seam/result.ts";
 
 /** The fake CLI the unit and contract suites share. */
-export const FAKE_COORDINATOR_CLI = fileURLToPath(
+const FAKE_COORDINATOR_CLI = fileURLToPath(
   new URL("../../tests/contract/lib/fake-coordination-kit.mjs", import.meta.url),
 );
 
-export interface FakeCall {
+interface FakeCall {
   readonly args: string[];
   readonly cwd: string;
   readonly execPath: string;
@@ -48,7 +48,7 @@ export function coordinatorCalls(root: string): FakeCall[] {
     : [];
 }
 
-export interface RecordingCoordinator extends Coordinator {
+interface RecordingCoordinator extends Coordinator {
   readonly reviews: number[];
   ingests: number;
   probes: number;

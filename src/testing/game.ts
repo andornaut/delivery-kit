@@ -64,7 +64,7 @@ export function commitFile(
   return gitSync(cwd, "rev-parse", "HEAD");
 }
 
-export interface RecordedEvents extends Events {
+interface RecordedEvents extends Events {
   readonly list: [string, string, string, string?][];
   readonly starts: [string, RunnerStarted][];
   ingests: number;
@@ -107,7 +107,7 @@ export function loggedEvents(test: TestGame): RunnerEvent[] {
     .map((line) => JSON.parse(line) as RunnerEvent);
 }
 
-export interface ManualClock extends Clock {
+interface ManualClock extends Clock {
   time: number;
 }
 
@@ -128,7 +128,7 @@ export function manualClock(start: number): ManualClock {
   return clock;
 }
 
-export type FakeChild = (spec: ExecSpec) => ExecResult | Promise<ExecResult>;
+type FakeChild = (spec: ExecSpec) => ExecResult | Promise<ExecResult>;
 
 interface FakeGateContainer {
   readonly source: string;
@@ -191,7 +191,7 @@ export function fakeExec(fake: FakeChild): Exec & { calls: ExecSpec[] } {
   return exec;
 }
 
-export interface GateFake {
+interface GateFake {
   /** Mutate the simulated container copy after the independent forced-tree check. */
   readonly afterCopy?: (work: string) => void;
   /** Image Git variables are applied only to its emulated copy/identity shell processes. */

@@ -2,10 +2,16 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { holdLock } from "@andornaut/coordination-kit/build/shared";
+import {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_REFUSED,
+  EXIT_USAGE,
+  holdLock,
+} from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, main } from "../cli.ts";
+import { main } from "../cli.ts";
 import { busPaths } from "../state/paths.ts";
 import { SUPERVISION_TOOLS } from "../supervision/unit.ts";
 import { GAME, makeGame } from "../testing/game.ts";

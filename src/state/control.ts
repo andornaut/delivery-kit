@@ -9,39 +9,39 @@ import {
 
 import { isRecord } from "../lib/values.ts";
 
-export type DesiredDeliveryState = "enabled" | "paused";
-export type DeliveryActivityState = "checking" | "deploying" | "failed";
-export type ObservedDeliveryState = DeliveryActivityState | "stopped" | "idle";
+type DesiredDeliveryState = "enabled" | "paused";
+type DeliveryActivityState = "checking" | "deploying" | "failed";
+type ObservedDeliveryState = DeliveryActivityState | "stopped" | "idle";
 
 export interface ControlStore {
   readonly dir: string;
   readonly now?: () => string;
 }
 
-export interface DesiredDeliveryInput {
+interface DesiredDeliveryInput {
   readonly state: DesiredDeliveryState;
   readonly reason: string;
   readonly requester: string;
 }
 
-export interface DeliveryActivity {
+interface DeliveryActivity {
   readonly state: DeliveryActivityState;
   readonly sha: string | null;
   readonly updatedAt: string;
 }
 
-export interface DeliveryActivityInput {
+interface DeliveryActivityInput {
   readonly id: string;
   readonly state: DeliveryActivityState;
   readonly sha: string | null;
 }
 
-export interface DeliveryObservation extends Omit<DeliveryActivity, "state"> {
+interface DeliveryObservation extends Omit<DeliveryActivity, "state"> {
   readonly state: ObservedDeliveryState;
   readonly runnerToken: string;
 }
 
-export interface DeliveryControl {
+interface DeliveryControl {
   readonly schema: 1;
   readonly revision: number;
   readonly desired: DesiredDeliveryInput & {
@@ -116,7 +116,7 @@ function selected(
   return first?.[1];
 }
 
-export function validateDeliveryControl(store: ControlStore, value: unknown): DeliveryControl {
+function validateDeliveryControl(store: ControlStore, value: unknown): DeliveryControl {
   const invalid = (): never => {
     throw new ControlInvalid(join(store.dir, "delivery-control.json"));
   };

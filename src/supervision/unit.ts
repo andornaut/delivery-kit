@@ -10,14 +10,14 @@ import { PACKAGE } from "../compatibility.ts";
 
 /** Host tools the runner's children need, in unit PATH order after the Node binary. */
 export const SUPERVISION_TOOLS = ["gh", "docker", "git", "flock", "claude"] as const;
-export type SupervisionTool = (typeof SUPERVISION_TOOLS)[number];
+type SupervisionTool = (typeof SUPERVISION_TOOLS)[number];
 
 /** Restart limits: five failed starts within ten minutes stop the unit. */
-export const START_LIMIT_INTERVAL_SECONDS = 600;
-export const START_LIMIT_BURST = 5;
-export const RESTART_SECONDS = 30;
+const START_LIMIT_INTERVAL_SECONDS = 600;
+const START_LIMIT_BURST = 5;
+const RESTART_SECONDS = 30;
 /** An idle runner stops within seconds; a stop that takes longer is killed. */
-export const TIMEOUT_STOP_SECONDS = 120;
+const TIMEOUT_STOP_SECONDS = 120;
 /** The exit status of `run` on SIGTERM. */
 const SIGTERM_EXIT = 143;
 

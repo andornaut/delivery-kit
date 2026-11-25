@@ -49,7 +49,7 @@ import { type BusPaths } from "./paths.ts";
 const SHA40 = /^[0-9a-f]{40}$/u;
 const GIT_TIMEOUT_MS = 10_000;
 
-export interface EventLogOptions {
+interface EventLogOptions {
   readonly paths: BusPaths;
   readonly game: string;
   /** The game checkout, for the work range. */
@@ -90,7 +90,7 @@ function readAt(path: string, position: number, length: number): Buffer {
 }
 
 /** The bytes after the last newline of a non-empty file, or undefined when it ends in one. */
-export function tornTail(path: string): Buffer | undefined {
+function tornTail(path: string): Buffer | undefined {
   const size = sizeOf(path);
   if (size === undefined || size === 0) {
     return undefined;
@@ -116,7 +116,7 @@ export function readCursor(path: string): EventCursor | "invalid" | undefined {
 }
 
 /** The ID of the file's first complete line, null when it has none, undefined when absent. */
-export function firstLineId(path: string): string | null | undefined {
+function firstLineId(path: string): string | null | undefined {
   let head: Buffer;
   try {
     head = readAt(path, 0, LINE_LIMIT);
@@ -145,7 +145,7 @@ export function logIdentity(path: string): LogIdentity | undefined {
 }
 
 /** Which file the cursor refers to: the live log, a rotated one still present, or neither. */
-export function cursorTarget(
+function cursorTarget(
   context: {
     readonly dir: string;
     readonly live: LogIdentity | undefined;
@@ -423,7 +423,7 @@ export class EventLog {
 }
 
 /** The read-only `events` status field. */
-export interface EventLogReport {
+interface EventLogReport {
   readonly file: string;
   /** Bytes in events.jsonl; 0 when it does not exist, null when unreadable. */
   readonly size: number | null;

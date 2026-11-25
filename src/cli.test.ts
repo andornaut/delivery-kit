@@ -2,10 +2,15 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { createRegistry, type Registry } from "@andornaut/coordination-kit/build/registry";
-import { loadLayout } from "@andornaut/coordination-kit/build/shared";
+import {
+  EXIT_INVALID,
+  EXIT_OK,
+  EXIT_USAGE,
+  loadLayout,
+} from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main, USAGE } from "./cli.ts";
+import { main, USAGE } from "./cli.ts";
 import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testing/fixtures.ts";
 
 async function run(

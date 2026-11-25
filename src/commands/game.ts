@@ -16,7 +16,7 @@ import {
 
 import { errorMessage } from "../lib/values.ts";
 
-export interface ResolvedGame {
+interface ResolvedGame {
   readonly layout: Layout;
   readonly game: GameLayout;
   readonly config: ProjectConfig;

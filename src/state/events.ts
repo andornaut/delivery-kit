@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 
 import { isRecord } from "../lib/values.ts";
 
-export const EVENT_SCHEMA = 1;
+const EVENT_SCHEMA = 1;
 export const EVENTS_FILE = "events.jsonl";
 export const CURSOR_FILE = "events.cursor";
 /** Each line, its newline included, is one write() of fewer than this many bytes. */
@@ -21,10 +21,10 @@ export const TRUNCATED = " [truncated]";
 const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 
-export type EventKind = "attempt" | "ci" | "deploy" | "gate" | "push" | "runner";
-export type EventStatus = "blocked" | "failed" | "ok" | "skipped" | "timeout";
+type EventKind = "attempt" | "ci" | "deploy" | "gate" | "push" | "runner";
+type EventStatus = "blocked" | "failed" | "ok" | "skipped" | "timeout";
 
-export interface EventFamily {
+interface EventFamily {
   readonly kind: EventKind;
   readonly status: EventStatus | null;
 }

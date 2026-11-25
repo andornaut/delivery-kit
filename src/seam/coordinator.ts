@@ -29,7 +29,7 @@ export const COORDINATOR_CLI = join(
   "cli.js",
 );
 /** Each spawn's deadline, under the 60 s observer pass. */
-export const SEAM_TIMEOUT_MS = 45_000;
+const SEAM_TIMEOUT_MS = 45_000;
 const MAX_STDOUT = 1024 * 1024;
 const STDERR_TAIL = 2000;
 
@@ -138,7 +138,7 @@ export interface Coordinator {
   drain(): Promise<void>;
 }
 
-export interface CoordinatorOptions {
+interface CoordinatorOptions {
   /** The coordinator root, passed as `--root` and used as the working directory. */
   readonly root: string;
   readonly game: string;

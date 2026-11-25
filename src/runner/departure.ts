@@ -99,7 +99,7 @@ interface Attempt {
   readonly signal?: AbortSignal;
 }
 
-export interface DepartOptions {
+interface DepartOptions {
   /** A claimed one-off request; omitted for a scheduled departure. */
   readonly requestId?: string | undefined;
   /** The delivery activity the caller already began. */
@@ -193,8 +193,11 @@ async function departAdmitted(context: BusContext, options: DepartOptions): Prom
 
 async function retryPendingDelivery(context: BusContext): Promise<void> {
   // A watch that timed out or lost authentication resumes, so a pending deployment can follow.
-  resumeStoppedCi(context, [readPending(context)?.sha, readTrimmed(context.paths.lastPushSha)]);
-  if (deployPendingExists(context)) {
+  resumeStoppedCi(context, [
+    readPending(context.paths)?.sha,
+    readTrimmed(context.paths.lastPushSha),
+  ]);
+  if (deployPendingExists(context.paths)) {
     // A failed retry is reported and kept; it does not hold back a newer main.
     await retryDeploy(context);
   }
@@ -298,7 +301,7 @@ async function departLocked(context: BusContext, attempt: Attempt): Promise<numb
   }
   const changed = await changedPaths(context.exec, context.game.repo, remote, head);
   // A pending deployment of an earlier push is superseded by a gated push of this range.
-  if (docsOnly(changed) && !deployPendingExists(context)) {
+  if (docsOnly(changed) && !deployPendingExists(context.paths)) {
     return pushDocs(context, attempt, head);
   }
   return gateAndPush(context, attempt, head, changed);
@@ -514,7 +517,11 @@ async function gateAndPush(
   );
   context.log(`${attempt.when} bus: pushed ${head}`);
   try {
-    await stageDeploy(context, { sha: head, work }, deployNeeded(context, changed));
+    await stageDeploy(
+      context,
+      { sha: head, work },
+      deployNeeded(context.config.deploy.skipPattern, changed),
+    );
   } catch (error) {
     rethrowInterrupted(error);
     // Never leave a pushed SHA undeployed without a report.

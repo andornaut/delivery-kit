@@ -37,7 +37,7 @@ interface SeamRecord {
 }
 
 /** The read-only `coordinator_cli` status field. */
-export interface CoordinatorCliReport {
+interface CoordinatorCliReport {
   readonly version: string | null;
   readonly distSha256: string | null;
   readonly seenAt: string | null;

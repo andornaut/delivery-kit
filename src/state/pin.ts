@@ -92,7 +92,7 @@ function describe(identity: PinIdentity): string {
   })`;
 }
 
-export interface PinMismatch {
+interface PinMismatch {
   /** The sha256 of the loaded and installed descriptions: the pin-mismatch event key. */
   readonly key: string;
   readonly logLine: string;

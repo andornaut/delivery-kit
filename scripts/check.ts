@@ -18,7 +18,7 @@ export function node(root: string, script: string, args: readonly string[] = [])
   run(root, process.execPath, [script, ...args]);
 }
 
-export interface TestTargets {
+interface TestTargets {
   readonly unit: readonly string[] | null;
   readonly contract: readonly string[] | null;
 }
@@ -52,12 +52,12 @@ export function workerArguments(args: readonly string[]): string[] {
     : ["--maxWorkers=4", ...args];
 }
 
-export function lint(root: string): void {
+function lint(root: string): void {
   run(root, "npm", ["run", "check"]);
   run(root, "npm", ["run", "lint"]);
 }
 
-export function test(root: string, args: readonly string[]): void {
+function test(root: string, args: readonly string[]): void {
   const targets = testTargets(args);
   const unit = targets.unit === null ? null : workerArguments(targets.unit);
   const contract = targets.contract === null ? null : workerArguments(targets.contract);
@@ -69,7 +69,7 @@ export function test(root: string, args: readonly string[]): void {
   }
 }
 
-export function verify(root: string, args: readonly string[]): void {
+function verify(root: string, args: readonly string[]): void {
   lint(root);
   test(root, args);
   run(root, "npm", ["run", "package:check"]);

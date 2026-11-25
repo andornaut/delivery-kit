@@ -89,7 +89,7 @@ export const spawnExec: Exec = (spec) => {
  * A child ended by SIGTERM or SIGINT was stopped from outside, by the runner's own shutdown
  * (the signal reaches the whole process group). It is not a failure of what it was doing.
  */
-export function interrupted(result: ExecResult): boolean {
+function interrupted(result: ExecResult): boolean {
   return result.signal === "SIGTERM" || result.signal === "SIGINT";
 }
 

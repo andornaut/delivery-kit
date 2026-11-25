@@ -17,15 +17,7 @@ import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import { VERSION } from "./compatibility.ts";
 import { errorMessage } from "./lib/values.ts";
-export {
-  EXIT_INVALID,
-  EXIT_OK,
-  EXIT_REFUSED,
-  EXIT_USAGE,
-  type Handler,
-  type Io,
-} from "@andornaut/coordination-kit/build/shared";
-export const COMMANDS = [
+const COMMANDS = [
   "run",
   "runner unit",
   "runner stop",
@@ -35,7 +27,6 @@ export const COMMANDS = [
   "check-config",
   "request",
 ] as const satisfies readonly Command[];
-export type { Command };
 /** Help text, generated from each command's parser options. */
 export const USAGE = [
   "usage: delivery-kit COMMAND [options] [--root COORDINATOR_ROOT]",

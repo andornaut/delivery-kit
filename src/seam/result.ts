@@ -9,7 +9,7 @@ import { type CliIdentity, cliIdentity } from "../state/seam.ts";
 export const DEFERRED_PREFIX = "bus: review deferred: ";
 export const COMPACTION_RESERVED = "compaction-reserved";
 /** Reason tokens the seam defines; any other token is treated as a deferral. */
-export const KNOWN_REASONS: ReadonlySet<string> = new Set([
+const KNOWN_REASONS: ReadonlySet<string> = new Set([
   "route-unavailable",
   "recipient-unavailable",
   "recipient-busy",
@@ -28,7 +28,7 @@ export const CLI_VERSION = "cli-version";
 
 const TOKEN = /^[a-z][a-z0-9-]*$/u;
 
-export type SeamStatus = "delivered" | "deferred" | "skipped";
+type SeamStatus = "delivered" | "deferred" | "skipped";
 
 /** A typed result, or a runner-side deferral (`cli` absent) for a missing or out-of-range CLI. */
 export interface SeamResult {
@@ -45,11 +45,11 @@ export interface SeamResult {
  * The counts an events-ingest result may carry: lines ingested, quarantined, COMPLETE reports
  * formed, lines committed (`delivered`) and `held` (1 while a torn tail is pending).
  */
-export const INGEST_COUNTS = ["completed", "delivered", "held", "ingested", "quarantined"] as const;
-export type IngestCount = (typeof INGEST_COUNTS)[number];
+const INGEST_COUNTS = ["completed", "delivered", "held", "ingested", "quarantined"] as const;
+type IngestCount = (typeof INGEST_COUNTS)[number];
 
 /** No delivery claimed: the spawn, its exit or its result was unusable. */
-export interface SeamUnclaimed {
+interface SeamUnclaimed {
   readonly claimed: false;
   readonly why: string;
 }

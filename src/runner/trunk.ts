@@ -63,7 +63,7 @@ export function docsOnly(paths: readonly string[] | undefined): boolean {
   );
 }
 
-export type Skip = "gate-failed" | "pushed";
+type Skip = "gate-failed" | "pushed";
 
 /** Why `head` must not depart: it is the last pushed SHA, or its gate already failed. */
 export function skipReason(paths: BusPaths, head: string): Skip | undefined {

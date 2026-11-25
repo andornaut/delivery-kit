@@ -1,6 +1,6 @@
 // Wall-clock arithmetic in a named time zone. Epoch values are whole seconds.
 
-export interface ZonedParts {
+interface ZonedParts {
   readonly year: string;
   readonly month: string;
   readonly day: string;

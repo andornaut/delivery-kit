@@ -22,7 +22,7 @@ import {
 } from "../src/compatibility.ts";
 import { isMain, node, run } from "./check.ts";
 
-export interface CheckContext {
+interface CheckContext {
   readonly CHECK_REVISION: string;
   readonly CHECK_SOURCE_SHA256: string;
   readonly CHECK_SOURCE_DIRTY: boolean;
@@ -97,10 +97,7 @@ export function bundledCoordinationKit(root: string): string {
   return version;
 }
 
-export function inspectPackage(
-  env: Readonly<Record<string, string | undefined>>,
-  root: string,
-): void {
+function inspectPackage(env: Readonly<Record<string, string | undefined>>, root: string): void {
   const context = inspectionContext(env);
   const proof = mkdtempSync(join(tmpdir(), "delivery-kit-package-check-"));
   const packed = spawnSync(

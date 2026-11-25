@@ -9,7 +9,7 @@ import { fileSha256, readText } from "../lib/files.ts";
 import { isoSeconds } from "../lib/values.ts";
 import type { BusPaths } from "./paths.ts";
 
-export interface IdentityInput {
+interface IdentityInput {
   readonly cliSha256?: string | null;
   /** The bundled coordination-kit version. */
   readonly coordinationKitVersion?: string | null;

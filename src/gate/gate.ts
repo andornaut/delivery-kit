@@ -32,7 +32,7 @@ import {
 } from "./identity.ts";
 
 /** What a gate needs from the runner: its child processes, log, game and gate settings. */
-export interface GateContext {
+interface GateContext {
   readonly exec: Exec;
   readonly log: (line: string) => void;
   readonly game: { readonly id: string };
@@ -186,7 +186,7 @@ async function removeLeftoverGates(context: GateContext): Promise<string[]> {
   return names;
 }
 
-export interface GateInput {
+interface GateInput {
   /** The scratch worktree; dist/ and node_modules/ are copied back into it after a pass. */
   readonly work: string;
   readonly sha: string;
@@ -205,7 +205,7 @@ export interface GateInput {
  * fingerprint check) records nothing, so the next
  * departure gates the same SHA again.
  */
-export type GateOutcome =
+type GateOutcome =
   | { readonly ok: true; readonly output: string }
   | {
       readonly ok: false;
