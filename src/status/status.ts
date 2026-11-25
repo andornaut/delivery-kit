@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { coordinationKitReport } from "../compatibility.ts";
 import { errnoCode, fileSha256, readText, readTrimmed } from "../lib/files.ts";
+import { unfinishedCiWatches } from "../state/ci.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "../state/control.ts";
 import { eventLogReport } from "../state/eventlog.ts";
 import { readIdentity } from "../state/identity.ts";
@@ -217,10 +218,8 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   if (ci === null) {
     blockers.push("ci_dir_unreadable");
   }
-  for (const name of ci ?? []) {
-    if (["pending", "running"].includes(readTrimmed(join(paths.ciDir, name)) ?? "")) {
-      blockers.push(`ci_watch:${name.slice(0, -".status".length)}`);
-    }
+  for (const sha of unfinishedCiWatches((name) => readTrimmed(join(paths.ciDir, name)), ci ?? [])) {
+    blockers.push(`ci_watch:${sha}`);
   }
   const pushed = readTrimmed(paths.lastPushSha);
   if (pushed && readText(ciStatusFile(paths, pushed)) === undefined) {

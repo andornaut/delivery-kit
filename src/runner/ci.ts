@@ -13,6 +13,7 @@ import {
 
 import { ensureDir, readTrimmed, writeLines } from "../lib/files.ts";
 import { isoSeconds } from "../lib/values.ts";
+import { unfinishedCiWatches } from "../state/ci.ts";
 import { type BusPaths, ciStatusFile } from "../state/paths.ts";
 import type { BusContext } from "./context.ts";
 
@@ -320,13 +321,9 @@ export function resumeStoppedCi(context: BusContext, shas: readonly (string | un
 export function unfinishedCi(paths: BusPaths): string[] {
   const shas = new Set<string>();
   try {
-    for (const name of readdirSync(paths.ciDir).sort()) {
-      if (
-        name.endsWith(".status") &&
-        ["pending", "running"].includes(readTrimmed(join(paths.ciDir, name)) ?? "")
-      ) {
-        shas.add(name.slice(0, -".status".length));
-      }
+    const names = readdirSync(paths.ciDir);
+    for (const sha of unfinishedCiWatches((name) => readTrimmed(join(paths.ciDir, name)), names)) {
+      shas.add(sha);
     }
   } catch (error) {
     // No ci/ directory yet; any other failure is not "nothing to resume".
