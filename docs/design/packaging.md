@@ -18,8 +18,9 @@ The source is layered, and each module imports only its own directory and lower 
 then `src/status/` (the read-only report), `src/seam/` (the coordinator CLI) and `src/gate/` (the
 gate container); then `src/runner/` (the resident process, departures, CI and deployment) and
 `src/supervision/` (runner start, stop and the systemd unit); then `src/commands/`, `src/cli.ts` and
-`src/bin.ts`. `src/testing/` holds test fixtures. `scripts/imports.test.ts` refuses an import cycle,
-type-only imports included, and an import that leaves its layer upward.
+`src/bin.ts`. `src/testing/` holds test fixtures. `scripts/imports.test.ts` refuses an import cycle
+in `src/`, `scripts/` or `tests/`, type-only imports included, and a `src/` import that leaves its
+layer upward. ESLint's `import-x/no-cycle` rule covers the same trees.
 
 Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 [Developing](../../README.md#developing), [Compatibility and releases](../../README.md#compatibility-and-releases).

@@ -1,14 +1,19 @@
-// The relative import graph of src/ and scripts/ has no cycles, type-only imports included: a
-// module in a cycle can run before what it imports has loaded, and a type cycle still ties two
-// modules' interfaces together. Each source module imports only its own directory and the layers
-// below it, so dependencies point from the CLI down to the domain-free helpers.
+// The relative import graph of src/, scripts/ and tests/ has no cycles. Type-only imports,
+// re-exports and dynamic imports of a literal specifier count as edges: a module in a cycle can run
+// before what it imports has loaded, and a type cycle still ties two modules' interfaces together.
+// Each src/ module imports only its own directory and the layers below it, so dependencies point
+// from the CLI down to the domain-free helpers.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** The directories whose modules form the checked graph; tests/contract is its own package. */
+const TREES = ["src", "scripts", "tests"];
 
 type Graph = ReadonlyMap<string, readonly string[]>;
 
@@ -53,34 +58,41 @@ function upwardImports(graph: Graph): string[] {
   });
 }
 
-function sources(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
+/** Each .ts, .mts and .mjs module under a directory, relative to the root, outside node_modules. */
+function modules(directory: string): string[] {
+  return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) {
-      return sources(path);
+      return entry.name === "node_modules" ? [] : modules(path);
     }
-    return /\.(?:ts|mjs)$/u.test(entry.name) ? [path] : [];
+    return /\.(?:ts|mts|mjs)$/u.test(entry.name) ? [path] : [];
   });
 }
 
-/** The relative specifiers a module imports or re-exports statically. */
+/**
+ * The relative specifiers a module imports, re-exports or loads by dynamic import of a literal,
+ * type-only forms included. String contents and computed specifiers are not imports.
+ */
 function relativeImports(text: string): string[] {
-  return [
-    ...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["'](\.{1,2}\/[^"']+)["']/gmu),
-    ...text.matchAll(/^\s*import\s*["'](\.{1,2}\/[^"']+)["']/gmu),
-  ].map((match) => match[1] ?? "");
+  return ts
+    .preProcessFile(text, true, true)
+    .importedFiles.map(({ fileName }) => fileName)
+    .filter((specifier) => /^\.{1,2}\//u.test(specifier));
 }
 
-/** Each module of src/ and scripts/, relative to the root, with the modules it imports. */
-function importGraph(): Map<string, string[]> {
-  const graph = new Map<string, string[]>();
-  for (const path of [...sources(join(root, "src")), ...sources(join(root, "scripts"))]) {
-    const targets = relativeImports(readFileSync(path, "utf8")).map((specifier) =>
-      relative(root, resolve(dirname(path), specifier)),
-    );
-    graph.set(relative(root, path), targets);
-  }
-  return graph;
+/** Each module with the root-relative modules it imports, its source read by `readSource`. */
+function importGraph(
+  readSource: (path: string) => string,
+  paths: readonly string[],
+): Map<string, string[]> {
+  return new Map(
+    paths.map((path) => [
+      path,
+      relativeImports(readSource(path)).map((specifier) =>
+        posix.join(posix.dirname(path), specifier),
+      ),
+    ]),
+  );
 }
 
 /** Every strongly connected set of more than one module, or a module importing itself. */
@@ -129,6 +141,11 @@ function cycles(graph: Graph): string[][] {
   return found.sort((a, b) => (a[0] ?? "").localeCompare(b[0] ?? ""));
 }
 
+/** The cycles among in-memory modules, keyed by root-relative path. */
+function sourceCycles(sources: Readonly<Record<string, string>>): string[][] {
+  return cycles(importGraph((path) => sources[path] ?? "", Object.keys(sources)));
+}
+
 describe("cycles", () => {
   it("finds a direct, a longer and a self cycle and passes a chain", () => {
     const graph = new Map([
@@ -151,12 +168,34 @@ describe("cycles", () => {
       ),
     ).toEqual([]);
   });
+
+  it("finds a cycle made only of type-only imports", () => {
+    expect(
+      sourceCycles({
+        "src/a.ts": 'import type { B } from "./b.ts";\nexport type A = B[];',
+        "src/b.ts": 'import { type A } from "./a.ts";\nexport type B = A | 1;',
+        "src/c.ts": 'import type { A } from "./a.ts";',
+      }),
+    ).toEqual([["src/a.ts", "src/b.ts"]]);
+  });
+
+  it("finds a cycle through a re-export, a dynamic import and a parent directory", () => {
+    expect(
+      sourceCycles({
+        "tests/lib/a.ts": 'export * from "../b.mjs";',
+        "tests/b.mjs": 'await import("./lib/a.ts");',
+      }),
+    ).toEqual([["tests/b.mjs", "tests/lib/a.ts"]]);
+  });
 });
 
 describe("the import graph", () => {
-  const graph = importGraph();
+  const graph = importGraph(
+    (path) => readFileSync(join(root, path), "utf8"),
+    TREES.flatMap((tree) => modules(tree)),
+  );
 
-  it("parses static, type-only, multi-line and re-export imports", () => {
+  it("parses static, type-only, re-export, side-effect and literal dynamic imports", () => {
     expect(
       relativeImports(
         [
@@ -164,11 +203,34 @@ describe("the import graph", () => {
           'import type { B } from "../b.ts";',
           "import {\n  c,\n  type D,\n} from './c.ts';",
           'export { e } from "./e.ts";',
+          'export type * from "./f.ts";',
           'import "./side.ts";',
+          'const g = await import("./g.mjs");',
+          'type H = typeof import("./h.ts");',
+          "const i = await import(name);",
+          "const j = 'import { j } from \"./j.ts\";';",
           'import { join } from "node:path";',
         ].join("\n"),
       ),
-    ).toEqual(["./a.ts", "../b.ts", "./c.ts", "./e.ts", "./side.ts"]);
+    ).toEqual([
+      "./a.ts",
+      "../b.ts",
+      "./c.ts",
+      "./e.ts",
+      "./f.ts",
+      "./side.ts",
+      "./g.mjs",
+      "./h.ts",
+    ]);
+  });
+
+  it("reads modules of every kind from every tree", () => {
+    const kinds = new Set(
+      [...graph.keys()].map((path) => `${path.split("/")[0]}/${extname(path)}`),
+    );
+    expect([...kinds]).toEqual(
+      expect.arrayContaining(["scripts/.mjs", "scripts/.ts", "src/.ts", "tests/.mjs", "tests/.ts"]),
+    );
   });
 
   it("resolves every relative import to a file", () => {
@@ -178,7 +240,7 @@ describe("the import graph", () => {
     expect(missing).toEqual([]);
   });
 
-  it("has no cycles in src/ or scripts/", () => {
+  it("has no cycles in src/, scripts/ or tests/", () => {
     expect(cycles(graph)).toEqual([]);
   });
 

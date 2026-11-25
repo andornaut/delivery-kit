@@ -8,6 +8,7 @@ import ts from "typescript-eslint";
 import { plugins, sourceRules, toolingRules } from "./eslint.config.base.mjs";
 
 const KIT_FILES = ["src/**/*.ts"];
+const MODULE_FILES = [...KIT_FILES, "scripts/**/*.{ts,mts,mjs}", "tests/**/*.{ts,mts,mjs}"];
 const TEST_FILES = ["src/**/*.test.ts", "scripts/**/*.test.ts"];
 
 // The bundles load nothing from disk after startup: only node: builtins, the kit's own modules and
@@ -79,15 +80,17 @@ export default defineConfig(
       ],
     },
   },
-  // No import cycles: a module in a cycle can run before what it imports has loaded.
-  // scripts/imports.test.ts checks src/ and scripts/ for cycles through type-only imports too.
+  // No import cycles in src/, scripts/ or tests/: a module in a cycle can run before what it
+  // imports has loaded. scripts/imports.test.ts checks the same trees, type-only imports included.
   {
-    files: KIT_FILES,
+    files: MODULE_FILES,
     plugins: { "import-x": { rules: { "no-cycle": noCycle } } },
     rules: { "import-x/no-cycle": "error" },
     settings: {
-      "import-x/extensions": [".ts"],
-      "import-x/resolver-next": [createNodeResolver({ extensions: [".ts", ".js"] })],
+      "import-x/extensions": [".ts", ".mts", ".mjs"],
+      "import-x/resolver-next": [
+        createNodeResolver({ extensions: [".ts", ".mts", ".mjs", ".js"] }),
+      ],
     },
   },
   // Tests and tooling: they verify or produce what ships rather than being it.
