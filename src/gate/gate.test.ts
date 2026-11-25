@@ -28,7 +28,7 @@ import {
   testContext,
 } from "../testing/game.ts";
 import { bindMount } from "./container.ts";
-import { gateScript, runGate, stepLogName } from "./gate.ts";
+import { gateScript, installOutcome, runGate, stepLogName } from "./gate.ts";
 
 describe("gateScript", () => {
   it("runs steps in order, logs each and stops at the first failure", () => {
@@ -45,6 +45,52 @@ describe("gateScript", () => {
     expect(result.stdout).toBe("lint ok\nunit test FAIL\nfailing\n");
     expect(readFileSync(join(logs, "01-lint.log"), "utf8")).toBe("linted\n");
     expect(stepLogName(2, "unit test")).toBe("02-unit_test.log");
+  });
+});
+
+describe("installOutcome", () => {
+  const log = "/logs/install.log";
+  const outcome = (status: number | null, logText = "") => installOutcome(log, { logText, status });
+
+  it("passes a zero exit", () => {
+    expect(outcome(0, "npm error code ECONNRESET")).toBeUndefined();
+  });
+
+  it("makes a Docker exec error an infrastructure failure", () => {
+    expect(outcome(125)).toEqual({
+      failure: "infrastructure",
+      ok: false,
+      reason: "docker exec of the install step failed; see /logs/install.log",
+    });
+  });
+
+  it("makes a logged registry or network fault an infrastructure failure", () => {
+    for (const line of [
+      "npm error code ECONNRESET",
+      "npm ERR! code E503",
+      "npm error code EAI_AGAIN",
+    ]) {
+      expect(outcome(1, `noise\n${line}\n`), line).toEqual({
+        failure: "infrastructure",
+        ok: false,
+        reason: "install could not reach the registry; see /logs/install.log",
+      });
+    }
+  });
+
+  it("makes any other exit or a timeout an install step failure", () => {
+    expect(outcome(1, "npm error code E404\n")).toEqual({
+      failure: "step",
+      ok: false,
+      reason: "install FAIL; see /logs/install.log",
+      stage: "install",
+    });
+    expect(outcome(null, "npm error code ETIMEDOUT\n")).toEqual({
+      failure: "step",
+      ok: false,
+      reason: "install TIMED OUT; see /logs/install.log",
+      stage: "install",
+    });
   });
 });
 

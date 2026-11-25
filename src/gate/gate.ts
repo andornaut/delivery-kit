@@ -243,13 +243,38 @@ function timedOut(result: ExecResult): boolean {
 const NETWORK_ERROR =
   /\bnpm (?:ERR!|error) code (?:E5\d\d|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ESOCKETTIMEDOUT)\b/;
 
-/** Whether the install log reports a network fault, which a later departure may not meet. */
-function networkFailure(log: string): boolean {
+/** The install log's text, or "" when it cannot be read. */
+function installLogText(log: string): string {
   try {
-    return NETWORK_ERROR.test(readFileSync(log, "utf8"));
+    return readFileSync(log, "utf8");
   } catch {
-    return false;
+    return "";
   }
+}
+
+/** The install step's exit status and the text of its log. */
+interface InstallResult {
+  readonly status: number | null;
+  readonly logText: string;
+}
+
+/**
+ * The outcome an install step decides, or undefined when it passed. A Docker failure or a network
+ * fault in the log, which a later departure may not meet, is an infrastructure failure; any other
+ * non-zero exit or a timeout is an install step failure. `log` names the log in each reason.
+ */
+export function installOutcome(log: string, install: InstallResult): GateOutcome | undefined {
+  const expired = install.status === null;
+  if (install.status === DOCKER_EXEC_ERROR) {
+    return blockedGate(`docker exec of the install step failed; see ${log}`);
+  }
+  if (install.status !== 0 && !expired && NETWORK_ERROR.test(install.logText)) {
+    return blockedGate(`install could not reach the registry; see ${log}`);
+  }
+  if (install.status !== 0) {
+    return failed("install", `install ${expired ? "TIMED OUT" : "FAIL"}; see ${log}`);
+  }
+  return undefined;
 }
 
 /** Tools the gate image provides besides sh, for the copy, the loopback check and step logs. */
@@ -426,14 +451,12 @@ async function gate(
       log,
       timeoutMs,
     );
-    if (install.status === DOCKER_EXEC_ERROR) {
-      return blockedGate(`docker exec of the install step failed; see ${log}`);
-    }
-    if (install.status !== 0 && !timedOut(install) && networkFailure(log)) {
-      return blockedGate(`install could not reach the registry; see ${log}`);
-    }
-    if (install.status !== 0) {
-      return failed("install", `install ${timedOut(install) ? "TIMED OUT" : "FAIL"}; see ${log}`);
+    const outcome = installOutcome(log, {
+      logText: install.status === 0 ? "" : installLogText(log),
+      status: install.status,
+    });
+    if (outcome !== undefined) {
+      return outcome;
     }
   }
   // Every gate step runs without network: disconnect, then confirm only loopback remains.
