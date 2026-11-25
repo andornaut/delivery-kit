@@ -16,7 +16,7 @@ import { at } from "../lib/time.ts";
 import { COORDINATOR_CLI, KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000002";
-const RANGE = ">=3.0.0 <7.0.0";
+const RANGE = ">=3.0.0 <8.0.0";
 /** The coordination-kit release this checkout builds against; its CLI is in range from 3.0. */
 const RELEASED_IN_RANGE = (() => {
   try {

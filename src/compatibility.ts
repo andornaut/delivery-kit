@@ -15,7 +15,7 @@ export const COORDINATION_KIT_RANGE = ">=2.0.1 <4.0.0";
  * The coordinator-installed coordination-kit CLI releases whose review and event results this
  * runner accepts. A result from a CLI outside it defers reviews and event delivery.
  */
-export const COORDINATOR_CLI_RANGE = ">=3.0.0 <7.0.0";
+export const COORDINATOR_CLI_RANGE = ">=3.0.0 <8.0.0";
 
 declare const __DK_VERSION__: string;
 declare const __DK_COORDINATION_KIT_VERSION__: string;

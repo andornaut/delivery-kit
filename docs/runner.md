@@ -112,7 +112,7 @@ passes `--capture`.
   and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
 - **Range:** the CLI version in each result must satisfy `COORDINATOR_CLI_RANGE` in
-  `src/compatibility.ts`, `>=3.0.0 <7.0.0`. A result from a CLI outside it defers
+  `src/compatibility.ts`, `>=3.0.0 <8.0.0`. A result from a CLI outside it defers
   with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
   its version until a supported install answers. Departures continue.
 - **Identity:** the runner logs `bus: coordinator CLI VERSION (dist sha256 SHA256), inside RANGE`
@@ -369,7 +369,7 @@ pins only `@andornaut/delivery-kit` and the runner never loads a game copy of co
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/compatibility.ts`;
 delivery-kit 7.0.0 supports `>=2.0.1 <4.0.0` and bundles 3.0.0; the coordinator CLI it spawns
-needs `>=3.0.0 <7.0.0`. The bundled range spans 2.0.1 and 3.x because coordination-kit 3.0 keeps
+needs `>=3.0.0 <8.0.0`. The bundled range spans 2.0.1 and 3.x because coordination-kit 3.0 keeps
 those subpaths unchanged, so moving the bundle to 3.x is a pin change only. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.

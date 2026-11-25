@@ -26,7 +26,7 @@ integrity. The bundles inline coordination-kit's utilities, so a game pins only 
 delivery-kit 8.3.0 bundles coordination-kit 3.4.4, inside `>=2.0.1 <4.0.0`
 ([Pin guard](docs/runner.md#pin-guard)). game-coordinator also pins coordination-kit directly
 for the roles' CLI, the channel MCP server and the reviews and event ingest each runner spawns,
-which need a release inside `>=3.0.0 <7.0.0`:
+which need a release inside `>=3.0.0 <8.0.0`:
 
 ```json
 "devDependencies": {
