@@ -5,9 +5,9 @@ import { createRegistry, type Registry } from "@andornaut/coordination-kit/build
 import { gameLayout, loadLayout } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { readDeliveryControl } from "../bus/control.ts";
 import { main } from "../cli.ts";
-import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testFixtures.ts";
+import { readDeliveryControl } from "../state/control.ts";
+import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testing/fixtures.ts";
 
 const GAME = "archies-dog-walks";
 

@@ -8,10 +8,10 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { resolveGame } from "../bus/command.ts";
-import { spawnExec } from "../bus/exec.ts";
-import { captureRequest } from "../bus/requests.ts";
-import { busPaths } from "../bus/state.ts";
+import { spawnExec } from "../lib/exec.ts";
+import { captureRequest } from "../runner/requests.ts";
+import { busPaths } from "../state/paths.ts";
+import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("request");

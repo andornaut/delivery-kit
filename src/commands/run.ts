@@ -7,10 +7,10 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { resolveGame } from "../bus/command.ts";
-import { busContext } from "../bus/context.ts";
-import { RunnerRefused, runRunner } from "../bus/runner.ts";
-import { testOptions } from "../bus/testOverrides.ts";
+import { busContext } from "../runner/context.ts";
+import { RunnerRefused, runRunner } from "../runner/runner.ts";
+import { testOptions } from "../runner/testOverrides.ts";
+import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("run");

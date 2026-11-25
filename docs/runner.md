@@ -140,7 +140,7 @@ one runs one more after it.
 ## Event log
 
 The runner appends every bus event to `var/games/<g>/bus/events.jsonl` and is its only writer;
-the coordinator CLI's `events ingest` reads it. The schema lives in `src/events.ts`.
+the coordinator CLI's `events ingest` reads it. The schema lives in `src/state/events.ts`.
 
 - **Lines:** one JSON object per line, terminated by `\n`. The file is opened with `O_APPEND`;
   each line is a single `write()` under 4096 bytes, then `fsync`. A `detail` that does not fit is

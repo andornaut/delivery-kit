@@ -24,13 +24,13 @@ import {
   readJsonIfExists,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { workerParentProblems } from "./bus/parents.ts";
 import { control } from "./commands/control.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
 import { runnerStart, runnerStop, runnerUnit } from "./commands/runner.ts";
 import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
+import { workerParentProblems } from "./commands/worker-parents.ts";
 import { VERSION } from "./compatibility.ts";
 export {
   EXIT_INVALID,

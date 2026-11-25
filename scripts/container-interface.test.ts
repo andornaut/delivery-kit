@@ -13,8 +13,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("test selection", () => {
   it("focuses source tests without accidentally starting the full contract suite", () => {
-    expect(testTargets(["src/ci.test.ts", "--reporter=dot"])).toEqual({
-      unit: ["src/ci.test.ts", "--reporter=dot"],
+    expect(testTargets(["src/runner/ci.test.ts", "--reporter=dot"])).toEqual({
+      unit: ["src/runner/ci.test.ts", "--reporter=dot"],
       contract: null,
     });
   });

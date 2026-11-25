@@ -11,8 +11,8 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { resolveGame } from "../bus/command.ts";
-import { setDesiredDelivery } from "../bus/control.ts";
+import { setDesiredDelivery } from "../state/control.ts";
+import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("control");

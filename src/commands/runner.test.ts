@@ -5,10 +5,10 @@ import { dirname, join } from "node:path";
 import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { busPaths } from "../bus/state.ts";
-import { SUPERVISION_TOOLS } from "../bus/supervision.ts";
-import { GAME, makeGame } from "../bus/testGame.ts";
 import { EXIT_INVALID, EXIT_OK, EXIT_REFUSED, EXIT_USAGE, main } from "../cli.ts";
+import { busPaths } from "../state/paths.ts";
+import { SUPERVISION_TOOLS } from "../supervision/unit.ts";
+import { GAME, makeGame } from "../testing/game.ts";
 
 async function cli(env: NodeJS.ProcessEnv, root: string, ...argv: string[]) {
   let out = "";

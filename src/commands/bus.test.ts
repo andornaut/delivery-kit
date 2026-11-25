@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { GAME, makeGame, mergeFastForward } from "../bus/testGame.ts";
 import { main } from "../cli.ts";
+import { GAME, makeGame, mergeFastForward } from "../testing/game.ts";
 
 async function run(root: string, ...argv: string[]) {
   let out = "";

@@ -6,7 +6,7 @@ import { loadLayout } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_INVALID, EXIT_OK, EXIT_USAGE, main, USAGE } from "./cli.ts";
-import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testFixtures.ts";
+import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testing/fixtures.ts";
 
 async function run(
   root: string,

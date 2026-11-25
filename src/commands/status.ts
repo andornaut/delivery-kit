@@ -2,12 +2,12 @@
 // with --resources the reporting-only resource information.
 import { dumpsJson, EXIT_OK, type Handler } from "@andornaut/coordination-kit/build/shared";
 
-import { resolveGame } from "../bus/command.ts";
-import { busContext } from "../bus/context.ts";
-import { resourceReport } from "../bus/resources.ts";
-import { busPaths } from "../bus/state.ts";
-import { statusReport } from "../bus/status.ts";
-import { testOptions } from "../bus/testOverrides.ts";
+import { busContext } from "../runner/context.ts";
+import { resourceReport } from "../runner/resources.ts";
+import { testOptions } from "../runner/testOverrides.ts";
+import { busPaths } from "../state/paths.ts";
+import { statusReport } from "../status/status.ts";
+import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("status");

@@ -25,9 +25,9 @@ const NO_PROTOCOL = {
     "delivery-kit reads no work protocol state; coordination-kit 3.0 removes build/protocol.",
   regex: `^${COORDINATION_KIT}protocol(?:/|$)`,
 };
-// Review and event delivery go through the coordinator-installed CLI (src/bus/seam.ts).
+// Review and event delivery go through the coordinator-installed CLI (src/seam/coordinator.ts).
 const SEAM_MESSAGE =
-  "Deliver reviews and events through the coordinator CLI seam in src/bus/seam.ts.";
+  "Deliver reviews and events through the coordinator CLI seam in src/seam/coordinator.ts.";
 const BUNDLED_SEAM = [
   {
     importNames: ["deliverScheduledReview", "DEFERRED_PREFIX"],
@@ -41,7 +41,7 @@ const BUNDLED_SEAM = [
   },
   {
     importNames: ["enqueueEvent", "recordEvent"],
-    message: "Append runner events to bus/events.jsonl through src/bus/eventlog.ts.",
+    message: "Append runner events to bus/events.jsonl through src/state/eventlog.ts.",
     name: `${COORDINATION_KIT}events`,
   },
 ];

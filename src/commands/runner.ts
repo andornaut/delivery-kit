@@ -1,6 +1,6 @@
 // The runner group. `runner unit --game ID` prints the explicit systemd user unit for one game's
 // resident runner and installs nothing. `runner stop` and `runner start` stop a game's runner once
-// it is idle and drained and start a single instance (src/bus/lifecycle.ts).
+// it is idle and drained and start a single instance (src/supervision/lifecycle.ts).
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 
@@ -12,7 +12,8 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { resolveGame } from "../bus/command.ts";
+import { VERSION } from "../compatibility.ts";
+import { busPaths } from "../state/paths.ts";
 import {
   type Lifecycle,
   StartRefused,
@@ -21,8 +22,7 @@ import {
   stopRunner,
   systemLifecycle,
   unitFile,
-} from "../bus/lifecycle.ts";
-import { busPaths } from "../bus/state.ts";
+} from "../supervision/lifecycle.ts";
 import {
   installedCli,
   renderRunnerUnit,
@@ -30,8 +30,8 @@ import {
   SUPERVISION_TOOLS,
   unitPath,
   UnitUnavailable,
-} from "../bus/supervision.ts";
-import { VERSION } from "../compatibility.ts";
+} from "../supervision/unit.ts";
+import { resolveGame } from "./game.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("runner unit");

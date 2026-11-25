@@ -37,8 +37,8 @@ describe("work protocol independence", () => {
   it("the lint configuration refuses a build/protocol import anywhere", async () => {
     const eslint = new ESLint({ cwd: root });
     for (const filePath of [
-      "src/bus/example.ts",
-      "src/bus/example.test.ts",
+      "src/runner/example.ts",
+      "src/runner/example.test.ts",
       "scripts/example.ts",
       "tests/contract/cases/example.test.ts",
     ]) {
