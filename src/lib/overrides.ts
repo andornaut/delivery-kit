@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { type Clock, sleepMs } from "../lib/clock.ts";
+import { type Clock, sleepMs } from "./clock.ts";
 
 const TEST_CLOCK_VARIABLE = "DELIVERY_KIT_TEST_CLOCK";
 

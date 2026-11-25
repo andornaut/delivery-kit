@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { testClock, testLoad, testOptions } from "./testOverrides.ts";
+import { testClock, testLoad, testOptions } from "./overrides.ts";
 
 describe("DELIVERY_KIT_TEST_CLOCK", () => {
   it("reads epoch, offsets and scaled wall time, and shortens sleeps by the speed", async () => {

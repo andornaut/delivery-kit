@@ -2,9 +2,9 @@
 // with --resources the reporting-only resource information.
 import { dumpsJson, EXIT_OK, type Handler } from "@andornaut/coordination-kit/build/shared";
 
+import { testOptions } from "../lib/overrides.ts";
 import { busContext } from "../runner/context.ts";
 import { resourceReport } from "../runner/resources.ts";
-import { testOptions } from "../runner/testOverrides.ts";
 import { busPaths } from "../state/paths.ts";
 import { statusReport } from "../status/status.ts";
 import { resolveGame } from "./game.ts";
