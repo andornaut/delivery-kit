@@ -460,26 +460,23 @@ async function gateAndPush(
   writeLines(join(logs, "commit.sha"), head);
   context.log(`${attempt.when} bus departs with main ${head}; gate logs: ${logs}`);
   const before = await treeFingerprint(context.exec, work);
-  const outcome = await runGate(
-    context,
-    {
-      departure: short,
-      logs,
-      onCaptured: (sha) =>
-        context.events.emit(
-          "attempt-captured",
-          attempt.key,
-          `${attempt.when} captured verified gate snapshot for main ${sha}.`,
-          sha,
-        ),
-      sha: head,
-      work,
-    },
-    async () =>
-      (await treeFingerprint(context.exec, work)) === before
-        ? undefined
-        : "gate discarded: Git status or reported-file fingerprints changed during checks",
-  );
+  const unchanged = async (): Promise<string | undefined> =>
+    (await treeFingerprint(context.exec, work)) === before
+      ? undefined
+      : "gate discarded: Git status or reported-file fingerprints changed during checks";
+  const outcome = await runGate(context, unchanged, {
+    departure: short,
+    logs,
+    onCaptured: (sha) =>
+      context.events.emit(
+        "attempt-captured",
+        attempt.key,
+        `${attempt.when} captured verified gate snapshot for main ${sha}.`,
+        sha,
+      ),
+    sha: head,
+    work,
+  });
   if (!outcome.ok) {
     context.log(outcome.reason);
     if (outcome.failure === "infrastructure") {

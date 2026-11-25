@@ -494,14 +494,20 @@ async function gate(
   return { ok: true, output: result.stdout };
 }
 
+/** A check after a passing gate: the reason to discard it, or undefined to keep it. */
+type GateVerify = () => Promise<string | undefined>;
+
+/** The verification that keeps every passing gate. */
+export const noVerification: GateVerify = () => Promise.resolve(undefined);
+
 /**
  * Run install then the offline gate in one departure container, copy results out and remove it.
  * `verify` runs after a passing gate and returns a reason to discard it.
  */
 export async function runGate(
   context: GateContext,
+  verify: GateVerify,
   input: GateInput,
-  verify: () => Promise<string | undefined> = () => Promise.resolve(undefined),
 ): Promise<GateOutcome> {
   await removeLeftoverGates(context);
   const name = gateContainerName(context.game.id, input.departure);

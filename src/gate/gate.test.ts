@@ -28,7 +28,7 @@ import {
   testContext,
 } from "../testing/game.ts";
 import { bindMount } from "./container.ts";
-import { gateScript, installOutcome, runGate, stepLogName } from "./gate.ts";
+import { gateScript, installOutcome, noVerification, runGate, stepLogName } from "./gate.ts";
 
 describe("gateScript", () => {
   it("runs steps in order, logs each and stops at the first failure", () => {
@@ -118,7 +118,10 @@ describe("runGate", () => {
 
   it("copies the exact commit in, logs, dist/ and node_modules/ out, and removes the container", async () => {
     const { context, exec, input, logs, test } = setup({}, "", 2305);
-    expect(await runGate(context, input)).toEqual({ ok: true, output: "lint ok\ntest ok\n" });
+    expect(await runGate(context, noVerification, input)).toEqual({
+      ok: true,
+      output: "lint ok\ntest ok\n",
+    });
     expect(readFileSync(join(logs, "01-lint.log"), "utf8")).toBe("linted\n");
     expect(readFileSync(join(test.repo, "dist", "index.js"), "utf8")).toBe("built\n");
     expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
@@ -181,7 +184,10 @@ describe("runGate", () => {
     expected = mergeWithCommit(test.test, "identity-topic");
     tree = gitSync(test.test.repo, "rev-parse", "HEAD^{tree}");
     test.input.sha = expected;
-    expect(await runGate(test.context, test.input)).toEqual({ ok: true, output: "" });
+    expect(await runGate(test.context, noVerification, test.input)).toEqual({
+      ok: true,
+      output: "",
+    });
     expect(seen).toHaveLength(2);
     expect(gitSync(test.test.repo, "rev-parse", "HEAD")).toBe(expected);
     expect(gitSync(test.test.repo, "rev-list", "--count", "HEAD")).toBe("5");
@@ -193,7 +199,7 @@ describe("runGate", () => {
     test.input.sha = gitSync(test.test.repo, "rev-parse", "HEAD");
     const store = join(test.test.repo, ".private-store");
     mkdirSync(store, { mode: 0o000 });
-    const outcome = await runGate(test.context, test.input);
+    const outcome = await runGate(test.context, noVerification, test.input);
     expect(outcome).toMatchObject({
       ok: false,
       failure: "infrastructure",
@@ -219,7 +225,7 @@ describe("runGate", () => {
         GIT_CONFIG_VALUE_0: "/missing/injected",
       },
     });
-    expect(await runGate(test.context, test.input)).toMatchObject({ ok: true });
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({ ok: true });
   });
 
   it("refuses an unknown Git cleanliness result instead of treating empty stdout as clean", async () => {
@@ -231,7 +237,7 @@ describe("runGate", () => {
       { mode: 0o755 },
     );
     const test = setup({ environment: { PATH: `${bin}:${process.env.PATH ?? ""}` } });
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: expect.stringContaining("gate source identity validation failed"),
@@ -242,7 +248,7 @@ describe("runGate", () => {
   it("refuses a source whose current HEAD differs from the selected exact commit", async () => {
     const test = setup({});
     commitFile(test.test.repo, "README.md", "new source\n");
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: "source HEAD mismatch",
@@ -257,7 +263,7 @@ describe("runGate", () => {
     const test = setup({
       afterCopy: (work) => writeFileSync(join(work, "README.md"), "changed copy\n"),
     });
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: expect.stringContaining("gate source identity validation failed"),
@@ -280,7 +286,7 @@ describe("runGate", () => {
         return ok();
       },
     });
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: expect.stringContaining("gate source identity validation failed"),
@@ -307,7 +313,7 @@ describe("runGate", () => {
         return ok();
       },
     });
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: expect.stringContaining("gate source identity validation failed"),
@@ -328,7 +334,7 @@ describe("runGate", () => {
         return ok();
       },
     });
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: expect.stringContaining("unsafe or unavailable Git configuration"),
@@ -339,7 +345,7 @@ describe("runGate", () => {
   it("rejects dirty source before image exposure and leaves the original files dirty", async () => {
     const test = setup({});
     writeFileSync(join(test.test.repo, "README.md"), "uncommitted change\n");
-    expect(await runGate(test.context, test.input)).toMatchObject({
+    expect(await runGate(test.context, noVerification, test.input)).toMatchObject({
       ok: false,
       failure: "infrastructure",
       reason: "gate source identity copy is dirty",
@@ -364,7 +370,7 @@ describe("runGate", () => {
       return gateDocker()(spec);
     });
     expect(
-      await runGate(testContext(test, { exec }), {
+      await runGate(testContext(test, { exec }), noVerification, {
         departure: "identity",
         work: test.repo,
         sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -386,7 +392,7 @@ describe("runGate", () => {
         : gateDocker()(spec),
     );
     expect(
-      await runGate(testContext(test, { exec }), {
+      await runGate(testContext(test, { exec }), noVerification, {
         departure: "identity",
         work: test.repo,
         sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -418,7 +424,7 @@ describe("runGate", () => {
         return gateDocker()(spec);
       });
       expect(
-        await runGate(testContext(test, { exec }), {
+        await runGate(testContext(test, { exec }), noVerification, {
           departure: "identity",
           work: test.repo,
           sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -443,7 +449,7 @@ describe("runGate", () => {
     );
     const context = testContext(test, { exec });
     const logs = mkdtempSync(join(tmpdir(), "logs-"));
-    const outcome = await runGate(context, {
+    const outcome = await runGate(context, noVerification, {
       departure: "departure-1",
       logs,
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -481,7 +487,7 @@ describe("runGate", () => {
       const exec = fakeExec((spec) => (spec.args[0] === verb ? result : gateDocker()(spec)));
       const context = testContext(test, { exec });
       // eslint-disable-next-line no-await-in-loop
-      const outcome = await runGate(context, {
+      const outcome = await runGate(context, noVerification, {
         departure: "departure-1",
         logs: mkdtempSync(join(tmpdir(), "logs-")),
         sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -496,7 +502,7 @@ describe("runGate", () => {
 
   it("reports a Docker error around the gate steps and a failed output copy as infrastructure", async () => {
     const gone = setup({ gate: () => ({ status: 125, stderr: "daemon gone\n", stdout: "" }) });
-    expect(await runGate(gone.context, gone.input)).toEqual({
+    expect(await runGate(gone.context, noVerification, gone.input)).toEqual({
       failure: "infrastructure",
       ok: false,
       reason: "docker exec of the gate steps failed: daemon gone",
@@ -507,7 +513,7 @@ describe("runGate", () => {
         ? { status: 1, stderr: "no space left on device\n", stdout: "" }
         : gateDocker()(spec),
     );
-    const outcome = await runGate(testContext(test, { exec }), {
+    const outcome = await runGate(testContext(test, { exec }), noVerification, {
       departure: "departure-1",
       logs: mkdtempSync(join(tmpdir(), "logs-")),
       sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -524,7 +530,7 @@ describe("runGate", () => {
     const { context, exec, input, test } = setup({
       install: () => ({ status: 1, stderr: "", stdout: "" }),
     });
-    expect(await runGate(context, input)).toMatchObject({
+    expect(await runGate(context, noVerification, input)).toMatchObject({
       failure: "step",
       ok: false,
       stage: "install",
@@ -541,14 +547,14 @@ describe("runGate", () => {
   ])("classifies a failed install logging %s as %s", async (line, failure) => {
     const { context, input } = setup({ install: () => ({ status: 1, stderr: "", stdout: "" }) });
     writeFileSync(join(input.logs, "install.log"), `${line}\nnpm error 504 Gateway Time-out\n`);
-    expect(await runGate(context, input)).toMatchObject({ failure, ok: false });
+    expect(await runGate(context, noVerification, input)).toMatchObject({ failure, ok: false });
   });
 
   it("copies no dist/ or node_modules/ out of a failed gate", async () => {
     const { context, exec, input, test } = setup({
       gate: () => ({ status: 1, stderr: "", stdout: "test FAIL\n" }),
     });
-    expect(await runGate(context, input)).toMatchObject({
+    expect(await runGate(context, noVerification, input)).toMatchObject({
       failure: "step",
       ok: false,
       stage: "full-gate",
@@ -585,16 +591,12 @@ describe("runGate", () => {
       return Promise.resolve(undefined);
     };
     expect(
-      await runGate(
-        testContext(test, { exec }),
-        {
-          departure: "departure-1",
-          logs: mkdtempSync(join(tmpdir(), "logs-")),
-          sha: gitSync(test.repo, "rev-parse", "HEAD"),
-          work: test.repo,
-        },
-        verify,
-      ),
+      await runGate(testContext(test, { exec }), verify, {
+        departure: "departure-1",
+        logs: mkdtempSync(join(tmpdir(), "logs-")),
+        sha: gitSync(test.repo, "rev-parse", "HEAD"),
+        work: test.repo,
+      }),
     ).toMatchObject({ ok: true });
     expect(seen).toEqual([false, false]);
     expect(existsSync(join(test.repo, "node_modules", FAKE_WRANGLER))).toBe(true);
@@ -616,7 +618,7 @@ describe("runGate", () => {
     });
     const context = testContext(test, { exec });
     expect(
-      await runGate(context, {
+      await runGate(context, noVerification, {
         departure: "cleanup",
         work: test.repo,
         sha: gitSync(test.repo, "rev-parse", "HEAD"),
@@ -637,7 +639,7 @@ describe("runGate", () => {
     const { context, exec, input } = setup({
       gate: () => ({ status: null, stderr: "", stdout: "" }),
     });
-    expect(await runGate(context, input)).toEqual({
+    expect(await runGate(context, noVerification, input)).toEqual({
       failure: "step",
       ok: false,
       reason: "gate TIMED OUT",
@@ -648,7 +650,7 @@ describe("runGate", () => {
 
   it("discards a gate that fails verification, copies no outputs and removes the container", async () => {
     const { context, exec, input, test } = setup({});
-    const outcome = await runGate(context, input, () => Promise.resolve("tree changed"));
+    const outcome = await runGate(context, () => Promise.resolve("tree changed"), input);
     expect(outcome).toEqual({ failure: "infrastructure", ok: false, reason: "tree changed" });
     expect(existsSync(join(test.repo, "dist"))).toBe(false);
     expect(existsSync(join(test.repo, "node_modules"))).toBe(false);
@@ -664,7 +666,7 @@ describe("runGate", () => {
     );
     const context = testContext(test, { exec });
     const logs = mkdtempSync(join(tmpdir(), "logs-"));
-    const outcome = await runGate(context, {
+    const outcome = await runGate(context, noVerification, {
       departure: "departure-1",
       logs,
       sha: gitSync(test.repo, "rev-parse", "HEAD"),

@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Exec, ExecResult, ExecSpec } from "../lib/exec.ts";
 import { busContext } from "../runner/context.ts";
 import { makeFixture, projectConfig } from "../testing/fixtures.ts";
-import { runGate } from "./gate.ts";
+import { noVerification, runGate } from "./gate.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -243,7 +243,7 @@ describe("stock gate genuine source identity", () => {
   it("runs the real gate script with the exact detached commit and tree", async () => {
     const test = fixture();
     const before = readFileSync(join(test.game.repo, "source.txt"));
-    const result = await runGate(test.context, test.input);
+    const result = await runGate(test.context, noVerification, test.input);
     expect(result, result.ok ? undefined : result.reason).toMatchObject({ ok: true });
     expect(JSON.parse(readFileSync(join(test.game.repo, "dist/proof.json"), "utf8"))).toEqual({
       commit: test.commit,
@@ -271,7 +271,7 @@ describe("stock gate genuine source identity", () => {
         );
       }
       const before = readFileSync(join(test.game.repo, "source.txt"));
-      const result = await runGate(test.context, test.input);
+      const result = await runGate(test.context, noVerification, test.input);
       expect(result).toMatchObject({ ok: false, failure: "infrastructure" });
       expect(existsSync(join(test.game.repo, "dist/proof.json"))).toBe(false);
       expect(readFileSync(join(test.game.repo, "source.txt"))).toEqual(before);
