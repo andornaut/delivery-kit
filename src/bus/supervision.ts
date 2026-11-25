@@ -6,7 +6,7 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 import { EXIT_REFUSED } from "@andornaut/coordination-kit/build/shared";
 
-import { PACKAGE } from "./pin.ts";
+import { PACKAGE } from "../compatibility.ts";
 
 /** Host tools the runner's children need, in unit PATH order after the Node binary. */
 export const SUPERVISION_TOOLS = ["gh", "docker", "git", "flock", "claude"] as const;

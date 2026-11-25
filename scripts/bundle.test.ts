@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { COORDINATION_KIT_RANGE } from "../src/bus/pin.ts";
+import { COORDINATION_KIT_RANGE } from "../src/compatibility.ts";
 import {
   bundledCoordinationKit,
   BUNDLES,

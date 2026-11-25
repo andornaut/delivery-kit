@@ -6,6 +6,7 @@ import { gameLayout, holdLock, loadLayout } from "@andornaut/coordination-kit/bu
 import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
+import { PACKAGE } from "../compatibility.ts";
 import { makeFixture } from "../testFixtures.ts";
 import {
   beginDeliveryActivity,
@@ -13,7 +14,7 @@ import {
   setDesiredDelivery,
   setObservedDelivery,
 } from "./control.ts";
-import { loadedIdentity, PACKAGE } from "./pin.ts";
+import { loadedIdentity } from "./pin.ts";
 import { busPaths } from "./state.ts";
 import { recordIdentity, statusReport } from "./status.ts";
 

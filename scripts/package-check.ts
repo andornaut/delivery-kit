@@ -19,7 +19,7 @@ import {
   COORDINATION_KIT_RANGE,
   COORDINATOR_CLI_RANGE,
   satisfies,
-} from "../src/bus/pin.ts";
+} from "../src/compatibility.ts";
 import { isMain, node, run } from "./check.ts";
 
 export interface CheckContext {

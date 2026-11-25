@@ -16,11 +16,11 @@ import { join } from "node:path";
 
 import { writeDurable } from "@andornaut/coordination-kit/build/shared";
 
+import { coordinationKitReport } from "../compatibility.ts";
 import { observerAdoption } from "./adoption.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "./control.ts";
 import { eventLogReport } from "./eventlog.ts";
 import { lockHeld } from "./locks.ts";
-import { coordinationKitReport } from "./pin.ts";
 import { type ProvenanceReport, provenanceReport } from "./provenance.ts";
 import { coordinatorCliReport } from "./seam.ts";
 import {

@@ -31,7 +31,7 @@ import { run } from "./commands/run.ts";
 import { runnerStart, runnerStop, runnerUnit } from "./commands/runner.ts";
 import { type Command, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
-declare const __DK_VERSION__: string;
+import { VERSION } from "./compatibility.ts";
 export {
   EXIT_INVALID,
   EXIT_OK,
@@ -40,7 +40,6 @@ export {
   type Handler,
   type Io,
 } from "@andornaut/coordination-kit/build/shared";
-export const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
 export const COMMANDS = [
   "run",
   "runner unit",

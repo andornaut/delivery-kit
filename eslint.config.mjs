@@ -79,8 +79,8 @@ export default defineConfig(
       ],
     },
   },
-  // No import cycles: a module in a cycle can run before what it imports has loaded. Type-only
-  // imports are erased at build time, so they never form one.
+  // No import cycles: a module in a cycle can run before what it imports has loaded.
+  // scripts/imports.test.ts checks src/ and scripts/ for cycles through type-only imports too.
   {
     files: KIT_FILES,
     plugins: { "import-x": { rules: { "no-cycle": noCycle } } },

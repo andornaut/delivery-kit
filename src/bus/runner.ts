@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { holdLock, LockBusy, type LockHandle } from "@andornaut/coordination-kit/build/shared";
 
 import { unfinishedCi, watchCi } from "../ci.ts";
+import { COORDINATION_KIT_BUNDLED, VERSION } from "../compatibility.ts";
 import {
   beginDeliveryWork,
   bindDeliveryRunner,
@@ -21,16 +22,13 @@ import {
 } from "../deploy.ts";
 import type { BusContext } from "./context.ts";
 import { depart, reportScheduledTick, requestStore, slotDetail } from "./departure.ts";
-import { COORDINATION_KIT_BUNDLED, loadedIdentity, pinGuard, recordPin } from "./pin.ts";
+import { loadedIdentity, pinGuard, recordPin } from "./pin.ts";
 import { claimRequest, finishRequest, recoverRequests } from "./requests.ts";
 import { sampleResources } from "./resources.ts";
 import { COMPACTION_RESERVED, DEFERRED_PREFIX, type SeamOutcome } from "./seam.ts";
 import { ensureDir, legacyOutboxIssue, truncate, writeLines } from "./state.ts";
 import { recordIdentity } from "./status.ts";
 import { currentMinuteSlot, minuteSlots, untilMinuteAfter, untilNext } from "./time.ts";
-
-declare const __DK_VERSION__: string;
-const LOADED_VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
 
 /** In-runner CI watches, at most one per SHA. Aborted watches resume in the next runner. */
 class CiTasks {
@@ -345,7 +343,7 @@ export async function runRunner(
     context.events.open();
     const cliPath = options.cliPath ?? realpathSync(process.argv[1] ?? "");
     const toolRoot = dirname(dirname(cliPath));
-    const loaded = loadedIdentity(LOADED_VERSION, cliPath, context.game.repo);
+    const loaded = loadedIdentity(VERSION, cliPath, context.game.repo);
     let runnerToken: string | undefined;
     try {
       const identity = recordIdentity(context.paths, {
@@ -355,7 +353,7 @@ export async function runRunner(
         pid: process.pid,
         sourceCommit: loaded.sourceCommit,
         toolRoot,
-        version: LOADED_VERSION,
+        version: VERSION,
       });
       runnerToken = typeof identity.token === "string" ? identity.token : undefined;
     } catch (error) {
@@ -378,7 +376,7 @@ export async function runRunner(
         context.events.started(startedKey, {
           cliSha256: loaded.cliSha256,
           coordinationKitVersion: cli?.version ?? null,
-          deliveryKitVersion: LOADED_VERSION,
+          deliveryKitVersion: VERSION,
           distSha256: cli?.distSha256 ?? null,
           token: runnerToken ?? null,
         }),

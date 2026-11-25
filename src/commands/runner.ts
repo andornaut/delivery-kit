@@ -31,10 +31,9 @@ import {
   unitPath,
   UnitUnavailable,
 } from "../bus/supervision.ts";
+import { VERSION } from "../compatibility.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
-declare const __DK_VERSION__: string;
-const VERSION = typeof __DK_VERSION__ === "string" ? __DK_VERSION__ : "0.0.0-source";
 const USAGE = commandUsage("runner unit");
 
 function isFile(path: string): boolean {

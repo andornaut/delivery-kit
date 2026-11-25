@@ -6,7 +6,7 @@ import {
   coordinationKitReport,
   COORDINATOR_CLI_RANGE,
   satisfies,
-} from "./pin.ts";
+} from "./compatibility.ts";
 
 describe("satisfies", () => {
   it("applies every comparator to plain releases only", () => {

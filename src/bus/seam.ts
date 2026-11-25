@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { writeJsonDurable } from "@andornaut/coordination-kit/build/shared";
 
-import { COORDINATOR_CLI_RANGE, satisfies } from "./pin.ts";
+import { COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
 import { zonedParts } from "./time.ts";
 
 /** The CLI path under the coordinator root; `npm ci` there replaces it in place. */
