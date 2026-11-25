@@ -12,15 +12,16 @@ commands natively. Releases are cut from `main` only after every
 required CI workflow passes on the exact commit, and a published tag is never moved. Public
 interfaces follow semver.
 
-The source is layered, and each module imports only its own directory and lower layers: `src/lib/`
+The source is layered, and each module imports only its own group and lower layers: `src/lib/`
 (child processes, files, clock, zoned time and the test clock and load overrides),
 `src/compatibility.ts` and `src/source-identity.ts`; then `src/state/` (the bus directory's files);
 then `src/status/` (the read-only report), `src/seam/` (the coordinator CLI) and `src/gate/` (the
 gate container); then `src/runner/` (the resident process, departures, CI and deployment) and
 `src/supervision/` (runner start, stop and the systemd unit); then `src/commands/`, `src/cli.ts` and
-`src/bin.ts`. `src/testing/` holds test fixtures. `scripts/imports.test.ts` refuses an import cycle
-in `src/`, `scripts/` or `tests/`, type-only imports included, and a `src/` import that leaves its
-layer upward. ESLint's `import-x/no-cycle` rule covers the same trees.
+`src/bin.ts`. A group is a directory or a module directly in `src/`, and groups in one layer do not
+import each other. `src/testing/` holds test fixtures; shipped code never imports it, `scripts/` or
+`tests/`. ESLint guards the layers with `no-restricted-imports`, type-only imports included, and
+rejects runtime import cycles in `src/`, `scripts/` and `tests/` with `import-x/no-cycle`.
 
 Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 [Developing](../../README.md#developing), [Compatibility and releases](../../README.md#compatibility-and-releases).

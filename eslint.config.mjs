@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+
 import js from "@eslint/js";
 import { defineConfig } from "eslint/config";
 import { createNodeResolver } from "eslint-plugin-import-x/node-resolver";
@@ -47,6 +49,91 @@ const BUNDLED_SEAM = [
   },
 ];
 
+// The layers of src/, lowest first. Each entry is a group: a folder of src/ or a module directly in
+// it. A shipped module imports only its own group and the groups of lower layers, type-only imports
+// and re-exports included; never another group in its own layer, a higher layer or support code.
+// Support code (src/testing/, scripts/, tests/) and tests never ship and are exempt.
+const LAYERS = [
+  ["lib", "compatibility.ts", "source-identity.ts"],
+  ["state"],
+  ["status", "seam", "gate"],
+  ["runner", "supervision"],
+  ["commands"],
+  ["cli.ts"],
+  ["bin.ts"],
+];
+const SUPPORT_FOLDER = "testing";
+
+const SRC_GROUPS = readdirSync(new URL("src", import.meta.url), { withFileTypes: true })
+  .filter((entry) =>
+    entry.isDirectory() ? entry.name !== SUPPORT_FOLDER : !entry.name.endsWith(".test.ts"),
+  )
+  .map((entry) => entry.name);
+const unplaced = SRC_GROUPS.filter((name) => !LAYERS.flat().includes(name));
+if (unplaced.length > 0) {
+  throw new Error(`src/ entries in no layer: ${unplaced.join(", ")}`);
+}
+
+const isModule = (group) => group.endsWith(".ts");
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const SRC_SYNTAX = ["WithStatement", "ImportExpression"];
+// `typeof import("...")` names a module that no-restricted-imports does not see.
+const TYPE_QUERY = {
+  message: "Import types with `import type`, which the layer rule checks.",
+  selector: "TSImportType",
+};
+
+// Every relative specifier that leaves the group for one outside the allowed groups. src/ has no
+// nested folders, so a folder's module reaches its own folder by "./" and any other by "../".
+function layerBoundary(group, index) {
+  const allowed = [group, ...LAYERS.slice(0, index).flat()];
+  const targets = allowed
+    .map((name) => (isModule(name) ? `${escapeRegex(name)}$` : `${escapeRegex(name)}/`))
+    .join("|");
+  const lower = LAYERS.slice(0, index)
+    .flat()
+    .map((name) => `src/${name}${isModule(name) ? "" : "/"}`);
+  return {
+    message:
+      `src/${group}${isModule(group) ? "" : "/"} imports only its own group` +
+      `${lower.length > 0 ? ` and lower layers: ${lower.join(", ")}` : ""}. ` +
+      "Shipped code never imports src/testing/, scripts/ or tests/.",
+    regex: isModule(group) ? `^(?:\\.\\./|\\./(?!(?:${targets})))` : `^\\.\\./(?!(?:${targets}))`,
+  };
+}
+
+// A later no-restricted-imports replaces an earlier one for the same file rather than adding to it,
+// so these configs partition the non-test modules of src/, and each lists the restrictions shared
+// by all of them (BUNDLED_SEAM, NO_PROTOCOL and OUTSIDE_NODE) alongside its group's boundary.
+function srcRestrictions(files, layerPatterns) {
+  return {
+    files,
+    ignores: TEST_FILES,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: BUNDLED_SEAM, patterns: [NO_PROTOCOL, OUTSIDE_NODE, ...layerPatterns] },
+      ],
+    },
+  };
+}
+
+function layerConfigs() {
+  return LAYERS.flatMap((layer, index) =>
+    layer.map((group) => {
+      const { files, ignores, rules } = srcRestrictions(
+        [isModule(group) ? `src/${group}` : `src/${group}/**/*.ts`],
+        [layerBoundary(group, index)],
+      );
+      return {
+        files,
+        ignores,
+        rules: { ...rules, "no-restricted-syntax": ["error", ...SRC_SYNTAX, TYPE_QUERY] },
+      };
+    }),
+  );
+}
+
 export default defineConfig(
   {
     ignores: [".claude/", "node_modules/", "dist/"],
@@ -63,25 +150,18 @@ export default defineConfig(
     plugins,
     rules: {
       ...sourceRules,
-      "no-restricted-syntax": ["error", "WithStatement", "ImportExpression"],
+      "no-restricted-syntax": ["error", ...SRC_SYNTAX],
     },
   },
   {
     files: ["**/*.ts", "**/*.mts", "**/*.js", "**/*.mjs"],
     rules: { "no-restricted-imports": ["error", { patterns: [NO_PROTOCOL] }] },
   },
-  {
-    files: KIT_FILES,
-    ignores: TEST_FILES,
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: BUNDLED_SEAM, patterns: [NO_PROTOCOL, OUTSIDE_NODE] },
-      ],
-    },
-  },
-  // No import cycles in src/, scripts/ or tests/: a module in a cycle can run before what it
-  // imports has loaded. scripts/imports.test.ts checks the same trees, type-only imports included.
+  srcRestrictions([`src/${SUPPORT_FOLDER}/**/*.ts`], []),
+  ...layerConfigs(),
+  // No runtime import cycles in src/, scripts/ or tests/: a module in a cycle can run before what
+  // it imports has loaded. Type-only imports are erased at build time, so they may form a cycle;
+  // in src/ the layer boundaries keep any such cycle within one group.
   {
     files: MODULE_FILES,
     plugins: { "import-x": { rules: { "no-cycle": noCycle } } },
