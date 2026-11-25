@@ -13,8 +13,10 @@ import { describe, expect, it } from "vitest";
 
 import { main } from "../cli.ts";
 import { busPaths } from "../state/paths.ts";
+import { STOP_TIMEOUT_SECONDS } from "../supervision/lifecycle.ts";
 import { SUPERVISION_TOOLS } from "../supervision/unit.ts";
 import { GAME, makeGame } from "../testing/game.ts";
+import { stopTimeout } from "./runner.ts";
 
 async function cli(env: NodeJS.ProcessEnv, root: string, ...argv: string[]) {
   let out = "";
@@ -103,6 +105,17 @@ describe("run refusal", () => {
       expect(EXIT_REFUSED).not.toBe(EXIT_INVALID);
     } finally {
       holder.release();
+    }
+  });
+});
+
+describe("stopTimeout", () => {
+  it("takes 1 to 9999999 whole seconds and defaults when omitted", () => {
+    expect(stopTimeout(undefined)).toBe(STOP_TIMEOUT_SECONDS);
+    expect(stopTimeout("1")).toBe(1);
+    expect(stopTimeout("9999999")).toBe(9_999_999);
+    for (const value of ["0", "10000000", "01", "1.5", "-1", "", "ten", true]) {
+      expect(stopTimeout(value), String(value)).toBeUndefined();
     }
   });
 });

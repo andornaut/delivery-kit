@@ -4,7 +4,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { coordinationKitReport } from "../compatibility.ts";
-import { fileSha256, readText, readTrimmed } from "../lib/files.ts";
+import { errnoCode, fileSha256, readText, readTrimmed } from "../lib/files.ts";
 import { ControlInvalid, ControlMissing, readDeliveryControl } from "../state/control.ts";
 import { eventLogReport } from "../state/eventlog.ts";
 import { readIdentity } from "../state/identity.ts";
@@ -21,7 +21,7 @@ function jsonFiles(directory: string, suffix: string): string[] | null {
       .filter((name) => name.endsWith(suffix))
       .sort();
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : null;
+    return errnoCode(error) === "ENOENT" ? [] : null;
   }
 }
 
@@ -74,25 +74,65 @@ interface ControlReport {
   readonly observed_status: "current" | "stale" | "unattested" | "missing" | "invalid";
 }
 
-/** Compare persisted intent with an observation attested by the singleton's identity token. */
-function controlReport(
-  attestation: {
-    readonly identity: Record<string, unknown> | null;
-    readonly identityStatus: string;
-    readonly loopHeld: boolean;
-    readonly running: boolean;
-  },
-  paths: BusPaths,
-): ControlReport {
-  const { identity, identityStatus, loopHeld, running } = attestation;
-  let control: ControlRecord;
+type IdentityStatus = "absent" | "current" | "stale" | "unattested" | "unreadable";
+
+/**
+ * How far runner.identity.json attests the running runner: `current` when runner.lock is held
+ * and holds the identity's token, `unattested` when it is held with another token, `stale` when
+ * it is free, and `absent` or `unreadable` for the file itself.
+ */
+export function identityStatus(
+  read: Record<string, unknown> | "unreadable" | null,
+  running: boolean,
+  lockToken: string | undefined,
+): IdentityStatus {
+  if (read === "unreadable") {
+    return "unreadable";
+  }
+  if (read === null) {
+    return "absent";
+  }
+  if (!running) {
+    return "stale";
+  }
+  return typeof read.token === "string" && read.token !== "" && read.token === lockToken
+    ? "current"
+    : "unattested";
+}
+
+/** What the control report compares the control record with. */
+interface ControlAttestation {
+  readonly identity: Record<string, unknown> | null;
+  readonly identityStatus: IdentityStatus;
+  readonly loopHeld: boolean;
+  readonly running: boolean;
+  /** The token runner.lock holds. */
+  readonly lockToken: string | undefined;
+}
+
+/** delivery-control.json, or which way it is unusable. */
+function readControl(paths: BusPaths): ControlRecord | "invalid" | "missing" {
   try {
-    control = readDeliveryControl({ dir: paths.dir });
+    return readDeliveryControl({ dir: paths.dir });
   } catch (error) {
-    if (!(error instanceof ControlMissing) && !(error instanceof ControlInvalid)) {
-      throw error;
+    if (error instanceof ControlMissing) {
+      return "missing";
     }
-    const missing = error instanceof ControlMissing;
+    if (error instanceof ControlInvalid) {
+      return "invalid";
+    }
+    throw error;
+  }
+}
+
+/** Compare persisted intent with an observation attested by the singleton's identity token. */
+export function controlReport(
+  attestation: ControlAttestation,
+  control: ControlRecord | "invalid" | "missing",
+): ControlReport {
+  const { identity, identityStatus: status, lockToken, loopHeld, running } = attestation;
+  if (control === "missing" || control === "invalid") {
+    const missing = control === "missing";
     return {
       desired: null,
       desired_state: "unknown",
@@ -127,12 +167,8 @@ function controlReport(
   // A stopped observation remains provable after shutdown, while idle and active observations
   // require a current singleton. The lock's retained token binds the shutdown to that identity.
   const stopped =
-    !running &&
-    !loopHeld &&
-    observed.state === "stopped" &&
-    matches &&
-    token === readTrimmed(paths.runnerLock);
-  const live = running && loopHeld && identityStatus === "current" && matches;
+    !running && !loopHeld && observed.state === "stopped" && matches && token === lockToken;
+  const live = running && loopHeld && status === "current" && matches;
   if (!live && !stopped) {
     return {
       ...common,
@@ -140,7 +176,7 @@ function controlReport(
       mismatch: null,
       mismatch_reason: "observation_unattested",
       observed_status:
-        running && loopHeld && identityStatus === "current" && !matches ? "stale" : "unattested",
+        running && loopHeld && status === "current" && !matches ? "stale" : "unattested",
     };
   }
   const active =
@@ -165,22 +201,8 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
-  let identityStatus: string;
-  if (read === "unreadable") {
-    identityStatus = "unreadable";
-  } else if (identity === null) {
-    identityStatus = "absent";
-  } else if (!running) {
-    identityStatus = "stale";
-  } else if (
-    typeof identity.token === "string" &&
-    identity.token !== "" &&
-    identity.token === readTrimmed(paths.runnerLock)
-  ) {
-    identityStatus = "current";
-  } else {
-    identityStatus = "unattested";
-  }
+  const lockToken = readTrimmed(paths.runnerLock);
+  const status = identityStatus(read, running, lockToken);
   const blockers: string[] = [];
   if (read === "unreadable") {
     blockers.push("identity_unreadable");
@@ -229,27 +251,29 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   if (gateFailed === null) {
     blockers.push("gate_failed_dir_unreadable");
   }
-  const config = identityStatus === "current" && identity !== null ? configStatus(identity) : null;
+  const config = status === "current" && identity !== null ? configStatus(identity) : null;
   const loopHeld = lockHeld(paths.loopLock);
-  const token =
-    identityStatus === "current" && typeof identity?.token === "string" ? identity.token : null;
+  const token = status === "current" && typeof identity?.token === "string" ? identity.token : null;
   const adoption = observerAdoption(paths, token);
   return {
     config_status: config,
-    control: controlReport({ identity, identityStatus, loopHeld, running }, paths),
+    control: controlReport(
+      { identity, identityStatus: status, lockToken, loopHeld, running },
+      readControl(paths),
+    ),
     coordination_kit: coordinationKitReport(),
     coordinator_cli: coordinatorCliReport(paths.seam),
     drained: blockers.length === 0 && reporters.length === 0,
     events: events.report,
     gate_failed: gateFailed ?? [],
     identity,
-    identity_status: identityStatus,
+    identity_status: status,
     idle: blockers.length === 0,
     idle_blockers: blockers,
     loop_lock_held: loopHeld,
     observer_adoption: adoption.status,
     observer_adoption_reason: adoption.reason,
-    provenance: provenanceReport({ identity, identityStatus, loopHeld }, repo),
+    provenance: provenanceReport({ identity, identityStatus: status, loopHeld }, repo),
     reporter_blockers: reporters,
     runner_lock_held: running,
     status: running ? "running" : "not running",

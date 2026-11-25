@@ -94,6 +94,17 @@ class CiTasks {
   }
 }
 
+/**
+ * Where the departure loop stands against the next scheduled slot: `early` before it, `due` within
+ * its first minute, `missed` once that minute has passed. A missed slot is never replayed.
+ */
+export function scheduledStep(now: number, next: number): "due" | "early" | "missed" {
+  if (now < next) {
+    return "early";
+  }
+  return now - next >= 60 ? "missed" : "due";
+}
+
 /** Serialized scheduled and requested departures until `signal` aborts. */
 async function departureLoop(
   context: BusContext,
@@ -114,7 +125,8 @@ async function departureLoop(
     let next = context.clock.now() + untilNext(timezone, departures, context.clock.now());
     while (!signal.aborted) {
       let now = context.clock.now();
-      if (now < next) {
+      const step = scheduledStep(now, next);
+      if (step === "early") {
         const admission = hasPendingRequest(context.paths)
           ? beginDeliveryWork(context, "checking", null)
           : undefined;
@@ -153,7 +165,7 @@ async function departureLoop(
         continue;
       }
       // An active operation may cross deadlines. Never replay a missed scheduled slot.
-      if (now - next >= 60) {
+      if (step === "missed") {
         next = now + untilNext(timezone, departures, now);
         continue;
       }

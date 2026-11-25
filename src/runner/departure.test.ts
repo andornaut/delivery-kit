@@ -23,6 +23,7 @@ import {
   depart,
   LOAD_RECHECK_SECONDS,
   LOAD_WAIT_SECONDS,
+  readSlotState,
   requestStore,
   slotDetail,
 } from "./departure.ts";
@@ -86,6 +87,8 @@ describe("slotDetail", () => {
   const earlier =
     "a departure is still checking or finishing; this observer starts no new push or deployment; " +
     "attempt outcomes are reported separately.";
+  const pending = "deployment is pending; its retry and outcome are reported separately.";
+  const idle = "no departure is currently active; main departs when it has a new commit.";
 
   it.each([
     ["started at the slot start", `${slot}\n`, own],
@@ -93,26 +96,28 @@ describe("slotDetail", () => {
     ["started before the slot", `${slot - 1}\n`, earlier],
     ["recorded an unparseable epoch", "not-an-epoch\n", earlier],
   ])("reports a departure that %s", (_name, active, detail) => {
-    const context = testContext(makeGame());
-    writeFileSync(context.paths.activeDeparture, active);
-    expect(slotDetail(context, slot)).toBe(detail);
+    expect(slotDetail({ activeDeparture: active, deployPending: "a".repeat(40) }, slot)).toBe(
+      detail,
+    );
   });
 
   it("reports a pending deployment when no departure is active", () => {
-    const context = testContext(makeGame());
-    writeFileSync(context.paths.activeDeparture, "");
-    writeFileSync(context.paths.deployPending, "a".repeat(40));
-    expect(slotDetail(context, slot)).toBe(
-      "deployment is pending; its retry and outcome are reported separately.",
-    );
+    expect(slotDetail({ activeDeparture: "", deployPending: "a".repeat(40) }, slot)).toBe(pending);
+    expect(slotDetail({ activeDeparture: undefined, deployPending: "x" }, slot)).toBe(pending);
   });
 
   it("reports an idle runner", () => {
+    expect(slotDetail({ activeDeparture: "", deployPending: "" }, slot)).toBe(idle);
+    expect(slotDetail({ activeDeparture: undefined, deployPending: undefined }, slot)).toBe(idle);
+  });
+
+  it("reads the departure files as they are, unreadable ones as undefined", () => {
     const context = testContext(makeGame());
-    writeFileSync(context.paths.activeDeparture, "");
-    expect(slotDetail(context, slot)).toBe(
-      "no departure is currently active; main departs when it has a new commit.",
-    );
+    writeFileSync(context.paths.activeDeparture, `${slot}\n`);
+    expect(readSlotState(context.paths)).toEqual({
+      activeDeparture: `${slot}\n`,
+      deployPending: undefined,
+    });
   });
 });
 

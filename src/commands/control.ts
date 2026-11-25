@@ -18,12 +18,19 @@ import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("control");
 
-export const control: Handler = (io, root, args) => {
-  const resolved = resolveGame(io, root, SPECS.control.options, USAGE, args);
-  if (typeof resolved === "number") {
-    return resolved;
-  }
-  const { reason, requester, state } = resolved.values;
+/**
+ * The requested state, reason and requester role, or undefined when one is missing or invalid:
+ * the state is `enabled` or `paused`, the reason is 1 to 4096 characters and not blank, and the
+ * requester is not blank.
+ */
+export function controlInput(values: Readonly<Record<string, string | boolean | undefined>>):
+  | {
+      readonly reason: string;
+      readonly requester: string;
+      readonly state: "enabled" | "paused";
+    }
+  | undefined {
+  const { reason, requester, state } = values;
   if (
     (state !== "enabled" && state !== "paused") ||
     typeof reason !== "string" ||
@@ -32,9 +39,22 @@ export const control: Handler = (io, root, args) => {
     typeof requester !== "string" ||
     requester.trim() === ""
   ) {
+    return undefined;
+  }
+  return { reason, requester, state };
+}
+
+export const control: Handler = (io, root, args) => {
+  const resolved = resolveGame(io, root, SPECS.control.options, USAGE, args);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
+  const input = controlInput(resolved.values);
+  if (input === undefined) {
     io.err(`${USAGE}\n`);
     return EXIT_USAGE;
   }
+  const { reason, requester, state } = input;
   try {
     const role = resolveRole(readRegistry(resolved.layout), requester);
     mkdirSync(resolved.game.busDir, { recursive: true });

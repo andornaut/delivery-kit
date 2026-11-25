@@ -110,23 +110,28 @@ function ingested(cursor: EventCursor | "invalid" | undefined, start: StartRecor
   }
 }
 
+/** What adoption is decided from: the latest start record and the last seen coordinator CLI. */
+interface AdoptionFacts {
+  /** The token of a running runner with a current identity, or null. */
+  readonly runnerToken: string | null;
+  readonly start: StartRecord | null | "unreadable";
+  /** Whether bus/seam.json's last seen coordinator CLI is in range; null when none was seen. */
+  readonly supported: boolean | null;
+  /** Whether the cursor shows the start record's line ingested. */
+  readonly ingested: boolean;
+}
+
 /**
  * `current` when the latest `runner.started` carries the running runner's token, the cursor shows
- * that line ingested and bus/seam.json's last seen coordinator CLI is in range; `stale` when its
- * token differs from the running runner's; otherwise `unknown`, with the cause as the reason.
- * `runnerToken` is the token of a running runner with a current identity, or null.
+ * that line ingested and the last seen coordinator CLI is in range; `stale` when its token differs
+ * from the running runner's; otherwise `unknown`, with the cause as the reason.
  */
-export function observerAdoption(
-  paths: BusPaths,
-  runnerToken: string | null,
-): ObserverAdoptionReport {
+export function adoption(facts: AdoptionFacts): ObserverAdoptionReport {
+  const { runnerToken, start, supported } = facts;
   if (runnerToken === null || runnerToken === "") {
     return { reason: "runner_not_current", status: "unknown" };
   }
-  let start: StartRecord | null;
-  try {
-    start = latestStart(paths);
-  } catch {
+  if (start === "unreadable") {
     return { reason: "log_unreadable", status: "unknown" };
   }
   if (start === null) {
@@ -135,15 +140,34 @@ export function observerAdoption(
   if (start.token !== runnerToken) {
     return { reason: "token_differs", status: "stale" };
   }
-  const { supported } = coordinatorCliReport(paths.seam);
   if (supported === null) {
     return { reason: "cli_unseen", status: "unknown" };
   }
   if (!supported) {
     return { reason: "cli_out_of_range", status: "unknown" };
   }
-  if (!ingested(readCursor(paths.eventsCursor), start)) {
+  if (!facts.ingested) {
     return { reason: "not_ingested", status: "unknown" };
   }
   return { reason: null, status: "current" };
+}
+
+/** Observer adoption of the running runner, read only from bus/. */
+export function observerAdoption(
+  paths: BusPaths,
+  runnerToken: string | null,
+): ObserverAdoptionReport {
+  let start: StartRecord | null | "unreadable";
+  try {
+    start = latestStart(paths);
+  } catch {
+    start = "unreadable";
+  }
+  return adoption({
+    ingested:
+      start !== null && start !== "unreadable" && ingested(readCursor(paths.eventsCursor), start),
+    runnerToken,
+    start,
+    supported: coordinatorCliReport(paths.seam).supported,
+  });
 }

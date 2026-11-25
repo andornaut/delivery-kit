@@ -4,7 +4,7 @@
 import { currentMinuteSlot, minuteSlots, untilMinuteAfter } from "../lib/time.ts";
 import { COMPACTION_RESERVED, DEFERRED_PREFIX, type SeamOutcome } from "../seam/result.ts";
 import type { BusContext } from "./context.ts";
-import { reportScheduledTick, slotDetail } from "./departure.ts";
+import { readSlotState, reportScheduledTick, slotDetail } from "./departure.ts";
 import { deliveryRunnerReady } from "./session.ts";
 
 /**
@@ -35,7 +35,15 @@ export function reviewLine(
   }
 }
 
-/** Retry only a confirmed refusal that left no review result to reconcile. */
+/**
+ * Whether a review slot is retained for a later pass: only a confirmed compaction-reserved
+ * deferral, which left no review result to reconcile.
+ */
+export function retriesLater(outcome: SeamOutcome): boolean {
+  return outcome.claimed && outcome.status === "deferred" && outcome.reason === COMPACTION_RESERVED;
+}
+
+/** Review one slot, retaining it for a retry when the CLI reserved it. */
 async function observeReview(
   context: BusContext,
   slot: number,
@@ -48,7 +56,7 @@ async function observeReview(
   } catch (error) {
     outcome = { claimed: false, why: String(error) };
   }
-  if (outcome.claimed && outcome.status === "deferred" && outcome.reason === COMPACTION_RESERVED) {
+  if (retriesLater(outcome)) {
     reservedSlots.add(slot);
   } else {
     reservedSlots.delete(slot);
@@ -80,7 +88,7 @@ async function observe(
   if (config.reports.scheduledTicks) {
     const minutes = config.schedule.departures.map((departure) => Number.parseInt(departure, 10));
     for (const slot of minuteSlots(config.schedule.timezone, minutes, after, now)) {
-      reportScheduledTick(context, slot, slotDetail(context, slot));
+      reportScheduledTick(context, slot, slotDetail(readSlotState(context.paths), slot));
     }
   }
   context.events.ingest();

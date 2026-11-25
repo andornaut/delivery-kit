@@ -21,7 +21,7 @@ import {
 } from "../testing/game.ts";
 import { requestStore } from "./departure.ts";
 import { captureRequest } from "./requests.ts";
-import { RunnerRefused, runRunner } from "./runner.ts";
+import { RunnerRefused, runRunner, scheduledStep } from "./runner.ts";
 
 function holdWithBash(path: string): Promise<() => void> {
   writeFileSync(path, "holder-token\n");
@@ -217,5 +217,16 @@ describe("scheduled-slot reports", () => {
         expect.stringContaining("scheduled slot: nothing new on main; no departure."),
       ],
     ]);
+  });
+});
+
+describe("scheduledStep", () => {
+  it("departs within the slot's first minute and never replays a missed slot", () => {
+    const next = 1_000_000;
+    expect(scheduledStep(next - 1, next)).toBe("early");
+    expect(scheduledStep(next, next)).toBe("due");
+    expect(scheduledStep(next + 59, next)).toBe("due");
+    expect(scheduledStep(next + 60, next)).toBe("missed");
+    expect(scheduledStep(next + 3600, next)).toBe("missed");
   });
 });

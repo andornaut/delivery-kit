@@ -85,20 +85,25 @@ function home(env: NodeJS.ProcessEnv): string {
 
 const STOP_USAGE = commandUsage("runner stop");
 
+/** `--timeout` in seconds: 1 to 9999999, or the default when it is omitted; undefined otherwise. */
+export function stopTimeout(value: string | boolean | undefined): number | undefined {
+  if (value === undefined) {
+    return STOP_TIMEOUT_SECONDS;
+  }
+  const text = String(value);
+  return /^[1-9]\d{0,6}$/u.test(text) ? Number(text) : undefined;
+}
+
 export const runnerStop: Handler = async (io, root, args) => {
   const resolved = resolveGame(io, root, SPECS["runner stop"].options, STOP_USAGE, args);
   if (typeof resolved === "number") {
     return resolved;
   }
   const { game, values } = resolved;
-  let timeout = STOP_TIMEOUT_SECONDS;
-  if (values.timeout !== undefined) {
-    const text = String(values.timeout);
-    if (!/^[1-9]\d{0,6}$/u.test(text)) {
-      io.err(`delivery-kit: --timeout must be a positive whole number of seconds\n${STOP_USAGE}\n`);
-      return EXIT_USAGE;
-    }
-    timeout = Number(text);
+  const timeout = stopTimeout(values.timeout);
+  if (timeout === undefined) {
+    io.err(`delivery-kit: --timeout must be a positive whole number of seconds\n${STOP_USAGE}\n`);
+    return EXIT_USAGE;
   }
   const paths = busPaths(game.busDir);
   const result = await stopRunner(

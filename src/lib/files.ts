@@ -18,12 +18,6 @@ export function readTrimmed(path: string): string | undefined {
   return readText(path)?.trim();
 }
 
-/** True when the file has content (`[ -s file ]`). */
-export function nonEmpty(path: string): boolean {
-  const text = readText(path);
-  return text !== undefined && text.length > 0;
-}
-
 /** Durable small state file; `lines` are written newline-terminated. */
 export function writeLines(path: string, ...lines: readonly string[]): void {
   writeDurable(path, lines.map((line) => `${line}\n`).join(""), { mode: 0o644 });

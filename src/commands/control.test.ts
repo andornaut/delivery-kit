@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../cli.ts";
 import { readDeliveryControl } from "../state/control.ts";
 import { CLAUDE_COORDINATOR, makeFixture, registryInput } from "../testing/fixtures.ts";
+import { controlInput } from "./control.ts";
 
 const GAME = "archies-dog-walks";
 
@@ -92,5 +93,27 @@ describe("control command", () => {
     writeFileSync(test.file, corrupt);
     expect(await run(test.root, ...args("enabled"))).toMatchObject({ code: 1, out: "" });
     expect(readFileSync(test.file, "utf8")).toBe(corrupt);
+  });
+});
+
+describe("controlInput", () => {
+  const valid = { reason: "release window", requester: "game-coordinator", state: "paused" };
+
+  it("accepts an enabled or paused state with a reason and a requester", () => {
+    expect(controlInput(valid)).toEqual(valid);
+    expect(controlInput({ ...valid, state: "enabled" })?.state).toBe("enabled");
+    expect(controlInput({ ...valid, reason: "r".repeat(4096) })).toBeDefined();
+  });
+
+  it.each([
+    { state: "stopped" },
+    { state: undefined },
+    { reason: " " },
+    { reason: "r".repeat(4097) },
+    { reason: true },
+    { requester: "" },
+    { requester: undefined },
+  ])("refuses %j", (change) => {
+    expect(controlInput({ ...valid, ...change })).toBeUndefined();
   });
 });

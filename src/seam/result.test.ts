@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseResult, parseVersion, slotIso } from "./result.ts";
+import { ingestLine, parseResult, parseVersion, slotIso } from "./result.ts";
 
 const GAME = "fixture-game";
 // 2026-11-04 03:20 UTC, the :20 wake slot of 22:20 EST in America/Toronto.
@@ -80,5 +80,24 @@ describe("parsing", () => {
     );
     expect(slotIso("Asia/Kolkata", SLOT)).toBe("2026-11-04T08:50:00+05:30");
     expect(slotIso("UTC", SLOT)).toBe("2026-11-04T03:20:00+00:00");
+  });
+});
+
+describe("ingestLine", () => {
+  const cli = { distSha256: SHA, version: "3.0.0" };
+
+  it("logs a failed or deferred ingest and nothing for a delivered or skipped one", () => {
+    expect(ingestLine({ claimed: false, why: "exit 1" })).toBe(
+      "bus: event ingest failed: exit 1; no delivery claimed",
+    );
+    expect(
+      ingestLine({ claimed: true, cli, detail: "lock held", reason: "held", status: "deferred" }),
+    ).toBe("bus: event ingest deferred: held: lock held");
+    expect(
+      ingestLine({ claimed: true, cli, detail: "", reason: null, status: "delivered" }),
+    ).toBeUndefined();
+    expect(
+      ingestLine({ claimed: true, cli, detail: "", reason: "no-events", status: "skipped" }),
+    ).toBeUndefined();
   });
 });

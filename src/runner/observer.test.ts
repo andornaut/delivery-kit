@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { recordingCoordinator } from "../testing/coordinator.ts";
 import { makeGame, manualClock, recordingEvents, testContext } from "../testing/game.ts";
-import { observer, reviewLine } from "./observer.ts";
+import { observer, retriesLater, reviewLine } from "./observer.ts";
 
 describe("observer", () => {
   it("observes a wake minute that begins while a pass is still running", async () => {
@@ -116,5 +116,17 @@ describe("reviewLine", () => {
     ],
   ] as const)("prints %j as its runner line", (outcome, expected) => {
     expect(reviewLine(60, outcome)).toEqual(expected);
+  });
+});
+
+describe("retriesLater", () => {
+  it("retains only a confirmed compaction-reserved deferral", () => {
+    const deferred = { claimed: true, detail: "", status: "deferred" } as const;
+    expect(retriesLater({ ...deferred, reason: "compaction-reserved" })).toBe(true);
+    expect(retriesLater({ ...deferred, reason: "recipient-busy" })).toBe(false);
+    expect(
+      retriesLater({ claimed: true, detail: "", reason: "compaction-reserved", status: "skipped" }),
+    ).toBe(false);
+    expect(retriesLater({ claimed: false, why: "compaction-reserved" })).toBe(false);
   });
 });

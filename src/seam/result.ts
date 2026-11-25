@@ -181,3 +181,14 @@ export function parseVersion(stdout: string): CliIdentity | string {
   }
   return cliIdentity(value) ?? "malformed result: version or distSha256";
 }
+
+/** The log line for an ingest outcome that needs attention: a failure or a deferral. */
+export function ingestLine(outcome: SeamOutcome): string | undefined {
+  if (!outcome.claimed) {
+    return `bus: event ingest failed: ${outcome.why}; no delivery claimed`;
+  }
+  if (outcome.status === "deferred") {
+    return `bus: event ingest deferred: ${outcome.reason ?? "unknown"}: ${outcome.detail}`;
+  }
+  return undefined;
+}

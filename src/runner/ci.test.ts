@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { makeGame, manualClock, recordingEvents, testContext } from "../testing/game.ts";
 import {
   type CheckRun,
+  ciOutcomeDetail,
   GitHubAuthError,
   latestRuns,
   requiredDecision,
@@ -144,5 +145,33 @@ describe("watchCi", () => {
     const lock = holdLock(join(context.paths.ciDir, `${SHA}.lock`));
     expect(await watchCi(context, SHA, { checks: () => Promise.resolve([]) })).toBe("busy");
     lock.release();
+  });
+});
+
+describe("ciOutcomeDetail", () => {
+  const SHA_A = "a".repeat(40);
+  const state = {
+    failed: ["Test (failure)"],
+    incomplete: ["Build (in_progress)"],
+    missing: ["Lint"],
+  };
+
+  it("names the result, the failed runs and the timeout's incomplete checks", () => {
+    expect(ciOutcomeDetail(600, SHA_A, "success", state)).toBe(
+      `CI success for ${SHA_A}; deployment completion is tracked separately.`,
+    );
+    expect(ciOutcomeDetail(600, SHA_A, "failure", state)).toContain(
+      `CI FAILED for pushed ${SHA_A}: required runs failed: Test (failure); watch stopped on red;`,
+    );
+    expect(ciOutcomeDetail(600, SHA_A, "unauthenticated", state)).toContain(
+      "GitHub authentication failed; completion not confirmed.",
+    );
+    expect(ciOutcomeDetail(600, SHA_A, "timeout", state)).toContain(
+      "the watch timed out after 600 seconds (required checks with no run: Lint; still " +
+        "incomplete: Build (in_progress));",
+    );
+    expect(
+      ciOutcomeDetail(600, SHA_A, "timeout", { failed: [], incomplete: [], missing: [] }),
+    ).toContain("(required checks with no run: none; still incomplete: none)");
   });
 });

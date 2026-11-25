@@ -14,7 +14,7 @@ import {
 import { recordIdentity } from "../state/identity.ts";
 import { busPaths } from "../state/paths.ts";
 import { makeGame } from "../testing/game.ts";
-import { statusReport } from "./status.ts";
+import { controlReport, identityStatus, statusReport } from "./status.ts";
 
 function paths() {
   return busPaths(makeGame().game.busDir);
@@ -399,5 +399,103 @@ describe("status report", () => {
     } finally {
       holder.kill("SIGKILL");
     }
+  });
+});
+
+describe("identityStatus", () => {
+  const identity = { pid: 1, token: "t-1" };
+
+  it("attests the identity only while runner.lock is held with its token", () => {
+    expect(identityStatus("unreadable", true, "t-1")).toBe("unreadable");
+    expect(identityStatus(null, true, "t-1")).toBe("absent");
+    expect(identityStatus(identity, false, "t-1")).toBe("stale");
+    expect(identityStatus(identity, true, "t-1")).toBe("current");
+    expect(identityStatus(identity, true, "t-2")).toBe("unattested");
+    expect(identityStatus(identity, true, undefined)).toBe("unattested");
+    expect(identityStatus({ token: "" }, true, "")).toBe("unattested");
+  });
+});
+
+describe("controlReport", () => {
+  const AT = "2026-11-04T03:20:00.000Z";
+  const desired = {
+    reason: "adopt",
+    requester: "game-coordinator",
+    revision: 1,
+    state: "enabled",
+    updatedAt: AT,
+  } as const;
+  const identity = { token: "t-1" };
+  const live = {
+    identity,
+    identityStatus: "current",
+    lockToken: "t-1",
+    loopHeld: true,
+    running: true,
+  } as const;
+  const stopped = { ...live, identityStatus: "stale", loopHeld: false, running: false } as const;
+  function control(
+    observed: {
+      readonly state: "checking" | "idle" | "stopped";
+      readonly runnerToken: string;
+    } | null,
+    state: "enabled" | "paused" = "enabled",
+  ) {
+    return {
+      activities: {},
+      desired: { ...desired, state },
+      observed: observed === null ? null : { ...observed, sha: null, updatedAt: AT },
+      revision: 2,
+      schema: 1,
+    } as const;
+  }
+
+  it("reports missing and invalid control as requiring migration", () => {
+    expect(controlReport(live, "missing")).toMatchObject({
+      desired_status: "missing",
+      migration_required: true,
+      mismatch_reason: "control_missing",
+      observed_status: "unattested",
+    });
+    expect(controlReport(stopped, "missing").observed_status).toBe("missing");
+    expect(controlReport(live, "invalid")).toMatchObject({
+      desired_status: "invalid",
+      mismatch_reason: "control_invalid",
+      observed_status: "invalid",
+    });
+  });
+
+  it("attests an observation by the running runner's token", () => {
+    expect(controlReport(live, control({ runnerToken: "t-1", state: "idle" }))).toMatchObject({
+      desired_state: "enabled",
+      mismatch: false,
+      mismatch_reason: null,
+      observed_status: "current",
+    });
+    expect(
+      controlReport(live, control({ runnerToken: "t-0", state: "idle" })).observed_status,
+    ).toBe("stale");
+    expect(controlReport(live, control(null))).toMatchObject({
+      mismatch_reason: "observation_unattested",
+      observed_status: "unattested",
+    });
+    expect(controlReport(stopped, control(null)).observed_status).toBe("missing");
+  });
+
+  it("proves a stopped observation after shutdown only with the lock's retained token", () => {
+    const record = control({ runnerToken: "t-1", state: "stopped" });
+    expect(controlReport(stopped, record)).toMatchObject({
+      mismatch: true,
+      mismatch_reason: "desired_enabled_observed_stopped",
+      observed_status: "current",
+    });
+    expect(controlReport({ ...stopped, lockToken: "t-9" }, record).observed_status).toBe(
+      "unattested",
+    );
+  });
+
+  it("drains while paused with work still active", () => {
+    const record = control({ runnerToken: "t-1", state: "checking" }, "paused");
+    expect(controlReport(live, record)).toMatchObject({ draining: true, mismatch: false });
   });
 });

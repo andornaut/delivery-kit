@@ -162,6 +162,38 @@ export function requiredDecision(state: RequiredState): "failure" | "success" | 
   return state.missing.length === 0 && state.incomplete.length === 0 ? "success" : undefined;
 }
 
+/** The event detail for a finished watch of the pushed `sha`. */
+export function ciOutcomeDetail(
+  timeoutSeconds: number,
+  sha: string,
+  result: Exclude<CiResult, "busy">,
+  state: RequiredState,
+): string {
+  switch (result) {
+    case "success":
+      return `CI success for ${sha}; deployment completion is tracked separately.`;
+    case "failure":
+      return [
+        `CI FAILED for pushed ${sha}: required runs failed: ${listed(state.failed)}; watch`,
+        "stopped on red; deployment state tracked separately; inspect checks and merge a fix on",
+        "main. No automatic CI rerun.",
+      ].join(" ");
+    case "unauthenticated":
+      return [
+        `CI status unknown for pushed ${sha}: GitHub authentication failed; completion not`,
+        "confirmed. Restore the gh login on the runner host; the next departure resumes the",
+        "watch, and a pending deployment runs once CI passes.",
+      ].join(" ");
+    default:
+      return [
+        `CI status unknown for pushed ${sha}: the watch timed out after`,
+        `${String(timeoutSeconds)} seconds (${timeoutDetail(state)});`,
+        "completion not confirmed. The next departure resumes the watch, and a pending",
+        "deployment runs once CI passes.",
+      ].join(" ");
+  }
+}
+
 interface PollResult {
   readonly result: CiResult;
   readonly state: RequiredState;
@@ -258,43 +290,15 @@ export async function watchCi(
       return result;
     }
     writeLines(ciStatusFile(context.paths, sha), result);
+    const detail = ciOutcomeDetail(context.config.ci.timeoutSeconds, sha, result, state);
     if (result === "success") {
-      context.events.emit(
-        "ci_success",
-        sha,
-        `CI success for ${sha}; deployment completion is tracked separately.`,
-      );
+      context.events.emit("ci_success", sha, detail);
     } else if (result === "failure") {
-      context.events.emit(
-        "ci_failure",
-        sha,
-        [
-          `CI FAILED for pushed ${sha}: required runs failed: ${listed(state.failed)}; watch`,
-          "stopped on red; deployment state tracked separately; inspect checks and merge a fix on",
-          "main. No automatic CI rerun.",
-        ].join(" "),
-      );
+      context.events.emit("ci_failure", sha, detail);
     } else if (result === "unauthenticated") {
-      context.events.emit(
-        "ci_auth_failed",
-        sha,
-        [
-          `CI status unknown for pushed ${sha}: GitHub authentication failed; completion not`,
-          "confirmed. Restore the gh login on the runner host; the next departure resumes the",
-          "watch, and a pending deployment runs once CI passes.",
-        ].join(" "),
-      );
+      context.events.emit("ci_auth_failed", sha, detail);
     } else {
-      context.events.emit(
-        "ci_timeout",
-        sha,
-        [
-          `CI status unknown for pushed ${sha}: the watch timed out after`,
-          `${String(context.config.ci.timeoutSeconds)} seconds (${timeoutDetail(state)});`,
-          "completion not confirmed. The next departure resumes the watch, and a pending",
-          "deployment runs once CI passes.",
-        ].join(" "),
-      );
+      context.events.emit("ci_timeout", sha, detail);
     }
     return result;
   } finally {

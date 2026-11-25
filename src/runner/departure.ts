@@ -6,11 +6,11 @@ import { holdLockAsync } from "@andornaut/coordination-kit/build/shared";
 
 import { runGate, treeFingerprint } from "../gate/gate.ts";
 import { assertNotInterrupted, git, Interrupted } from "../lib/exec.ts";
-import { ensureDir, nonEmpty, readTrimmed, writeLines } from "../lib/files.ts";
+import { ensureDir, readText, readTrimmed, writeLines } from "../lib/files.ts";
 import { latestScheduledSlot, stamp } from "../lib/time.ts";
 import { errorMessage } from "../lib/values.ts";
 import type { BlockedStage } from "../state/events.ts";
-import { gateFailedFile } from "../state/paths.ts";
+import { type BusPaths, gateFailedFile } from "../state/paths.ts";
 import { resumeStoppedCi } from "./ci.ts";
 import { type BusContext, loadOk } from "./context.ts";
 import {
@@ -52,10 +52,23 @@ export function reportScheduledTick(context: BusContext, slot: number, detail: s
   );
 }
 
+/** The departure files the observer's slot report reads: their text, undefined when unreadable. */
+export interface SlotState {
+  readonly activeDeparture: string | undefined;
+  readonly deployPending: string | undefined;
+}
+
+export function readSlotState(paths: BusPaths): SlotState {
+  return {
+    activeDeparture: readText(paths.activeDeparture),
+    deployPending: readText(paths.deployPending),
+  };
+}
+
 /** The start epoch `active-departure` records, or undefined when it is not a whole number. */
-function activeDepartureStart(context: BusContext): number | undefined {
-  const text = readTrimmed(context.paths.activeDeparture) ?? "";
-  const value = /^\d+$/u.test(text) ? Number(text) : Number.NaN;
+function activeDepartureStart(text: string): number | undefined {
+  const trimmed = text.trim();
+  const value = /^\d+$/u.test(trimmed) ? Number(trimmed) : Number.NaN;
   return Number.isSafeInteger(value) ? value : undefined;
 }
 
@@ -64,10 +77,10 @@ function activeDepartureStart(context: BusContext): number | undefined {
  * its start epoch in `active-departure`, so a departure that started at or after the slot is this
  * slot's own; only an earlier one is unfinished from before the slot.
  */
-export function slotDetail(context: BusContext, slot: number): string {
-  const { paths } = context;
-  if (nonEmpty(paths.activeDeparture)) {
-    const started = activeDepartureStart(context);
+export function slotDetail(state: SlotState, slot: number): string {
+  const { activeDeparture, deployPending } = state;
+  if (activeDeparture !== undefined && activeDeparture.length > 0) {
+    const started = activeDepartureStart(activeDeparture);
     if (started !== undefined && started >= slot) {
       return "this slot's departure is checking main; any attempt is reported separately.";
     }
@@ -76,7 +89,7 @@ export function slotDetail(context: BusContext, slot: number): string {
       "attempt outcomes are reported separately.",
     ].join(" ");
   }
-  if (nonEmpty(paths.deployPending)) {
+  if (deployPending !== undefined && deployPending.length > 0) {
     return "deployment is pending; its retry and outcome are reported separately.";
   }
   return "no departure is currently active; main departs when it has a new commit.";

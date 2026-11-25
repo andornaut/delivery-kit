@@ -12,6 +12,7 @@ import {
   CLI_UNAVAILABLE,
   CLI_VERSION,
   type Expected,
+  ingestLine,
   oneLine,
   parseResult,
   parseVersion,
@@ -317,12 +318,7 @@ export class CoordinatorCli implements Coordinator {
 
   /** Log an ingest outcome that needs attention, once until the outcome changes. */
   #logIngest(outcome: SeamOutcome): void {
-    let line: string | undefined;
-    if (!outcome.claimed) {
-      line = `bus: event ingest failed: ${outcome.why}; no delivery claimed`;
-    } else if (outcome.status === "deferred") {
-      line = `bus: event ingest deferred: ${outcome.reason ?? "unknown"}: ${outcome.detail}`;
-    }
+    const line = ingestLine(outcome);
     if (line !== undefined && line !== this.#lastIngestLine) {
       this.#options.log(line);
     }

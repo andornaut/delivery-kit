@@ -197,6 +197,23 @@ async function attempt(context: BusContext, pending: PendingDeploy): Promise<boo
   }
 }
 
+/**
+ * Whether a trigger queued behind `prior` takes the outcome of `last`: an attempt at the same
+ * pending deployment that finished while the trigger waited.
+ */
+export function sharesAttempt(
+  last: DeploymentAttempt | undefined,
+  prior: DeploymentAttempt | undefined,
+  pending: PendingDeploy,
+): last is DeploymentAttempt {
+  return (
+    last !== undefined &&
+    last !== prior &&
+    last.pending.sha === pending.sha &&
+    last.pending.work === pending.work
+  );
+}
+
 function attemptOnce(
   context: BusContext,
   lifecycle: PendingLifecycle,
@@ -204,12 +221,7 @@ function attemptOnce(
   pending: PendingDeploy,
 ): Promise<boolean> {
   const last = lifecycle.lastAttempt;
-  if (
-    last !== undefined &&
-    last !== prior &&
-    last.pending.sha === pending.sha &&
-    last.pending.work === pending.work
-  ) {
+  if (sharesAttempt(last, prior, pending)) {
     return last.result;
   }
   const result = attempt(context, pending);

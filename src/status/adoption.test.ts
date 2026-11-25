@@ -9,7 +9,7 @@ import { logIdentity } from "../state/eventlog.ts";
 import { EVENTS_FILE, formatLine, makeEvent, startedDetail } from "../state/events.ts";
 import { recordIdentity } from "../state/identity.ts";
 import { type BusPaths, busPaths } from "../state/paths.ts";
-import { latestStart, observerAdoption } from "./adoption.ts";
+import { adoption, latestStart, observerAdoption } from "./adoption.ts";
 import { statusReport } from "./status.ts";
 
 const GAME = "archies-dog-walks";
@@ -222,5 +222,38 @@ describe("observerAdoption", () => {
       observer_adoption: "unknown",
       observer_adoption_reason: "runner_not_current",
     });
+  });
+});
+
+describe("adoption", () => {
+  const start = { end: 10, file: "events.jsonl", token: TOKEN };
+  const facts = { ingested: true, runnerToken: TOKEN, start, supported: true } as const;
+
+  it("is current only when every fact holds", () => {
+    expect(adoption(facts)).toEqual({ reason: null, status: "current" });
+  });
+
+  it.each([
+    [{ runnerToken: null }, "runner_not_current", "unknown"],
+    [{ runnerToken: "" }, "runner_not_current", "unknown"],
+    [{ start: "unreadable" }, "log_unreadable", "unknown"],
+    [{ start: null }, "no_runner_started", "unknown"],
+    [{ start: { ...start, token: OTHER } }, "token_differs", "stale"],
+    [{ supported: null }, "cli_unseen", "unknown"],
+    [{ supported: false }, "cli_out_of_range", "unknown"],
+    [{ ingested: false }, "not_ingested", "unknown"],
+  ] as const)("with %j reports %s", (change, reason, status) => {
+    expect(adoption({ ...facts, ...change })).toEqual({ reason, status });
+  });
+
+  it("checks the token before the coordinator CLI and ingest", () => {
+    expect(
+      adoption({
+        ingested: false,
+        runnerToken: TOKEN,
+        start: { ...start, token: OTHER },
+        supported: null,
+      }),
+    ).toEqual({ reason: "token_differs", status: "stale" });
   });
 });

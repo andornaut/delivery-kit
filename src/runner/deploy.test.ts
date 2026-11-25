@@ -17,7 +17,14 @@ import {
   recordingEvents,
   testContext,
 } from "../testing/game.ts";
-import { deployAfterCi, readPending, retryDeploy, stageDeploy } from "./deploy.ts";
+import {
+  deployAfterCi,
+  deployNeeded,
+  readPending,
+  retryDeploy,
+  sharesAttempt,
+  stageDeploy,
+} from "./deploy.ts";
 import { withDeliveryRunner } from "./session.ts";
 
 const failed: ExecResult = { status: 1, stderr: "temporarily unavailable", stdout: "" };
@@ -187,5 +194,36 @@ describe("pending deployment lifecycle", () => {
 
     remote.result = healthy;
     await expect(retryDeploy(context)).resolves.toBe(true);
+  });
+});
+
+describe("deployNeeded", () => {
+  it("needs a deployment unless every changed path matches the skip pattern", () => {
+    expect(deployNeeded("^docs/", ["docs/a.md", "docs/b.md"])).toBe(false);
+    expect(deployNeeded("^docs/", ["docs/a.md", "src/main.ts"])).toBe(true);
+    expect(deployNeeded("^docs/", [])).toBe(false);
+  });
+
+  it("always needs one without a pattern or with an unknown range", () => {
+    expect(deployNeeded(undefined, ["docs/a.md"])).toBe(true);
+    expect(deployNeeded("", ["docs/a.md"])).toBe(true);
+    expect(deployNeeded("^docs/", undefined)).toBe(true);
+  });
+});
+
+describe("sharesAttempt", () => {
+  const pending = { sha: "a".repeat(40), work: "/work/a" };
+  const attempt = { pending, result: Promise.resolve(true) };
+
+  it("shares an attempt at the same pending deployment that finished while it waited", () => {
+    expect(sharesAttempt(attempt, undefined, pending)).toBe(true);
+    expect(sharesAttempt(attempt, { ...attempt }, { ...pending })).toBe(true);
+  });
+
+  it("starts its own attempt otherwise", () => {
+    expect(sharesAttempt(undefined, undefined, pending)).toBe(false);
+    expect(sharesAttempt(attempt, attempt, pending)).toBe(false);
+    expect(sharesAttempt(attempt, undefined, { ...pending, work: "/work/b" })).toBe(false);
+    expect(sharesAttempt(attempt, undefined, { ...pending, sha: "b".repeat(40) })).toBe(false);
   });
 });

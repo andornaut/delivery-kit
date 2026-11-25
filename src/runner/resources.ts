@@ -7,14 +7,15 @@ import { GATE_LABEL } from "../gate/gate.ts";
 import { zonedParts } from "../lib/time.ts";
 import type { BusContext } from "./context.ts";
 
-function clockLine(timezone: string, epoch: number): string {
+/** `%Y-%m-%d %H:%M:%S %Z` in `timezone`. */
+export function clockLine(timezone: string, epoch: number): string {
   const p = zonedParts(timezone, epoch);
   const pad = (value: number): string => String(value).padStart(2, "0");
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${pad(p.minute)}:${pad(p.second)} ${p.zone}`;
 }
 
 /** uptime(1)'s up-time and load averages, read from node:os rather than a child process. */
-function uptimeLine(seconds: number, loads: readonly number[]): string {
+export function uptimeLine(seconds: number, loads: readonly number[]): string {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
