@@ -140,6 +140,12 @@ export default defineConfig(
   },
   js.configs.recommended,
   ts.configs.recommended,
+  // `import { type A }` still loads its module at runtime under verbatimModuleSyntax, while
+  // import-x/no-cycle skips it as type-only. `import type` keeps every runtime import visible.
+  {
+    files: ["**/*.ts", "**/*.mts"],
+    rules: { "@typescript-eslint/no-import-type-side-effects": "error" },
+  },
   {
     languageOptions: {
       globals: { ...globals.node },

@@ -1,4 +1,4 @@
-import { type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
+import type { ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
 import {

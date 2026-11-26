@@ -13,7 +13,7 @@ import {
 
 import type { Exec } from "../lib/exec.ts";
 import { ensureDir, errnoCode } from "../lib/files.ts";
-import { type BusPaths } from "../state/paths.ts";
+import type { BusPaths } from "../state/paths.ts";
 import { mainHead, skipReason } from "./trunk.ts";
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;

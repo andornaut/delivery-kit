@@ -44,7 +44,7 @@ import {
   WORK_FILE,
   workStatus,
 } from "./events.ts";
-import { type BusPaths } from "./paths.ts";
+import type { BusPaths } from "./paths.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/u;
 const GIT_TIMEOUT_MS = 10_000;

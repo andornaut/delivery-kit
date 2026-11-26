@@ -3,11 +3,7 @@
 import { appendFileSync } from "node:fs";
 import { loadavg } from "node:os";
 
-import {
-  type GameLayout,
-  type Layout,
-  type ProjectConfig,
-} from "@andornaut/coordination-kit/build/shared";
+import type { GameLayout, Layout, ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 
 import { type Clock, systemClock } from "../lib/clock.ts";
 import { type Exec, spawnExec } from "../lib/exec.ts";

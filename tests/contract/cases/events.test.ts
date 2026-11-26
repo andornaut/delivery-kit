@@ -11,7 +11,7 @@ import { expect } from "vitest";
 import { cli, execute, impl, type Resident, startRunner } from "../lib/adapter.ts";
 import { contract, EXIT_INVALID, EXIT_REFUSED, suite, workspaces } from "../lib/cases.ts";
 import { at, sleep } from "../lib/time.ts";
-import { type Workspace } from "../lib/workspace.ts";
+import type { Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000001";
 const EVERY_MINUTE = Array.from({ length: 60 }, (_, m) => String(m).padStart(2, "0"));

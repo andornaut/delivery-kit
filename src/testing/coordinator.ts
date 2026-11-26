@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { type Coordinator, COORDINATOR_CLI } from "../seam/coordinator.ts";
-import { type SeamOutcome } from "../seam/result.ts";
+import type { SeamOutcome } from "../seam/result.ts";
 
 /** The fake CLI the unit and contract suites share. */
 const FAKE_COORDINATOR_CLI = fileURLToPath(

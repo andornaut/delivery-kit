@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
-import { type GateStep, type ProjectConfig } from "@andornaut/coordination-kit/build/shared";
+import type { GateStep, ProjectConfig } from "@andornaut/coordination-kit/build/shared";
 
 import { assertNotInterrupted, type Exec, type ExecResult, Interrupted } from "../lib/exec.ts";
 import { errorMessage } from "../lib/values.ts";
