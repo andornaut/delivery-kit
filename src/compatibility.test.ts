@@ -24,7 +24,7 @@ describe("satisfies", () => {
 describe("ranges", () => {
   it("accept 3.x through 7.x coordinator CLIs and a 2.0.1 or 3.x bundle", () => {
     expect(COORDINATOR_CLI_RANGE).toBe(">=3.0.0 <8.0.0");
-    expect(COORDINATION_KIT_RANGE).toBe(">=2.0.1 <4.0.0");
+    expect(COORDINATION_KIT_RANGE).toBe(">=7.8.0 <8.0.0");
     for (const [version, cli, bundle] of [
       ["2.0.0", false, false],
       ["2.0.1", false, true],

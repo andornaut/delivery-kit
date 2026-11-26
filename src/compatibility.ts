@@ -6,11 +6,8 @@
 
 export const PACKAGE = "@andornaut/delivery-kit";
 export const COORDINATION_KIT = "@andornaut/coordination-kit";
-/**
- * The coordination-kit releases the build may inline. It spans 2.0.1 and 3.x because the bundles
- * use only build/registry, build/review and build/shared, which 3.0 keeps unchanged.
- */
-export const COORDINATION_KIT_RANGE = ">=2.0.1 <4.0.0";
+/** Builds need the app layout and permission exports introduced in Coordination Kit 7.8. */
+export const COORDINATION_KIT_RANGE = ">=7.8.0 <8.0.0";
 /**
  * The coordinator-installed coordination-kit CLI releases whose review and event results this
  * runner accepts. A result from a CLI outside it defers reviews and event delivery.

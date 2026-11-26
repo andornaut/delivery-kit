@@ -97,7 +97,7 @@ describe("bundled coordination-kit", () => {
   it("is inside the supported range, and the package check refuses one outside it", () => {
     expect(bundledCoordinationKit(root)).toMatch(/^[23]\.\d+\.\d+$/u);
     // The current 2.0.1 bundle and a later 3.x bundle both pass.
-    expect(COORDINATION_KIT_RANGE).toBe(">=2.0.1 <4.0.0");
+    expect(COORDINATION_KIT_RANGE).toBe(">=7.8.0 <8.0.0");
     for (const [version, accepted] of [
       ["2.0.1", true],
       ["2.9.3", true],
