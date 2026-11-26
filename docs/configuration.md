@@ -1,27 +1,50 @@
 # Configuration
 
-The committed configuration files: game-coordinator's `config.json` and each game's `delivery-kit.json`.
-coordination-kit reads the same files for the registry, the review route and message routing.
+Commit `config.json` at the workspace root and `delivery-kit.json` at each app's repository root.
+Coordination Kit reads these files for the registry, review route and message routing.
 
 Configuration never holds secret values. Use the operator's existing authentication and
 credential references.
 
-## game-coordinator `config.json`
+## Workspace `config.json`
 
-Committed in game-coordinator, schema 1. Every path is relative to game-coordinator. See `examples/config.json`.
+Schema 1 requires `timezone` (an IANA zone), `wakeMinutes` (unique integers 0 to 59),
+`kits` (a map of kit IDs to `{path}`), `sharedRoles` (role keys) and exactly one of
+`apps` or `games`. Paths resolve relative to the workspace root. An empty `wakeMinutes`
+schedules no review.
 
-- `timezone` (an IANA time zone) and `wakeMinutes` (unique integers 0 to 59): the scheduled
-  review minutes. An empty `wakeMinutes` schedules no review.
-- `games.<id>`: `name` (the report name, for example `Archie`), `path` to the game checkout and
-  `roles`.
-- `kits.<id>.path` and `sharedRoles`.
+### App mode
 
-Role keys are `<game>/<role>` for each game role, then each shared role name. The registry, the
-route and every role reference must use these keys.
+Each `apps.<id>` entry has a display `name`, repository `path` and a non-empty list of
+exact registry role keys in `roles`. A solo repo can set `path` to `"."`. Role keys such as
+`operator` and `reports/operator` are used verbatim by the registry, the route and reports.
 
-## Game `delivery-kit.json`
+Declare grants under `permissions.<role>` with a `workspace` array and an `apps` map from
+app IDs to grant arrays. Use an empty `workspace` array for a role whose grants apply only
+to named apps. Set the app's `operations.<id>.busOwner` in the registry and grant that role
+`delivery:operate`, `review:deliver` and `events:ingest` for the app to run its resident.
+See [authorization](commands.md#app-mode-authorization) for command requirements.
 
-Committed in each game, schema 1, and owned by its Tech role. See `examples/delivery-kit.json`.
+New workspaces default to `var/apps/<id>/bus/`. When upgrading a `games` workspace, set
+`"appStateDir": "games"` to keep its existing state paths. See the
+[solo configuration](../examples/solo/config.json) and the [upgrade procedure](upgrading.md#opt-in-to-app-mode).
+
+To try the solo example, copy its two configuration files to the app root and its
+`route.json` to `var/route.json`. Keep `var/` out of Git. Set the GitHub repository, CI
+check names and gate commands for your project. Create the [registry binding](registry.md)
+and validate the configuration with `delivery-kit --root WORKSPACE check-config --app reports`.
+
+### Legacy game mode
+
+Keep the existing [`games` configuration](../examples/config.json) to retain legacy behaviour.
+Each `games.<id>` entry has `name`, `path` and unqualified `roles`. The corresponding registry
+role keys are `<id>/<role>`, plus the shared role names. `permissions` and `appStateDir` are
+app-mode fields.
+
+## App `delivery-kit.json`
+
+Each app uses schema 1. See the [solo example](../examples/solo/delivery-kit.json) or the
+[legacy example](../examples/delivery-kit.json).
 
 - `git`: `main`, `remote` and `github` (the GitHub `owner/name`).
 - `schedule`: `departures`, a non-empty list of unique two-digit minute strings such as `"00"`, and
@@ -36,8 +59,8 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   rejected. Every step is treated alike: each needs a unique name (a letter or digit, then up
   to 63 letters, digits, `_`, `.` or `-`), steps run in list order, and the first failure stops
   the gate. No step name has special meaning. The
-  canonical order is `check`, `lint`, `test`, `build`, then any game-specific steps (such as
-  `art`), so every game lists the shared steps the same way and opts into extras by adding them.
+  canonical order is `check`, `lint`, `test`, `build`, then any app-specific steps (such as
+  `art`), so every app lists the shared steps the same way and opts into extras by adding them.
 - `resources`: `cpus` (integer 1 to 4), `memoryMiB` (integer 6 to 8192) and `loadLimit` (a
   number 0 to 30), all required. Gate containers receive `--memory <memoryMiB>m`, in MiB. CPU and
   memory limits cap execution; only the one-minute load controls admission. A departure starts only below
@@ -56,8 +79,8 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   This shortcut applies independently of `skipPattern` ([Departures](runner.md#departures)).
 - `reports` requires a `scheduledTicks` boolean, a `recipient` role key and a `workerParents`
   array of unique role keys. The recipient receives delivery reports and the scheduled reviews
-  when the game hosts the route. Enabling `scheduledTicks` adds one `scheduled-status` event
-  per departure slot. Reports use the game's `name` from `config.json`. The optional legacy
+  when the app hosts the route. Enabling `scheduledTicks` adds one `scheduled-status` event
+  per departure slot. Reports use the app's `name` from `config.json`. The optional legacy
   `project` must match that name when supplied. Keep it while a current or rollback reader
   requires it. When `var/registry.json` exists, `check-config` resolves the recipient and each
   worker parent as registry roles. Every listed worker parent must have a canonical conversation

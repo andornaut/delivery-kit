@@ -1,50 +1,45 @@
 # delivery-kit
 
-Local scheduled trunk-based Git delivery. A full departure gates the game's local `main` HEAD in
+Local scheduled trunk-based Git delivery. A full departure gates the app's local `main` HEAD in
 an isolated container, pushes that exact commit, watches its CI and deploys the gated build when
 CI passes and deployment is enabled for the range. Eligible
 [docs-only ranges](docs/runner.md#departures) push and watch CI without gating or deploying.
-Each game owns its repository, `delivery-kit.json`, credentials and schedule.
-`game-coordinator` owns `config.json`, the registry and runner state under `var/`.
+Each app has a repository, `delivery-kit.json`, credentials and a schedule. The workspace root
+holds `config.json`, the registry and runner state under `var/`. A single app can use its own
+repository as the workspace root.
 
 The role registry, durable role messages, harness adapters, inbox review and the work store are
 [coordination-kit](https://github.com/andornaut/coordination-kit), which delivery-kit builds on;
 delivery-kit reads no coordination-kit store or work protocol state. The resident runner calls the
-coordinator-installed coordination-kit CLI for scheduled reviews and ingestion of its per-game
+workspace-installed coordination-kit CLI for scheduled reviews and ingestion of its app's
 event log ([Event log](docs/runner.md#event-log)).
 
 The `@andornaut/delivery-kit` package provides the operator CLI,
 bundled into `dist/cli.js` with the coordination-kit modules it uses. The bundle imports only
 `node:` builtins, has no dynamic `import()`,
 relative `require`, worker threads or source maps. The runner reads the installed package and
-lockfile again before each departure. It runs the game's installed Wrangler and the coordinator
+lockfile again before each departure. It runs the app's installed Wrangler and the workspace
 root's `coordination-kit` CLI with the same Node binary.
 
 ## Install and pin
 
-Games and game-coordinator pin the released asset as a devDependency and commit the lockfile
-integrity. The bundles inline coordination-kit's utilities, so a game pins only delivery-kit;
-delivery-kit 8.5.0 bundles coordination-kit 3.4.4, inside `>=2.0.1 <4.0.0`
-([Pin guard](docs/runner.md#pin-guard)). game-coordinator also pins coordination-kit directly
-for the roles' CLI, the channel MCP server and the reviews and event ingest each runner spawns,
-which need a release inside `>=3.0.0 <8.0.0`:
+Pin the released Delivery Kit asset as a devDependency and commit the lockfile integrity.
+Each runner uses its app's installed Delivery Kit, which bundles the Coordination Kit utilities
+it needs. Install Coordination Kit directly at the workspace root for coordination commands and
+for the review and ingest CLI that the runner spawns. App mode requires Coordination Kit 7.8.0 or
+later within the supported range. See [Pin guard](docs/runner.md#pin-guard) for legacy compatibility
+and [Upgrading](docs/upgrading.md#opt-in-to-app-mode) for adoption and rollback.
 
-```json
-"devDependencies": {
-  "@andornaut/delivery-kit": "https://github.com/andornaut/delivery-kit/releases/download/v8.5.0/delivery-kit-8.5.0.tgz"
-}
-```
-
-A pin changes only by a devDependency bump, `npm ci`, then an idle runner replacement. Each game's
-runner runs from that game's own `node_modules`; game-coordinator's copy runs `check-config` and
-`status`, and its coordination-kit copy runs the coordination commands and the runners' reviews
-and event ingest.
+Change a pin via the devDependency and lockfile, run `npm ci`, then replace the runner while idle
+and drained.
 
 ## Commands
 
-Delivery commands resolve the coordinator root from `--root DIR`, then `DELIVERY_KIT_ROOT`,
+Delivery commands resolve the workspace root from `--root DIR`, then `DELIVERY_KIT_ROOT`,
 then the working directory. Supply `--root` at most once, in any position. Select an app with
 `--app ID`. Compatibility alias `--game ID` selects the same app. Supply only one selector.
+The workspace configuration determines which [authorization rules](docs/commands.md#app-mode-authorization)
+apply.
 `check-config` checks all configured apps when no ID is supplied.
 
 | Command                                                                   | Purpose                                                                                                                                          |
@@ -70,9 +65,9 @@ generated from each command's parser options, so it lists every flag a command a
 
 ## Configuration
 
-Configuration never holds secret values. game-coordinator commits `config.json` and each game
-commits its `delivery-kit.json`; see `examples/`. Every field and its validation:
-[docs/configuration.md](docs/configuration.md).
+Commit `config.json` at the workspace root and `delivery-kit.json` at each app root. See the
+[configuration reference](docs/configuration.md) for the solo example, exact role keys and
+the existing `games` configuration.
 
 ## Documentation
 
@@ -80,7 +75,7 @@ commits its `delivery-kit.json`; see `examples/`. Every field and its validation
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [docs/commands.md](docs/commands.md)                     | Per-command semantics and the commands that moved to coordination-kit                                                                                                                                                         |
 | [docs/configuration.md](docs/configuration.md)           | `config.json` and `delivery-kit.json`: schedule, gate, resources, CI, deployment and reports                                                                                                                                  |
-| [docs/registry.md](docs/registry.md)                     | Pointer: the registry moved to coordination-kit; what delivery-kit still reads from it                                                                                                                                        |
+| [docs/registry.md](docs/registry.md)                     | Registry role bindings and delivery ownership                                                                                                                                                                                 |
 | [docs/messages.md](docs/messages.md)                     | Pointer: common role messages moved to coordination-kit                                                                                                                                                                       |
 | [docs/review.md](docs/review.md)                         | The scheduled review seam the runner calls and the bus events it records, with their remedies                                                                                                                                 |
 | [docs/state.md](docs/state.md)                           | The state layout, durable writes, desired and observed delivery control, and adopting persistent control                                                                                                                      |

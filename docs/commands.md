@@ -2,12 +2,26 @@
 
 Per-command semantics for the `delivery-kit` CLI, beyond the command table in the [README](../README.md#commands), and the commands that moved to coordination-kit.
 
+## App-mode authorization
+
+In an `apps` workspace, `run`, `runner start`, `runner stop`, `request` and `control`
+require an active registry binding for the caller's exact native conversation ID
+(`CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`). Its role must match
+`operations.<appId>.busOwner` and have `delivery:operate` for the app. `run` and
+`runner start` also require `review:deliver` and `events:ingest` for the same app.
+`control --requester ROLE` must match the resolved caller role.
+
+Both selector spellings apply these checks before mutation. A legacy `games` workspace
+retains its existing operating rules, including the registered requester on `control`.
+See [Configuration](configuration.md#app-mode) to declare the grants and
+[Supervision](runner.md#supervision) to provision the resident's environment.
+
 ## Command semantics
 
 - `request` takes a `SAFE_ID` starting with an ASCII letter or digit, followed by up to 63
   ASCII letters, digits, underscores or hyphens. Reusing an ID returns its existing receipt.
   An invalid ID exits 1. Omitting `--id` exits 2.
-- `control` persists the desired state approved for the game. The command changes
+- `control` persists the desired state approved for the app. The command changes
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
@@ -28,7 +42,7 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   coordination-kit version and the supported range; see [Pin guard](runner.md#pin-guard).
   `coordinator_cli` reports the last coordinator CLI identity a seam result carried, from
   `bus/seam.json`: `{version, distSha256, seenAt, supported}`, where `supported` tests `version`
-  against `>=3.0.0 <8.0.0`, and every field is null before the runner has seen one; see
+  against the workspace's supported CLI range, and every field is null before the runner has seen one; see
   [Coordinator CLI seam](runner.md#coordinator-cli-seam).
   `events` reports `{file, size, cursorOffset, rotated, torn, drained}`. `size` is 0 without a log
   and null when unreadable. `cursorOffset` is null without a valid cursor. `rotated` lists logs
@@ -56,13 +70,13 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   refused singleton start also exits 3.
 - `runner start --app ID`: exits 1 and starts nothing while either lock is held or the legacy
   outbox check fails. Starts the systemd user unit when its file is installed, otherwise spawns
-  the game's installed `dist/cli.js run --game ID` detached with output appended to
+  the app's installed Delivery Kit CLI detached with output appended to
   `bus/runner.out`. Stdout is one JSON line `{schema, appId, pid, method, status}` with
   `method` `systemd` or `spawn` and `status`
   `{running, idle, coordinator_cli}`. After the launch call returns, the command waits up to
   30 s to attest startup. It exits 1 if attestation fails.
-- `runner unit`: prints the systemd user unit for the game's resident runner to stdout and writes
-  nothing: no unit file, no `systemctl` call. It resolves the coordinator root, the game's
+- `runner unit`: prints the systemd user unit for the app's resident runner to stdout and writes
+  nothing: no unit file, no `systemctl` call. It resolves the workspace root, the app's
   canonical checkout and installed `dist/cli.js`, the running Node binary and the directories of
   `gh`, `docker`, `git`, `flock` and `claude` on `PATH`. A missing installed CLI or tool exits 1
   with no stdout. Install and upgrade steps are in [Supervision](runner.md#supervision).

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "timezone": "UTC",
+  "wakeMinutes": [30],
+  "apps": {
+    "reports": { "name": "Reports", "path": ".", "roles": ["operator"] }
+  },
+  "kits": {},
+  "sharedRoles": [],
+  "permissions": {
+    "operator": {
+      "workspace": [],
+      "apps": { "reports": ["delivery:operate", "review:deliver", "events:ingest"] }
+    }
+  }
+}

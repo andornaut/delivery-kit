@@ -2,16 +2,17 @@
 
 Where delivery-kit keeps mutable state, how it writes it durably, and the persistent delivery control record.
 
-The following paths live under game-coordinator's ignored `var/`. Coordination Kit owns the
-registry, route, review and message state. Delivery Kit owns each game's bus and shares the
+The following paths live under the workspace's ignored `var/`. Coordination Kit owns the
+registry, route, review and message state. Delivery Kit owns each app's bus and shares the
 event log and cursor formats with Coordination Kit.
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
 - `handoffs/<scope>/`: checkpoints the registry references.
-- `game-dev/`: review and inbox snapshots, health history, acknowledgements and retentions.
-  This persisted directory remains `var/game-dev/` for the coordinator rename.
-- `games/<g>/bus/`: the bus. It holds `runner.lock`, `loop.lock`, `departure.lock`,
+- `reviews/`: review and inbox snapshots, health history, acknowledgements and retentions.
+  Legacy workspaces and app mode with `"appStateDir": "games"` use `game-dev/`.
+- `apps/<id>/bus/`: the bus for a new app workspace. Legacy workspaces and app mode with
+  `"appStateDir": "games"` use `games/<id>/bus/`. The bus holds `runner.lock`, `loop.lock`, `departure.lock`,
   `active-departure` (the running departure's start epoch, empty when none), `gate-failed/`,
   the detached `gate-<sha>` worktree kept for a pending deployment, `gate-logs/`, `ci/`, `deploy/`,
   `deploy-pending`, `last-push*`, `last-deploy*`,
@@ -24,10 +25,10 @@ event log and cursor formats with Coordination Kit.
   `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
   `runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
 
-An unmigrated `games/<g>/bus/events` outbox blocks startup and remains in place. Use the
+An unmigrated `bus/events` outbox blocks startup and remains in place. Use the
 [6.1.2 migration bridge](upgrading.md#upgrading-to-80) to import and drain it.
 
-The gate's npm cache is the Docker volume `delivery-kit-npm-<game>`.
+The gate's npm cache is the Docker volume `delivery-kit-npm-<id>`.
 
 Coordination Kit owns the external coordination state root. The legacy protocol used
 `<stateRoot>/accounting` and `<stateRoot>/transport/messages`. See the [Coordination Kit 3.0 migration](https://github.com/andornaut/coordination-kit/blob/main/docs/upgrading.md#from-21)
@@ -35,12 +36,12 @@ for retirement and the current configuration pointer.
 
 Durable record replacement uses a temporary file, file fsync, rename and directory fsync. The
 [event log](runner.md#event-log) uses single `O_APPEND` writes followed by fsync. Locks use
-`flock(1)`. Runners read `<game>/delivery-kit.json` and keep their bus state under
-`var/games/<g>/bus/`. Gates also create detached worktrees and use a Docker cache volume.
+`flock(1)`. Runners load `delivery-kit.json` from the app repository. Gates also create
+detached worktrees and use a Docker cache volume.
 
 ## Desired and observed delivery control
 
-`games/<g>/bus/delivery-control.json` is the single persistent control record. Writers hold
+`bus/delivery-control.json` is the single persistent control record. Writers hold
 `control.lock` and use the durable write procedure above. Its schema is:
 
 | Field                | Content                                                                                       |
@@ -63,7 +64,7 @@ closed until explicitly initialized or repaired. A legacy installation never bec
 implicitly. Readiness probes, candidates and blockers remain separate from desired control;
 none creates a competing control file or implies permission to depart.
 
-`status --game ID` adds a `control` object:
+`status --app ID` includes a `control` object:
 
 | Field                                 | Content                                                                                      |
 | ------------------------------------- | -------------------------------------------------------------------------------------------- |

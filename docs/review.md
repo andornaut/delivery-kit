@@ -1,6 +1,7 @@
 # Review and events
 
-What the resident runner hands to the coordinator-installed coordination-kit CLI: the scheduled review slots and the bus events.
+The resident runner calls the workspace-installed Coordination Kit CLI for scheduled reviews
+and bus event ingestion. See the [wire contract](runner.md#coordinator-cli-seam).
 
 ## Scheduled reviews
 
@@ -8,9 +9,10 @@ The review route `var/route.json`, the brief, the inbox inventory and the Claude
 adapters are coordination-kit's. The runner's observer decides when a `config.json`
 `wakeMinutes` slot is due and spawns the coordinator root's `coordination-kit review deliver` for
 it. Coordination Kit resolves the route, stores the brief for the recipient when due and
-records the slot result. `check-config` validates `var/route.json` when present. Cadence, the
-observer and the seam are in
-[runner.md](runner.md#coordinator-cli-seam).
+records the slot result. The schema-2 route's `host` is the app ID. The host's
+`reports.recipient` receives the review, and an active route's `targets` list contains
+additional exact role keys. A solo app-mode route can use an empty list. `check-config`
+validates `var/route.json` when present. See the [solo route](../examples/solo/route.json).
 
 The observer keeps the exact slot epoch in memory when the CLI returns a valid deferred
 `compaction-reserved` result. On each existing minute pass it attempts a fresh due slot first,

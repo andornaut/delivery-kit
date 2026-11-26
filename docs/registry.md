@@ -1,9 +1,18 @@
 # Registry
 
-`var/registry.json`, harness selection, send-time resolution, the readiness probes and the
-harness doctor moved to coordination-kit in delivery-kit 5.0. delivery-kit still reads the
-registry through coordination-kit: `check-config` validates it, `run` refuses a registry with
-non-canonical conversation IDs, and `control` resolves `--requester` through it.
+Coordination Kit owns schema-1 `var/registry.json`, harness selection, send-time resolution
+and readiness probes. Delivery Kit reads the registry for `check-config`, runner startup and
+[command authorization](commands.md#app-mode-authorization).
 
-Reference: [coordination-kit registry](https://github.com/andornaut/coordination-kit/blob/main/docs/registry.md),
-[upgrading to 5.0](upgrading.md#upgrading-to-50).
+In an app workspace, register exact keys from `apps.<id>.roles` or `sharedRoles`. Set
+`operations.<id>.busOwner` to the registered role that operates delivery for that app. For
+the [solo example](../examples/solo/config.json), set `operations.reports.busOwner` to
+`operator`, with its actual native conversation under the selected harness and active
+ownership. Use the workspace root for its worktree path (`"."`) when the session runs there.
+Seed the registry using the workspace owner's actual native project and conversation IDs.
+See the [Coordination Kit app workspace setup](https://github.com/andornaut/coordination-kit/blob/v7.8.0/docs/configuration.md#start-an-app-workspace).
+
+An in-place migration preserves the existing registry keys and bus owner. Legacy
+`control --requester` continues to resolve a registered role. See the
+[Coordination Kit registry reference](https://github.com/andornaut/coordination-kit/blob/main/docs/registry.md)
+and [upgrading to 5.0](upgrading.md#upgrading-to-50).

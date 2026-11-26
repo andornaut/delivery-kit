@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "git": { "main": "main", "remote": "origin", "github": "owner/reports" },
+  "schedule": { "departures": ["00"] },
+  "gate": {
+    "image": "node:24.21.0",
+    "install": "npm ci",
+    "steps": [
+      { "name": "check", "run": "npm run check" },
+      { "name": "test", "run": "npm test -- --maxWorkers=4" }
+    ]
+  },
+  "resources": { "cpus": 4, "loadLimit": 20, "memoryMiB": 4096 },
+  "ci": { "requiredNames": ["Test"], "pollSeconds": 60, "timeoutSeconds": 1800 },
+  "deploy": { "mode": "none" },
+  "reports": {
+    "scheduledTicks": true,
+    "recipient": "operator",
+    "workerParents": []
+  }
+}

@@ -2,6 +2,39 @@
 
 Version-specific upgrade steps and removed command forms.
 
+## Opt in to app mode
+
+A workspace can keep its legacy `games` map and existing operation rules. To adopt
+`apps` in place, use an app-compatible Delivery Kit release and Coordination Kit 7.8.0
+or later within the supported range. Qualify the exact pins and supervisor in an isolated
+copy before the workspace owner changes the live configuration.
+
+1. Adopt the compatible Coordination Kit reader first, with the legacy configuration.
+   Verify the existing runner can ingest events and deliver the scheduled review.
+2. In the staged `config.json`, replace `games` with `apps`, expand each role to its exact
+   current registry key, set `"appStateDir": "games"` and declare explicit grants for the
+   active owners. Keep app IDs, repository paths, registry bindings and `busOwner` keys,
+   report recipients, route, schedules and store authority. The existing
+   `var/games/<id>/bus/` and `var/game-dev/` stay in place with controls, requests,
+   locks, CI watches, deploy receipts, event logs and cursors.
+3. Qualify the exact app pins and authentic resident environment using the staged layout.
+   Check that both selectors resolve the original bus, a caller without authority leaves
+   state untouched, the registered owner can start through the intended supervisor, and
+   review and ingest accept the app wire and existing legacy records. Verify slot and event
+   deduplication, control state and departure continuity.
+4. At the agreed idle, drained boundary, stop the old runner with its existing configuration.
+   Adopt the qualified configuration and pins, then start one runner per app. Check singleton
+   identity, control, event drain and observer adoption. Verify a genuine scheduled review and
+   departure on the existing cadence.
+
+For rollback, stop the app-mode runner while idle and drained, restore the previous
+`games` config, Delivery Kit pins and supervisor settings as qualified. Preserve controls,
+cursor positions and all runtime files in place. Keep the compatible Coordination Kit reader
+while surviving logs or receipts can contain `appId`. Restore an older reader only after
+qualifying it against every surviving record it can read, including unrotated and rotated
+logs. Draining the cursor alone leaves those records in place. Check reader and resident
+startup on the rollback pins before the cutover.
+
 ## Upgrading to 8.5
 
 8.5 keeps the bundled Coordination Kit at 3.4.4 and accepts coordinator CLIs in

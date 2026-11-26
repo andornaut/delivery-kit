@@ -1,13 +1,12 @@
 # Resident runner
 
-The per-game resident runner: launch, supervision and replacement, the coordinator CLI seam, the event log, the pin guard, status provenance, observer adoption, departures, the gate container and test-only overrides.
-
-Launch one runner per game from that game's canonical checkout, in its own session, so it
-resolves the game's own `node_modules`:
+Launch one resident per app from the app's canonical checkout, using its installed Delivery Kit.
+In app mode, launch from the active bus owner's environment with the
+[required grants](commands.md#app-mode-authorization).
 
 ```bash
-cd /absolute/path/to/game \
-  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator setsid node node_modules/@andornaut/delivery-kit/dist/cli.js run --game GAME_ID
+cd /absolute/path/to/app \
+  && DELIVERY_KIT_ROOT=/absolute/path/to/workspace setsid node node_modules/@andornaut/delivery-kit/dist/cli.js run --app APP_ID
 ```
 
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
@@ -38,7 +37,7 @@ departure still checking or finishing.
 The recipient's instruction contract for every caller-configured scheduled review pass is:
 
 - Inventory registered parent queues, verified workers' queues and ready worker handoffs across
-  all registered games, kits and game-coordinator. Classify every original backlog item, including
+  all registered apps, kits and shared roles. Classify every original backlog item, including
   independent work. This is a recipient obligation, not an automatic backlog drain or a guarantee
   that one snapshot contains every role's payloads.
 - Report unavailable visibility explicitly, including unavailable Claude native target queues and
@@ -74,22 +73,28 @@ The runner spawns the coordinator root's
 then the working directory. The child inherits the runner's environment and uses that root
 both as `--root` and as its working directory.
 
-| Call                                        | When                                                                   |
-| ------------------------------------------- | ---------------------------------------------------------------------- |
-| `review deliver --game GAME_ID --slot SLOT` | At a due `wakeMinutes` slot or to retry a retained compaction deferral |
-| `events ingest --game GAME_ID`              | Once per observer pass and after each appended event                   |
-| `--version --json`                          | At startup, and before a call while the last seen CLI is out of range  |
+| Call                                      | When                                                                   |
+| ----------------------------------------- | ---------------------------------------------------------------------- |
+| `review deliver --app APP_ID --slot SLOT` | At a due `wakeMinutes` slot or to retry a retained compaction deferral |
+| `events ingest --app APP_ID`              | Once per observer pass and after each appended event                   |
+| `--version --json`                        | At startup, and before a call while the last seen CLI is out of range  |
+
+The table shows app mode. With legacy `games` configuration the runner uses `--game ID` for
+both calls, including when it was started with `--app`.
 
 `SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
 `2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
 review or ingest call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed
-`game` (and `slot` for reviews, which must equal the one sent), `status` (`delivered`, `deferred` or `skipped`), `reason`, free-text
-`detail` and `cli` `{version, distSha256}`. An ingest result has `kind` `events-ingest`: `delivered`
-when it ingested lines, `skipped` with `no-events` when nothing was new, and `deferred` with a
-reason otherwise. It may add counts, each a non-negative integer when present: `ingested`,
+app identifier (`appId` for the app call, `game` for the legacy call), `status` (`delivered`,
+`deferred` or `skipped`), `reason`, free-text `detail` and `cli` `{version, distSha256}`. An ingest
+result has kind `events-ingest`. Its status is `delivered` when it ingested lines, `skipped`
+with `no-events` when nothing was new, and `deferred` with a reason otherwise. It may add counts, each a non-negative integer when present: `ingested`,
 `quarantined`, `completed` (COMPLETE reports formed), `delivered` (lines committed) and `held` (1
 while a torn tail is pending). The runner parses the JSON, not its key order, ignores fields it
 does not define and never parses `detail`.
+
+The reader requires the exact app ID and, for reviews, the exact echoed `slot`. It accepts
+either identity field and rejects conflicting values if both are present.
 
 A delivered result may carry a null `reason`. Recognised reason tokens are `route-unavailable`,
 `recipient-unavailable`, `recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`,
@@ -102,7 +107,7 @@ with `schema` 1, `version` and `distSha256`.
 
 - **No delivery claimed:** a missing result, a nonzero exit (an internal failure exits 1 with no
   stdout and one `coordination-kit:` stderr line, which the runner logs), a line that is not one
-  JSON object, a second stdout line, a wrong `schema`, `kind`, `game` or `slot`, a timeout and an
+  JSON object, a second stdout line, a wrong `schema`, `kind`, app ID or `slot`, a timeout and an
   abort claim nothing. The runner logs them and continues; none stops a departure, prevents runner
   start or ends the runner. The CLI checks for an abort before it writes a slot record, so killing
   it never leaves a partial record.
@@ -112,8 +117,8 @@ with `schema` 1, `version` and `distSha256`.
 - **Missing CLI:** while the file is missing, for example during `npm ci` at the root, reviews
   and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
-- **Range:** the CLI version in each result must satisfy `COORDINATOR_CLI_RANGE` in
-  `src/compatibility.ts`, `>=3.0.0 <8.0.0`. A result from a CLI outside it defers
+- **Range:** legacy mode accepts the workspace CLI range `>=3.0.0 <8.0.0`. App mode requires
+  the app-compatible CLI starting at 7.8.0 within that range. An unsupported CLI defers
   with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
   its version until a supported install answers. Departures continue.
 - **Identity:** the runner logs `bus: coordinator CLI VERSION (dist sha256 SHA256), inside RANGE`
@@ -140,16 +145,18 @@ one runs one more after it.
 
 ## Event log
 
-The runner appends every bus event to `var/games/<g>/bus/events.jsonl` and is its only writer;
-the coordinator CLI's `events ingest` reads it. The schema lives in `src/state/events.ts`.
+The runner alone appends to its [resolved bus](state.md) at `bus/events.jsonl`.
+The workspace CLI's `events ingest` reads it. The schema lives in `src/state/events.ts`.
 
 - **Lines:** one JSON object per line, terminated by `\n`. The file is opened with `O_APPEND`;
   each line is a single `write()` under 4096 bytes, then `fsync`. A `detail` that does not fit is
   cut at a character boundary and ends in `[truncated]`.
-- **Fields:** `{"schema":1,"id":ID,"game":G,"kind":K,"type":T,"key":KEY,"at":ISO,"sha":SHA|null,
-"status":S|null,"detail":TEXT,"work":[IDS]|null}`. `id` is the sha256 hex of
-  `${game}\n${type}\n${key}`; `sha` is the key when the key is a commit SHA, or is set explicitly
-  for `attempt-captured`. The `at` time is UTC to the
+- **Fields:** schema 1 app-mode lines use `appId` with an app-compatible CLI. Legacy
+  workspace lines use `game`. Coordination Kit 7.8.0 accepts either field and rejects
+  conflicting values. Other fields are `schema`, `id`, `kind`, `type`, `key`, `at`, `sha`,
+  `status`, `detail` and `work`. The event ID is the sha256 hex of
+  `${appId}\n${type}\n${key}`, using the same ID value for either spelling. `sha` is the key
+  when it is a commit SHA or is set explicitly for `attempt-captured`. `at` is UTC to the
   second. `detail` carries the operator-facing text.
 - **At most once:** per `(type, key)`, through an in-memory ID set rebuilt at startup from the
   unrotated log; coordination-kit's store keeps the older IDs unique. A failed append logs
@@ -172,7 +179,7 @@ the coordinator CLI's `events ingest` reads it. The schema lives in `src/state/e
   selected for the pinned push after preflight, identified as docs-only in the event detail.
   Idle slots, stale requests and failures before capture have no capture event. Gate, push, CI
   and deploy outcomes retain their own evidence.
-- **COMPLETE:** a coordination-kit projection with a unique `(game, complete, sha)` key, formed
+- **COMPLETE:** a coordination-kit projection with a unique `(app ID, complete, sha)` key, formed
   when the gate passes (`gate_passed`) or a docs-only range skips it (`gate_skipped`), push and CI
   succeed and the deploy status is `ok` or `skipped`. The runner appends no `complete` event.
 
@@ -245,22 +252,21 @@ are left in place.
 ## Supervision
 
 Supervision by a systemd user service is optional and adds no timer: the service starts the same
-resident runner, whose schedule stays in-process. `runner unit` prints an explicit unit for one
-game and installs nothing; it never runs `systemctl`. Run it from the game's canonical checkout
-with the Node binary and `PATH` the runner should use:
+resident runner, whose schedule stays in-process. `runner unit` prints a unit for one app.
+Use the app's canonical checkout and the Node binary and `PATH` the runner should use.
 
 ```bash
 mkdir -p ~/.config/systemd/user \
-  && cd /absolute/path/to/game \
-  && DELIVERY_KIT_ROOT=/absolute/path/to/game-coordinator node node_modules/@andornaut/delivery-kit/dist/cli.js runner unit --game GAME_ID \
-  > ~/.config/systemd/user/delivery-kit-GAME_ID.service
+  && cd /absolute/path/to/app \
+  && DELIVERY_KIT_ROOT=/absolute/path/to/workspace node node_modules/@andornaut/delivery-kit/dist/cli.js runner unit --app APP_ID \
+  > ~/.config/systemd/user/delivery-kit-APP_ID.service
 ```
 
 The unit resolves every path when it is printed:
 
-- `WorkingDirectory` is the game's canonical checkout. `ExecStart` is the absolute Node binary
-  running the command (`process.execPath`), the game's installed
-  `node_modules/@andornaut/delivery-kit/dist/cli.js` and `run --game GAME_ID`, with no `npx`.
+- `WorkingDirectory` is the app's canonical checkout. `ExecStart` uses the absolute Node binary
+  running the command (`process.execPath`) and the app's installed
+  `node_modules/@andornaut/delivery-kit/dist/cli.js` to run the selected app.
 - `Environment` sets `DELIVERY_KIT_ROOT` to the resolved coordinator root and `PATH` to the
   directory of `process.execPath`, followed by the directories of `gh`, `docker`, `git`,
   `flock` and `claude` from the caller's `PATH`. A missing tool or installed CLI exits 1
@@ -274,14 +280,18 @@ The unit resolves every path when it is printed:
   `TimeoutStopSec=120` covers an idle shutdown; processes still running after it are killed.
 - `[Install]` has `WantedBy=default.target`.
 
-The service sees only those variables plus the systemd user manager's defaults, such as `HOME`.
-Git push and `gh` authentication must work without an interactive session's environment.
+In app mode the operator provisions the service environment, for example in a unit drop-in,
+with the actual registered native ID of the active bus owner. Set `CODEX_THREAD_ID` for Codex
+or `CLAUDE_CODE_SESSION_ID` for Claude, using the selected harness binding. A role label or
+`--requester` supplies no native identity. Requalify the service environment when the active
+binding changes. Detached `runner start` inherits the caller environment. Git push and `gh`
+authentication must also work in the resident's environment.
 
-Enable and start it, after stopping any manually launched runner for that game:
+Enable and start the service after stopping any manually launched runner for the app.
 
 ```bash
 systemctl --user daemon-reload \
-  && systemctl --user enable --now delivery-kit-GAME_ID.service
+  && systemctl --user enable --now delivery-kit-APP_ID.service
 ```
 
 Starting at boot without a login session needs lingering, which the user enables with
@@ -289,27 +299,28 @@ Starting at boot without a login session needs lingering, which the user enables
 
 `runner stop` and `runner start` replace a runner with or without the unit:
 
-- `runner stop --game GAME_ID [--timeout SECONDS]` polls `status` (default timeout 900 s) until
+- `runner stop --app APP_ID [--timeout SECONDS]` polls `status` (default timeout 900 s) until
   the runner is idle and drained: no active departure, deploy retry, CI watch or pending
   request, and the event log ingested. It then runs
-  `systemctl --user stop delivery-kit-GAME_ID` when
-  `~/.config/systemd/user/delivery-kit-GAME_ID.service` exists and `systemctl --user is-active`
+  `systemctl --user stop delivery-kit-APP_ID` when
+  `~/.config/systemd/user/delivery-kit-APP_ID.service` exists and `systemctl --user is-active`
   reports the unit active; otherwise it sends `SIGTERM` to the PID in `bus/runner.json`, but only while `runner.lock` holds the token `runner.identity.json`
   records for that PID, so a recycled PID is never signalled. It waits up to 150 s for both locks
-  to be free and prints one JSON line `{schema, game, pid, method, stopped, locksFree}`, `method`
+  to be free and prints one JSON line `{schema, appId, pid, method, stopped, locksFree}`, `method`
   being `systemd`, `signal` or `none`. It exits 0 when the runner stopped with both locks free,
   or when no runner was running (`method` `none`, `pid` null). On a timeout, or when the PID does
   not hold the identity, it exits 1 and leaves the runner running and untouched.
-- `runner start --game GAME_ID` exits 1 and starts nothing while either lock is held or the
+- `runner start --app APP_ID` exits 1 and starts nothing while either lock is held or the
   legacy outbox check fails. With the unit file installed it runs
-  `systemctl --user start delivery-kit-GAME_ID`. Otherwise it spawns the running Node binary
-  directly, with the game's installed
-  `node_modules/@andornaut/delivery-kit/dist/cli.js run --game GAME_ID`, detached in its own
-  session, from the game checkout with `DELIVERY_KIT_ROOT` set and stdout and stderr appended to
+  `systemctl --user start delivery-kit-APP_ID`. Otherwise it spawns the running Node binary
+  directly with the app's installed Delivery Kit CLI, detached in its own
+  session from the app checkout with `DELIVERY_KIT_ROOT` set and stdout and stderr appended to
   `bus/runner.out`, creating its parent directory if needed. It waits up to 30 s for both locks,
-  a current identity and a `runner.json` naming that PID, then prints `{schema, game, pid, method, status}`, where
+  a current identity and a `runner.json` naming that PID, then prints `{schema, appId, pid, method, status}`, where
   `method` is `systemd` or `spawn` and `status` is `{running, idle, coordinator_cli}`. A runner
   that does not come up, or exits first, exits 1.
+
+The legacy `--game` selector preserves the `game` field in these replies.
 
 Neither command changes desired delivery control or any coordination-kit state. Both use the status
 report and `runner.json` to attest the runner. Startup also checks the legacy outbox path.
@@ -317,11 +328,11 @@ When starts race, the singleton locks admit only one runner.
 
 Upgrade or replace a supervised runner in a quiet window:
 
-1. Install the new pin in the game checkout: the devDependency bump, then `npm ci`.
+1. Install the new pin in the app checkout and run `npm ci`.
 2. After a Node upgrade or a moved tool, run `runner unit` again, replace the unit file and run
    `systemctl --user daemon-reload`. A pin change alone keeps every path.
-3. Run `runner stop --game GAME_ID`, which waits until the runner is idle and drained.
-4. Run `runner start --game GAME_ID`.
+3. Run `runner stop --app APP_ID`, which waits until the runner is idle and drained.
+4. Run `runner start --app APP_ID`.
 5. Verify exactly one holder of each lock with `status` (`runner_lock_held`, `loop_lock_held`,
    `identity_status` `current`) and `runner.json`.
 6. Confirm `observer_adoption` `current` once the new runner's `runner.started` is ingested (see
@@ -370,10 +381,10 @@ durable writes, configuration validation and IDs) from `build/registry`, `build/
 `build/shared`, and nothing from `build/protocol`, so a game
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
-coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/compatibility.ts`;
-Delivery Kit 8.5.0 bundles 3.4.4 and supports `>=2.0.1 <4.0.0` for that bundle. The spawned
-coordinator CLI needs `>=3.0.0 <8.0.0`. The bundled range spans 2.0.1 and 3.x because
-Coordination Kit 3.0 keeps those subpaths unchanged. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
+coordination-kit range in `COORDINATION_KIT_RANGE` in `src/compatibility.ts`. The app layout
+and permissions require `>=7.8.0 <8.0.0` for the bundle. The independently
+installed CLI has the runtime ranges in [Coordinator CLI seam](#coordinator-cli-seam).
+The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.
 
@@ -384,7 +395,7 @@ MCP server and the seam the runner spawns, whose own range is `COORDINATOR_CLI_R
 exchange data only through on-disk formats: the registry, the event log and its cursor
 ([Event log](#event-log)).
 
-At startup the runner writes `var/games/<g>/bus/runner.json`: `schema`, `pid`, `startedAt`,
+At startup the runner writes `bus/runner.json` with `schema`, `pid`, `startedAt`,
 `version`, `coordinationKitVersion` (the bundled coordination-kit), `cliPath` (realpath of the
 loaded `dist/cli.js`), `cliSha256` and the lockfile `integrity` of
 `node_modules/@andornaut/delivery-kit`; `runner.identity.json` records the same bundled version as
