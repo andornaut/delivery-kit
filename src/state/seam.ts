@@ -44,7 +44,10 @@ interface CoordinatorCliReport {
   readonly supported: boolean | null;
 }
 
-export function coordinatorCliReport(seamFile: string): CoordinatorCliReport {
+export function coordinatorCliReport(
+  seamFile: string,
+  range = COORDINATOR_CLI_RANGE,
+): CoordinatorCliReport {
   try {
     const value = JSON.parse(readFileSync(seamFile, "utf8")) as unknown;
     const cli = isRecord(value) && value.schema === 1 ? cliIdentity(value) : undefined;
@@ -52,7 +55,7 @@ export function coordinatorCliReport(seamFile: string): CoordinatorCliReport {
       return {
         ...cli,
         seenAt: value.seenAt,
-        supported: satisfies(COORDINATOR_CLI_RANGE, cli.version),
+        supported: satisfies(range, cli.version),
       };
     }
   } catch {

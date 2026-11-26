@@ -11,7 +11,7 @@ import {
   type Handler,
 } from "@andornaut/coordination-kit/build/shared";
 
-import { VERSION } from "../compatibility.ts";
+import { APP_COORDINATOR_CLI_RANGE, VERSION } from "../compatibility.ts";
 import { isDirectory, isFile } from "../lib/files.ts";
 import { errorMessage } from "../lib/values.ts";
 import { busPaths } from "../state/paths.ts";
@@ -123,7 +123,11 @@ export const runnerStop: Handler = async (io, root, args) => {
     return EXIT_INVALID;
   }
   const result = await stopRunner(
-    systemLifecycle(paths, game.repo),
+    systemLifecycle(
+      paths,
+      game.repo,
+      layout.mode === "app" ? APP_COORDINATOR_CLI_RANGE : undefined,
+    ),
     { game: game.id, paths, unitFile: unitFile(home(io.env), game.id) },
     timeout,
   );
@@ -147,7 +151,12 @@ export const runnerStart: Handler = async (io, root, args) => {
     return EXIT_INVALID;
   }
   try {
-    const result = await startRunner(systemLifecycle(paths, game.repo), {
+    const lifecycle = systemLifecycle(
+      paths,
+      game.repo,
+      layout.mode === "app" ? APP_COORDINATOR_CLI_RANGE : undefined,
+    );
+    const result = await startRunner(lifecycle, {
       game: game.id,
       paths,
       spawn: {

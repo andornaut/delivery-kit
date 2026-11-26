@@ -162,6 +162,7 @@ export function adoption(facts: AdoptionFacts): ObserverAdoptionReport {
 export function observerAdoption(
   paths: BusPaths,
   runnerToken: string | null,
+  supported = coordinatorCliReport(paths.seam).supported,
 ): ObserverAdoptionReport {
   let start: StartRecord | null | "unreadable";
   try {
@@ -174,6 +175,6 @@ export function observerAdoption(
       start !== null && start !== "unreadable" && ingested(readCursor(paths.eventsCursor), start),
     runnerToken,
     start,
-    supported: coordinatorCliReport(paths.seam).supported,
+    supported,
   });
 }

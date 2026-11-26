@@ -261,7 +261,7 @@ export async function startRunner(
 }
 
 /** The production seams. */
-export function systemLifecycle(paths: BusPaths, repo: string): Lifecycle {
+export function systemLifecycle(paths: BusPaths, repo: string, cliRange?: string): Lifecycle {
   return {
     fileExists: existsSync,
     kill: (pid, signal) => process.kill(pid, signal),
@@ -290,7 +290,7 @@ export function systemLifecycle(paths: BusPaths, repo: string): Lifecycle {
         closeSync(output);
       }
     },
-    status: () => statusReport(paths, repo) as unknown as RunnerStatus,
+    status: () => statusReport(paths, repo, cliRange) as unknown as RunnerStatus,
     systemctl: (args) =>
       spawnSync("systemctl", ["--user", ...args], { stdio: "ignore", timeout: 300_000 }),
   };

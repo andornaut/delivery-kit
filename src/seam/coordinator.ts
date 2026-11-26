@@ -5,7 +5,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 
-import { COORDINATION_KIT_RANGE, COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
+import { APP_COORDINATOR_CLI_RANGE, COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
 import { isFile } from "../lib/files.ts";
 import { type CliIdentity, writeSeamRecord } from "../state/seam.ts";
 import {
@@ -176,7 +176,7 @@ export class CoordinatorCli implements Coordinator {
   constructor(options: CoordinatorOptions) {
     this.#options = options;
     this.#cliPath = join(options.root, COORDINATOR_CLI);
-    this.#range = options.appMode === true ? COORDINATION_KIT_RANGE : COORDINATOR_CLI_RANGE;
+    this.#range = options.appMode === true ? APP_COORDINATOR_CLI_RANGE : COORDINATOR_CLI_RANGE;
     this.#target = [options.appMode === true ? "--app" : "--game", options.game];
   }
 

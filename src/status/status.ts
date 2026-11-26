@@ -198,7 +198,7 @@ export function controlReport(
  * The status report, read only from bus/. The last push needs a CI record, because every 1.x game
  * watches CI.
  */
-export function statusReport(paths: BusPaths, repo?: string): StatusReport {
+export function statusReport(paths: BusPaths, repo?: string, cliRange?: string): StatusReport {
   const running = lockHeld(paths.runnerLock);
   const read = readIdentity(paths);
   const identity = read === "unreadable" ? null : read;
@@ -253,7 +253,8 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
   const config = status === "current" && identity !== null ? configStatus(identity) : null;
   const loopHeld = lockHeld(paths.loopLock);
   const token = status === "current" && typeof identity?.token === "string" ? identity.token : null;
-  const adoption = observerAdoption(paths, token);
+  const coordinatorCli = coordinatorCliReport(paths.seam, cliRange);
+  const adoption = observerAdoption(paths, token, coordinatorCli.supported);
   return {
     config_status: config,
     control: controlReport(
@@ -261,7 +262,7 @@ export function statusReport(paths: BusPaths, repo?: string): StatusReport {
       readControl(paths),
     ),
     coordination_kit: coordinationKitReport(),
-    coordinator_cli: coordinatorCliReport(paths.seam),
+    coordinator_cli: coordinatorCli,
     drained: blockers.length === 0 && reporters.length === 0,
     events: events.report,
     gate_failed: gateFailed ?? [],
