@@ -82,6 +82,7 @@ export interface Registry {
 export interface GameOptions {
   /** Key in the existing coordinator `config.json` games map. */
   game?: string;
+  selector?: "--app" | "--game";
   name?: string;
   roles?: string[];
   /** Shared role keys for a new coordinator; omit for the legacy game fixtures. */
@@ -173,6 +174,7 @@ export class Workspace {
   readonly fakeDir: string;
   readonly fakeBin: string;
   readonly game: string;
+  readonly selector: "--app" | "--game";
   readonly repo: string;
   readonly state: string;
   config: GameConfig;
@@ -195,6 +197,7 @@ export class Workspace {
     this.fakeDir = join(this.root, "fakes");
     this.fakeBin = join(this.fakeDir, "bin");
     this.game = options.game ?? "fixture-game";
+    this.selector = options.selector ?? "--game";
     this.repo = join(this.root, this.game);
     this.state = join(this.coordinator, "var", "games", this.game, "bus");
     this.config = options.config ?? defaultConfig();

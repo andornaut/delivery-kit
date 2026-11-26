@@ -44,7 +44,7 @@ function expectDelivery(ws: Workspace, head: string): void {
   expect(ws.calls("wrangler")).toEqual([]);
 }
 
-suite("standalone delivery through legacy selectors", () => {
+suite("standalone delivery with configured roles", () => {
   const workspace = workspaces();
 
   contract("one arbitrary operator enables delivery at the configured slot", async () => {
@@ -91,6 +91,7 @@ suite("standalone delivery through legacy selectors", () => {
         game: "catalog",
         name: "Catalog",
         roles: ["publisher"],
+        selector: "--app",
         sharedRoles: [],
       });
       const ledger = workspace({
@@ -99,6 +100,7 @@ suite("standalone delivery through legacy selectors", () => {
         game: "ledger",
         name: "Ledger",
         roles: ["releaser", "reviewer"],
+        selector: "--app",
       });
       const publisher = "catalog/publisher";
       const releaser = "ledger/releaser";

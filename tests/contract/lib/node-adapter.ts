@@ -194,7 +194,7 @@ function command(ws: Workspace, words: string[]): Command {
   const verb = words.slice(0, width);
   const rest = words.slice(width);
   return {
-    argv: [process.execPath, CLI, ...verb, "--game", ws.game, ...rest],
+    argv: [process.execPath, CLI, ...verb, ws.selector, ws.game, ...rest],
     cwd: ws.coordinator,
     env: env(ws),
   };
