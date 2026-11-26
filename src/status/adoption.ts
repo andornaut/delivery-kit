@@ -70,11 +70,17 @@ function lastStarted(file: string, bytes: Buffer): StartRecord | undefined {
     if (newline === -1) {
       return found;
     }
-    const event = parseLine(bytes.subarray(at, newline).toString("utf8"));
-    if (event?.type === "runner.started") {
-      found = { end: newline + 1, file, token: startedToken(event.detail) };
-    }
+    const line = bytes.toString("utf8", at, newline);
     at = newline + 1;
+    // A JSON string can spell this ASCII value with Unicode escapes, so those lines still
+    // need parsing even when they do not contain the literal value.
+    if (!line.includes('"runner.started"') && !line.includes("\\u")) {
+      continue;
+    }
+    const event = parseLine(line);
+    if (event?.type === "runner.started") {
+      found = { end: at, file, token: startedToken(event.detail) };
+    }
   }
 }
 

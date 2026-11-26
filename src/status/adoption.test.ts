@@ -127,6 +127,24 @@ describe("observerAdoption", () => {
     expect(observerAdoption(paths, OTHER)).toEqual({ reason: "token_differs", status: "stale" });
   });
 
+  it("reads a Unicode-escaped start at its byte offset once the append is complete", () => {
+    const paths = bus();
+    const prior = startedLine(TOKEN) + otherLine("café");
+    const escaped = startedLine(OTHER).replace('"runner.started"', '"runner\\u002estarted"');
+    append(paths.eventsLog, prior + escaped.slice(0, -1));
+    expect(latestStart(paths)).toEqual({
+      end: Buffer.byteLength(startedLine(TOKEN)),
+      file: paths.eventsLog,
+      token: TOKEN,
+    });
+    append(paths.eventsLog, `\n${otherLine("later")}`);
+    expect(latestStart(paths)).toEqual({
+      end: Buffer.byteLength(prior + escaped),
+      file: paths.eventsLog,
+      token: OTHER,
+    });
+  });
+
   it("is current only once the line is ingested and the CLI last seen is in range", () => {
     const paths = bus();
     const line = startedLine(TOKEN);
