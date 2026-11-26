@@ -25,7 +25,11 @@ async function run(root: string, ...argv: string[]) {
 function fixture() {
   const { root } = makeFixture();
   const layout = loadLayout(root);
-  createRegistry(layout, registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">);
+  createRegistry(
+    () => new Date("2026-11-26T00:00:00Z"),
+    layout,
+    registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
+  );
   const store = { dir: gameLayout(layout, GAME).busDir };
   return { file: join(store.dir, "delivery-control.json"), root, store };
 }

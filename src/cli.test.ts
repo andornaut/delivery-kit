@@ -29,6 +29,7 @@ async function run(
 
 function withRegistry(root: string): void {
   createRegistry(
+    () => new Date("2026-11-26T00:00:00Z"),
     loadLayout(root),
     registryInput() as unknown as Omit<Registry, "revision" | "updatedAt">,
   );

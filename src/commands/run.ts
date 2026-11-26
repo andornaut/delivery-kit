@@ -32,7 +32,8 @@ export const run: Handler = async (io, root, args) => {
     layout.mode === "app"
       ? () => {
           const current = loadLayout(layout.root);
-          if (current.mode !== "app" || appLayout(current, game.appId).busDir !== game.busDir) {
+          const app = appLayout(current, game.appId);
+          if (current.mode !== "app" || app.busDir !== game.busDir || app.repo !== game.repo) {
             throw new Error("the app workspace layout changed; restart at a safe boundary");
           }
           deliveryOperator(current, io.env, game.appId, true);
