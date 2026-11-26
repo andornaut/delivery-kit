@@ -20,6 +20,7 @@ interface ResolvedGame {
   readonly layout: Layout;
   readonly game: GameLayout;
   readonly config: ProjectConfig;
+  readonly selector: "app" | "game";
   readonly values: Record<string, string | boolean | undefined>;
 }
 
@@ -37,7 +38,7 @@ export function parseAppOptions(options: Options, args: string[]) {
   if (app !== undefined && game !== undefined) {
     throw new Error("--app and --game cannot be used together");
   }
-  const selector = app === undefined ? "game" : "app";
+  const selector: ResolvedGame["selector"] = app === undefined ? "game" : "app";
   if (selectors.length > 1) {
     throw new Error(`--${selector} is given more than once`);
   }
@@ -77,7 +78,7 @@ export function resolveGame(
   }
   const game = gameLayout(layout, values.game);
   try {
-    return { config: loadProjectConfig(game.configFile), game, layout, values };
+    return { config: loadProjectConfig(game.configFile), game, layout, selector, values };
   } catch (error) {
     io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;

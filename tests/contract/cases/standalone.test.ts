@@ -30,18 +30,20 @@ function pushes(ws: Workspace) {
   return ws.calls("git").filter((call) => call.args.includes("push"));
 }
 
-function expectDelivery(ws: Workspace, head: string): void {
+function expectDelivery(ws: Workspace, head: string, deployed: boolean): void {
   expect(pushes(ws).map((call) => call.args.at(-1))).toEqual([`${head}:refs/heads/main`]);
+  const deployEvent = deployed ? "deploy_success" : "deploy_disabled";
   const outcomes = ws
     .events()
     .filter((event) =>
-      ["gate_passed", "push", "ci_success", "deploy_disabled"].includes(String(event.type)),
+      ["gate_passed", "push", "ci_success", deployEvent].includes(String(event.type)),
     )
     .map(({ game, sha, type }) => [game, sha, type]);
-  expect(outcomes).toEqual(
-    ["gate_passed", "push", "deploy_disabled", "ci_success"].map((type) => [ws.game, head, type]),
-  );
-  expect(ws.calls("wrangler")).toEqual([]);
+  const types = deployed
+    ? ["gate_passed", "push", "ci_success", deployEvent]
+    : ["gate_passed", "push", deployEvent, "ci_success"];
+  expect(outcomes).toEqual(types.map((type) => [ws.game, head, type]));
+  expect(ws.calls("wrangler")).toHaveLength(deployed ? 1 : 0);
 }
 
 suite("standalone delivery with configured roles", () => {
@@ -57,6 +59,7 @@ suite("standalone delivery with configured roles", () => {
       sharedRoles: [],
     });
     configure(ws, "Catalog", operator, ["17"]);
+    ws.config.deploy = { mode: "wrangler" };
     ws.writeRegistry({
       ...ws.registry(),
       operations: { [ws.game]: { busOwner: operator } },
@@ -73,14 +76,14 @@ suite("standalone delivery with configured roles", () => {
       await runner.armed();
       expect(pushes(ws)).toEqual([]);
       ws.advanceClock(2);
-      await runner.until(() => ws.events().some((event) => event.type === "ci_success"));
+      await runner.until(() => ws.events().some((event) => event.type === "deploy_success"));
     } finally {
       await runner.stop();
     }
     expect(ws.events().filter((event) => event.type === "scheduled-status")).toMatchObject([
       { game: ws.game, key: String(at(17)) },
     ]);
-    expectDelivery(ws, head);
+    expectDelivery(ws, head, true);
   });
 
   contract(
@@ -155,7 +158,7 @@ suite("standalone delivery with configured roles", () => {
         { game: catalog.game, key: `request-${id}` },
       ]);
       expect(catalog.events().some((event) => event.type === "scheduled-status")).toBe(false);
-      expectDelivery(catalog, pending.head);
+      expectDelivery(catalog, pending.head, false);
       expect(ledger.readJson(...receipt)).toEqual(pending);
       expect(ledger.events()).toEqual([]);
       expect(pushes(ledger)).toEqual([]);

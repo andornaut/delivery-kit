@@ -1,4 +1,4 @@
-// status --game ID [--resources]: the read-only runner, idle and drain report as one JSON line, or
+// status --app ID [--resources]: the read-only runner, idle and drain report as one JSON line, or
 // with --resources the reporting-only resource information.
 import { dumpsJson, EXIT_OK, type Handler } from "@andornaut/coordination-kit/build/shared";
 
@@ -17,7 +17,7 @@ export const status: Handler = async (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  const { config, game, layout, values } = resolved;
+  const { config, game, layout, selector, values } = resolved;
   if (values.resources === true) {
     const context = busContext(
       { ...testOptions(io.env), log: (line) => io.err(`${line}\n`) },
@@ -28,6 +28,7 @@ export const status: Handler = async (io, root, args) => {
     io.out(await resourceReport(context));
     return EXIT_OK;
   }
-  io.out(`${dumpsJson(statusReport(busPaths(game.busDir), game.repo))}\n`);
+  const report = statusReport(busPaths(game.busDir), game.repo);
+  io.out(`${dumpsJson(selector === "app" ? { ...report, appId: game.id } : report)}\n`);
   return EXIT_OK;
 };

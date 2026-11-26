@@ -113,11 +113,16 @@ describe("check-config", () => {
 });
 
 describe("app selection", () => {
-  it("returns the same status for --app and --game", async () => {
+  it("identifies app status without changing the legacy response", async () => {
     const { root } = makeFixture();
     const legacy = await run(root, "status", "--game", "archies-dog-walks");
     expect(legacy).toMatchObject({ code: EXIT_OK, err: "" });
-    expect(await run(root, "status", "--app", "archies-dog-walks")).toEqual(legacy);
+    const neutral = await run(root, "status", "--app", "archies-dog-walks");
+    expect(neutral).toMatchObject({ code: EXIT_OK, err: "" });
+    expect(JSON.parse(neutral.out)).toEqual({
+      ...JSON.parse(legacy.out),
+      appId: "archies-dog-walks",
+    });
   });
 
   it.each([

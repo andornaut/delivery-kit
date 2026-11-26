@@ -35,6 +35,14 @@ import { commandUsage, SPECS } from "./spec.ts";
 
 const UNIT_USAGE = commandUsage("runner unit");
 
+function runnerResult<T extends { readonly game: string }>(result: T, selector: "app" | "game") {
+  if (selector === "game") {
+    return result;
+  }
+  const { game: appId, ...status } = result;
+  return { ...status, appId };
+}
+
 export const runnerUnit: Handler = (io, root, args) => {
   const resolved = resolveGame(io, root, SPECS["runner unit"].options, UNIT_USAGE, args);
   if (typeof resolved === "number") {
@@ -99,7 +107,7 @@ export const runnerStop: Handler = async (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  const { game, values } = resolved;
+  const { game, selector, values } = resolved;
   const timeout = stopTimeout(values.timeout);
   if (timeout === undefined) {
     io.err(`delivery-kit: --timeout must be a positive whole number of seconds\n${STOP_USAGE}\n`);
@@ -111,7 +119,7 @@ export const runnerStop: Handler = async (io, root, args) => {
     { game: game.id, paths, unitFile: unitFile(home(io.env), game.id) },
     timeout,
   );
-  io.out(`${dumpsJson(result)}\n`);
+  io.out(`${dumpsJson(runnerResult(result, selector))}\n`);
   return result.stopped && result.locksFree ? EXIT_OK : EXIT_INVALID;
 };
 
@@ -122,7 +130,7 @@ export const runnerStart: Handler = async (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  const { game, layout } = resolved;
+  const { game, layout, selector } = resolved;
   const paths = busPaths(game.busDir);
   try {
     const result = await startRunner(systemLifecycle(paths, game.repo), {
@@ -137,7 +145,7 @@ export const runnerStart: Handler = async (io, root, args) => {
       },
       unitFile: unitFile(home(io.env), game.id),
     });
-    io.out(`${dumpsJson(result)}\n`);
+    io.out(`${dumpsJson(runnerResult(result, selector))}\n`);
     return EXIT_OK;
   } catch (error) {
     if (error instanceof StartRefused) {

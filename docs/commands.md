@@ -18,6 +18,7 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
   (the runner keeps the loaded copy until an idle restart), `unknown` when either digest is
   unavailable, and `null` without a current runner.
+  The JSON report includes `appId` with the primary selector. The legacy selector preserves its original report.
   `observer_adoption` is `current`, `stale` or `unknown`, derived from bus/ alone: `current` when
   the latest `runner.started` carries the running token, the cursor shows that line ingested and
   the last seen coordinator CLI is in range, and `stale` when that token differs.
@@ -45,7 +46,7 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   runner is idle and drained, then stops it through its active systemd user unit or with
   `SIGTERM` to the `runner.json` PID while that PID holds the runner identity token. After the
   stop action it waits up to another 150 s for `runner.lock` and `loop.lock` to be free. The
-  result is one JSON line `{schema, game, pid, method, stopped, locksFree}` with `method`
+  result is one JSON line `{schema, appId, pid, method, stopped, locksFree}` with `method`
   `systemd`, `signal` or `none`.
   Exit 0 when stopped with the locks free or when no runner runs; 1 on a timeout, a PID that does
   not hold the identity or a runner that does not exit, leaving the runner untouched in the first
@@ -56,7 +57,7 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
 - `runner start --app ID`: exits 1 and starts nothing while either lock is held or the legacy
   outbox check fails. Starts the systemd user unit when its file is installed, otherwise spawns
   the game's installed `dist/cli.js run --game ID` detached with output appended to
-  `bus/runner.out`. Stdout is one JSON line `{schema, game, pid, method, status}` with
+  `bus/runner.out`. Stdout is one JSON line `{schema, appId, pid, method, status}` with
   `method` `systemd` or `spawn` and `status`
   `{running, idle, coordinator_cli}`. After the launch call returns, the command waits up to
   30 s to attest startup. It exits 1 if attestation fails.
