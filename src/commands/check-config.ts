@@ -1,6 +1,9 @@
 // check-config: validate config.json, var/registry.json, var/route.json and each app's
 // delivery-kit.json, and report every problem found.
 import {
+  appLayout,
+  type Layout,
+  loadLayout,
   type Registry,
   resolveRole,
   validateRegistry,
@@ -11,10 +14,7 @@ import {
   EXIT_INVALID,
   EXIT_OK,
   EXIT_USAGE,
-  gameLayout,
   type Handler,
-  type Layout,
-  loadLayout,
   loadProjectConfig,
   type ProjectConfig,
   readJsonIfExists,
@@ -31,7 +31,7 @@ function checkGame(
   rawRegistry: unknown,
   game: string,
 ): string[] {
-  const entry = gameLayout(layout, game);
+  const entry = appLayout(layout, game);
   let config: ProjectConfig;
   try {
     config = loadProjectConfig(entry.configFile);
@@ -86,9 +86,9 @@ export const checkConfig: Handler = (io, root, args) => {
   } catch (error) {
     problems.push(errorMessage(error));
   }
-  const games = values.game === undefined ? Object.keys(layout.config.games) : [values.game];
+  const games = values.game === undefined ? Object.keys(layout.config.apps) : [values.game];
   for (const game of games) {
-    if (!Object.hasOwn(layout.config.games, game)) {
+    if (!Object.hasOwn(layout.config.apps, game)) {
       io.err(`delivery-kit: unknown ${selector}: ${game}\n`);
       return EXIT_USAGE;
     }

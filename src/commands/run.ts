@@ -1,5 +1,10 @@
 // run --game ID: the resident delivery runner for one game.
-import { readRegistry, RegistryMissing } from "@andornaut/coordination-kit/build/registry";
+import {
+  appLayout,
+  loadLayout,
+  readRegistry,
+  RegistryMissing,
+} from "@andornaut/coordination-kit/build/registry";
 import {
   EXIT_INVALID,
   EXIT_OK,
@@ -12,6 +17,7 @@ import { errorMessage } from "../lib/values.ts";
 import { busContext } from "../runner/context.ts";
 import { RunnerRefused, runRunner } from "../runner/runner.ts";
 import { resolveGame } from "./game.ts";
+import { deliveryOperator } from "./operator.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("run");
@@ -22,12 +28,26 @@ export const run: Handler = async (io, root, args) => {
     return resolved;
   }
   const { config, game, layout } = resolved;
+  const authorizeDeparture =
+    layout.mode === "app"
+      ? () => {
+          const current = loadLayout(layout.root);
+          if (current.mode !== "app" || appLayout(current, game.appId).busDir !== game.busDir) {
+            throw new Error("the app workspace layout changed; restart at a safe boundary");
+          }
+          deliveryOperator(current, io.env, game.appId, true);
+        }
+      : undefined;
   // A registry with non-canonical conversation IDs stops the runner before any native call;
   // every send still resolves the registry again at send time.
   try {
-    readRegistry(layout);
+    if (layout.mode === "app") {
+      deliveryOperator(layout, io.env, game.appId, true);
+    } else {
+      readRegistry(layout);
+    }
   } catch (error) {
-    if (!(error instanceof RegistryMissing)) {
+    if (layout.mode === "app" || !(error instanceof RegistryMissing)) {
       io.err(`delivery-kit: ${errorMessage(error)}\n`);
       return EXIT_INVALID;
     }
@@ -43,8 +63,12 @@ export const run: Handler = async (io, root, args) => {
   process.once("SIGINT", onInt);
   process.once("SIGTERM", onTerm);
   try {
-    await runRunner({ signal: controller.signal }, (startCi) =>
-      busContext({ ...testOptions(io.env), startCi }, layout, game, config),
+    await runRunner(
+      {
+        ...(authorizeDeparture === undefined ? {} : { authorizeDeparture }),
+        signal: controller.signal,
+      },
+      (startCi) => busContext({ ...testOptions(io.env), startCi }, layout, game, config),
     );
   } catch (error) {
     if (error instanceof RunnerRefused) {

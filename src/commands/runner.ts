@@ -13,6 +13,7 @@ import {
 
 import { VERSION } from "../compatibility.ts";
 import { isDirectory, isFile } from "../lib/files.ts";
+import { errorMessage } from "../lib/values.ts";
 import { busPaths } from "../state/paths.ts";
 import {
   StartRefused,
@@ -31,6 +32,7 @@ import {
   UnitUnavailable,
 } from "../supervision/unit.ts";
 import { resolveGame } from "./game.ts";
+import { deliveryOperator } from "./operator.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const UNIT_USAGE = commandUsage("runner unit");
@@ -107,13 +109,19 @@ export const runnerStop: Handler = async (io, root, args) => {
   if (typeof resolved === "number") {
     return resolved;
   }
-  const { game, selector, values } = resolved;
+  const { game, layout, selector, values } = resolved;
   const timeout = stopTimeout(values.timeout);
   if (timeout === undefined) {
     io.err(`delivery-kit: --timeout must be a positive whole number of seconds\n${STOP_USAGE}\n`);
     return EXIT_USAGE;
   }
   const paths = busPaths(game.busDir);
+  try {
+    deliveryOperator(layout, io.env, game.appId);
+  } catch (error) {
+    io.err(`delivery-kit: runner stop: ${errorMessage(error)}\n`);
+    return EXIT_INVALID;
+  }
   const result = await stopRunner(
     systemLifecycle(paths, game.repo),
     { game: game.id, paths, unitFile: unitFile(home(io.env), game.id) },
@@ -132,6 +140,12 @@ export const runnerStart: Handler = async (io, root, args) => {
   }
   const { game, layout, selector } = resolved;
   const paths = busPaths(game.busDir);
+  try {
+    deliveryOperator(layout, io.env, game.appId, true);
+  } catch (error) {
+    io.err(`delivery-kit: runner start: ${errorMessage(error)}\n`);
+    return EXIT_INVALID;
+  }
   try {
     const result = await startRunner(systemLifecycle(paths, game.repo), {
       game: game.id,

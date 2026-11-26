@@ -14,6 +14,7 @@ import {
 import { errorMessage } from "../lib/values.ts";
 import { setDesiredDelivery } from "../state/control.ts";
 import { resolveGame } from "./game.ts";
+import { deliveryOperator } from "./operator.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("control");
@@ -56,7 +57,11 @@ export const control: Handler = (io, root, args) => {
   }
   const { reason, requester, state } = input;
   try {
-    const role = resolveRole(readRegistry(resolved.layout), requester);
+    const operator = deliveryOperator(resolved.layout, io.env, resolved.game.appId);
+    if (operator !== undefined && requester !== operator) {
+      throw new Error("--requester must match the active delivery operator");
+    }
+    const role = operator ?? resolveRole(readRegistry(resolved.layout), requester);
     mkdirSync(resolved.game.busDir, { recursive: true });
     const record = setDesiredDelivery(
       { dir: resolved.game.busDir },

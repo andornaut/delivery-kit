@@ -2,13 +2,15 @@
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
 import {
-  EXIT_INVALID,
-  EXIT_USAGE,
-  type GameLayout,
-  gameLayout,
-  type Io,
+  type AppLayout,
+  appLayout,
   type Layout,
   loadLayout,
+} from "@andornaut/coordination-kit/build/registry";
+import {
+  EXIT_INVALID,
+  EXIT_USAGE,
+  type Io,
   loadProjectConfig,
   type ProjectConfig,
 } from "@andornaut/coordination-kit/build/shared";
@@ -18,7 +20,7 @@ import { APP_OPTIONS } from "./spec.ts";
 
 interface ResolvedGame {
   readonly layout: Layout;
-  readonly game: GameLayout;
+  readonly game: AppLayout;
   readonly config: ProjectConfig;
   readonly selector: "app" | "game";
   readonly values: Record<string, string | boolean | undefined>;
@@ -72,11 +74,11 @@ export function resolveGame(
     io.err(`delivery-kit: ${errorMessage(error)}\n`);
     return EXIT_INVALID;
   }
-  if (!Object.hasOwn(layout.config.games, values.game)) {
+  if (!Object.hasOwn(layout.config.apps, values.game)) {
     io.err(`delivery-kit: unknown ${selector}: ${values.game}\n`);
     return EXIT_USAGE;
   }
-  const game = gameLayout(layout, values.game);
+  const game = appLayout(layout, values.game);
   try {
     return { config: loadProjectConfig(game.configFile), game, layout, selector, values };
   } catch (error) {

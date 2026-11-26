@@ -109,6 +109,7 @@ export function scheduledStep(now: number, next: number): "due" | "early" | "mis
 async function departureLoop(
   context: BusContext,
   beforeDeparture: () => void,
+  authorizeDeparture: (() => void) | undefined,
   signal: AbortSignal,
 ): Promise<void> {
   const { config, paths } = context;
@@ -119,6 +120,21 @@ async function departureLoop(
   context.log(
     `bus: scheduled ${departures.join(" ")} (${timezone}), deployment route ${config.deploy.mode}`,
   );
+  let lastDenial: string | undefined;
+  const authorized = (): boolean => {
+    try {
+      authorizeDeparture?.();
+      lastDenial = undefined;
+      return true;
+    } catch (error) {
+      const detail = String(error);
+      if (detail !== lastDenial) {
+        context.log(`bus: departure blocked by app operator authorization: ${detail}`);
+        lastDenial = detail;
+      }
+      return false;
+    }
+  };
   truncate(paths.activeDeparture);
   try {
     await recoverRequests(store);
@@ -127,9 +143,10 @@ async function departureLoop(
       let now = context.clock.now();
       const step = scheduledStep(now, next);
       if (step === "early") {
-        const admission = hasPendingRequest(context.paths)
-          ? beginDeliveryWork(context, "checking", null)
-          : undefined;
+        const admission =
+          hasPendingRequest(context.paths) && authorized()
+            ? beginDeliveryWork(context, "checking", null)
+            : undefined;
         let request: string | undefined;
         try {
           // Reserve before claiming: a pause cannot consume a pending receipt.
@@ -169,11 +186,13 @@ async function departureLoop(
         next = now + untilNext(timezone, departures, now);
         continue;
       }
-      writeLines(paths.activeDeparture, String(now));
-      beforeDeparture();
-      // eslint-disable-next-line no-await-in-loop
-      await depart(context, { signal });
-      truncate(paths.activeDeparture);
+      if (authorized()) {
+        writeLines(paths.activeDeparture, String(now));
+        beforeDeparture();
+        // eslint-disable-next-line no-await-in-loop
+        await depart(context, { signal });
+        truncate(paths.activeDeparture);
+      }
       now = context.clock.now();
       next = now + untilNext(timezone, departures, now);
     }
@@ -201,6 +220,8 @@ function pinGuard(context: BusContext, loaded: PinIdentity): () => void {
 export class RunnerRefused extends Error {}
 
 interface RunnerOptions {
+  /** Recheck app-mode authority before claiming a request or admitting a scheduled slot. */
+  readonly authorizeDeparture?: () => void;
   /** The loaded bundle, for the pin guard; defaults to the running script. */
   readonly cliPath?: string;
   readonly signal: AbortSignal;
@@ -299,7 +320,7 @@ export async function runRunner(
     ];
     let backgroundFailure: PromiseRejectedResult | undefined;
     try {
-      await departureLoop(context, guard, signal);
+      await departureLoop(context, guard, options.authorizeDeparture, signal);
     } finally {
       stop.abort();
       context.coordinator.stop();

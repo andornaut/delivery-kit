@@ -13,6 +13,7 @@ import { errorMessage } from "../lib/values.ts";
 import { captureRequest } from "../runner/requests.ts";
 import { busPaths } from "../state/paths.ts";
 import { resolveGame } from "./game.ts";
+import { deliveryOperator } from "./operator.ts";
 import { commandUsage, SPECS } from "./spec.ts";
 
 const USAGE = commandUsage("request");
@@ -28,6 +29,7 @@ export const request: Handler = async (io, root, args) => {
     return EXIT_USAGE;
   }
   try {
+    deliveryOperator(resolved.layout, io.env, resolved.game.appId);
     const store = {
       exec: spawnExec,
       main: resolved.config.git.main,
