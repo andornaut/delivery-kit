@@ -5,7 +5,7 @@
 // lives here so a contract change touches one module.
 import { createHash } from "node:crypto";
 
-import { isRecord } from "../lib/values.ts";
+import { isRecord, wireAppId } from "../lib/values.ts";
 
 const EVENT_SCHEMA = 1;
 export const EVENTS_FILE = "events.jsonl";
@@ -176,13 +176,16 @@ export function parseLine(text: string): RunnerEvent | undefined {
     value.schema !== EVENT_SCHEMA ||
     typeof value.id !== "string" ||
     !SHA256.test(value.id) ||
-    typeof value.game !== "string" ||
     typeof value.type !== "string" ||
     typeof value.key !== "string"
   ) {
     return undefined;
   }
-  return value as unknown as RunnerEvent;
+  const appId = wireAppId(value);
+  if (appId === undefined) {
+    return undefined;
+  }
+  return (value.game === undefined ? { ...value, game: appId } : value) as unknown as RunnerEvent;
 }
 
 /** bus/events.cursor, written atomically by `events ingest` and read-only for the runner. */

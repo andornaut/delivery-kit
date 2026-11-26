@@ -75,6 +75,18 @@ describe("the event type table", () => {
 });
 
 describe("event lines", () => {
+  it("reads app identities without changing event IDs and rejects contradictory aliases", () => {
+    const original = makeEvent({ at: "x", detail: "", game: GAME }, "push", SHA);
+    const { game, ...fields } = original;
+    expect(parseLine(JSON.stringify({ ...fields, appId: game }))).toEqual({
+      ...original,
+      appId: game,
+    });
+    expect(parseLine(JSON.stringify({ ...original, appId: game }))?.id).toBe(original.id);
+    expect(parseLine(JSON.stringify({ ...original, appId: "another-app" }))).toBeUndefined();
+    expect(parseLine(JSON.stringify({ ...original, appId: null }))).toBeUndefined();
+  });
+
   it("derives the ID from game, type and key", () => {
     expect(eventId(GAME, "push", SHA)).toBe(
       createHash("sha256").update(`${GAME}\npush\n${SHA}`).digest("hex"),

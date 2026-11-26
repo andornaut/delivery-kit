@@ -21,6 +21,24 @@ describe("parsing", () => {
     status: "delivered",
   };
 
+  it("requires the exact app and slot even when the reply uses a neutral identity", () => {
+    const expected = { game: GAME, kind: "review-deliver", slot: ISO } as const;
+    const { game, ...fields } = ingest;
+    const neutral = { ...fields, appId: game, kind: expected.kind, slot: ISO };
+    expect(parseResult(expected, JSON.stringify(neutral))).toMatchObject({ claimed: true });
+    expect(parseResult(expected, JSON.stringify({ ...neutral, game }))).toMatchObject({
+      claimed: true,
+    });
+    expect(parseResult(expected, JSON.stringify({ ...neutral, game: "other-app" }))).toEqual({
+      claimed: false,
+      why: "malformed result: app ID differs",
+    });
+    expect(parseResult(expected, JSON.stringify({ ...neutral, slot: "later" }))).toEqual({
+      claimed: false,
+      why: "malformed result: slot differs",
+    });
+  });
+
   it("reads an events-ingest result with its counts and ignores fields it does not define", () => {
     const line = `${JSON.stringify(ingest)}\n`;
     expect(parseResult({ game: GAME, kind: "events-ingest" }, line)).toEqual({

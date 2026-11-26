@@ -2,7 +2,7 @@
 // validation of a review-deliver, events-ingest or version result line. Pure; the spawn is in
 // coordinator.ts.
 import { zonedParts } from "../lib/time.ts";
-import { isRecord } from "../lib/values.ts";
+import { isRecord, wireAppId } from "../lib/values.ts";
 import { type CliIdentity, cliIdentity } from "../state/seam.ts";
 
 /** The runner log prefix of a deferred review, on its own line and on stderr. */
@@ -123,8 +123,8 @@ export function parseResult(expected: Expected, stdout: string): SeamOutcome {
   if (value.kind !== expected.kind) {
     return mismatch(`kind is not ${expected.kind}`);
   }
-  if (value.game !== expected.game) {
-    return mismatch("game differs");
+  if (wireAppId(value) !== expected.game) {
+    return mismatch(value.appId === undefined ? "game differs" : "app ID differs");
   }
   if (expected.kind === "review-deliver" && value.slot !== expected.slot) {
     return mismatch("slot differs");
