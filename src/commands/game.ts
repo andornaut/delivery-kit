@@ -1,5 +1,4 @@
-// Shared `--game` resolution for the bus commands: game-coordinator config.json, then the game's
-// committed delivery-kit.json. Every bus write goes under var/games/<g>/bus/.
+// App selection for commands backed by the coordinator layout and committed delivery-kit.json.
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
 import {
@@ -15,6 +14,7 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import { errorMessage } from "../lib/values.ts";
+import { APP_OPTIONS } from "./spec.ts";
 
 interface ResolvedGame {
   readonly layout: Layout;
@@ -25,7 +25,26 @@ interface ResolvedGame {
 
 type Options = NonNullable<ParseArgsConfig["options"]>;
 
-/** Resolve `--game ID` plus `extra` options, or print the problem and return an exit code. */
+/** Parse a single app selector, keeping the legacy value key for command handlers. */
+export function parseAppOptions(options: Options, args: string[]) {
+  const {
+    tokens,
+    values: { app, game, ...values },
+  } = parseArgs({ args, options: { ...options, ...APP_OPTIONS }, strict: true, tokens: true });
+  const selectors = tokens.filter(
+    (token) => token.kind === "option" && (token.name === "app" || token.name === "game"),
+  );
+  if (app !== undefined && game !== undefined) {
+    throw new Error("--app and --game cannot be used together");
+  }
+  const selector = app === undefined ? "game" : "app";
+  if (selectors.length > 1) {
+    throw new Error(`--${selector} is given more than once`);
+  }
+  return { selector, values: { ...values, game: app ?? game } };
+}
+
+/** Resolve the app and extra options, or print the problem and return an exit code. */
 export function resolveGame(
   io: Io,
   root: string,
@@ -33,15 +52,15 @@ export function resolveGame(
   usage: string,
   args: string[],
 ): ResolvedGame | number {
-  let values: Record<string, string | boolean | undefined>;
+  let parsed: ReturnType<typeof parseAppOptions>;
   try {
-    values = parseArgs({ args, options: { game: { type: "string" }, ...extra }, strict: true })
-      .values as Record<string, string | boolean | undefined>;
+    parsed = parseAppOptions(extra, args);
   } catch (error) {
     io.err(`delivery-kit: ${errorMessage(error)}\n${usage}\n`);
     return EXIT_USAGE;
   }
-  if (typeof values.game !== "string") {
+  const { selector, values } = parsed;
+  if (values.game === undefined) {
     io.err(`${usage}\n`);
     return EXIT_USAGE;
   }
@@ -53,7 +72,7 @@ export function resolveGame(
     return EXIT_INVALID;
   }
   if (!Object.hasOwn(layout.config.games, values.game)) {
-    io.err(`delivery-kit: unknown game: ${values.game}\n`);
+    io.err(`delivery-kit: unknown ${selector}: ${values.game}\n`);
     return EXIT_USAGE;
   }
   const game = gameLayout(layout, values.game);

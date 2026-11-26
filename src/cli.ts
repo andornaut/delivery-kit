@@ -1,5 +1,5 @@
-// delivery-kit command dispatcher. Every verb is a game operation; the runner group takes a verb.
-// Every command resolves game-coordinator from --root (in any position, once), DELIVERY_KIT_ROOT or
+// delivery-kit command dispatcher. The runner command group takes a verb.
+// Every command resolves the coordinator from --root (in any position, once), DELIVERY_KIT_ROOT or
 // the working directory, in that order.
 import {
   EXIT_OK,
@@ -31,7 +31,7 @@ const COMMANDS = [
 export const USAGE = [
   "usage: delivery-kit COMMAND [options] [--root COORDINATOR_ROOT]",
   "",
-  "Game operations:",
+  "App operations:",
   ...COMMANDS.flatMap((command) => [
     ...synopsis(command).map((line) => `  ${line}`),
     `      ${SPECS[command].summary}`,
@@ -40,7 +40,8 @@ export const USAGE = [
   "  help, --help    print this text",
   "  --version       print the version",
   "",
-  "game-coordinator is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
+  "--game ID is a compatibility alias for --app ID.",
+  "The coordinator root is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
   "",
 ].join("\n");
 const HANDLERS: Readonly<Record<Command, Handler>> = {

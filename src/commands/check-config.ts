@@ -1,7 +1,5 @@
-// check-config: validate config.json, var/registry.json, var/route.json and each game's
+// check-config: validate config.json, var/registry.json, var/route.json and each app's
 // delivery-kit.json, and report every problem found.
-import { parseArgs } from "node:util";
-
 import {
   type Registry,
   resolveRole,
@@ -23,6 +21,7 @@ import {
 } from "@andornaut/coordination-kit/build/shared";
 
 import { errorMessage } from "../lib/values.ts";
+import { parseAppOptions } from "./game.ts";
 import { SPECS } from "./spec.ts";
 import { workerParentProblems } from "./worker-parents.ts";
 
@@ -70,7 +69,7 @@ function checkRoute(layout: Layout): string[] {
   }
 }
 export const checkConfig: Handler = (io, root, args) => {
-  const { values } = parseArgs({ args, options: SPECS["check-config"].options, strict: true });
+  const { selector, values } = parseAppOptions(SPECS["check-config"].options, args);
   let layout: Layout;
   try {
     layout = loadLayout(root);
@@ -90,7 +89,7 @@ export const checkConfig: Handler = (io, root, args) => {
   const games = values.game === undefined ? Object.keys(layout.config.games) : [values.game];
   for (const game of games) {
     if (!Object.hasOwn(layout.config.games, game)) {
-      io.err(`delivery-kit: unknown game: ${game}\n`);
+      io.err(`delivery-kit: unknown ${selector}: ${game}\n`);
       return EXIT_USAGE;
     }
     problems.push(...checkGame(layout, registry, rawRegistry, game));

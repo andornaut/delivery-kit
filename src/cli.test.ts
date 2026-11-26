@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { createRegistry, type Registry } from "@andornaut/coordination-kit/build/registry";
@@ -6,6 +6,7 @@ import {
   EXIT_INVALID,
   EXIT_OK,
   EXIT_USAGE,
+  gameLayout,
   loadLayout,
 } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
@@ -90,24 +91,89 @@ describe("check-config", () => {
     expect(await run(root, "check-config")).toMatchObject({ code: EXIT_OK, err: "" });
   });
 
-  it("rejects a mismatched reports.project and limits checks with --game", async () => {
+  it("rejects a mismatched reports.project and limits checks with either selector", async () => {
     const { base, root } = makeFixture();
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));
     const result = await run(root, "check-config");
     expect(result.code).toBe(EXIT_INVALID);
     expect(result.err).toContain("/reports/project must be Chibi");
-    expect((await run(root, "check-config", "--game", "archies-dog-walks")).code).toBe(EXIT_OK);
-    expect((await run(root, "check-config", "--game", "nope")).code).toBe(EXIT_USAGE);
+    const legacy = await run(root, "check-config", "--game", "archies-dog-walks");
+    expect(legacy).toMatchObject({ code: EXIT_OK, err: "" });
+    expect(await run(root, "check-config", "--app=archies-dog-walks")).toEqual(legacy);
+    await Promise.all(
+      ["app", "game"].map(async (selector) => {
+        expect(await run(root, "check-config", `--${selector}`, "nope")).toEqual({
+          code: EXIT_USAGE,
+          err: `delivery-kit: unknown ${selector}: nope\n`,
+          out: "",
+        });
+      }),
+    );
   });
 });
 
+describe("app selection", () => {
+  it("returns the same status for --app and --game", async () => {
+    const { root } = makeFixture();
+    const legacy = await run(root, "status", "--game", "archies-dog-walks");
+    expect(legacy).toMatchObject({ code: EXIT_OK, err: "" });
+    expect(await run(root, "status", "--app", "archies-dog-walks")).toEqual(legacy);
+  });
+
+  it.each([
+    {
+      diagnostic: "--app and --game cannot be used together",
+      selectors: ["--app", "archies-dog-walks", "--game=archies-dog-walks"],
+    },
+    {
+      diagnostic: "--app is given more than once",
+      selectors: ["--app=archies-dog-walks", "--app", "chibis-way-home"],
+    },
+    {
+      diagnostic: "--game is given more than once",
+      selectors: ["--game", "archies-dog-walks", "--game=archies-dog-walks"],
+    },
+  ])(
+    "rejects ambiguous selectors without creating delivery state ($diagnostic)",
+    async ({ diagnostic, selectors }) => {
+      const { root } = makeFixture();
+      withRegistry(root);
+      const layout = loadLayout(root);
+      const result = await run(
+        root,
+        "control",
+        ...selectors,
+        "--state",
+        "paused",
+        "--reason",
+        "test",
+        "--requester",
+        "game-coordinator",
+      );
+      expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
+      expect(result.err).toContain(diagnostic);
+      for (const game of Object.keys(layout.config.games)) {
+        expect(existsSync(gameLayout(layout, game).busDir)).toBe(false);
+      }
+      expect(await run(root, "check-config", ...selectors)).toEqual({
+        code: EXIT_USAGE,
+        err: `delivery-kit: ${diagnostic}\n`,
+        out: "",
+      });
+    },
+  );
+});
+
 describe("dispatcher", () => {
-  it("prints the game operations for help and rejects unknown commands", async () => {
+  it("advertises app operations and rejects unknown commands", async () => {
     const { root } = makeFixture();
     const help = await run(root, "--help");
     expect(help.code).toBe(EXIT_OK);
-    expect(help.out).toContain("control --game ID --state enabled|paused --reason TEXT");
-    expect(help.out).toContain("status --game ID [--resources]");
+    expect(help.out).toContain("App operations:");
+    expect(help.out).toContain("control --app ID --state enabled|paused --reason TEXT");
+    expect(help.out).toContain("status --app ID [--resources]");
+    expect(help.out).toContain("check-config [--app ID]");
+    expect(help.out).toContain("--game ID is a compatibility alias for --app ID.");
     expect(help.out).not.toContain("moved to coordination-kit");
     expect(await run(root, "scheduled-once")).toMatchObject({ code: EXIT_USAGE });
     expect((await run(root, "check-config", "--unknown")).code).toBe(EXIT_USAGE);
@@ -140,6 +206,6 @@ describe("dispatcher", () => {
     const result = await run(root, "status", "--game", "archies-dog-walks", "--harness", "codex");
     expect(result).toMatchObject({ code: EXIT_USAGE, out: "" });
     expect(result.err).toContain("Unknown option '--harness'");
-    expect(result.err).toContain("usage: delivery-kit status --game ID [--resources]");
+    expect(result.err).toContain("usage: delivery-kit status --app ID [--resources]");
   });
 });
