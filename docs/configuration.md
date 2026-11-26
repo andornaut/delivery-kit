@@ -24,13 +24,12 @@ route and every role reference must use these keys.
 Committed in each game, schema 1, and owned by its Tech role. See `examples/delivery-kit.json`.
 
 - `git`: `main`, `remote` and `github` (the GitHub `owner/name`).
-- `schedule`: `departures`, a non-empty list of two-digit minute strings such as `"00"`, and
+- `schedule`: `departures`, a non-empty list of unique two-digit minute strings such as `"00"`, and
   `timezone`, which defaults to the `config.json` timezone.
-- `gate`: `image`, `install` and ordered `steps` (`name`, `run`). Any image and install command
-  are accepted, provided the image has `sh`, `git`, `tar`, `ls` and `tail`, plus `node` when
-  `install` is set and `package-lock.json` lists optional packages; a departure names the tool an
-  image lacks. A passing install must leave every optional package the lock lists for the
-  container's platform and npm's effective omit, including omit flags in `install`
+- `gate`: `image`, `install` and ordered `steps` (`name`, `run`). The image needs `sh`, `git`,
+  `tar`, `ls` and `tail`. After a passing install, the optional-package check needs `node` if
+  the supported npm lock lists optional packages. The install must leave every optional package
+  expected for the container's platform and npm's effective omit, including flags in `install`
   ([gate container](runner.md#gate-container)). An empty `install` skips
   the install step, and an empty `steps` list
   gates with no checks. A command that assigns a secret-like variable inline (for example `TOKEN=x npm ci`) is
@@ -43,11 +42,11 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   number 0 to 30), all required. Gate containers receive `--memory <memoryMiB>m`, in MiB. CPU and
   memory limits cap execution; only the one-minute load controls admission. A departure starts only below
   `loadLimit`. At or above it, the departure re-checks the one-minute load every 60 seconds and
-  starts once the load is below the limit, up to 15 minutes after its scheduled slot; a load still
-  at or above the limit then skips the slot with `blocked-load`. A `loadLimit` of 0 holds every
-  departure, each after the full 15 minutes.
-- `ci`: `requiredNames` (a non-empty list of check names that must exist and pass for the exact
-  pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400). With a
+  starts once the load is below the limit, up to 15 minutes from the scheduled slot or the start
+  of a requested departure. If the load still meets or exceeds the limit at the deadline, the
+  attempt reports `blocked-load`. A `loadLimit` of 0 blocks every attempt that reaches the load check.
+- `ci`: `requiredNames` (a non-empty list of unique check names that must exist and pass for
+  the exact pushed commit), `pollSeconds` (1 to 3600) and `timeoutSeconds` (1 to 86400). With a
   path-filtered workflow, include its classification job (for example `changes`), since a
   skipped required run counts as passing.
 - `deploy`: `mode` is `wrangler` or `none`; the optional `skipPattern` is a regular expression
@@ -60,5 +59,6 @@ Committed in each game, schema 1, and owned by its Tech role. See `examples/deli
   when the game hosts the route. Enabling `scheduledTicks` adds one `scheduled-status` event
   per departure slot. Reports use the game's `name` from `config.json`. The optional legacy
   `project` must match that name when supplied. Keep it while a current or rollback reader
-  requires it. When `var/registry.json` exists, `check-config` requires each `workerParents`
-  role to resolve to a canonical conversation UUID that no other parent shares.
+  requires it. When `var/registry.json` exists, `check-config` resolves the recipient and each
+  worker parent as registry roles. Every listed worker parent must have a canonical conversation
+  UUID that no other listed parent shares.

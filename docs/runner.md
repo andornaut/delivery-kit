@@ -13,9 +13,8 @@ cd /absolute/path/to/game \
 The runner holds `runner.lock` and `loop.lock` (a second runner is refused), records its identity,
 and runs the scheduled and requested departure loop, the per-minute observer (scheduled reviews,
 scheduled-slot reports and event ingests), the 1800 s resource sampler and the CI watches
-in-process. The runner creates no timers: none outlives it, and no cron entry or other timer is
-involved. Supervision by a systemd user service is optional (see [Supervision](#supervision)). A
-missed scheduled slot is never replayed.
+in-process. The schedule needs no external timer or cron entry. A missed scheduled slot is
+never replayed. See [Supervision](#supervision) for the optional systemd user service.
 
 The observer wakes at the start of each minute after its previous clock reading, so a pass that
 runs past a minute boundary still reviews that minute's slot. A slot whose whole minute passes
@@ -64,15 +63,16 @@ holder of each lock with `status` and `runner.json`, then observe the next norma
 replacement resumes every CI watch whose `ci/<sha>.status` is still running, with its original
 deadline. A `pending` status, or a last push with no CI status, starts a watch with a new deadline.
 
-A second start while another runner holds `runner.lock` or `loop.lock` is refused with exit 3 and
-leaves the holder's identity intact.
+A second direct `run` while another runner holds `runner.lock` or `loop.lock` exits 3 and leaves
+the holder's identity intact.
 
 ## Coordinator CLI seam
 
 The runner spawns the coordinator root's
 `node_modules/@andornaut/coordination-kit/dist/cli.js` with its own Node binary
-(`process.execPath`, never `npx`), the coordinator root it resolved from `--root` or
-`DELIVERY_KIT_ROOT` as `--root` and as the working directory, and its own environment:
+(`process.execPath`). It resolves the coordinator root from `--root`, then `DELIVERY_KIT_ROOT`,
+then the working directory. The child inherits the runner's environment and uses that root
+both as `--root` and as its working directory.
 
 | Call                                        | When                                                                   |
 | ------------------------------------------- | ---------------------------------------------------------------------- |
@@ -82,8 +82,8 @@ The runner spawns the coordinator root's
 
 `SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
 `2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
-call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed `game` (and `slot`,
-which must equal the one sent), `status` (`delivered`, `deferred` or `skipped`), `reason`, free-text
+review or ingest call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed
+`game` (and `slot` for reviews, which must equal the one sent), `status` (`delivered`, `deferred` or `skipped`), `reason`, free-text
 `detail` and `cli` `{version, distSha256}`. An ingest result has `kind` `events-ingest`: `delivered`
 when it ingested lines, `skipped` with `no-events` when nothing was new, and `deferred` with a
 reason otherwise. It may add counts, each a non-negative integer when present: `ingested`,
@@ -91,13 +91,14 @@ reason otherwise. It may add counts, each a non-negative integer when present: `
 while a torn tail is pending). The runner parses the JSON, not its key order, ignores fields it
 does not define and never parses `detail`.
 
-`reason` is null when delivered, otherwise one of `route-unavailable`, `recipient-unavailable`,
-`recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`, `already-delivered`,
-`nothing-due`, `no-events` or `cli-error`; an unknown token, such as `in-flight`, is a deferral.
-The runner adds `cli-unavailable` and `cli-version` for its own deferrals. coordination-kit
-records each review result under `bus/unblock/review-deliver/` and prints it again for a repeated
-call, except a `recipient-busy` lock contention, which it does not record. The runner never
-passes `--capture`.
+A delivered result may carry a null `reason`. Recognised reason tokens are `route-unavailable`,
+`recipient-unavailable`, `recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`,
+`already-delivered`, `nothing-due`, `no-events`, `cli-error` and `compaction-reserved`. An unknown token such as
+`in-flight` is a deferral. The runner adds `cli-unavailable` and `cli-version` for its own
+deferrals. Coordination Kit reuses any result recorded under `bus/unblock/review-deliver/` for
+a repeated call. A busy slot lock or a store compaction reservation can defer without recording
+a result. The runner never passes `--capture`. The version probe returns a separate JSON object
+with `schema` 1, `version` and `distSha256`.
 
 - **No delivery claimed:** a missing result, a nonzero exit (an internal failure exits 1 with no
   stdout and one `coordination-kit:` stderr line, which the runner logs), a line that is not one
@@ -105,9 +106,9 @@ passes `--capture`.
   abort claim nothing. The runner logs them and continues; none stops a departure, prevents runner
   start or ends the runner. The CLI checks for an abort before it writes a slot record, so killing
   it never leaves a partial record.
-- **Timeout:** each spawn has 45 s, under the 60 s pass. On a timeout or an abort (runner
-  shutdown) the runner kills the child's whole process group. A spawn never holds
-  `departure.lock` and never delays a departure; departures never depend on the seam.
+- **Timeout:** each spawn has a 45 s deadline. A pass can cross a minute boundary,
+  especially when it also retries a reserved slot. On timeout or shutdown the runner kills the
+  child's whole process group. The seam runs independently of departures and outside `departure.lock`.
 - **Missing CLI:** while the file is missing, for example during `npm ci` at the root, reviews
   and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
@@ -155,9 +156,9 @@ the coordinator CLI's `events ingest` reads it. The schema lives in `src/state/e
   `bus: event TYPE KEY not appended to events.jsonl (...); operator review required` to
   `runner.log` and stderr and never stops a departure. Every appended event requests an ingest.
 - **`runner.started`:** appended at each start once the startup probe settles, keyed by the
-  runner token. Its `detail` is the JSON string `{token, deliveryKitVersion, cliSha256,
-coordinationKitVersion, distSha256}`: the loaded delivery-kit and the coordinator CLI identity,
-  null when the probe found none.
+  runner token when available. Its `detail` is a JSON string with `token`, `deliveryKitVersion`
+  and `cliSha256` for the running Delivery Kit. `coordinationKitVersion` and `distSha256` come
+  from the coordinator CLI probe and are null when the probe found no identity.
 - **`work`:** on a deploy event with status `ok` or `skipped`, the work IDs whose
   `docs/work/<id>.md` front matter is `status: done` at this SHA but not at the last complete SHA,
   from `git` in the game checkout; `[]` when none, null when either commit is unknown. A commit is
@@ -210,8 +211,9 @@ when `firstId` equals that file's first line ID or, when `firstId` is null, when
 first line ID and its inode and device match. The offset counts only for the file the cursor
 names; the runner and `status` parse every field strictly.
 
-`status` reports the log as drained when the cursor names the live `events.jsonl`, its `offset`
-equals the file's size, no rotated `events.<epoch>.jsonl` remains and the last line is not torn.
+`status` reports a non-empty log as drained when the cursor names the live `events.jsonl` and
+its `offset` equals the file's size, with no rotated log or torn line. An absent or empty log
+can be drained without a cursor if there are no event blockers.
 A cursor naming a rotated log adds `events_cursor_rotated`, and one naming no file present
 `events_cursor_unmatched`. Ingest finds the file the cursor names, finishes it from `offset` and
 reads newer files from 0, or every file from 0 when none matches; it never consumes a torn line
@@ -260,8 +262,9 @@ The unit resolves every path when it is printed:
   running the command (`process.execPath`), the game's installed
   `node_modules/@andornaut/delivery-kit/dist/cli.js` and `run --game GAME_ID`, with no `npx`.
 - `Environment` sets `DELIVERY_KIT_ROOT` to the resolved coordinator root and `PATH` to the
-  directories of `node`, `gh`, `docker`, `git`, `flock` and `claude` as found on the caller's
-  `PATH`, Node first. A missing tool or installed CLI exits 1 with no unit printed.
+  directory of `process.execPath`, followed by the directories of `gh`, `docker`, `git`,
+  `flock` and `claude` from the caller's `PATH`. A missing tool or installed CLI exits 1
+  with no unit printed.
 - `Restart=on-failure` with `RestartSec=30`. A sixth start within 600 s (`StartLimitIntervalSec`,
   `StartLimitBurst=5`) is refused and the unit stays failed until `systemctl --user reset-failed`,
   so a persistent failure does not loop.
@@ -308,8 +311,8 @@ Starting at boot without a login session needs lingering, which the user enables
   `method` is `systemd` or `spawn` and `status` is `{running, idle, coordinator_cli}`. A runner
   that does not come up, or exits first, exits 1.
 
-Neither command changes desired delivery control or any coordination-kit state. Both read only
-the read-only status report and `runner.json`, and startup checks the legacy outbox path.
+Neither command changes desired delivery control or any coordination-kit state. Both use the status
+report and `runner.json` to attest the runner. Startup also checks the legacy outbox path.
 When starts race, the singleton locks admit only one runner.
 
 Upgrade or replace a supervised runner in a quiet window:
@@ -368,9 +371,9 @@ durable writes, configuration validation and IDs) from `build/registry`, `build/
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit releases it supports in one place, `COORDINATION_KIT_RANGE` in `src/compatibility.ts`;
-delivery-kit 7.0.0 supports `>=2.0.1 <4.0.0` and bundles 3.0.0; the coordinator CLI it spawns
-needs `>=3.0.0 <8.0.0`. The bundled range spans 2.0.1 and 3.x because coordination-kit 3.0 keeps
-those subpaths unchanged, so moving the bundle to 3.x is a pin change only. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
+Delivery Kit 8.5.0 bundles 3.4.4 and supports `>=2.0.1 <4.0.0` for that bundle. The spawned
+coordinator CLI needs `>=3.0.0 <8.0.0`. The bundled range spans 2.0.1 and 3.x because
+Coordination Kit 3.0 keeps those subpaths unchanged. The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
 build whose bundled version is outside the range, so a release can only ship a supported one.
 
@@ -463,8 +466,8 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
 
 - **Fix forward:** a red gate (install or a gate step exiting non-zero inside the running
   container) leaves `main` unpushed and records `gate-failed/<sha>`, so that SHA is never gated
-  again; the next departure runs once Tech merges a fix. Red CI or a failed deployment is fixed the
-  same way, with no automatic CI rerun.
+  again. Red CI also requires a new commit. A failed deployment with passing CI retains its
+  pending assets for retry.
 - **Docs-only range:** when every path changed from the remote `main` to HEAD starts with `docs/`
   (both sides of a rename count) and no deployment is pending, the departure starts no gate
   container. It pushes the exact SHA as in step 7, records `last-deploy-skipped.sha`, reports
@@ -474,7 +477,7 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   the full gate, so the gated push supersedes the pending deployment. The prefix is fixed, not
   configured.
 - **Gate infrastructure:** when Docker is unavailable, the image cannot be pulled, the container
-  cannot be created or started, install fails with an npm network code (HTTP 5xx, `ETIMEDOUT`,
+  cannot be created or started, install fails with an npm network code (`E5xx`, `ETIMEDOUT`,
   `ECONNRESET`, `ECONNREFUSED`, `EAI_AGAIN`, `ENOTFOUND`, `ESOCKETTIMEDOUT`), a passing install
   skipped an optional package that `package-lock.json` lists for the container's platform (see
   [Gate container](#gate-container)), the network cannot be
@@ -518,7 +521,7 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
 
 - requires the complete approved tracked source inventory, rejecting extra ignored/untracked
   paths and unsupported filesystem entries before creating a source-mounted container;
-- runs `gate.image` as `--user 19001:19001` with `HOME=/tmp`, `--group-add` of the worktree's
+- runs `gate.image` as `--user 19001:19001` with `HOME=/tmp`, `--group-add` of the staged source's
   group, `--cpus` from `resources.cpus` and `--memory <memoryMiB>m` from
   `resources.memoryMiB` (MiB);
 - binds a verified source-only stage read-only at `/src` (`--mount type=bind,...,readonly`) and the npm cache
@@ -536,7 +539,7 @@ One container per gated SHA, named `delivery-kit-gate-<game>-<short sha>` and la
 - after a passing install, when the commit's `package-lock.json` (lockfileVersion 2 or 3) lists
   optional packages, checks that each one npm installs on the container's platform is present,
   because npm skips an optional package whose fetch or build fails and still exits 0. `node` in
-  the container reports the platform (`process.platform`, `process.arch`, npm's libc detection)
+  the container reports the platform (`process.platform`, `process.arch` and libc when detected)
   and the Node and npm versions, so such a commit needs `node` in the image. The check follows
   npm's effective omit: `npm config get omit` run in the working copy (so project configuration,
   `npm_config_omit` and `NODE_ENV=production` count), joined with a best-effort reading of the

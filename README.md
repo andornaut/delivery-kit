@@ -1,16 +1,17 @@
 # delivery-kit
 
-Local scheduled trunk-based Git delivery. Each departure gates the game's local `main` HEAD in an
-isolated container, pushes that exact commit, watches its CI and deploys the already-gated build
-on a pass. The kit owns the mechanisms. Each game owns its repository, `delivery-kit.json`,
-credentials and schedule; `game-coordinator` owns `config.json`, the registry and mutable state.
-The legacy default is `var/`.
+Local scheduled trunk-based Git delivery. A full departure gates the game's local `main` HEAD in
+an isolated container, pushes that exact commit, watches its CI and deploys the gated build when
+CI passes and deployment is enabled for the range. Eligible
+[docs-only ranges](docs/runner.md#departures) push and watch CI without gating or deploying.
+Each game owns its repository, `delivery-kit.json`, credentials and schedule.
+`game-coordinator` owns `config.json`, the registry and runner state under `var/`.
 
 The role registry, durable role messages, harness adapters, inbox review and the work store are
 [coordination-kit](https://github.com/andornaut/coordination-kit), which delivery-kit builds on;
-delivery-kit reads no coordination-kit store or work protocol state. The resident runner decides when a scheduled review slot is due and hands it to the
-coordinator-installed coordination-kit CLI, appends its bus events to a per-game event log and asks
-that CLI to ingest them ([Event log](docs/runner.md#event-log)).
+delivery-kit reads no coordination-kit store or work protocol state. The resident runner calls the
+coordinator-installed coordination-kit CLI for scheduled reviews and ingestion of its per-game
+event log ([Event log](docs/runner.md#event-log)).
 
 The `@andornaut/delivery-kit` package provides the operator CLI,
 bundled into `dist/cli.js` with the coordination-kit modules it uses. The bundle imports only
@@ -41,9 +42,9 @@ and event ingest.
 
 ## Commands
 
-Every verb is a game operation; `runner` is a noun group that takes a verb. Every command resolves game-coordinator from `--root DIR`, else
-`DELIVERY_KIT_ROOT`, else the working directory. `--root` may appear anywhere on the command line, at most once. `--game` is always
-explicit; it is never inferred from the working directory.
+Game operations resolve the coordinator root from `--root DIR`, then `DELIVERY_KIT_ROOT`, then
+the working directory. Supply `--root` at most once, in any position. A game ID must be explicit
+where required. `check-config` checks all configured games when no ID is supplied.
 
 | Command                                                                    | Purpose                                                                                                                                                          |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,7 +52,7 @@ explicit; it is never inferred from the working directory.
 | `runner unit --game ID`                                                    | Game operation: print the optional systemd user unit for the game's resident runner; installs nothing.                                                           |
 | `runner stop --game ID [--timeout SECONDS]`                                | Game operation: wait until the game's runner is idle and drained, then stop it through its unit or by signal.                                                    |
 | `runner start --game ID`                                                   | Game operation: start one runner through the game's systemd user unit, or detached without one.                                                                  |
-| `status --game ID [--resources]`                                           | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line; with `--resources`, the reporting-only resource information.       |
+| `status --game ID [--resources]`                                           | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line. `--resources` prints the resource report instead.                  |
 | `control --game ID --state enabled\|paused --reason TEXT --requester ROLE` | Game operation: persist desired delivery control with its reason and requesting role.                                                                            |
 | `check-config [--game ID]`                                                 | Game operation: validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
 | `request --game ID --id SAFE_ID`                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
@@ -130,8 +131,9 @@ the contract lockfile with native npm. Ordinary Git commits run serial local lin
 with direct Prettier and ESLint fixes that preserve Git's staged/unstaged workflow.
 
 CI runs the same native npm commands directly on the runner with the pinned Node version.
-Its `lint` job (types, Prettier, ESLint and Markdown lint) runs on pushes to `main` and
-`release-*` branches and on pull requests. The `build`, `test`, `contract` and `package` jobs
+Its `changes` and `lint` jobs run on pushes to `main` and `release-*` branches and on pull
+requests. `lint` checks types, Prettier, ESLint and Markdown. The separate attribution workflow
+runs on branch pushes and pull requests. The `build`, `test`, `contract` and `package` jobs
 skip when the classifier finds a non-empty diff entirely under `docs/`. A change to the root
 `README.md`, an empty diff, a forced push, a new branch or an unverified base runs every job.
 

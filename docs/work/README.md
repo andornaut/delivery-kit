@@ -1,7 +1,7 @@
 # Work items
 
 Each user request is one file, `docs/work/<id>.md`, whether or not it is approved. It records scope and milestones; live
-progress (claims, blocks, receipts and acceptance) stays in the work protocol state root. The
+progress (claims, blocks, receipts and acceptance) stays in the Coordination Kit store. The
 [design index](../design/README.md) lists the work items of each area.
 
 | Front matter | Content                                                                  |
@@ -26,7 +26,8 @@ decided or delivered, and why, in a line or two each.
   is never rewritten.
 - Work files are public: no session IDs, hostnames, local home-directory paths or quoted
   conversation, only short approval references.
-- Docs-only changes run only the attribution and lint checks ([dk-0014](dk-0014.md)).
+- A non-empty diff confined to `docs/` runs CI classification, lint and the separate attribution
+  workflow, with build, test, contract and package skipped ([dk-0014](dk-0014.md)).
 - Work files are not part of the npm package.
 - [dk-0029](dk-0029.md) to [dk-0033](dk-0033.md) record requests approved before this convention, filed
   after delivery, so their IDs do not follow approval order.

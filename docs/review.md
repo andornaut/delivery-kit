@@ -29,10 +29,10 @@ named recipient actionable outcomes and one COMPLETE report for each successful 
 Routine progress stays in event history.
 
 Events are appended at most once per `(type, key)`. Each `blocked-*` report states its own remedy:
-`blocked-load` (a load still at or above `loadLimit` 15 minutes after the slot) clears by
-itself, `blocked-gate` is gated again at the next departure, `blocked-fetch` and a failed push
-are retried, a red gate needs a fix merged on main, a non-fast-forward needs Tech to merge the
-remote `main`, and an unreadable local `main` needs an operator fix.
+`blocked-load` skips the attempt when its 15-minute load window expires at or above
+`loadLimit`. A later departure can retry `blocked-load`, `blocked-gate`, `blocked-fetch` and
+transient push failures. A red gate needs a fix merged on main, a non-fast-forward needs Tech
+to merge the remote `main`, and an unreadable local `main` needs an operator fix.
 
 Reference: [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/review.md),
 [upgrading to 6.1](upgrading.md#upgrading-to-61).

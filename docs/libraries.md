@@ -34,7 +34,7 @@ commit for an independently copied source tree; they do not copy working files o
 
 - `snapshotSourceIdentity({ sourceRoot, artifactDir }, { expectedCommit, approvedPaths })`
   requires the full lowercase 40-character SHA1 HEAD and the complete safety-approved tracked
-  file inventory, including `.gitignore`. Filename checks are defence in depth: callers must
+  file inventory, including `.gitignore` when tracked. Filename checks are defence in depth: callers must
   approve file contents too. Omitted tracked paths, forbidden paths, gitlinks and symbolic links
   fail closed. Regular files, executable files and trees are supported.
 - The new artifact directory must be outside the source checkout. It contains `identity.json`

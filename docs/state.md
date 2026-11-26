@@ -2,10 +2,9 @@
 
 Where delivery-kit keeps mutable state, how it writes it durably, and the persistent delivery control record.
 
-The legacy default is game-coordinator's ignored `var/`. delivery-kit and coordination-kit share
-this layout and its byte formats: coordination-kit owns the registry, route, review, message,
-ledger and protocol state, and delivery-kit owns each game's bus. These paths remain there even
-when the work protocol is active:
+The following paths live under game-coordinator's ignored `var/`. Coordination Kit owns the
+registry, route, review and message state. Delivery Kit owns each game's bus and shares the
+event log and cursor formats with Coordination Kit.
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
@@ -20,7 +19,7 @@ when the work protocol is active:
   `coordination-kit events ingest`, naming its file by first line ID, inode and device), `events.quarantine.jsonl` (malformed lines ingest set aside),
   `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (a retained
   6.0 outbox archive with its `<sha>.state` files), `last-complete.sha` (the last commit the
-  runner saw complete), `requests/`, `unblock/` (coordination-kit's delivery spool),
+  runner saw complete), `requests/` (receipts and `requests.lock`), `unblock/` (Coordination Kit delivery state),
   `runner.json`, `runner.identity.json`,
   `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
   `runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.

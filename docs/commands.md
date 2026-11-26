@@ -11,7 +11,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
-- `status --game`: an unreadable `ci/`, `requests/` or `gate-failed/` directory or event log is
+- `status --game ID --resources` prints the resource report in place of the JSON status.
+- `status --game ID`: an unreadable `ci/`, `requests/` or `gate-failed/` directory or event log is
   a blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
   `unreadable` with the `identity_unreadable` blocker. The runner loads `delivery-kit.json` once
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
@@ -28,14 +29,15 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   `bus/seam.json`: `{version, distSha256, seenAt, supported}`, where `supported` tests `version`
   against `>=3.0.0 <8.0.0`, and every field is null before the runner has seen one; see
   [Coordinator CLI seam](runner.md#coordinator-cli-seam).
-  `events` reads the event log and its cursor, read-only: `{file, size, cursorOffset, rotated,
-torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffset` is null
-  without a valid cursor, `rotated` lists rotated logs awaiting ingest, `torn` is true while the
-  last line has no newline, and `drained` is true when the cursor names the live log and reaches
-  its end, with no rotated log and no torn line. Its reporter blockers are `events_uningested:BYTES`, `events_rotated:N`,
+  `events` reports `{file, size, cursorOffset, rotated, torn, drained}`. `size` is 0 without a log
+  and null when unreadable. `cursorOffset` is null without a valid cursor. `rotated` lists logs
+  awaiting ingest, and `torn` is true when the last line has no newline. `events.drained` is true
+  when the log and cursor have no blockers. An absent or empty log can be drained without a
+  cursor when the bus directory is readable. Reporter blockers include `events_uningested:BYTES`,
+  `events_rotated:N`,
   `events_torn`, `events_cursor_invalid`, `events_cursor_ahead`, `events_cursor_rotated` (the
   cursor names a rotated log), `events_cursor_unmatched` (it names no file present),
-  `events_unreadable` and `events_dir_unreadable`. The reporter blocker `events_legacy_outbox`
+  `events_unreadable` and `events_dir_unreadable` (the bus directory is missing or unreadable). The reporter blocker `events_legacy_outbox`
   indicates a 6.0 `bus/events` outbox that needs the [6.1.2 migration](upgrading.md#upgrading-to-80).
   `events_legacy_outbox_unreadable` means the path could not be checked. Top-level `drained`
   requires no reporter or idle blockers. See [Event log](runner.md#event-log).
@@ -49,7 +51,8 @@ torn, drained}`. `size` is 0 without a log and null when unreadable, `cursorOffs
   not hold the identity or a runner that does not exit, leaving the runner untouched in the first
   two cases. `--timeout` accepts 1 to 9999999 seconds in decimal without leading zeros. See
   [Supervision](runner.md#supervision).
-- `run --game ID`: exits 3 before writing runner state if the legacy outbox check fails.
+- `run --game ID`: exits 3 before writing runner state if the legacy outbox check fails. A
+  refused singleton start also exits 3.
 - `runner start --game ID`: exits 1 and starts nothing while either lock is held or the legacy
   outbox check fails. Starts the systemd user unit when its file is installed, otherwise spawns
   the game's installed `dist/cli.js run --game ID` detached with output appended to

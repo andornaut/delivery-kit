@@ -1,6 +1,14 @@
 # Upgrading
 
-Breaking changes between major versions, the edits each one needs, and the removed command forms.
+Version-specific upgrade steps and removed command forms.
+
+## Upgrading to 8.5
+
+8.5 keeps the bundled Coordination Kit at 3.4.4 and accepts coordinator CLIs in
+`>=3.0.0 <8.0.0`. For a gate with an install command and a supported npm lock containing
+optional packages, the image now needs `node` to verify the expected packages after install.
+A missing expected package blocks the gate as infrastructure, so a later departure can retry the
+same commit. See [Gate container](runner.md#gate-container) for platform and omit handling.
 
 ## Upgrading to 8.4
 
