@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -80,8 +80,14 @@ export interface Registry {
 }
 
 export interface GameOptions {
-  /** Key in game-coordinator `config.json`; the checkout is created beside game-coordinator. */
+  /** Key in the existing coordinator `config.json` games map. */
   game?: string;
+  name?: string;
+  roles?: string[];
+  /** Shared role keys for a new coordinator; omit for the legacy game fixtures. */
+  sharedRoles?: string[];
+  /** Add an app to this fixture's coordinator, keeping a separate checkout and fake tools. */
+  alongside?: Workspace;
   config?: GameConfig;
   /** Use native Git for remote/history operations too, instead of scripting those operations. */
   realGit?: boolean;
@@ -185,7 +191,7 @@ export class Workspace {
     this.root = mkdtempSync(join(tmpdir(), "dk-"));
     this.home = join(this.root, "home");
     this.xdgState = join(this.home, ".local", "state");
-    this.coordinator = join(this.root, "game-coordinator");
+    this.coordinator = options.alongside?.coordinator ?? join(this.root, "game-coordinator");
     this.fakeDir = join(this.root, "fakes");
     this.fakeBin = join(this.fakeDir, "bin");
     this.game = options.game ?? "fixture-game";
@@ -203,7 +209,7 @@ export class Workspace {
     // watches CI before deploying.
     const gh = { default: [{ conclusion: "success", id: 1, name: "Test", status: "completed" }] };
     this.setControl(this.realGit ? { gh, git: { real: true } } : { gh });
-    this.writeCoordinator();
+    this.writeCoordinator(options);
     if (options.deliveryState !== null)
       this.adoptDeliveryControl(options.deliveryState ?? "enabled");
     this.initRealGit();
@@ -220,20 +226,29 @@ export class Workspace {
     }
   }
 
-  private writeCoordinator(): void {
+  private writeCoordinator(options: GameOptions): void {
+    const entry = {
+      name: options.name ?? "Fixture",
+      path: relative(this.coordinator, this.repo),
+      roles: options.roles ?? ["art", "gameplay", "tech"],
+    };
+    if (options.alongside !== undefined) {
+      const { games } = this.coordinatorConfig() as { games: Record<string, unknown> };
+      this.updateCoordinatorConfig({ games: { ...games, [this.game]: entry } });
+      return;
+    }
     writeJson(join(this.coordinator, "config.json"), {
       schema: 1,
       timezone: "America/Toronto",
       wakeMinutes: [20, 50],
-      games: {
-        [this.game]: {
-          name: "Fixture",
-          path: `../${this.game}`,
-          roles: ["art", "gameplay", "tech"],
-        },
-      },
+      games: { [this.game]: entry },
       kits: {},
-      sharedRoles: ["game-coordinator", "art-kit", "delivery-kit", "game-kit"],
+      sharedRoles: options.sharedRoles ?? [
+        "game-coordinator",
+        "art-kit",
+        "delivery-kit",
+        "game-kit",
+      ],
     });
     this.writeRegistry({ schema: 1, revision: 1, harness: "claude", roles: {} });
     this.installCoordinatorCli();
