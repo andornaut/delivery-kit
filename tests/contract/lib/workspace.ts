@@ -82,6 +82,7 @@ export interface Registry {
 export interface GameOptions {
   /** Key in the existing coordinator `config.json` games map. */
   game?: string;
+  layout?: "apps" | "migrated-apps";
   selector?: "--app" | "--game";
   name?: string;
   roles?: string[];
@@ -174,6 +175,7 @@ export class Workspace {
   readonly fakeDir: string;
   readonly fakeBin: string;
   readonly game: string;
+  readonly layout: "legacy" | "apps" | "migrated-apps";
   readonly selector: "--app" | "--game";
   readonly repo: string;
   readonly state: string;
@@ -197,9 +199,11 @@ export class Workspace {
     this.fakeDir = join(this.root, "fakes");
     this.fakeBin = join(this.fakeDir, "bin");
     this.game = options.game ?? "fixture-game";
+    this.layout = options.alongside?.layout ?? options.layout ?? "legacy";
     this.selector = options.selector ?? "--game";
     this.repo = join(this.root, this.game);
-    this.state = join(this.coordinator, "var", "games", this.game, "bus");
+    const stateDir = this.layout === "apps" ? "apps" : "games";
+    this.state = join(this.coordinator, "var", stateDir, this.game, "bus");
     this.config = options.config ?? defaultConfig();
     this.realGit = options.realGit ?? false;
     this.hostLoad = options.hostLoad ?? "ignore";
@@ -230,21 +234,24 @@ export class Workspace {
   }
 
   private writeCoordinator(options: GameOptions): void {
+    const appMap = this.layout === "legacy" ? "games" : "apps";
     const entry = {
       name: options.name ?? "Fixture",
       path: relative(this.coordinator, this.repo),
       roles: options.roles ?? ["art", "gameplay", "tech"],
     };
     if (options.alongside !== undefined) {
-      const { games } = this.coordinatorConfig() as { games: Record<string, unknown> };
-      this.updateCoordinatorConfig({ games: { ...games, [this.game]: entry } });
+      const entries = this.coordinatorConfig()[appMap] as Record<string, unknown>;
+      this.updateCoordinatorConfig({ [appMap]: { ...entries, [this.game]: entry } });
       return;
     }
     writeJson(join(this.coordinator, "config.json"), {
       schema: 1,
       timezone: "America/Toronto",
       wakeMinutes: [20, 50],
-      games: { [this.game]: entry },
+      [appMap]: { [this.game]: entry },
+      ...(this.layout === "migrated-apps" ? { appStateDir: "games" } : {}),
+      ...(this.layout === "legacy" ? {} : { permissions: {} }),
       kits: {},
       sharedRoles: options.sharedRoles ?? [
         "game-coordinator",
@@ -331,6 +338,7 @@ export class Workspace {
       roles,
     };
     writeJson(join(this.coordinator, "var", "registry.json"), complete);
+    if (this.layout !== "legacy") return;
     const config = this.coordinatorConfig();
     const shared = new Set(config.sharedRoles as string[]);
     for (const key of Object.keys(roles)) if (!key.includes("/")) shared.add(key);

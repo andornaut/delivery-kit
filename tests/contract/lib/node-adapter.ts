@@ -186,9 +186,11 @@ function registerUsedConversations(ws: Workspace, words: string[]): void {
 function command(ws: Workspace, words: string[]): Command {
   writeJson(ws.configFile, nodeConfig(ws));
   installPackage(ws);
-  ensureRecipient(ws);
-  ensureRouteRoles(ws);
-  registerUsedConversations(ws, words);
+  if (ws.layout === "legacy") {
+    ensureRecipient(ws);
+    ensureRouteRoles(ws);
+    registerUsedConversations(ws, words);
+  }
   // The runner group takes a verb; the other commands are one word.
   const width = words[0] === "runner" ? 2 : 1;
   const verb = words.slice(0, width);
