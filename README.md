@@ -42,21 +42,22 @@ and event ingest.
 
 ## Commands
 
-Game operations resolve the coordinator root from `--root DIR`, then `DELIVERY_KIT_ROOT`, then
-the working directory. Supply `--root` at most once, in any position. A game ID must be explicit
-where required. `check-config` checks all configured games when no ID is supplied.
+Delivery commands resolve the coordinator root from `--root DIR`, then `DELIVERY_KIT_ROOT`,
+then the working directory. Supply `--root` at most once, in any position. Select an app with
+`--app ID`. Compatibility alias `--game ID` selects the same app. Supply only one selector.
+`check-config` checks all configured apps when no ID is supplied.
 
-| Command                                                                    | Purpose                                                                                                                                                          |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run --game ID`                                                            | Game operation: the resident runner for one game.                                                                                                                |
-| `runner unit --game ID`                                                    | Game operation: print the optional systemd user unit for the game's resident runner; installs nothing.                                                           |
-| `runner stop --game ID [--timeout SECONDS]`                                | Game operation: wait until the game's runner is idle and drained, then stop it through its unit or by signal.                                                    |
-| `runner start --game ID`                                                   | Game operation: start one runner through the game's systemd user unit, or detached without one.                                                                  |
-| `status --game ID [--resources]`                                           | Game operation: read-only runner identity, singleton, idle and drain report as one JSON line. `--resources` prints the resource report instead.                  |
-| `control --game ID --state enabled\|paused --reason TEXT --requester ROLE` | Game operation: persist desired delivery control with its reason and requesting role.                                                                            |
-| `check-config [--game ID]`                                                 | Game operation: validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
-| `request --game ID --id SAFE_ID`                                           | Game operation: record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
-| `help`, `--help`, `--version`                                              | Usage and version.                                                                                                                                               |
+| Command                                                                   | Purpose                                                                                                                                          |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run --app ID`                                                            | The resident runner for one app.                                                                                                                 |
+| `runner unit --app ID`                                                    | Print the optional systemd user unit for the app's resident runner without installing it.                                                        |
+| `runner stop --app ID [--timeout SECONDS]`                                | Wait until the app's runner is idle and drained, then stop it through its unit or by signal.                                                     |
+| `runner start --app ID`                                                   | Start one runner through the app's systemd user unit, or detached without one.                                                                   |
+| `status --app ID [--resources]`                                           | Read-only runner identity, singleton, idle and drain report as one JSON line. `--resources` prints the resource report instead.                  |
+| `control --app ID --state enabled\|paused --reason TEXT --requester ROLE` | Persist desired delivery control with its reason and requesting role.                                                                            |
+| `check-config [--app ID]`                                                 | Validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
+| `request --app ID --id SAFE_ID`                                           | Record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
+| `help`, `--help`, `--version`                                             | Usage and version.                                                                                                                               |
 
 `check-config` validates the registry and route when those files are present. See the
 [command reference](docs/commands.md) for details and commands moved to Coordination Kit.

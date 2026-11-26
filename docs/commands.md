@@ -11,8 +11,8 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
-- `status --game ID --resources` prints the resource report in place of the JSON status.
-- `status --game ID`: an unreadable `ci/`, `requests/` or `gate-failed/` directory or event log is
+- `status --app ID --resources` prints the resource report in place of the JSON status.
+- `status --app ID`: an unreadable `ci/`, `requests/` or `gate-failed/` directory or event log is
   a blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
   `unreadable` with the `identity_unreadable` blocker. The runner loads `delivery-kit.json` once
   at startup; `config_status` is `loaded` while the file still matches, `changed` when it differs
@@ -41,7 +41,7 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   indicates a 6.0 `bus/events` outbox that needs the [6.1.2 migration](upgrading.md#upgrading-to-80).
   `events_legacy_outbox_unreadable` means the path could not be checked. Top-level `drained`
   requires no reporter or idle blockers. See [Event log](runner.md#event-log).
-- `runner stop --game ID [--timeout SECONDS]`: waits up to `SECONDS` (default 900) until the
+- `runner stop --app ID [--timeout SECONDS]`: waits up to `SECONDS` (default 900) until the
   runner is idle and drained, then stops it through its active systemd user unit or with
   `SIGTERM` to the `runner.json` PID while that PID holds the runner identity token. After the
   stop action it waits up to another 150 s for `runner.lock` and `loop.lock` to be free. The
@@ -51,9 +51,9 @@ Per-command semantics for the `delivery-kit` CLI, beyond the command table in th
   not hold the identity or a runner that does not exit, leaving the runner untouched in the first
   two cases. `--timeout` accepts 1 to 9999999 seconds in decimal without leading zeros. See
   [Supervision](runner.md#supervision).
-- `run --game ID`: exits 3 before writing runner state if the legacy outbox check fails. A
+- `run --app ID`: exits 3 before writing runner state if the legacy outbox check fails. A
   refused singleton start also exits 3.
-- `runner start --game ID`: exits 1 and starts nothing while either lock is held or the legacy
+- `runner start --app ID`: exits 1 and starts nothing while either lock is held or the legacy
   outbox check fails. Starts the systemd user unit when its file is installed, otherwise spawns
   the game's installed `dist/cli.js run --game ID` detached with output appended to
   `bus/runner.out`. Stdout is one JSON line `{schema, game, pid, method, status}` with
