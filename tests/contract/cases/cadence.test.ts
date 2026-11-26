@@ -17,7 +17,7 @@ import { COORDINATOR_CLI, KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000002";
 const RANGE = ">=3.0.0 <8.0.0";
-/** The coordination-kit release this checkout builds against; its CLI is in range from 3.0. */
+/** The released coordinator CLI installed from this checkout's locked bundle pin. */
 const RELEASED_IN_RANGE = (() => {
   try {
     const manifest = join(
@@ -27,9 +27,8 @@ const RELEASED_IN_RANGE = (() => {
       "coordination-kit",
       "package.json",
     );
-    return (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version.startsWith(
-      "3.",
-    );
+    const { version } = JSON.parse(readFileSync(manifest, "utf8")) as { version: string };
+    return /^[3-7]\.\d+\.\d+$/u.test(version);
   } catch {
     return false;
   }
@@ -253,7 +252,6 @@ suite("review cadence", () => {
     CASE_TIMEOUT_MS,
   );
 
-  // In range only from 3.0; until the pin moves there, the case above covers the released CLI.
   contract.skipIf(!RELEASED_IN_RANGE)(
     "the released coordination-kit CLI answers review deliver and events ingest with typed results",
     async () => {

@@ -41,7 +41,7 @@ export function deliveryOperator(
     (!isPermitted(layout, registry, actor, "review:deliver", appId) ||
       !isPermitted(layout, registry, actor, "events:ingest", appId))
   ) {
-    throw new Error(`app ${appId} runner requires review:deliver and events:ingest`);
+    throw new Error(`app ${appId} runner requires review:deliver and events:ingest permissions`);
   }
   return owner;
 }
