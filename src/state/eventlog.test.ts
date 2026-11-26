@@ -30,7 +30,7 @@ const NOW = 1_800_000_000;
 interface Harness {
   readonly test: TestGame;
   readonly lines: string[];
-  readonly log: () => EventLog;
+  readonly log: (appMode?: boolean) => EventLog;
   readonly paths: ReturnType<typeof busPaths>;
 }
 
@@ -39,8 +39,9 @@ function harness(test: TestGame = makeGame()): Harness {
   const paths = busPaths(test.game.busDir);
   return {
     lines,
-    log: () =>
+    log: (appMode) =>
       new EventLog({
+        appMode: appMode ?? false,
         game: GAME,
         log: (line) => lines.push(line),
         now: () => NOW,
@@ -139,6 +140,36 @@ describe("EventLog appends", () => {
       "ci_pending",
       "ci_success",
       "ci_failure",
+    ]);
+  });
+
+  it("keeps the cursor and commit progress across mixed game and app rows", () => {
+    const h = harness();
+    expect(h.log().append("push", SHA, "pushed")).toBe(true);
+    const legacyBytes = readFileSync(h.paths.eventsLog, "utf8");
+    writeCursor(h, Buffer.byteLength(legacyBytes));
+    const cursor = readFileSync(h.paths.eventsCursor, "utf8");
+
+    const app = h.log(true);
+    expect(app.append("push", SHA, "already pushed")).toBe(false);
+    expect(app.append("ci_success", SHA, "green")).toBe(true);
+    const mixed = readFileSync(h.paths.eventsLog, "utf8");
+    expect(mixed.startsWith(legacyBytes)).toBe(true);
+    expect(rawLines(h)[1]).toContain(`"appId":"${GAME}"`);
+    expect(rawLines(h)[1]).not.toContain('"game"');
+    expect(eventLogReport(h.paths)).toMatchObject({
+      blockers: [`events_uningested:${Buffer.byteLength(mixed) - Buffer.byteLength(legacyBytes)}`],
+    });
+    expect(readFileSync(h.paths.eventsCursor, "utf8")).toBe(cursor);
+
+    const restarted = h.log(true);
+    expect(restarted.append("ci_success", SHA, "already green")).toBe(false);
+    expect(restarted.append("deploy_success", SHA, "deployed")).toBe(true);
+    expect(readFileSync(h.paths.lastCompleteSha, "utf8")).toBe(`${SHA}\n`);
+    expect(loggedEvents(h.test).map((event) => event.id)).toEqual([
+      eventId(GAME, "push", SHA),
+      eventId(GAME, "ci_success", SHA),
+      eventId(GAME, "deploy_success", SHA),
     ]);
   });
 

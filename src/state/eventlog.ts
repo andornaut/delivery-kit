@@ -52,6 +52,7 @@ const GIT_TIMEOUT_MS = 10_000;
 interface EventLogOptions {
   readonly paths: BusPaths;
   readonly game: string;
+  readonly appMode?: boolean;
   /** The game checkout, for the work range. */
   readonly repo: string;
   /** Epoch seconds. */
@@ -374,7 +375,7 @@ export class EventLog {
     if (this.#tailSuspect) {
       this.#repairTail();
     }
-    this.#write(formatLine(event));
+    this.#write(formatLine(event, this.#options.appMode));
     this.#ids.add(event.id);
     const completed = this.#fold(event);
     if (completed !== undefined && completed !== this.#lastComplete) {

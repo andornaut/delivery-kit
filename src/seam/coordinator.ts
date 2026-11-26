@@ -5,7 +5,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 
-import { COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
+import { COORDINATION_KIT_RANGE, COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
 import { isFile } from "../lib/files.ts";
 import { type CliIdentity, writeSeamRecord } from "../state/seam.ts";
 import {
@@ -143,6 +143,7 @@ interface CoordinatorOptions {
   /** The coordinator root, passed as `--root` and used as the working directory. */
   readonly root: string;
   readonly game: string;
+  readonly appMode?: boolean;
   /** The coordinator `config.json` timezone the wake slots are selected in. */
   readonly timezone: string;
   /** bus/seam.json. */
@@ -161,6 +162,8 @@ function describeIdentity(cli: CliIdentity): string {
 export class CoordinatorCli implements Coordinator {
   readonly #options: CoordinatorOptions;
   readonly #cliPath: string;
+  readonly #range: string;
+  readonly #target: readonly string[];
   readonly #stop = new AbortController();
   readonly #running = new Set<Promise<unknown>>();
   #identity: (CliIdentity & { readonly supported: boolean }) | undefined;
@@ -173,6 +176,8 @@ export class CoordinatorCli implements Coordinator {
   constructor(options: CoordinatorOptions) {
     this.#options = options;
     this.#cliPath = join(options.root, COORDINATOR_CLI);
+    this.#range = options.appMode === true ? COORDINATION_KIT_RANGE : COORDINATOR_CLI_RANGE;
+    this.#target = [options.appMode === true ? "--app" : "--game", options.game];
   }
 
   #spawn(args: readonly string[], signal?: AbortSignal): Promise<Spawned> {
@@ -194,13 +199,13 @@ export class CoordinatorCli implements Coordinator {
 
   /** Record a CLI identity: log it when it changes and keep bus/seam.json current. */
   #note(cli: CliIdentity): boolean {
-    const supported = satisfies(COORDINATOR_CLI_RANGE, cli.version);
+    const supported = satisfies(this.#range, cli.version);
     const previous = this.#identity;
     if (previous?.version !== cli.version || previous.distSha256 !== cli.distSha256) {
       this.#identity = { ...cli, supported };
       const range = supported
-        ? `, inside ${COORDINATOR_CLI_RANGE}`
-        : ` is outside ${COORDINATOR_CLI_RANGE}; reviews and event delivery defer`;
+        ? `, inside ${this.#range}`
+        : ` is outside ${this.#range}; reviews and event delivery defer`;
       this.#options.log(`bus: coordinator CLI ${describeIdentity(cli)}${range}`);
     }
     // One durable write per identity change, then at most one a minute for seenAt.
@@ -229,7 +234,7 @@ export class CoordinatorCli implements Coordinator {
   #outOfRange(cli: CliIdentity): SeamResult {
     return {
       claimed: true,
-      detail: `coordinator CLI ${cli.version} is outside ${COORDINATOR_CLI_RANGE}`,
+      detail: `coordinator CLI ${cli.version} is outside ${this.#range}`,
       reason: CLI_VERSION,
       status: "deferred",
     };
@@ -243,8 +248,9 @@ export class CoordinatorCli implements Coordinator {
   ): Promise<SeamOutcome> {
     // The startup probe settles first, so the first call already knows the CLI identity.
     await this.#probing;
-    // A CLI last seen out of range is probed again before it is asked to deliver anything.
-    if (this.#identity?.supported === false) {
+    // An app call requires a fresh result from the installed CLI, which can change in place.
+    // In legacy mode retain the retry probe only for a CLI last seen out of range.
+    if (this.#options.appMode === true || this.#identity?.supported === false) {
       const probed = await this.#probe(signal);
       if (probed !== true) {
         return probed;
@@ -291,7 +297,7 @@ export class CoordinatorCli implements Coordinator {
     const iso = slotIso(this.#options.timezone, slot);
     const { game } = this.#options;
     return this.#call(
-      ["review", "deliver", "--game", game, "--slot", iso],
+      ["review", "deliver", ...this.#target, "--slot", iso],
       { game, kind: "review-deliver", slot: iso },
       signal,
     );
@@ -332,7 +338,7 @@ export class CoordinatorCli implements Coordinator {
         this.#ingestAgain = false;
         // Each ingest follows the previous one; a request meanwhile runs exactly one more.
         // eslint-disable-next-line no-await-in-loop
-        const outcome = await this.#call(["events", "ingest", "--game", this.#options.game], {
+        const outcome = await this.#call(["events", "ingest", ...this.#target], {
           game: this.#options.game,
           kind: "events-ingest",
         });

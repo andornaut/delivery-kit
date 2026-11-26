@@ -87,6 +87,13 @@ describe("event lines", () => {
     expect(parseLine(JSON.stringify({ ...original, appId: null }))).toBeUndefined();
   });
 
+  it("changes only the identity field name when writing app rows", () => {
+    const event = makeEvent({ at: "x", detail: "detail", game: GAME }, "attempt", "k");
+    const legacy = `${JSON.stringify(event)}\n`;
+    expect(formatLine(event)).toBe(legacy);
+    expect(formatLine(event, true)).toBe(legacy.replace('"game":', '"appId":'));
+  });
+
   it("derives the ID from game, type and key", () => {
     expect(eventId(GAME, "push", SHA)).toBe(
       createHash("sha256").update(`${GAME}\npush\n${SHA}`).digest("hex"),
@@ -160,9 +167,9 @@ describe("event lines", () => {
     expect(parseLine(line.slice(0, -1))?.detail).toBe("short");
   });
 
-  it("cuts a long detail at a character boundary below the line limit", () => {
+  it.each([false, true])("cuts a long detail below the line limit with app mode %s", (appMode) => {
     const detail = `${"é".repeat(3000)}${"\u{1F600}".repeat(500)}`;
-    const line = formatLine(makeEvent({ at: "x", detail, game: GAME }, "attempt", "k"));
+    const line = formatLine(makeEvent({ at: "x", detail, game: GAME }, "attempt", "k"), appMode);
     expect(Buffer.byteLength(line, "utf8")).toBeLessThan(LINE_LIMIT);
     expect(Buffer.byteLength(line, "utf8")).toBeGreaterThan(LINE_LIMIT - 16);
     const parsed = parseLine(line.slice(0, -1));

@@ -106,9 +106,11 @@ export function busContext(
     timezone: config.schedule.timezone ?? layout.config.timezone,
   };
   const clock = options.clock ?? systemClock;
+  const appMode = layout.mode === "app";
   const coordinator =
     options.coordinator ??
     new CoordinatorCli({
+      appMode,
       game: game.id,
       log,
       now: () => clock.now(),
@@ -126,6 +128,7 @@ export function busContext(
       options.events ??
       busEvents(
         new EventLog({
+          appMode,
           game: game.id,
           log,
           now: () => clock.now(),

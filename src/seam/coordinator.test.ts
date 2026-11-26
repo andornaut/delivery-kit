@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,7 +24,7 @@ afterEach(() => {
   }
 });
 
-function fixture(control?: Record<string, unknown>, timeoutMs?: number) {
+function fixture(control?: Record<string, unknown>, timeoutMs?: number, appMode = false) {
   const root = mkdtempSync(join(tmpdir(), "seam-"));
   roots.push(root);
   if (control !== undefined) {
@@ -34,6 +34,7 @@ function fixture(control?: Record<string, unknown>, timeoutMs?: number) {
   const seamFile = join(root, "seam.json");
   let now = SLOT;
   const cli = new CoordinatorCli({
+    appMode,
     game: GAME,
     log: (line) => lines.push(line),
     now: () => now,
@@ -290,6 +291,94 @@ describe("review deliver", () => {
       supported: true,
       version: "3.0.0",
     });
+  });
+});
+
+describe("app-mode calls", () => {
+  it.each(["7.7.9", "8.0.0"])("only probes an installed CLI at %s", async (version) => {
+    const { cli, lines, root } = fixture({ version }, undefined, true);
+    expect(await cli.review(SLOT)).toMatchObject({
+      detail: `coordinator CLI ${version} is outside >=7.8.0 <8.0.0`,
+      reason: "cli-version",
+      status: "deferred",
+    });
+    cli.ingest();
+    await cli.drain();
+    expect(coordinatorCalls(root).map((call) => call.args)).toEqual([
+      ["--version", "--json"],
+      ["--version", "--json"],
+    ]);
+    expect(lines.at(-1)).toContain("event ingest deferred: cli-version");
+  });
+
+  it("does not submit a review after an unusable version probe", async () => {
+    const { cli, root } = fixture({ probe: { stdout: "broken" } }, undefined, true);
+    expect(await cli.probe()).toBeUndefined();
+    expect(await cli.review(SLOT)).toEqual({
+      claimed: false,
+      why: "version probe: the result is not JSON",
+    });
+    expect(coordinatorCalls(root).map((call) => call.args)).toEqual([
+      ["--version", "--json"],
+      ["--version", "--json"],
+    ]);
+  });
+
+  it("uses the app flag until the installed CLI is downgraded", async () => {
+    const { cli, lines, root } = fixture({}, undefined, true);
+    const calls = join(root, "app-calls.jsonl");
+    writeFileSync(
+      join(root, COORDINATOR_CLI),
+      `import { appendFileSync } from "node:fs";
+const args = process.argv.slice(4);
+const cli = { version: "7.8.0", distSha256: "${SHA}" };
+appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + "\\n");
+if (args[0] === "--version") {
+  console.log(JSON.stringify({ schema: 1, ...cli }));
+} else {
+  const [command, action, flag, appId, , slot] = args;
+  if (flag !== "--app") process.exit(2);
+  console.log(JSON.stringify({
+    schema: 1, kind: command + "-" + action, appId, slot, cli,
+    detail: "", reason: null, status: "delivered",
+  }));
+}
+`,
+    );
+    expect(await cli.review(SLOT)).toMatchObject({
+      cli: { version: "7.8.0" },
+      status: "delivered",
+    });
+    cli.ingest();
+    await cli.drain();
+    expect(lines.filter((line) => line.includes("event ingest"))).toEqual([]);
+    expect(
+      readFileSync(calls, "utf8")
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
+      ["--version", "--json"],
+      ["review", "deliver", "--app", GAME, "--slot", ISO],
+      ["--version", "--json"],
+      ["events", "ingest", "--app", GAME],
+    ]);
+
+    installCoordinator(root, { version: "7.7.9" });
+    expect(await cli.review(SLOT)).toMatchObject({ reason: "cli-version" });
+    expect(coordinatorCalls(root).map((call) => call.args)).toEqual([["--version", "--json"]]);
+  });
+
+  it("does not retry a failed app command with the game flag", async () => {
+    const { cli, root } = fixture({ version: "7.8.0" }, undefined, true);
+    expect(await cli.review(SLOT)).toMatchObject({
+      claimed: false,
+      why: expect.stringContaining("exit 2"),
+    });
+    expect(coordinatorCalls(root).map((call) => call.args)).toEqual([
+      ["--version", "--json"],
+      ["review", "deliver", "--app", GAME, "--slot", ISO],
+    ]);
   });
 });
 

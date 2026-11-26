@@ -128,23 +128,23 @@ export function cleanDetail(text: string): string {
   return text.replace(/[\u0000-\u001f\u007f]/gu, " ");
 }
 
-function serialize(event: RunnerEvent): string {
-  return `${JSON.stringify(event)}\n`;
-}
-
 /**
  * The event as one newline-terminated line under LINE_LIMIT bytes. A detail that does not fit is
  * cut at a character boundary and marked with TRUNCATED; the other fields are never cut.
  */
-export function formatLine(event: RunnerEvent): string {
-  const line = serialize(event);
+export function formatLine(event: RunnerEvent, appMode = false): string {
+  const { game, id, schema, ...rest } = event;
+  // Keep the identity in the same position in both schema-1 formats.
+  // eslint-disable-next-line sort-keys
+  const wire = appMode ? { schema, id, appId: game, ...rest } : event;
+  const line = `${JSON.stringify(wire)}\n`;
   if (Buffer.byteLength(line, "utf8") < LINE_LIMIT) {
     return line;
   }
   const characters = Array.from(event.detail);
   const fits = (count: number): string | undefined => {
     const detail = `${characters.slice(0, count).join("")}${TRUNCATED}`;
-    const candidate = serialize({ ...event, detail });
+    const candidate = `${JSON.stringify({ ...wire, detail })}\n`;
     return Buffer.byteLength(candidate, "utf8") < LINE_LIMIT ? candidate : undefined;
   };
   if (fits(0) === undefined) {
