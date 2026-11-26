@@ -46,4 +46,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | dk-0046 | Reject import cycles in scripts and tests                             | [dk-0046.md](../work/dk-0046.md) |
 | dk-0047 | Guard the module layers with ESLint                                   | [dk-0047.md](../work/dk-0047.md) |
 | dk-0050 | Write type-only imports as import type                                | [dk-0050.md](../work/dk-0050.md) |
-| dk-0051 | Audit Delivery Kit 8.5 documentation                                 | [dk-0051.md](../work/dk-0051.md) |
+| dk-0051 | Audit Delivery Kit 8.5 documentation                                  | [dk-0051.md](../work/dk-0051.md) |
