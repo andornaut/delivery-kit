@@ -108,7 +108,11 @@ export type Expected =
   | { readonly kind: "events-ingest"; readonly game: string };
 
 /** Validate one result; an unknown reason token turns any status into a deferral. */
-export function parseResult(expected: Expected, stdout: string): SeamOutcome {
+export function parseResult(
+  expected: Expected,
+  field: "appId" | "game",
+  stdout: string,
+): SeamOutcome {
   const value = resultLine(stdout);
   if (typeof value === "string") {
     return { claimed: false, why: value };
@@ -123,8 +127,8 @@ export function parseResult(expected: Expected, stdout: string): SeamOutcome {
   if (value.kind !== expected.kind) {
     return mismatch(`kind is not ${expected.kind}`);
   }
-  if (wireAppId(value) !== expected.game) {
-    return mismatch(value.appId === undefined ? "game differs" : "app ID differs");
+  if (value[field] !== expected.game || wireAppId(value) !== expected.game) {
+    return mismatch(field === "appId" ? "app ID differs" : "game differs");
   }
   if (expected.kind === "review-deliver" && value.slot !== expected.slot) {
     return mismatch("slot differs");

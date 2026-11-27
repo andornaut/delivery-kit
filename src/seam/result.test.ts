@@ -25,15 +25,30 @@ describe("parsing", () => {
     const expected = { game: GAME, kind: "review-deliver", slot: ISO } as const;
     const { game, ...fields } = ingest;
     const neutral = { ...fields, appId: game, kind: expected.kind, slot: ISO };
-    expect(parseResult(expected, JSON.stringify(neutral))).toMatchObject({ claimed: true });
-    expect(parseResult(expected, JSON.stringify({ ...neutral, game }))).toMatchObject({
+    expect(parseResult(expected, "appId", JSON.stringify(neutral))).toMatchObject({
       claimed: true,
     });
-    expect(parseResult(expected, JSON.stringify({ ...neutral, game: "other-app" }))).toEqual({
+    expect(parseResult(expected, "game", JSON.stringify(neutral))).toEqual({
+      claimed: false,
+      why: "malformed result: game differs",
+    });
+    expect(
+      parseResult(
+        expected,
+        "appId",
+        JSON.stringify({ ...fields, game, kind: expected.kind, slot: ISO }),
+      ),
+    ).toEqual({ claimed: false, why: "malformed result: app ID differs" });
+    expect(parseResult(expected, "appId", JSON.stringify({ ...neutral, game }))).toMatchObject({
+      claimed: true,
+    });
+    expect(
+      parseResult(expected, "appId", JSON.stringify({ ...neutral, game: "other-app" })),
+    ).toEqual({
       claimed: false,
       why: "malformed result: app ID differs",
     });
-    expect(parseResult(expected, JSON.stringify({ ...neutral, slot: "later" }))).toEqual({
+    expect(parseResult(expected, "appId", JSON.stringify({ ...neutral, slot: "later" }))).toEqual({
       claimed: false,
       why: "malformed result: slot differs",
     });
@@ -41,7 +56,7 @@ describe("parsing", () => {
 
   it("reads an events-ingest result with its counts and ignores fields it does not define", () => {
     const line = `${JSON.stringify(ingest)}\n`;
-    expect(parseResult({ game: GAME, kind: "events-ingest" }, line)).toEqual({
+    expect(parseResult({ game: GAME, kind: "events-ingest" }, "game", line)).toEqual({
       claimed: true,
       cli,
       detail: "ingested 2",
@@ -57,7 +72,9 @@ describe("parsing", () => {
       quarantined: 1,
       unknownField: "ignored",
     };
-    expect(parseResult({ game: GAME, kind: "events-ingest" }, JSON.stringify(counted))).toEqual({
+    expect(
+      parseResult({ game: GAME, kind: "events-ingest" }, "game", JSON.stringify(counted)),
+    ).toEqual({
       claimed: true,
       cli,
       counts: { completed: 1, delivered: 3, held: 1, ingested: 2, quarantined: 1 },
@@ -67,11 +84,15 @@ describe("parsing", () => {
     });
     for (const bad of [{ held: -1 }, { delivered: 1.5 }, { completed: "1" }]) {
       expect(
-        parseResult({ game: GAME, kind: "events-ingest" }, JSON.stringify({ ...ingest, ...bad })),
+        parseResult(
+          { game: GAME, kind: "events-ingest" },
+          "game",
+          JSON.stringify({ ...ingest, ...bad }),
+        ),
       ).toEqual({ claimed: false, why: `malformed result: ${Object.keys(bad)[0]}` });
     }
     const skipped = JSON.stringify({ ...ingest, reason: "no-events", status: "skipped" });
-    expect(parseResult({ game: GAME, kind: "events-ingest" }, skipped)).toMatchObject({
+    expect(parseResult({ game: GAME, kind: "events-ingest" }, "game", skipped)).toMatchObject({
       reason: "no-events",
       status: "skipped",
     });

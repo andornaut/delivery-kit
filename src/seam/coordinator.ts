@@ -3,6 +3,7 @@
 // or unreadable result, a nonzero exit, a timeout or an abort claims no delivery. The CLI owns the
 // per-slot receipt and dedupe; the runner keeps no slot receipt and never reads brief content.
 import { type ChildProcess, spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import { APP_COORDINATOR_CLI_RANGE, COORDINATOR_CLI_RANGE, satisfies } from "../compatibility.ts";
@@ -158,17 +159,29 @@ function describeIdentity(cli: CliIdentity): string {
   return `${cli.version} (dist sha256 ${cli.distSha256})`;
 }
 
+/** Re-probe an executable replaced by an in-place package install. */
+function cliFileKey(path: string): string | undefined {
+  try {
+    const info = statSync(path, { bigint: true });
+    return info.isFile()
+      ? `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The seam over the coordinator-installed CLI. */
 export class CoordinatorCli implements Coordinator {
   readonly #options: CoordinatorOptions;
   readonly #cliPath: string;
   readonly #range: string;
-  readonly #target: readonly string[];
   readonly #stop = new AbortController();
   readonly #running = new Set<Promise<unknown>>();
   #identity: (CliIdentity & { readonly supported: boolean }) | undefined;
+  #probedFile: string | undefined;
   #written: { readonly key: string; readonly at: number } | undefined;
-  #probing: Promise<unknown> | undefined;
+  #probing: Promise<CliIdentity | SeamOutcome> | undefined;
   #ingesting = false;
   #ingestAgain = false;
   #lastIngestLine: string | undefined;
@@ -177,7 +190,6 @@ export class CoordinatorCli implements Coordinator {
     this.#options = options;
     this.#cliPath = join(options.root, COORDINATOR_CLI);
     this.#range = options.appMode === true ? APP_COORDINATOR_CLI_RANGE : COORDINATOR_CLI_RANGE;
-    this.#target = [options.appMode === true ? "--app" : "--game", options.game];
   }
 
   #spawn(args: readonly string[], signal?: AbortSignal): Promise<Spawned> {
@@ -241,21 +253,37 @@ export class CoordinatorCli implements Coordinator {
   }
 
   /** The result of one spawn, with the identity noted and the range applied. */
-  async #call(
-    args: readonly string[],
-    expected: Expected,
-    signal?: AbortSignal,
-  ): Promise<SeamOutcome> {
+  async #call(expected: Expected, signal?: AbortSignal): Promise<SeamOutcome> {
     // The startup probe settles first, so the first call already knows the CLI identity.
     await this.#probing;
-    // An app call requires a fresh result from the installed CLI, which can change in place.
-    // In legacy mode retain the retry probe only for a CLI last seen out of range.
-    if (this.#options.appMode === true || this.#identity?.supported === false) {
+    if (this.#stop.signal.aborted || signal?.aborted === true) {
+      return { claimed: false, why: "aborted" };
+    }
+    const file = cliFileKey(this.#cliPath);
+    const prior = this.#identity;
+    // App workspaces keep their existing fresh probe. For legacy workspaces, reuse a successful
+    // probe while the executable is unchanged and its last seen version is supported.
+    let identity: CliIdentity;
+    if (
+      this.#options.appMode === true ||
+      prior?.supported !== true ||
+      file === undefined ||
+      file !== this.#probedFile
+    ) {
       const probed = await this.#probe(signal);
-      if (probed !== true) {
+      if ("claimed" in probed) {
         return probed;
       }
+      identity = probed;
+    } else {
+      identity = prior;
     }
+    const app = satisfies(APP_COORDINATOR_CLI_RANGE, identity.version);
+    const flag = app ? "--app" : "--game";
+    const args =
+      expected.kind === "review-deliver"
+        ? ["review", "deliver", flag, expected.game, "--slot", expected.slot]
+        : ["events", "ingest", flag, expected.game];
     const spawned = await this.#spawn(args, signal);
     if (spawned.kind === "missing") {
       return this.#unavailable();
@@ -270,15 +298,17 @@ export class CoordinatorCli implements Coordinator {
         why: `exit ${spawned.code}${stderr === "" ? "" : `: ${stderr}`}`,
       };
     }
-    const result = parseResult(expected, spawned.stdout);
+    const result = parseResult(expected, app ? "appId" : "game", spawned.stdout);
     if (!result.claimed || result.cli === undefined) {
       return result;
     }
     return this.#note(result.cli) ? result : this.#outOfRange(result.cli);
   }
 
-  /** true when the CLI is in range; otherwise the deferral or failure to report. */
-  async #probe(signal?: AbortSignal): Promise<true | SeamOutcome> {
+  /** A supported CLI identity, or a deferral or failure to report. */
+  async #probe(signal?: AbortSignal): Promise<CliIdentity | SeamOutcome> {
+    const file = cliFileKey(this.#cliPath);
+    this.#probedFile = undefined;
     const spawned = await this.#spawn(["--version", "--json"], signal);
     if (spawned.kind === "missing") {
       return this.#unavailable();
@@ -290,17 +320,20 @@ export class CoordinatorCli implements Coordinator {
     if (typeof cli === "string") {
       return { claimed: false, why: `version probe: ${cli}` };
     }
-    return this.#note(cli) ? true : this.#outOfRange(cli);
+    if (file !== cliFileKey(this.#cliPath)) {
+      return { claimed: false, why: "coordinator CLI changed during version probe" };
+    }
+    if (!this.#note(cli)) {
+      return this.#outOfRange(cli);
+    }
+    this.#probedFile = file;
+    return cli;
   }
 
   review(slot: number, signal?: AbortSignal): Promise<SeamOutcome> {
     const iso = slotIso(this.#options.timezone, slot);
     const { game } = this.#options;
-    return this.#call(
-      ["review", "deliver", ...this.#target, "--slot", iso],
-      { game, kind: "review-deliver", slot: iso },
-      signal,
-    );
+    return this.#call({ game, kind: "review-deliver", slot: iso }, signal);
   }
 
   async probe(signal?: AbortSignal): Promise<CliIdentity | undefined> {
@@ -308,11 +341,8 @@ export class CoordinatorCli implements Coordinator {
     this.#probing = probing;
     const probed = await probing;
     this.#probing = undefined;
-    if (probed === true) {
-      const identity = this.#identity;
-      return identity === undefined
-        ? undefined
-        : { distSha256: identity.distSha256, version: identity.version };
+    if (!("claimed" in probed)) {
+      return probed;
     }
     if (probed.claimed) {
       this.#options.log(`bus: coordinator CLI: ${probed.detail}; reviews and event delivery defer`);
@@ -338,7 +368,7 @@ export class CoordinatorCli implements Coordinator {
         this.#ingestAgain = false;
         // Each ingest follows the previous one; a request meanwhile runs exactly one more.
         // eslint-disable-next-line no-await-in-loop
-        const outcome = await this.#call(["events", "ingest", ...this.#target], {
+        const outcome = await this.#call({
           game: this.#options.game,
           kind: "events-ingest",
         });

@@ -77,10 +77,13 @@ both as `--root` and as its working directory.
 | ----------------------------------------- | ---------------------------------------------------------------------- |
 | `review deliver --app APP_ID --slot SLOT` | At a due `wakeMinutes` slot or to retry a retained compaction deferral |
 | `events ingest --app APP_ID`              | Once per observer pass and after each appended event                   |
-| `--version --json`                        | At startup, and before a call while the last seen CLI is out of range  |
+| `--version --json`                        | At startup and before a call that needs a fresh CLI identity           |
 
-The table shows app mode. With legacy `games` configuration the runner uses `--game ID` for
-both calls, including when it was started with `--app`.
+The table shows the subprocess contract for Coordination Kit 7.8 and later supported releases.
+An older supported CLI receives `--game ID` in a legacy workspace. The installed CLI version
+chooses the subprocess selector. Workspace settings still choose the bus path and event identity.
+App mode probes before each call. Legacy mode reuses a supported version probe until the installed
+CLI file changes. A failed call leaves its outcome unconfirmed and never tries the other selector.
 
 `SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
 `2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
@@ -93,8 +96,8 @@ with `no-events` when nothing was new, and `deferred` with a reason otherwise. I
 while a torn tail is pending). The runner parses the JSON, not its key order, ignores fields it
 does not define and never parses `detail`.
 
-The reader requires the exact app ID and, for reviews, the exact echoed `slot`. It accepts
-either identity field and rejects conflicting values if both are present.
+The reader requires the selected identity field, its exact ID, and the exact echoed `slot` for
+reviews. If both identity fields are present their values must agree.
 
 A delivered result may carry a null `reason`. Recognised reason tokens are `route-unavailable`,
 `recipient-unavailable`, `recipient-busy`, `question-pending`, `held`, `receipt-ambiguous`,

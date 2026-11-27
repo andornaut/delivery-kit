@@ -102,6 +102,7 @@ describe("review deliver", () => {
       status: "delivered",
     });
     expect(coordinatorCalls(root)).toEqual([
+      { args: ["--version", "--json"], cwd: root, execPath: process.execPath, root },
       {
         args: ["review", "deliver", "--game", GAME, "--slot", ISO],
         cwd: root,
@@ -164,8 +165,10 @@ describe("review deliver", () => {
     const outcome = await cli.review(SLOT);
     expect(outcome.claimed).toBe(false);
     expect(outcome.claimed ? "" : outcome.why).toContain(why);
-    expect(lines).toEqual([]);
-    expect(existsSync(seamFile)).toBe(false);
+    expect(lines).toEqual([
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
+    ]);
+    expect(coordinatorCliReport(seamFile).distSha256).toBe(SHA);
   });
 
   it("asks again after lock contention, which the CLI does not record", async () => {
@@ -243,7 +246,7 @@ describe("review deliver", () => {
     // Still out of range: only the version probe runs.
     expect(await cli.review(SLOT + 1800)).toMatchObject({ reason: "cli-version" });
     expect(coordinatorCalls(root).map((call) => call.args.slice(0, 2))).toEqual([
-      ["review", "deliver"],
+      ["--version", "--json"],
       ["--version", "--json"],
     ]);
     // A supported install is probed, logged and then asked.
@@ -253,7 +256,7 @@ describe("review deliver", () => {
       `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
     );
     expect(coordinatorCalls(root).map((call) => call.args.slice(0, 2))).toEqual([
-      ["review", "deliver"],
+      ["--version", "--json"],
       ["--version", "--json"],
       ["--version", "--json"],
       ["review", "deliver"],
@@ -291,6 +294,29 @@ describe("review deliver", () => {
       supported: true,
       version: "3.0.0",
     });
+  });
+
+  it("re-negotiates the selector on replacement in a legacy workspace", async () => {
+    const { cli, root } = fixture({ review: { status: "delivered" }, version: "3.0.0" });
+    expect(await cli.review(SLOT)).toMatchObject({ claimed: true, status: "delivered" });
+    installCoordinator(root, {
+      distSha256: SHA,
+      review: { status: "delivered" },
+      version: "8.0.0",
+    });
+    expect(await cli.review(SLOT + 60)).toMatchObject({
+      cli: { version: "8.0.0" },
+      status: "delivered",
+    });
+    cli.ingest();
+    await cli.drain();
+    expect(coordinatorCalls(root).map((call) => call.args.slice(0, 4))).toEqual([
+      ["--version", "--json"],
+      ["review", "deliver", "--game", GAME],
+      ["--version", "--json"],
+      ["review", "deliver", "--app", GAME],
+      ["events", "ingest", "--app", GAME],
+    ]);
   });
 });
 
@@ -413,6 +439,7 @@ describe("events ingest", () => {
     cli.ingest();
     await cli.drain();
     expect(coordinatorCalls(root).map((call) => call.args)).toEqual([
+      ["--version", "--json"],
       ["events", "ingest", "--game", GAME],
       ["events", "ingest", "--game", GAME],
     ]);
