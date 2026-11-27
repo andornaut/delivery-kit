@@ -51,3 +51,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0049 | Block a gate whose install skipped a locked optional package                       | [dk-0049.md](../work/dk-0049.md) |
 | dk-0053 | Improve Delivery Kit runtime performance                                           | [dk-0053.md](../work/dk-0053.md) |
 | dk-0054 | Make Delivery Kit app neutral                                                      | [dk-0054.md](../work/dk-0054.md) |
+| dk-0055 | Align Delivery Kit CLI ergonomics with Coordination Kit | [dk-0055.md](../work/dk-0055.md) |
