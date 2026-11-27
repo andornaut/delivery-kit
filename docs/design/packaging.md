@@ -20,8 +20,9 @@ gate container); then `src/runner/` (the resident process, departures, CI and de
 `src/supervision/` (runner start, stop and the systemd unit); then `src/commands/`, `src/cli.ts` and
 `src/bin.ts`. A group is a directory or a module directly in `src/`, and groups in one layer do not
 import each other. `src/testing/` holds test fixtures; shipped code never imports it, `scripts/` or
-`tests/`. ESLint guards the layers with `no-restricted-imports`, type-only imports included, and
-rejects runtime import cycles in `src/`, `scripts/` and `tests/` with `import-x/no-cycle`. Imports
+`tests/`. ESLint resolves relative import and re-export paths to their top-level source groups,
+including from nested directories and type-only declarations. It rejects runtime import cycles
+in `src/`, `scripts/` and `tests/` with `import-x/no-cycle`. Imports
 of only types are written `import type`, so the cycle rule sees every runtime import.
 
 Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),

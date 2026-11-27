@@ -1,5 +1,3 @@
-// delivery-kit reads no work protocol state: coordination-kit 3.0 removes build/protocol, so no
-// source, test or tooling file imports it, and the lint configuration refuses one that would.
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,3 +52,21 @@ describe("work protocol independence", () => {
     }
   }, 60_000);
 });
+
+it("applies source layer boundaries to nested paths and type-only re-exports", async () => {
+  const eslint = new ESLint({ cwd: root });
+  const [result] = await eslint.lintText(
+    [
+      'export type { BusPaths } from "../../state/paths.ts";',
+      'export type { StopResult } from "../../supervision/stop.ts";',
+      'export { run } from "../../state/../commands/run.ts";',
+      'export { gameFixture } from "../../testing/game.ts";',
+    ].join("\n"),
+    { filePath: join(root, "src/runner/nested/example.ts") },
+  );
+  expect(
+    result?.messages
+      .filter((message) => message.ruleId === "delivery-kit/source-layers")
+      .map((message) => message.line),
+  ).toEqual([2, 3, 4]);
+}, 60_000);
