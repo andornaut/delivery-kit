@@ -16,18 +16,18 @@ import {
   ok,
   testContext,
 } from "../testing/game.ts";
-import { watchCi } from "./ci.ts";
-import { depart, requestStore } from "./departure.ts";
-import { deployAfterCi } from "./deploy.ts";
-import { captureRequest, claimRequest } from "./requests.ts";
-import { runRunner } from "./runner.ts";
+import { depart } from "./departure/depart.ts";
+import { captureRequest, claimRequest, requestStore } from "./departure/requests.ts";
+import { watchCi } from "./post-push/ci.ts";
+import { deployAfterCi } from "./post-push/deploy.ts";
+import { runRunner } from "./run.ts";
 
-vi.mock("./ci.ts", async (original) => ({
-  ...(await original<typeof import("./ci.ts")>()),
+vi.mock("./post-push/ci.ts", async (original) => ({
+  ...(await original<typeof import("./post-push/ci.ts")>()),
   watchCi: vi.fn(() => Promise.resolve("success")),
 }));
-vi.mock("./requests.ts", async (original) => {
-  const actual = await original<typeof import("./requests.ts")>();
+vi.mock("./departure/requests.ts", async (original) => {
+  const actual = await original<typeof import("./departure/requests.ts")>();
   return { ...actual, claimRequest: vi.fn(actual.claimRequest) };
 });
 
@@ -138,7 +138,8 @@ describe("paused resident runner", () => {
       const record = readDeliveryControl({ dir: test.game.busDir });
       expect(Object.keys(record.activities)).toHaveLength(1);
       desired(test.game.busDir, "paused");
-      const actual = await vi.importActual<typeof import("./requests.ts")>("./requests.ts");
+      const actual =
+        await vi.importActual<typeof import("./departure/requests.ts")>("./departure/requests.ts");
       return actual.claimRequest(store);
     });
     const stop = new AbortController();

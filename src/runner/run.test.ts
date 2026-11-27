@@ -19,9 +19,9 @@ import {
   testContext,
   type TestGame,
 } from "../testing/game.ts";
-import { requestStore } from "./departure.ts";
-import { captureRequest } from "./requests.ts";
-import { RunnerRefused, runRunner, scheduledStep } from "./runner.ts";
+import { scheduledStep } from "./departure/loop.ts";
+import { captureRequest, requestStore } from "./departure/requests.ts";
+import { RunnerRefused, runRunner } from "./run.ts";
 
 function holdWithBash(path: string): Promise<() => void> {
   writeFileSync(path, "holder-token\n");

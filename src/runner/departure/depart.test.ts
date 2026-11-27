@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { Exec, ExecResult, ExecSpec } from "../lib/exec.ts";
+import type { Exec, ExecResult, ExecSpec } from "../../lib/exec.ts";
 import {
   commitFile,
   type ContextParts,
@@ -18,17 +18,11 @@ import {
   recordingEvents,
   testContext,
   type TestGame,
-} from "../testing/game.ts";
-import {
-  depart,
-  LOAD_RECHECK_SECONDS,
-  LOAD_WAIT_SECONDS,
-  readSlotState,
-  requestStore,
-  slotDetail,
-} from "./departure.ts";
-import { deployAfterCi } from "./deploy.ts";
-import { captureRequest, claimRequest, finishRequest } from "./requests.ts";
+} from "../../testing/game.ts";
+import { readSlotState, slotDetail } from "../observation/scheduled-status.ts";
+import { deployAfterCi } from "../post-push/deploy.ts";
+import { depart, LOAD_RECHECK_SECONDS, LOAD_WAIT_SECONDS } from "./depart.ts";
+import { captureRequest, claimRequest, finishRequest, requestStore } from "./requests.ts";
 
 function originMain(test: TestGame): string {
   return gitSync(test.origin, "rev-parse", "main");

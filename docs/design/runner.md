@@ -24,6 +24,19 @@ and finishes on the loaded code until an idle replacement. Desired delivery cont
 
 Reference: [runner](../runner.md), [configuration](../configuration.md), [state](../state.md).
 
+## Source layout
+
+In `src/runner/`, `run.ts` holds the resident lifecycle and wires the three
+parts together:
+
+- `departure/` owns slot and request admission, the gate and the exact-SHA push.
+- `post-push/` owns CI watches, deployment and their recovery.
+- `observation/` owns the review loop, slot reports and resource reporting.
+
+The parts share the runner context and session state. Command handlers call
+the named operation they need. Unit tests live beside the implementation,
+and the contract suite exercises the installed CLI.
+
 ## Work items
 
 | ID      | Title                                                                              | Link                             |

@@ -5,7 +5,7 @@ import { dumpsJson, EXIT_OK, type Handler } from "@andornaut/coordination-kit/bu
 import { APP_COORDINATOR_CLI_RANGE } from "../compatibility.ts";
 import { testOptions } from "../lib/overrides.ts";
 import { busContext } from "../runner/context.ts";
-import { resourceReport } from "../runner/resources.ts";
+import { resourceReport } from "../runner/observation/resources.ts";
 import { busPaths } from "../state/paths.ts";
 import { statusReport } from "../status/status.ts";
 import { resolveGame } from "./game.ts";

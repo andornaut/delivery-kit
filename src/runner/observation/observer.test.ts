@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { recordingCoordinator } from "../testing/coordinator.ts";
-import { makeGame, manualClock, recordingEvents, testContext } from "../testing/game.ts";
+import { recordingCoordinator } from "../../testing/coordinator.ts";
+import { makeGame, manualClock, recordingEvents, testContext } from "../../testing/game.ts";
 import { observer, retriesLater, reviewLine } from "./observer.ts";
 
 describe("observer", () => {

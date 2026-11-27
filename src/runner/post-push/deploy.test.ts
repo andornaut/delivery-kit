@@ -4,11 +4,11 @@ import { dirname, join } from "node:path";
 import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { type ExecResult, Interrupted, spawnExec, WRANGLER_ENTRY } from "../lib/exec.ts";
-import { writeLines } from "../lib/files.ts";
-import { readDeliveryControl } from "../state/control.ts";
-import { ciStatusFile } from "../state/paths.ts";
-import { lockHeld } from "../status/locks.ts";
+import { type ExecResult, Interrupted, spawnExec, WRANGLER_ENTRY } from "../../lib/exec.ts";
+import { writeLines } from "../../lib/files.ts";
+import { readDeliveryControl } from "../../state/control.ts";
+import { ciStatusFile } from "../../state/paths.ts";
+import { lockHeld } from "../../status/locks.ts";
 import {
   commitFile,
   gitSync,
@@ -16,7 +16,8 @@ import {
   ok,
   recordingEvents,
   testContext,
-} from "../testing/game.ts";
+} from "../../testing/game.ts";
+import { withDeliveryRunner } from "../session.ts";
 import {
   deployAfterCi,
   deployNeeded,
@@ -25,7 +26,6 @@ import {
   sharesAttempt,
   stageDeploy,
 } from "./deploy.ts";
-import { withDeliveryRunner } from "./session.ts";
 
 const failed: ExecResult = { status: 1, stderr: "temporarily unavailable", stdout: "" };
 

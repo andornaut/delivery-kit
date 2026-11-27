@@ -151,8 +151,3 @@ export function busContext(
 function defaultLoad(): number {
   return loadavg()[0] ?? 0;
 }
-
-/** True when the one-minute load is below the configured limit. */
-export function loadOk(context: BusContext): boolean {
-  return context.loadAverage() < context.config.resources.loadLimit;
-}

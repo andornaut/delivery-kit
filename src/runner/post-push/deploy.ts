@@ -6,10 +6,10 @@ import { join } from "node:path";
 
 import { fsyncDirectory, SHA_PATTERN } from "@andornaut/coordination-kit/build/shared";
 
-import { gitOk, Interrupted, WRANGLER_ENTRY } from "../lib/exec.ts";
-import { ensureDir, readText, readTrimmed, writeLines } from "../lib/files.ts";
-import { type BusPaths, ciStatusFile } from "../state/paths.ts";
-import type { BusContext } from "./context.ts";
+import { Interrupted, WRANGLER_ENTRY } from "../../lib/exec.ts";
+import { ensureDir, readText, readTrimmed, writeLines } from "../../lib/files.ts";
+import { type BusPaths, ciStatusFile } from "../../state/paths.ts";
+import type { BusContext } from "../context.ts";
 import {
   beginDeliveryWork,
   type DeploymentAttempt,
@@ -17,8 +17,9 @@ import {
   type PendingLifecycle,
   updateDeliveryWork,
   withPendingLifecycle,
-} from "./session.ts";
-import { remoteMain } from "./trunk.ts";
+} from "../session.ts";
+import { remoteMain, removeWorktree } from "../trunk.ts";
+import { resumeStoppedCi } from "./ci.ts";
 
 interface PendingDeploy {
   readonly sha: string;
@@ -52,10 +53,6 @@ export function deployNeeded(
   }
   const skip = new RegExp(pattern);
   return changed.some((name) => !skip.test(name));
-}
-
-export async function removeWorktree(context: BusContext, work: string): Promise<void> {
-  await gitOk(context.exec, context.game.repo, ["worktree", "remove", "--force", work]);
 }
 
 function failureEvent(context: BusContext, sha: string): void {
@@ -266,6 +263,18 @@ export async function retryDeploy(context: BusContext): Promise<boolean> {
 }
 
 /** Supersede an older pending deployment by a newer push: keep its record, drop its worktree. */
+export async function retryPendingDelivery(context: BusContext): Promise<void> {
+  // A watch that timed out or lost authentication resumes, so a pending deployment can follow.
+  resumeStoppedCi(context, [
+    readPending(context.paths)?.sha,
+    readTrimmed(context.paths.lastPushSha),
+  ]);
+  if (deployPendingExists(context.paths)) {
+    // A failed retry is reported and kept; it does not hold back a newer main.
+    await retryDeploy(context);
+  }
+}
+
 async function supersede(context: BusContext, sha: string): Promise<void> {
   const previous = readPending(context.paths);
   if (previous === undefined || previous.sha === sha) {

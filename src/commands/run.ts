@@ -15,7 +15,7 @@ import {
 import { testOptions } from "../lib/overrides.ts";
 import { errorMessage } from "../lib/values.ts";
 import { busContext } from "../runner/context.ts";
-import { RunnerRefused, runRunner } from "../runner/runner.ts";
+import { RunnerRefused, runRunner } from "../runner/run.ts";
 import { resolveGame } from "./game.ts";
 import { deliveryOperator } from "./operator.ts";
 import { commandUsage, SPECS } from "./spec.ts";

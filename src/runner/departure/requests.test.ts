@@ -3,9 +3,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { spawnExec } from "../lib/exec.ts";
-import { busPaths } from "../state/paths.ts";
-import { makeGame, mergeFastForward, type TestGame } from "../testing/game.ts";
+import { spawnExec } from "../../lib/exec.ts";
+import { busPaths } from "../../state/paths.ts";
+import { makeGame, mergeFastForward, type TestGame } from "../../testing/game.ts";
 import {
   captureRequest,
   claimRequest,

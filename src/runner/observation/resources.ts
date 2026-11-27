@@ -3,9 +3,9 @@
 import { appendFileSync } from "node:fs";
 import { loadavg, uptime } from "node:os";
 
-import { GATE_LABEL } from "../gate/gate.ts";
-import { zonedParts } from "../lib/time.ts";
-import type { BusContext } from "./context.ts";
+import { GATE_LABEL } from "../../gate/gate.ts";
+import { zonedParts } from "../../lib/time.ts";
+import type { BusContext } from "../context.ts";
 
 /** `%Y-%m-%d %H:%M:%S %Z` in `timezone`. */
 export function clockLine(timezone: string, epoch: number): string {
@@ -23,7 +23,9 @@ export function uptimeLine(seconds: number, loads: readonly number[]): string {
   return `up ${up},  load average: ${loads.map((load) => load.toFixed(2)).join(", ")}`;
 }
 
-export async function resourceReport(context: BusContext): Promise<string> {
+export async function resourceReport(
+  context: Pick<BusContext, "clock" | "config" | "exec" | "game" | "loadAverage">,
+): Promise<string> {
   const lines = [
     clockLine(context.config.schedule.timezone, context.clock.now()),
     // The one-minute value is the load departures compare, including a test override.

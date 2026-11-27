@@ -4,96 +4,38 @@ import { join } from "node:path";
 
 import { holdLockAsync } from "@andornaut/coordination-kit/build/shared";
 
-import { runGate, treeFingerprint } from "../gate/gate.ts";
-import { assertNotInterrupted, git, Interrupted } from "../lib/exec.ts";
-import { ensureDir, readText, readTrimmed, writeLines } from "../lib/files.ts";
-import { latestScheduledSlot, stamp } from "../lib/time.ts";
-import { errorMessage } from "../lib/values.ts";
-import type { BlockedStage } from "../state/events.ts";
-import { type BusPaths, gateFailedFile } from "../state/paths.ts";
-import { resumeStoppedCi } from "./ci.ts";
-import { type BusContext, loadOk } from "./context.ts";
+import { runGate, treeFingerprint } from "../../gate/gate.ts";
+import { assertNotInterrupted, git, Interrupted } from "../../lib/exec.ts";
+import { ensureDir, writeLines } from "../../lib/files.ts";
+import { latestScheduledSlot, stamp } from "../../lib/time.ts";
+import { errorMessage } from "../../lib/values.ts";
+import type { BlockedStage } from "../../state/events.ts";
+import { gateFailedFile } from "../../state/paths.ts";
+import type { BusContext } from "../context.ts";
+import { reportScheduledTick } from "../observation/scheduled-status.ts";
 import {
   deployNeeded,
   deployPendingExists,
-  readPending,
-  removeWorktree,
-  retryDeploy,
+  retryPendingDelivery,
   skipDeploy,
   stageDeploy,
-} from "./deploy.ts";
-import { type RequestStore, validateRequest } from "./requests.ts";
+} from "../post-push/deploy.ts";
 import {
   beginDeliveryWork,
   endDeliveryWork,
   updateDeliveryWork,
   withDeliveryRunner,
-} from "./session.ts";
-import { changedPaths, DOCS_PREFIX, docsOnly, mainHead, remoteMain, skipReason } from "./trunk.ts";
-
-export function requestStore(context: BusContext): RequestStore {
-  return {
-    exec: context.exec,
-    main: context.config.git.main,
-    paths: context.paths,
-    repo: context.game.repo,
-  };
-}
-
-/** One deduplicated report per departure slot. */
-export function reportScheduledTick(context: BusContext, slot: number, detail: string): void {
-  if (!context.config.reports.scheduledTicks) {
-    return;
-  }
-  context.events.emit(
-    "scheduled-status",
-    String(slot),
-    `${stamp(context.config.schedule.timezone, slot)} scheduled slot: ${detail}`,
-  );
-}
-
-/** The departure files the observer's slot report reads: their text, undefined when unreadable. */
-export interface SlotState {
-  readonly activeDeparture: string | undefined;
-  readonly deployPending: string | undefined;
-}
-
-export function readSlotState(paths: BusPaths): SlotState {
-  return {
-    activeDeparture: readText(paths.activeDeparture),
-    deployPending: readText(paths.deployPending),
-  };
-}
-
-/** The start epoch `active-departure` records, or undefined when it is not a whole number. */
-function activeDepartureStart(text: string): number | undefined {
-  const trimmed = text.trim();
-  const value = /^\d+$/u.test(trimmed) ? Number(trimmed) : Number.NaN;
-  return Number.isSafeInteger(value) ? value : undefined;
-}
-
-/**
- * The observer's detail for the departure slot that starts at `slot`. The departure loop records
- * its start epoch in `active-departure`, so a departure that started at or after the slot is this
- * slot's own; only an earlier one is unfinished from before the slot.
- */
-export function slotDetail(state: SlotState, slot: number): string {
-  const { activeDeparture, deployPending } = state;
-  if (activeDeparture !== undefined && activeDeparture.length > 0) {
-    const started = activeDepartureStart(activeDeparture);
-    if (started !== undefined && started >= slot) {
-      return "this slot's departure is checking main; any attempt is reported separately.";
-    }
-    return [
-      "a departure is still checking or finishing; this observer starts no new push or deployment;",
-      "attempt outcomes are reported separately.",
-    ].join(" ");
-  }
-  if (deployPending !== undefined && deployPending.length > 0) {
-    return "deployment is pending; its retry and outcome are reported separately.";
-  }
-  return "no departure is currently active; main departs when it has a new commit.";
-}
+} from "../session.ts";
+import {
+  changedPaths,
+  DOCS_PREFIX,
+  docsOnly,
+  mainHead,
+  remoteMain,
+  removeWorktree,
+  skipReason,
+} from "../trunk.ts";
+import { requestStore, validateRequest } from "./requests.ts";
 
 /** Seconds after its slot (a request: after it starts) that a departure re-checks a high load. */
 export const LOAD_WAIT_SECONDS = 15 * 60;
@@ -201,18 +143,6 @@ async function departAdmitted(context: BusContext, options: DepartOptions): Prom
       endDeliveryWork(context, activity);
     }
     lock.release();
-  }
-}
-
-async function retryPendingDelivery(context: BusContext): Promise<void> {
-  // A watch that timed out or lost authentication resumes, so a pending deployment can follow.
-  resumeStoppedCi(context, [
-    readPending(context.paths)?.sha,
-    readTrimmed(context.paths.lastPushSha),
-  ]);
-  if (deployPendingExists(context.paths)) {
-    // A failed retry is reported and kept; it does not hold back a newer main.
-    await retryDeploy(context);
   }
 }
 
@@ -329,7 +259,7 @@ async function waitForLoad(context: BusContext, attempt: Attempt): Promise<boole
   const limit = context.config.resources.loadLimit;
   let announced = false;
   for (;;) {
-    if (loadOk(context)) {
+    if (context.loadAverage() < limit) {
       return true;
     }
     const remaining = attempt.loadDeadline - context.clock.now();

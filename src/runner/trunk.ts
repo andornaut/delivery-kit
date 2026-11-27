@@ -1,11 +1,12 @@
-// Trunk reads. The runner only reads the canonical checkout's refs/heads/<main> and asks the
-// remote for its main with ls-remote, which writes no ref; it never fetches, checks out or
-// moves a ref in the canonical checkout. Its only write there is the push of an exact SHA.
+// The runner reads local main in the canonical checkout and queries remote main with ls-remote.
+// It leaves the canonical checkout's branch refs and HEAD untouched. Removing a detached gate
+// worktree updates the repository's worktree metadata.
 import { existsSync } from "node:fs";
 
-import { assertNotInterrupted, type Exec, git } from "../lib/exec.ts";
+import { assertNotInterrupted, type Exec, git, gitOk } from "../lib/exec.ts";
 import { readTrimmed } from "../lib/files.ts";
 import { type BusPaths, gateFailedFile } from "../state/paths.ts";
+import type { BusContext } from "./context.ts";
 
 /** The exact commit local main points at. */
 export function mainHead(exec: Exec, repo: string, main: string): Promise<string> {
@@ -71,4 +72,11 @@ export function skipReason(paths: BusPaths, head: string): Skip | undefined {
     return "pushed";
   }
   return existsSync(gateFailedFile(paths, head)) ? "gate-failed" : undefined;
+}
+
+export async function removeWorktree(
+  context: Pick<BusContext, "exec" | "game">,
+  work: string,
+): Promise<void> {
+  await gitOk(context.exec, context.game.repo, ["worktree", "remove", "--force", work]);
 }

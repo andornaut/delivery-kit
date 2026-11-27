@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { holdLock } from "@andornaut/coordination-kit/build/shared";
 import { describe, expect, it } from "vitest";
 
-import { makeGame, manualClock, recordingEvents, testContext } from "../testing/game.ts";
+import { makeGame, manualClock, recordingEvents, testContext } from "../../testing/game.ts";
 import {
   type CheckRun,
   ciOutcomeDetail,

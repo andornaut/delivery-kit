@@ -10,7 +10,7 @@ import {
 
 import { spawnExec } from "../lib/exec.ts";
 import { errorMessage } from "../lib/values.ts";
-import { captureRequest } from "../runner/requests.ts";
+import { captureRequest } from "../runner/departure/requests.ts";
 import { busPaths } from "../state/paths.ts";
 import { resolveGame } from "./game.ts";
 import { deliveryOperator } from "./operator.ts";

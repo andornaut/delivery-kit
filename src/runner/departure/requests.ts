@@ -11,10 +11,11 @@ import {
   writeDurable,
 } from "@andornaut/coordination-kit/build/shared";
 
-import type { Exec } from "../lib/exec.ts";
-import { ensureDir, errnoCode } from "../lib/files.ts";
-import type { BusPaths } from "../state/paths.ts";
-import { mainHead, skipReason } from "./trunk.ts";
+import type { Exec } from "../../lib/exec.ts";
+import { ensureDir, errnoCode } from "../../lib/files.ts";
+import type { BusPaths } from "../../state/paths.ts";
+import type { BusContext } from "../context.ts";
+import { mainHead, skipReason } from "../trunk.ts";
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -43,6 +44,15 @@ export interface RequestStore {
   /** The canonical game checkout whose main HEAD is captured. */
   readonly repo: string;
   readonly main: string;
+}
+
+export function requestStore(context: BusContext): RequestStore {
+  return {
+    exec: context.exec,
+    main: context.config.git.main,
+    paths: context.paths,
+    repo: context.game.repo,
+  };
 }
 
 function recordPath(store: RequestStore, id: string): string {
