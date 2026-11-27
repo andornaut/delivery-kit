@@ -109,6 +109,7 @@ suite("standalone delivery with configured roles", () => {
         if (appMode) {
           const review = `bus: scheduled review ${at(17)}`;
           await runner.until(() => runner.output().stdout.includes(review));
+          expect(runner.output().stdout).toContain("inside >=7.8.0 <9.0.0");
           expect(runner.output().stdout).toContain(`${review}: skipped nothing-due`);
           await runner.until(() => ws.events().some((event) => event.type === "scheduled-status"));
           await runner.until(

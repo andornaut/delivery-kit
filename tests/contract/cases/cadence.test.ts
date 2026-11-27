@@ -5,7 +5,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 import { expect } from "vitest";
 
@@ -16,9 +15,10 @@ import { at } from "../lib/time.ts";
 import { COORDINATOR_CLI, KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000002";
-const RANGE = ">=3.0.0 <8.0.0";
+const RECIPIENT_ROLE = "game-coordinator";
+const RANGE = ">=3.0.0 <9.0.0";
 /** The released coordinator CLI installed from this checkout's locked bundle pin. */
-const RELEASED_IN_RANGE = (() => {
+const RELEASED_MAJOR = (() => {
   try {
     const manifest = join(
       KIT_ROOT,
@@ -28,28 +28,31 @@ const RELEASED_IN_RANGE = (() => {
       "package.json",
     );
     const { version } = JSON.parse(readFileSync(manifest, "utf8")) as { version: string };
-    return /^[3-7]\.\d+\.\d+$/u.test(version);
+    const match = /^(0|[1-9]\d*)\.\d+\.\d+$/u.exec(version);
+    return match === null ? undefined : Number(match[1]);
   } catch {
-    return false;
+    return undefined;
   }
 })();
+const RELEASED_IN_RANGE = RELEASED_MAJOR !== undefined && RELEASED_MAJOR >= 3 && RELEASED_MAJOR < 9;
 
 /** A game with the observer at minutes 20 and 50 and departures at 00 and 10. */
 function cadenceGame(
   ws: Workspace,
   review: Record<string, unknown> = { status: "delivered" },
+  version?: string,
 ): void {
   ws.writeRegistry({
     schema: 1,
     revision: 1,
     harness: "claude",
-    roles: { "game-coordinator": { conversations: { claude: RECIPIENT } } },
+    roles: { [RECIPIENT_ROLE]: { conversations: { claude: RECIPIENT } } },
   });
   ws.config.git = { main: "main", remote: "origin", github: "" };
   ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
-  ws.config.reports = { project: "Fixture", recipient: "game-coordinator", scheduledTicks: true };
-  ws.scriptCoordinator({ review });
+  ws.config.reports = { project: "Fixture", recipient: RECIPIENT_ROLE, scheduledTicks: true };
+  ws.scriptCoordinator({ review, version });
 }
 
 function pushes(ws: Workspace): number {
@@ -180,11 +183,11 @@ suite("review cadence", () => {
     },
   );
 
-  contract(
-    "the runner spawns the coordinator root's CLI with its own Node binary and reports its identity",
-    async () => {
+  contract.each(["3.0.0", "8.0.0"])(
+    "the runner spawns the coordinator root's %s CLI with its own Node binary and reports its identity",
+    async (version) => {
       const ws = workspace();
-      cadenceGame(ws, { detail: "brief r-1 sent", status: "delivered" });
+      cadenceGame(ws, { detail: "brief r-1 sent", status: "delivered" }, version);
       const result = await tick(ws, at(20));
       expect(result.review).toEqual([{ slot: at(20), text: "brief r-1 sent" }]);
       const calls = ws.coordinatorCalls();
@@ -203,7 +206,7 @@ suite("review cadence", () => {
         .update(readFileSync(join(ws.coordinator, COORDINATOR_CLI)))
         .digest("hex");
       expect(result.stdout).toContain(
-        `bus: coordinator CLI 3.0.0 (dist sha256 ${distSha256}), inside ${RANGE}`,
+        `bus: coordinator CLI ${version} (dist sha256 ${distSha256}), inside ${RANGE}`,
       );
       const status = await cli(ws, ["status"]);
       expect(status.code, status.stderr).toBe(0);
@@ -212,7 +215,7 @@ suite("review cadence", () => {
         distSha256,
         seenAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/),
         supported: true,
-        version: "3.0.0",
+        version,
       });
       // runner.json keeps recording the bundled coordination-kit.
       expect(ws.readJson("runner.json").coordinationKitVersion).toBe(
@@ -222,7 +225,7 @@ suite("review cadence", () => {
     CASE_TIMEOUT_MS,
   );
 
-  contract.skipIf(RELEASED_IN_RANGE)(
+  contract.skipIf(RELEASED_MAJOR === undefined || RELEASED_MAJOR >= 3)(
     "a released coordination-kit CLI before 3.0 defers with cli-version, and the runner still starts",
     async () => {
       const ws = workspace();
@@ -340,9 +343,8 @@ suite("review cadence", () => {
     CASE_TIMEOUT_MS,
   );
 
-  // In range only from 3.0, like the case above.
   contract.skipIf(!RELEASED_IN_RANGE)(
-    "the released coordination-kit CLI stores COMPLETE for a gated departure with deployment disabled",
+    "the released coordination-kit CLI lists one COMPLETE for a gated departure with deployment disabled",
     async () => {
       const ws = workspace();
       cadenceGame(ws);
@@ -370,24 +372,36 @@ suite("review cadence", () => {
       expect(ws.exists("events.quarantine.jsonl") ? ws.read("events.quarantine.jsonl") : "").toBe(
         "",
       );
-      // The store sits in the synthetic root's var/, as no work protocol state root is active.
-      const store = new DatabaseSync(join(ws.coordinator, "var", "coordination.db"), {
-        readOnly: true,
+      const history = await execute({
+        argv: [
+          process.execPath,
+          join(ws.coordinator, COORDINATOR_CLI),
+          "--root",
+          ws.coordinator,
+          "msg",
+          "history",
+          "--role",
+          RECIPIENT_ROLE,
+          "--include-body",
+          "--native-id",
+          RECIPIENT,
+        ],
+        cwd: ws.coordinator,
+        env: ws.baseEnv(),
       });
-      try {
-        const bodies = (
-          store.prepare("SELECT body FROM messages WHERE to_role = ?").all("game-coordinator") as {
-            body: string;
-          }[]
-        ).map((row) => row.body);
-        expect(bodies.filter((body) => body.includes(`bus: COMPLETE ${sha}`))).toEqual([
-          expect.stringContaining(
-            `bus: COMPLETE ${sha}: gate ok, push ok, ci ok, deploy deploy_disabled (skipped)`,
-          ),
-        ]);
-      } finally {
-        store.close();
-      }
+      expect(history.code, history.stderr).toBe(0);
+      const { events } = JSON.parse(history.stdout) as {
+        events: { kind: string; detail: { body?: string; to?: string } }[];
+      };
+      const bodies = events
+        .filter((event) => event.kind === "msg.sent" && event.detail.to === RECIPIENT_ROLE)
+        .map((event) => event.detail.body)
+        .filter((body) => body?.includes(`bus: COMPLETE ${sha}`));
+      expect(bodies).toEqual([
+        expect.stringContaining(
+          `bus: COMPLETE ${sha}: gate ok, push ok, ci ok, deploy deploy_disabled (skipped)`,
+        ),
+      ]);
     },
     CASE_TIMEOUT_MS,
   );
@@ -510,15 +524,15 @@ suite("review cadence", () => {
     CASE_TIMEOUT_MS,
   );
 
-  contract(
-    "an out-of-range coordinator CLI defers with cli-version, and the runner still departs",
-    async () => {
+  contract.each(["2.0.1", "9.0.0"])(
+    "out-of-range coordinator CLI %s defers with cli-version, and the runner still departs",
+    async (version) => {
       const ws = workspace();
       cadenceGame(ws);
       ws.config.schedule = { departures: ["20"], timezone: "America/Toronto" };
-      ws.scriptCoordinator({ review: { status: "delivered" }, version: "2.0.1" });
+      ws.scriptCoordinator({ review: { status: "delivered" }, version });
       impl.offer(ws, ["bus/feature"]);
-      const deferral = `bus: review deferred: cli-version: coordinator CLI 2.0.1 is outside ${RANGE}`;
+      const deferral = `bus: review deferred: cli-version: coordinator CLI ${version} is outside ${RANGE}`;
       const result = await tick(ws, at(20), {
         done: ({ stderr }) => pushes(ws) === 1 && stderr.includes(deferral),
         // A departure under load can outlast the default settle; end on the condition.
@@ -534,7 +548,7 @@ suite("review cadence", () => {
         string,
         Record<string, unknown>
       >;
-      expect(status.coordinator_cli).toMatchObject({ supported: false, version: "2.0.1" });
+      expect(status.coordinator_cli).toMatchObject({ supported: false, version });
     },
     CASE_TIMEOUT_MS,
   );
