@@ -35,8 +35,9 @@ and drained.
 
 ## Commands
 
-Delivery commands resolve the workspace root from `--root DIR`, then `DELIVERY_KIT_ROOT`,
-then the working directory. Supply `--root` at most once, in any position. Select an app with
+Delivery commands resolve the workspace root from `--root DIR` or `--root=DIR`, then
+`DELIVERY_KIT_ROOT`, then the working directory. Supply `--root` at most once, before the
+`--` option terminator. Select an app with
 `--app ID`. Compatibility alias `--game ID` selects the same app. Supply only one selector.
 The workspace configuration determines which [authorization rules](docs/commands.md#app-mode-authorization)
 apply.
@@ -49,10 +50,12 @@ apply.
 | `runner stop --app ID [--timeout SECONDS]`                                | Wait until the app's runner is idle and drained, then stop it through its unit or by signal.                                                     |
 | `runner start --app ID`                                                   | Start one runner through the app's systemd user unit, or detached without one.                                                                   |
 | `status --app ID [--resources]`                                           | Read-only runner identity, singleton, idle and drain report as one JSON line. `--resources` prints the resource report instead.                  |
+| `status --scope app:ID [--resources]`                                     | Select the app by scope for the same status report.                                                                                              |
 | `control --app ID --state enabled\|paused --reason TEXT --requester ROLE` | Persist desired delivery control with its reason and requesting role.                                                                            |
 | `check-config [--app ID]`                                                 | Validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
 | `request --app ID --id SAFE_ID`                                           | Record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
 | `help`, `--help`, `--version`                                             | Usage and version.                                                                                                                               |
+| `COMMAND --help`                                                          | Show the syntax and purpose of one command, including a runner verb.                                                                             |
 
 `check-config` validates the registry and route when those files are present. See the
 [command reference](docs/commands.md) for details and commands moved to Coordination Kit.

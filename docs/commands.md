@@ -25,7 +25,9 @@ See [Configuration](configuration.md#app-mode) to declare the grants and
   admission for subsequent departures without starting a runner or terminating an active batch.
   `reason` must be non-empty and `requester` resolves through the registry to a role. Stdout is
   the desired record as one JSON line.
-- `status --app ID --resources` prints the resource report in place of the JSON status.
+- `status --scope app:ID` and `status --scope ID` select one app with the same report as
+  `status --app ID`. Use a single selector. Add `--resources` to print the resource report
+  in place of the JSON status.
 - `status --app ID`: an unreadable `ci/`, `requests/` or `gate-failed/` directory or event log is
   a blocker, never an empty one, and a corrupt `runner.identity.json` reports `identity_status`
   `unreadable` with the `identity_unreadable` blocker. The runner loads `delivery-kit.json` once

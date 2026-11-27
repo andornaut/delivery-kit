@@ -14,15 +14,21 @@ import { describe, expect, it } from "vitest";
 import { main, USAGE } from "./cli.ts";
 import { makeFixture, projectConfig, registryInput, writeFixtureJson } from "./testing/fixtures.ts";
 
+const CHECK_CONFIG_HINT = "Hint: Run delivery-kit check-config --help for accepted syntax.\n";
+
 async function run(
   root: string,
   ...argv: string[]
 ): Promise<{ code: number; out: string; err: string }> {
+  return invoke("--root", root, ...argv);
+}
+
+async function invoke(...argv: string[]) {
   let out = "";
   let err = "";
   const code = await main(
     { cwd: "/nonexistent", env: {}, err: (text) => (err += text), out: (text) => (out += text) },
-    ["--root", root, ...argv],
+    argv,
   );
   return { code, err, out };
 }
@@ -105,7 +111,7 @@ describe("check-config", () => {
       ["app", "game"].map(async (selector) => {
         expect(await run(root, "check-config", `--${selector}`, "nope")).toEqual({
           code: EXIT_USAGE,
-          err: `delivery-kit: unknown ${selector}: nope\n`,
+          err: `delivery-kit: unknown ${selector}: nope\n${CHECK_CONFIG_HINT}`,
           out: "",
         });
       }),
@@ -124,6 +130,23 @@ describe("app selection", () => {
       ...JSON.parse(legacy.out),
       appId: "archies-dog-walks",
     });
+    expect(await run(root, "status", "--scope=app:archies-dog-walks")).toEqual(neutral);
+    expect(await run(root, "status", "--scope", "archies-dog-walks")).toEqual(neutral);
+    const invalidScopes = [
+      ["--scope", "kit:archies-dog-walks"],
+      ["--scope", "app:"],
+      ["--scope", "archies-dog-walks", "--game", "archies-dog-walks"],
+      ["--scope", "archies-dog-walks", "--scope=chibis-way-home"],
+    ];
+    await Promise.all(
+      invalidScopes.map(async (args) => {
+        expect(await run(root, "status", ...args)).toMatchObject({
+          code: EXIT_USAGE,
+          err: expect.stringContaining("Hint: Run delivery-kit status --help"),
+          out: "",
+        });
+      }),
+    );
   });
 
   it.each([
@@ -163,7 +186,7 @@ describe("app selection", () => {
       }
       expect(await run(root, "check-config", ...selectors)).toEqual({
         code: EXIT_USAGE,
-        err: `delivery-kit: ${diagnostic}\n`,
+        err: `delivery-kit: ${diagnostic}\n${CHECK_CONFIG_HINT}`,
         out: "",
       });
     },
@@ -171,6 +194,45 @@ describe("app selection", () => {
 });
 
 describe("dispatcher", () => {
+  it("prints help for the named command without loading configuration", async () => {
+    expect(await invoke("runner", "stop", "--help")).toEqual({
+      code: EXIT_OK,
+      err: "",
+      out: [
+        "usage: delivery-kit runner stop --app ID [--timeout SECONDS]",
+        "",
+        "wait until the app's runner is idle and drained, then stop it",
+        "",
+      ].join("\n"),
+    });
+    expect(await invoke("runner", "stop", "--", "--help")).toMatchObject({
+      code: EXIT_USAGE,
+      out: "",
+    });
+  });
+
+  it("accepts an inline root before the terminator and leaves later tokens alone", async () => {
+    const { root } = makeFixture();
+    const configured = await run(root, "check-config");
+    expect(configured.code).toBe(EXIT_OK);
+    expect(await invoke("check-config", `--root=${root}`)).toEqual(configured);
+    expect(await run(root, "check-config", "--", "--root=unused")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("Hint: Run delivery-kit check-config --help"),
+      out: "",
+    });
+    expect(await run(root, "check-config", "--root=unused")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--root is given more than once"),
+      out: "",
+    });
+    expect(await invoke("check-config", "--root=")).toMatchObject({
+      code: EXIT_USAGE,
+      err: expect.stringContaining("--root needs a directory"),
+      out: "",
+    });
+  });
+
   it("advertises app operations and rejects unknown commands", async () => {
     const { root } = makeFixture();
     const help = await run(root, "--help");
@@ -204,7 +266,11 @@ describe("dispatcher", () => {
     ["constructor"],
   ])("prints standard usage for an invalid command %s", async (...argv) => {
     const { root } = makeFixture();
-    expect(await run(root, ...argv)).toEqual({ code: EXIT_USAGE, err: USAGE, out: "" });
+    expect(await run(root, ...argv)).toEqual({
+      code: EXIT_USAGE,
+      err: `${USAGE}Hint: Run delivery-kit --help for available commands.\n`,
+      out: "",
+    });
   });
 
   it("rejects status --harness as an unknown option", async () => {

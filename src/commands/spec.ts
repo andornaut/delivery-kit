@@ -12,6 +12,7 @@ const VALUES: Readonly<Record<string, string>> = {
   id: "SAFE_ID",
   reason: "TEXT",
   requester: "ROLE",
+  scope: "app:ID",
   state: "enabled|paused",
   timeout: "SECONDS",
 };
@@ -59,8 +60,11 @@ export const SPECS = {
     summary: "print the optional systemd user unit for the app's resident runner; installs nothing",
   },
   status: {
-    forms: [["app", "resources?"]],
-    options: { ...APP_OPTIONS, resources: { type: "boolean" } },
+    forms: [
+      ["app", "resources?"],
+      ["scope", "resources?"],
+    ],
+    options: { ...APP_OPTIONS, resources: { type: "boolean" }, scope: { type: "string" } },
     summary:
       "print the read-only runner and delivery status, or with --resources the resource report",
   },

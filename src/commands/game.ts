@@ -30,10 +30,11 @@ type Options = NonNullable<ParseArgsConfig["options"]>;
 
 /** Parse a single app selector, keeping the legacy value key for command handlers. */
 export function parseAppOptions(options: Options, args: string[]) {
+  const allOptions: Options = { ...options, ...APP_OPTIONS };
   const {
     tokens,
-    values: { app, game, ...values },
-  } = parseArgs({ args, options: { ...options, ...APP_OPTIONS }, strict: true, tokens: true });
+    values: { app, game, scope, ...values },
+  } = parseArgs({ args, options: allOptions, strict: true, tokens: true });
   const selectors = tokens.filter(
     (token) => token.kind === "option" && (token.name === "app" || token.name === "game"),
   );
@@ -44,7 +45,21 @@ export function parseAppOptions(options: Options, args: string[]) {
   if (selectors.length > 1) {
     throw new Error(`--${selector} is given more than once`);
   }
-  return { selector, values: { ...values, game: app ?? game } };
+  if (typeof scope === "string") {
+    if (selectors.length > 0) {
+      throw new Error("--scope cannot be used with --app or --game");
+    }
+    if (tokens.filter((token) => token.kind === "option" && token.name === "scope").length > 1) {
+      throw new Error("--scope is given more than once");
+    }
+    const appId = scope.startsWith("app:") ? scope.slice("app:".length) : scope;
+    if (!appId.trim() || appId.includes(":")) {
+      throw new Error("--scope needs app:ID or an app ID");
+    }
+    return { selector: "app" as const, values: { ...values, game: appId } };
+  }
+  const appId = app ?? game;
+  return { selector, values: { ...values, game: typeof appId === "string" ? appId : undefined } };
 }
 
 /** Resolve the app and extra options, or print the problem and return an exit code. */

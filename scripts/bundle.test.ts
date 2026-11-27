@@ -43,7 +43,10 @@ describe("dist/cli.js", () => {
     };
     expect(execFileSync(cli, ["--version"], { encoding: "utf8" })).toBe(`${version}\n`);
     const run = spawnSync(cli, ["run"], { encoding: "utf8" });
-    expect([run.status, run.stderr]).toEqual([2, "usage: delivery-kit run --app ID\n"]);
+    expect([run.status, run.stderr]).toEqual([
+      2,
+      "usage: delivery-kit run --app ID\nHint: Run delivery-kit run --help for accepted syntax.\n",
+    ]);
   });
 });
 

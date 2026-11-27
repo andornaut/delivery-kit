@@ -1,5 +1,5 @@
 // delivery-kit command dispatcher. The runner command group takes a verb.
-// Every command resolves the coordinator from --root (in any position, once), DELIVERY_KIT_ROOT or
+// Every command resolves the coordinator from --root, DELIVERY_KIT_ROOT or
 // the working directory, in that order.
 import {
   EXIT_OK,
@@ -13,7 +13,7 @@ import { control } from "./commands/control.ts";
 import { request } from "./commands/request.ts";
 import { run } from "./commands/run.ts";
 import { runnerStart, runnerStop, runnerUnit } from "./commands/runner.ts";
-import { type Command, SPECS, synopsis } from "./commands/spec.ts";
+import { type Command, commandUsage, SPECS, synopsis } from "./commands/spec.ts";
 import { status } from "./commands/status.ts";
 import { VERSION } from "./compatibility.ts";
 import { errorMessage } from "./lib/values.ts";
@@ -37,11 +37,13 @@ export const USAGE = [
     `      ${SPECS[command].summary}`,
   ]),
   "",
-  "  help, --help    print this text",
-  "  --version       print the version",
+  "  help, --help      print this text",
+  "  COMMAND --help    print help for one command",
+  "  --version         print the version",
   "",
   "--game ID is a compatibility alias for --app ID.",
-  "The coordinator root is --root (in any position, once), else DELIVERY_KIT_ROOT, else the working directory.",
+  "Set the coordinator root once with --root DIR or --root=DIR before --.",
+  "The default is DELIVERY_KIT_ROOT, then the working directory.",
   "",
 ].join("\n");
 const HANDLERS: Readonly<Record<Command, Handler>> = {
@@ -54,24 +56,33 @@ const HANDLERS: Readonly<Record<Command, Handler>> = {
   "runner unit": runnerUnit,
   status,
 };
-/** Take every `--root DIR` out of the arguments; at most one is allowed. */
+/** Extract one global root option before the option terminator. */
 function extractRoot(args: string[]): {
   root?: string;
   error?: string;
 } {
-  const at = args.indexOf("--root");
-  if (at < 0) {
-    return {};
+  let root: string | undefined;
+  for (let at = 0; at < args.length; at++) {
+    const token = args[at]!;
+    if (token === "--") {
+      break;
+    }
+    const separate = token === "--root";
+    if (!separate && !token.startsWith("--root=")) {
+      continue;
+    }
+    if (root !== undefined) {
+      return { error: "--root is given more than once" };
+    }
+    const value = separate ? args[at + 1] : token.slice("--root=".length);
+    if (value === undefined || value === "" || (separate && value.startsWith("--"))) {
+      return { error: "--root needs a directory" };
+    }
+    root = value;
+    args.splice(at, separate ? 2 : 1);
+    at--;
   }
-  const value = args[at + 1];
-  if (value === undefined || value.startsWith("--")) {
-    return { error: "--root needs a directory" };
-  }
-  args.splice(at, 2);
-  if (args.includes("--root")) {
-    return { error: "--root is given more than once" };
-  }
-  return { root: value };
+  return root === undefined ? {} : { root };
 }
 /** The command a line names: two words for a noun group, otherwise one. */
 function commandOf(args: readonly string[]):
@@ -94,7 +105,7 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
   const args = [...argv];
   const extracted = extractRoot(args);
   if (extracted.error !== undefined) {
-    io.err(`delivery-kit: ${extracted.error}\n${USAGE}`);
+    io.err(`delivery-kit: ${extracted.error}\n${USAGE}Hint: Use --root DIR or --root=DIR once.\n`);
     return EXIT_USAGE;
   }
   const root = extracted.root ?? io.env.DELIVERY_KIT_ROOT ?? io.cwd;
@@ -109,13 +120,23 @@ export async function main(io: Io, argv: readonly string[]): Promise<number> {
   }
   const found = commandOf(args);
   if (found === undefined) {
-    io.err(USAGE);
+    io.err(`${USAGE}Hint: Run delivery-kit --help for available commands.\n`);
     return EXIT_USAGE;
   }
+  const { command, rest } = found;
+  if (rest.length === 1 && rest[0] === "--help") {
+    io.out(`${commandUsage(command)}\n\n${SPECS[command].summary}\n`);
+    return EXIT_OK;
+  }
+  let code: number;
   try {
-    return await HANDLERS[found.command](io, root, found.rest);
+    code = await HANDLERS[command](io, root, rest);
   } catch (error) {
     io.err(`delivery-kit: ${errorMessage(error)}\n`);
-    return EXIT_USAGE;
+    code = EXIT_USAGE;
   }
+  if (code === EXIT_USAGE) {
+    io.err(`Hint: Run delivery-kit ${command} --help for accepted syntax.\n`);
+  }
+  return code;
 }
