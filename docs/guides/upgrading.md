@@ -49,10 +49,11 @@ startup on the rollback pins before the cutover.
 
 ## Move the workspace reader to Coordination Kit 8
 
-Delivery Kit 8.6.0 and older residents defer review and event delivery with a
-Coordination Kit 8 CLI. Replace those residents while the workspace still runs
-its qualified 7.x reader. Use an exact Delivery Kit package qualified with
-both the current reader and the new 8.0.0 reader.
+Delivery Kit 8.7 bundles Coordination Kit 8.0.0 and accepts the existing
+7.8.0 reader through the same review and event contracts. Delivery Kit 8.6.0
+and older residents defer review and event delivery with a Coordination Kit
+8 CLI. Replace those residents while the workspace still runs its qualified
+7.x reader.
 
 1. With the old reader still installed, verify each app's exact new package
    and resident identity at its idle, drained singleton boundary. Confirm

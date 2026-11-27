@@ -509,6 +509,9 @@ export class Workspace {
       GIT_COMMITTER_EMAIL: "fixture@example.invalid",
       GIT_CONFIG_NOSYSTEM: "1",
     };
+    if (process.env.NODE_OPTIONS === "--no-experimental-sqlite") {
+      env.NODE_OPTIONS = process.env.NODE_OPTIONS;
+    }
     if (existsSync(this.clockFile)) env.DELIVERY_KIT_TEST_CLOCK = this.clockFile;
     return { ...env, ...this.env };
   }
