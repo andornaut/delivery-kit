@@ -155,7 +155,7 @@ describe("observerAdoption", () => {
       reason: "cli_out_of_range",
       status: "unknown",
     });
-    seen(paths, "8.0.0");
+    seen(paths, "9.0.0");
     expect(observerAdoption(paths, TOKEN).reason).toBe("cli_out_of_range");
     seen(paths, "4.0.2");
     expect(observerAdoption(paths, TOKEN)).toEqual({ reason: "not_ingested", status: "unknown" });

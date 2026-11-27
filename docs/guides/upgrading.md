@@ -47,6 +47,23 @@ qualifying it against every surviving record it can read, including unrotated an
 logs. Draining the cursor alone leaves those records in place. Check reader and resident
 startup on the rollback pins before the cutover.
 
+## Move the workspace reader to Coordination Kit 8
+
+Delivery Kit 8.6.0 and older residents defer review and event delivery with a
+Coordination Kit 8 CLI. Replace those residents while the workspace still runs
+its qualified 7.x reader. Use an exact Delivery Kit package qualified with
+both the current reader and the new 8.0.0 reader.
+
+1. With the old reader still installed, verify each app's exact new package
+   and resident identity at its idle, drained singleton boundary. Confirm
+   event ingestion and the configured review route.
+2. Once all resident readers and writers are compatible, switch the workspace
+   CLI and file-store authority under the Coordination Kit cutover procedure.
+   Preserve the registry, route, schedules, delivery controls and bus paths.
+3. Verify the first genuine scheduled review and the next ordinary departure
+   for each app. Check exact-SHA gate, push, CI, deploy and COMPLETE evidence
+   where applicable, as well as event cursor continuity and deduplication.
+
 ## Upgrading to 8.5
 
 8.5 keeps the bundled Coordination Kit at 3.4.4 and accepts coordinator CLIs in

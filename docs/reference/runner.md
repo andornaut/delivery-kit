@@ -117,7 +117,7 @@ with `schema` 1, `version` and `distSha256`.
 - **Missing CLI:** while the file is missing, for example during `npm ci` at the root, reviews
   and ingests defer with reason `cli-unavailable`. The next call after the install finishes
   reaches the CLI again.
-- **Range:** legacy mode accepts the workspace CLI range `>=3.0.0 <8.0.0`. App mode requires
+- **Range:** legacy mode accepts the workspace CLI range `>=3.0.0 <9.0.0`. App mode requires
   the app-compatible CLI starting at 7.8.0 within that range. An unsupported CLI defers
   with reason `cli-version`, and while the last seen CLI is out of range the runner asks only for
   its version until a supported install answers. Departures continue.
@@ -382,7 +382,7 @@ durable writes, configuration validation and IDs) from `build/registry`, `build/
 pins only `@andornaut/delivery-kit` and the runner never loads a game copy of coordination-kit. The
 build embeds the bundled coordination-kit version. delivery-kit declares the bundled
 coordination-kit range in `COORDINATION_KIT_RANGE` in `src/compatibility.ts`. The app layout
-and permissions require `>=7.8.0 <8.0.0` for the bundle. The independently
+and permissions require `>=7.8.0 <9.0.0` for the bundle. The independently
 installed CLI has the runtime ranges in [Coordinator CLI seam](#coordinator-cli-seam).
 The range holds plain `MAJOR.MINOR.PATCH` comparators (`<`, `<=`, `>`,
 `>=`, `=`), and a prerelease or build-metadata version never satisfies it. The package check refuses a
