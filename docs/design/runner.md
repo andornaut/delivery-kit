@@ -52,3 +52,4 @@ Reference: [runner](../runner.md), [configuration](../configuration.md), [state]
 | dk-0053 | Improve Delivery Kit runtime performance                                           | [dk-0053.md](../work/dk-0053.md) |
 | dk-0054 | Make Delivery Kit app neutral                                                      | [dk-0054.md](../work/dk-0054.md) |
 | dk-0055 | Align Delivery Kit CLI ergonomics with Coordination Kit                            | [dk-0055.md](../work/dk-0055.md) |
+| dk-0056 | Organize Delivery Kit around cohesive module boundaries                            | [dk-0056.md](../work/dk-0056.md) |
