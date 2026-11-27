@@ -1,6 +1,18 @@
 # Upgrading
 
-Version-specific upgrade steps and removed command forms.
+Installation, version-specific upgrade steps and removed command forms.
+
+## Install and pin
+
+Pin the released Delivery Kit asset as a devDependency and commit the lockfile integrity.
+Each runner uses its app's installed Delivery Kit, which bundles the Coordination Kit utilities
+it needs. Install Coordination Kit directly at the workspace root for coordination commands and
+for the review and ingest CLI that the runner spawns. App mode requires Coordination Kit 7.8.0 or
+later within the supported range. See [Pin guard](runner.md#pin-guard) for legacy compatibility
+and the [app-mode upgrade procedure](#opt-in-to-app-mode) for adoption and rollback.
+
+Change a pin via the devDependency and lockfile, run `npm ci`, then replace the runner while idle
+and drained.
 
 ## Opt in to app mode
 

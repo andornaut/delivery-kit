@@ -514,11 +514,12 @@ is the push of an exact SHA (and the scratch worktree's Git metadata).
   `deploy-pending` with its worktree, superseding an older pending deployment. When CI passes and
   the remote `main` is still that SHA, it runs `node_modules/wrangler/bin/wrangler.js deploy
 --config wrangler.jsonc --no-bundle` in the gate worktree with the gated `dist/`, so the
-  deployment uses the Wrangler locked in the gated commit. A worktree without that entry is not
-  deployed: the runner logs the missing path and keeps the deployment pending. The CI completion
-  and scheduled retry paths serialize access to the pending deployment. A failure, including an
-  unavailable remote ref lookup, keeps the assets for a later retry. A deployment that cannot
-  be staged after its push is reported as `deploy_failure` with the cause, so a pushed SHA never goes undeployed silently.
+  deployment uses the runner's Node binary to invoke the Wrangler locked in the gated commit.
+  A worktree without that entry is not deployed: the runner logs the missing path and keeps the
+  deployment pending. The CI completion and scheduled retry paths serialize access to the pending
+  deployment. A failure, including an unavailable remote ref lookup, keeps the assets for a later
+  retry. A deployment that cannot be staged after its push is reported as `deploy_failure` with the
+  cause, so a pushed SHA never goes undeployed silently.
 - **`request`:** an operator-authorized one-off departure of the current `main` HEAD with the same
   rules and receipts, including the 15-minute load wait, which starts when the request departs. A
   HEAD that is the last pushed SHA or failed its gate is refused. At departure, the runner compares

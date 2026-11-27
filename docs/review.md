@@ -12,7 +12,7 @@ it. Coordination Kit resolves the route, stores the brief for the recipient when
 records the slot result. The schema-2 route's `host` is the app ID. The host's
 `reports.recipient` receives the review, and an active route's `targets` list contains
 additional exact role keys. A solo app-mode route can use an empty list. `check-config`
-validates `var/route.json` when present. See the [solo route](../examples/solo/route.json).
+validates `var/route.json` when present. See the [solo route](https://github.com/andornaut/delivery-kit/blob/main/examples/solo/route.json).
 
 The observer keeps the exact slot epoch in memory when the CLI returns a valid deferred
 `compaction-reserved` result. On each existing minute pass it attempts a fresh due slot first,

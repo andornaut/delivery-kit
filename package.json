@@ -24,8 +24,10 @@
   "files": [
     "dist",
     "README.md",
+    "docs/README.md",
     "docs/commands.md",
     "docs/configuration.md",
+    "docs/developing.md",
     "docs/libraries.md",
     "docs/messages.md",
     "docs/registry.md",

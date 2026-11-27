@@ -6,7 +6,7 @@ and readiness probes. Delivery Kit reads the registry for `check-config`, runner
 
 In an app workspace, register exact keys from `apps.<id>.roles` or `sharedRoles`. Set
 `operations.<id>.busOwner` to the registered role that operates delivery for that app. For
-the [solo example](../examples/solo/config.json), set `operations.reports.busOwner` to
+the [solo example](https://github.com/andornaut/delivery-kit/blob/main/examples/solo/config.json), set `operations.reports.busOwner` to
 `operator`, with its actual native conversation under the selected harness and active
 ownership. Use the workspace root for its worktree path (`"."`) when the session runs there.
 Seed the registry using the workspace owner's actual native project and conversation IDs.

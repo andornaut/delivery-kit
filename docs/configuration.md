@@ -36,7 +36,7 @@ and validate the configuration with `delivery-kit --root WORKSPACE check-config 
 
 ### Legacy game mode
 
-Keep the existing [`games` configuration](../examples/config.json) to retain legacy behaviour.
+Keep the existing [`games` configuration](https://github.com/andornaut/delivery-kit/blob/main/examples/config.json) to retain legacy behaviour.
 Each `games.<id>` entry has `name`, `path` and unqualified `roles`. The corresponding registry
 role keys are `<id>/<role>`, plus the shared role names. `permissions` and `appStateDir` are
 app-mode fields.
@@ -44,7 +44,7 @@ app-mode fields.
 ## App `delivery-kit.json`
 
 Each app uses schema 1. See the [solo example](https://github.com/andornaut/delivery-kit/blob/v8.6.0/examples/solo/delivery-kit.json) or the
-[legacy example](../examples/delivery-kit.json).
+[legacy example](https://github.com/andornaut/delivery-kit/blob/main/examples/delivery-kit.json).
 
 - `git`: `main`, `remote` and `github` (the GitHub `owner/name`).
 - `schedule`: `departures`, a non-empty list of unique two-digit minute strings such as `"00"`, and

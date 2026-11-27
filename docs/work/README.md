@@ -2,7 +2,8 @@
 
 Each user request is one file, `docs/work/<id>.md`, whether or not it is approved. It records scope and milestones; live
 progress (claims, blocks, receipts and acceptance) stays in the Coordination Kit store. The
-[design index](../design/README.md) lists the work items of each area.
+[design index](../design/README.md) groups items by topic. Browse the files in this directory by
+request ID or return to the [documentation index](../README.md).
 
 | Front matter | Content                                                                  |
 | ------------ | ------------------------------------------------------------------------ |

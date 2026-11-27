@@ -39,30 +39,30 @@ and the contract suite exercises the installed CLI.
 
 ## Work items
 
-| ID      | Title                                                                              | Link                             |
-| ------- | ---------------------------------------------------------------------------------- | -------------------------------- |
-| dk-0006 | Arm the contract runner before its review slot                                     | [dk-0006.md](../work/dk-0006.md) |
-| dk-0013 | Wake the review observer at the start of each minute                               | [dk-0013.md](../work/dk-0013.md) |
-| dk-0016 | Supervise the runner with a generated systemd user unit                            | [dk-0016.md](../work/dk-0016.md) |
-| dk-0017 | Report resident identity changes                                                   | [dk-0017.md](../work/dk-0017.md) |
-| dk-0022 | Call the coordinator-installed coordination-kit CLI for reviews and event delivery | [dk-0022.md](../work/dk-0022.md) |
-| dk-0025 | Record runner events in a per-game append-only log                                 | [dk-0025.md](../work/dk-0025.md) |
-| dk-0026 | Derive observer adoption from the runner's own start record                        | [dk-0026.md](../work/dk-0026.md) |
-| dk-0027 | Report the slot's own departure correctly in scheduled-slot status                 | [dk-0027.md](../work/dk-0027.md) |
-| dk-0028 | Stop and start a game's runner with one command                                    | [dk-0028.md](../work/dk-0028.md) |
-| dk-0031 | Bind the stock gate to the verified source identity                                | [dk-0031.md](../work/dk-0031.md) |
-| dk-0034 | Log a gate_passed event so every passed departure completes                        | [dk-0034.md](../work/dk-0034.md) |
-| dk-0035 | Word the slot report so an idle check does not read as a departure                 | [dk-0035.md](../work/dk-0035.md) |
-| dk-0036 | Expose the verified SHA captured for a departure                                   | [dk-0036.md](../work/dk-0036.md) |
-| dk-0038 | Fix departure, retry and verification review findings                              | [dk-0038.md](../work/dk-0038.md) |
-| dk-0040 | Qualify Coordination Kit 4.x at the runner seam                                    | [dk-0040.md](../work/dk-0040.md) |
-| dk-0042 | Qualify Coordination Kit 5.x at the runner seam                                    | [dk-0042.md](../work/dk-0042.md) |
-| dk-0043 | Qualify Coordination Kit 6.x at the runner seam                                    | [dk-0043.md](../work/dk-0043.md) |
-| dk-0044 | Refactor for structure, encapsulation and simplicity                               | [dk-0044.md](../work/dk-0044.md) |
-| dk-0045 | Finish the refactor follow-ups                                                     | [dk-0045.md](../work/dk-0045.md) |
-| dk-0048 | Qualify Coordination Kit 7.x at the runner seam                                    | [dk-0048.md](../work/dk-0048.md) |
-| dk-0049 | Block a gate whose install skipped a locked optional package                       | [dk-0049.md](../work/dk-0049.md) |
-| dk-0053 | Improve Delivery Kit runtime performance                                           | [dk-0053.md](../work/dk-0053.md) |
-| dk-0054 | Make Delivery Kit app neutral                                                      | [dk-0054.md](../work/dk-0054.md) |
-| dk-0055 | Align Delivery Kit CLI ergonomics with Coordination Kit                            | [dk-0055.md](../work/dk-0055.md) |
-| dk-0056 | Organize Delivery Kit around cohesive module boundaries                            | [dk-0056.md](../work/dk-0056.md) |
+| ID      | Title                                                                              | Link                                                                                   |
+| ------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| dk-0006 | Arm the contract runner before its review slot                                     | [dk-0006.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0006.md) |
+| dk-0013 | Wake the review observer at the start of each minute                               | [dk-0013.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0013.md) |
+| dk-0016 | Supervise the runner with a generated systemd user unit                            | [dk-0016.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0016.md) |
+| dk-0017 | Report resident identity changes                                                   | [dk-0017.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0017.md) |
+| dk-0022 | Call the coordinator-installed coordination-kit CLI for reviews and event delivery | [dk-0022.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0022.md) |
+| dk-0025 | Record runner events in a per-game append-only log                                 | [dk-0025.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0025.md) |
+| dk-0026 | Derive observer adoption from the runner's own start record                        | [dk-0026.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0026.md) |
+| dk-0027 | Report the slot's own departure correctly in scheduled-slot status                 | [dk-0027.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0027.md) |
+| dk-0028 | Stop and start a game's runner with one command                                    | [dk-0028.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0028.md) |
+| dk-0031 | Bind the stock gate to the verified source identity                                | [dk-0031.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0031.md) |
+| dk-0034 | Log a gate_passed event so every passed departure completes                        | [dk-0034.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0034.md) |
+| dk-0035 | Word the slot report so an idle check does not read as a departure                 | [dk-0035.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0035.md) |
+| dk-0036 | Expose the verified SHA captured for a departure                                   | [dk-0036.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0036.md) |
+| dk-0038 | Fix departure, retry and verification review findings                              | [dk-0038.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0038.md) |
+| dk-0040 | Qualify Coordination Kit 4.x at the runner seam                                    | [dk-0040.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0040.md) |
+| dk-0042 | Qualify Coordination Kit 5.x at the runner seam                                    | [dk-0042.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0042.md) |
+| dk-0043 | Qualify Coordination Kit 6.x at the runner seam                                    | [dk-0043.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0043.md) |
+| dk-0044 | Refactor for structure, encapsulation and simplicity                               | [dk-0044.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0044.md) |
+| dk-0045 | Finish the refactor follow-ups                                                     | [dk-0045.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0045.md) |
+| dk-0048 | Qualify Coordination Kit 7.x at the runner seam                                    | [dk-0048.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0048.md) |
+| dk-0049 | Block a gate whose install skipped a locked optional package                       | [dk-0049.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0049.md) |
+| dk-0053 | Improve Delivery Kit runtime performance                                           | [dk-0053.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0053.md) |
+| dk-0054 | Make Delivery Kit app neutral                                                      | [dk-0054.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0054.md) |
+| dk-0055 | Align Delivery Kit CLI ergonomics with Coordination Kit                            | [dk-0055.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0055.md) |
+| dk-0056 | Organize Delivery Kit around cohesive module boundaries                            | [dk-0056.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0056.md) |
