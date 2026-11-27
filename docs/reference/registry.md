@@ -14,5 +14,5 @@ See the [Coordination Kit app workspace setup](https://github.com/andornaut/coor
 
 An in-place migration preserves the existing registry keys and bus owner. Legacy
 `control --requester` continues to resolve a registered role. See the
-[Coordination Kit registry reference](https://github.com/andornaut/coordination-kit/blob/main/docs/registry.md)
-and [upgrading to 5.0](upgrading.md#upgrading-to-50).
+[Coordination Kit registry reference](https://github.com/andornaut/coordination-kit/blob/main/docs/reference/registry.md)
+and [upgrading to 5.0](../guides/upgrading.md#upgrading-to-50).

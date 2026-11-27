@@ -22,7 +22,7 @@ whose bundled coordination-kit is outside the supported range, and `status` repo
 version; before each departure the runner compares the loaded package with the installed one
 and finishes on the loaded code until an idle replacement. Desired delivery control is a persistent record that the runner observes.
 
-Reference: [runner](../runner.md), [configuration](../configuration.md), [state](../state.md).
+Reference: [runner](../reference/runner.md), [configuration](../reference/configuration.md), [state](../reference/state.md).
 
 ## Source layout
 

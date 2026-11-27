@@ -109,7 +109,9 @@ suite("departure", () => {
     async () => {
       const ws = workspace();
       bus(ws);
-      ws.updateControl((c) => (c.git = { files: "docs/runner.md\ndocs/guide/setup.md" }));
+      ws.updateControl(
+        (c) => (c.git = { files: "docs/reference/runner.md\ndocs/guides/upgrading.md" }),
+      );
       impl.offer(ws, ["bus/docs"]);
       const runner = await departOnce(ws, () => kinds(ws).includes("ci_success"));
       await runner.stop();

@@ -46,7 +46,7 @@ Its `changes` and `lint` jobs run on pushes to `main` and `release-*` branches a
 requests. `lint` checks types, Prettier, ESLint and Markdown. The separate attribution workflow
 runs on branch pushes and pull requests. The `build`, `test`, `contract` and `package` jobs
 skip when the classifier finds a non-empty diff entirely under `docs/`. A change to the
-[root README](../README.md), an empty diff, a forced push, a new branch or an unverified base runs every job.
+[root README](../../README.md), an empty diff, a forced push, a new branch or an unverified base runs every job.
 
 Package inspection always reports `immutableCommitClaim: false`. Snapshot metadata retains
 `CHECK_REVISION`, `CHECK_SOURCE_SHA256` and `CHECK_SOURCE_DIRTY` when supplied; native
@@ -75,7 +75,7 @@ the `migrate` command; a 0.9.x installation upgrades through 1.0.3 first.
 
 A release is three files from `pack`:
 
-- `delivery-kit-VERSION.tgz`, the npm package (`dist/`, `README.md`, [operator and design docs](README.md), `LICENSE` and `SOURCE_COMMIT`);
+- `delivery-kit-VERSION.tgz`, the npm package (`dist/`, `README.md`, [guides, reference and design docs](../README.md), `LICENSE` and `SOURCE_COMMIT`);
 - `SOURCE_COMMIT`, the exact commit it was built from, also inside the archive;
 - `SHA256SUMS`, covering the archive and `SOURCE_COMMIT`.
 

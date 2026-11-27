@@ -8,7 +8,7 @@ Pin the released Delivery Kit asset as a devDependency and commit the lockfile i
 Each runner uses its app's installed Delivery Kit, which bundles the Coordination Kit utilities
 it needs. Install Coordination Kit directly at the workspace root for coordination commands and
 for the review and ingest CLI that the runner spawns. App mode requires Coordination Kit 7.8.0 or
-later within the supported range. See [Pin guard](runner.md#pin-guard) for legacy compatibility
+later within the supported range. See [Pin guard](../reference/runner.md#pin-guard) for legacy compatibility
 and the [app-mode upgrade procedure](#opt-in-to-app-mode) for adoption and rollback.
 
 Change a pin via the devDependency and lockfile, run `npm ci`, then replace the runner while idle
@@ -53,7 +53,7 @@ startup on the rollback pins before the cutover.
 `>=3.0.0 <8.0.0`. For a gate with an install command and a supported npm lock containing
 optional packages, the image now needs `node` to verify the expected packages after install.
 A missing expected package blocks the gate as infrastructure, so a later departure can retry the
-same commit. See [Gate container](runner.md#gate-container) for platform and omit handling.
+same commit. See [Gate container](../reference/runner.md#gate-container) for platform and omit handling.
 
 ## Upgrading to 8.4
 
@@ -121,13 +121,13 @@ Install Coordination Kit 3.1.0 at the coordinator before replacing runners with 
 7.1.0. It retains capture events without a standalone notice, reports actionable failures,
 and sends one routine COMPLETE for a successful departure. Pin the new package and replace
 each runner while idle and drained. The event schema, cursor, controls and schedule stay the
-same. See [capture evidence](runner.md#event-log).
+same. See [capture evidence](../reference/runner.md#event-log).
 
 ## Upgrading to 7.0
 
 7.0.0 reads no coordination-kit work protocol state. It accepts results only from a coordinator
 CLI inside `>=3.0.0 <4.0.0` and derives `observer_adoption` from the runner's own
-`runner.started` record ([Observer adoption](runner.md#observer-adoption)). The event log schema,
+`runner.started` record ([Observer adoption](../reference/runner.md#observer-adoption)). The event log schema,
 cursor, rotation, the 6.0 outbox import and the COMPLETE rules are unchanged, so a 6.0 runner can
 also move straight to 7.0.
 
@@ -159,7 +159,7 @@ swapped. Events stay in `events.jsonl` and are ingested once both match.
 - Commands: `runner stop --game ID [--timeout SECONDS]` waits until the runner is idle and
   drained, then stops it through its active unit or by `SIGTERM`; `runner start --game ID`
   starts one runner through the unit, or detached without one
-  ([Supervision](runner.md#supervision)). Both read only the bus status files, so they also stop
+  ([Supervision](../reference/runner.md#supervision)). Both read only the bus status files, so they also stop
   and start a 6.1 runner.
 - Status: `observer_adoption` is `current` when the latest `runner.started` carries the running
   token, the cursor shows that line ingested and the last seen coordinator CLI is in range;
@@ -186,7 +186,7 @@ swapped. Events stay in `events.jsonl` and are ingested once both match.
 
 6.1.0 replaces the in-process event outbox with a per-game append-only event log,
 `bus/events.jsonl`, that the runner alone writes, and asks the coordinator CLI to
-`events ingest` it instead of `events flush` ([Event log](runner.md#event-log)). The runner no
+`events ingest` it instead of `events flush` ([Event log](../reference/runner.md#event-log)). The runner no
 longer tracks `<sha>.state` or emits `complete`: COMPLETE is a coordination-kit projection.
 Commands, options and exit codes are unchanged.
 
@@ -219,10 +219,10 @@ DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The i
   appended event's `detail` keeps the text the 6.0 outbox delivered.
 - Status: `status --game` adds `events {file, size, cursorOffset, rotated, torn, drained}`;
   `reporter_blockers` replaces `unsent_events:N` and `event_flush_running` with the event log
-  blockers in [Command semantics](commands.md#command-semantics).
+  blockers in [Command semantics](../reference/commands.md#command-semantics).
 - State: the bus gains `events.jsonl`, `events.cursor`, `events.quarantine.jsonl`,
   `events.<epoch>.jsonl`, `events.imported-<epoch>/` and `last-complete.sha`
-  ([State](state.md)).
+  ([State](../reference/state.md)).
 - Events: a push under `deploy.mode` `none` now appends `deploy_disabled`. From 6.1.2, a passed
   gate appends `gate_passed` (kind `gate`, status `ok`) before the push, so a gated departure
   completes; 6.1.0 and 6.1.1 complete only docs-only pushes. A coordinator CLI from 2.1.2 stores
@@ -239,7 +239,7 @@ DETAIL`, one line per due slot on every runner, where 6.0 printed nothing. The i
 
 6.0.0 stops bundling scheduled review delivery and event delivery. The runner spawns the
 coordinator root's `coordination-kit review deliver` and `events flush` instead
-([Coordinator CLI seam](runner.md#coordinator-cli-seam)). State formats do not change, events are
+([Coordinator CLI seam](../reference/runner.md#coordinator-cli-seam)). State formats do not change, events are
 still recorded in-process, and delivery-kit's commands, options and exit codes are unchanged.
 
 1. game-coordinator installs coordination-kit 1.2.0 or later (inside `>=1.2.0 <2.0.0`) before any
@@ -287,7 +287,7 @@ keeps the game operations: `run`, `runner unit`, `status`, `control`, `check-con
 4.7.0.
 
 - Pins: a game pins only delivery-kit, which bundles coordination-kit; delivery-kit 5 bundles
-  coordination-kit 1.x; 5.0.2 supports `>=1.0.1 <2.0.0` ([Pin guard](runner.md#pin-guard)).
+  coordination-kit 1.x; 5.0.2 supports `>=1.0.1 <2.0.0` ([Pin guard](../reference/runner.md#pin-guard)).
   game-coordinator pins coordination-kit directly for the roles' CLI and the channel MCP server,
   beside its delivery-kit pin for `check-config` and `status`. The two installs exchange data only
   through the on-disk formats, which stay compatible within coordination-kit 1.x. Pin each release
@@ -417,4 +417,4 @@ command usage.
 | `claude channel --monitor UUID`                                                    | 3.0.0      | `coordination-kit claude channel --conversation UUID`                        |
 | `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` commands | 5.0.0      | `coordination-kit GROUP VERB ...` (see [Upgrading to 5.0](#upgrading-to-50)) |
 
-For supported forms, see the [current Coordination Kit commands](https://github.com/andornaut/coordination-kit/blob/main/docs/commands.md).
+For supported forms, see the [current Coordination Kit commands](https://github.com/andornaut/coordination-kit/blob/main/docs/reference/commands.md).

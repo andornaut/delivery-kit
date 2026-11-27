@@ -245,7 +245,7 @@ checks the tail the same way before its next append.
 ### Unmigrated 6.0 outbox
 
 Startup refuses a game with a `bus/events` outbox before changing runner state. Use the
-[6.1.2 migration bridge](upgrading.md#upgrading-to-80) to import and drain it. Previously
+[6.1.2 migration bridge](../guides/upgrading.md#upgrading-to-80) to import and drain it. Previously
 imported schema-1 records remain readable, and archived `events.imported-<epoch>/` directories
 are left in place.
 

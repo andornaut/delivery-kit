@@ -36,5 +36,5 @@ Events are appended at most once per `(type, key)`. Each `blocked-*` report stat
 transient push failures. A red gate needs a fix merged on main, a non-fast-forward needs Tech
 to merge the remote `main`, and an unreadable local `main` needs an operator fix.
 
-Reference: [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/review.md),
-[upgrading to 6.1](upgrading.md#upgrading-to-61).
+Reference: [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/reference/review.md),
+[upgrading to 6.1](../guides/upgrading.md#upgrading-to-61).

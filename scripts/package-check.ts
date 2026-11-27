@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -53,13 +53,13 @@ export function inspectionContext(env: Readonly<Record<string, string | undefine
   };
 }
 
-// The package ships the topic docs and the design summaries; the work files stay in the repository.
+// The package ships the public documentation. Work history stays in the repository.
 export function packagedDocs(root: string): string[] {
-  const topics = readdirSync(join(root, "docs"), { withFileTypes: true })
+  return readdirSync(join(root, "docs"), { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
-    .map((entry) => `docs/${entry.name}`);
-  const design = readdirSync(join(root, "docs", "design")).map((name) => `docs/design/${name}`);
-  return [...topics, ...design].sort();
+    .map((entry) => relative(root, join(entry.parentPath, entry.name)).replaceAll(sep, "/"))
+    .filter((path) => !path.startsWith("docs/work/"))
+    .sort();
 }
 
 /** The bundles the package ships; each must import only node: builtins. */

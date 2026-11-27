@@ -85,7 +85,7 @@ See [Configuration](configuration.md#app-mode) to declare the grants and
   `events_torn`, `events_cursor_invalid`, `events_cursor_ahead`, `events_cursor_rotated` (the
   cursor names a rotated log), `events_cursor_unmatched` (it names no file present),
   `events_unreadable` and `events_dir_unreadable` (the bus directory is missing or unreadable). The reporter blocker `events_legacy_outbox`
-  indicates a 6.0 `bus/events` outbox that needs the [6.1.2 migration](upgrading.md#upgrading-to-80).
+  indicates a 6.0 `bus/events` outbox that needs the [6.1.2 migration](../guides/upgrading.md#upgrading-to-80).
   `events_legacy_outbox_unreadable` means the path could not be checked. Top-level `drained`
   requires no reporter or idle blockers. See [Event log](runner.md#event-log).
 - `runner stop --app ID [--timeout SECONDS]`: waits up to `SECONDS` (default 900) until the
@@ -117,4 +117,4 @@ See [Configuration](configuration.md#app-mode) to declare the grants and
 
 The `inbox`, `message`, `ledger`, `harness`, `protocol`, `claude` and `codex` groups moved to
 Coordination Kit in 5.0. From 8.0, their former Delivery Kit forms exit 2 with standard usage.
-See the command mapping in [Upgrading to 5.0](upgrading.md#upgrading-to-50).
+See the command mapping in [Upgrading to 5.0](../guides/upgrading.md#upgrading-to-50).

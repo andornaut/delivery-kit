@@ -27,7 +27,7 @@ See [authorization](commands.md#app-mode-authorization) for command requirements
 
 New workspaces default to `var/apps/<id>/bus/`. When upgrading a `games` workspace, set
 `"appStateDir": "games"` to keep its existing state paths. See the
-[solo configuration](https://github.com/andornaut/delivery-kit/blob/v8.6.0/examples/solo/config.json) and the [upgrade procedure](upgrading.md#opt-in-to-app-mode).
+[solo configuration](https://github.com/andornaut/delivery-kit/blob/v8.6.0/examples/solo/config.json) and the [upgrade procedure](../guides/upgrading.md#opt-in-to-app-mode).
 
 To try the solo example, copy its two configuration files to the app root and its
 `route.json` to `var/route.json`. Keep `var/` out of Git. Set the GitHub repository, CI

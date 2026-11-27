@@ -6,7 +6,7 @@ build API is `build/source-identity`, with a deprecated compatibility alias. del
 depends one way on `@andornaut/coordination-kit` through its `build/` subpaths, pinned as a
 devDependency on the release asset like a game pins delivery-kit, and declares the coordination-kit
 range it supports once. The npm package ships `dist/`, the README, the documentation index,
-the topic docs, the design summaries, `LICENSE` and `SOURCE_COMMIT`. Work files live in
+the guides, reference pages, design summaries, `LICENSE` and `SOURCE_COMMIT`. Work files live in
 the source repository. The `make` targets
 run every check in stock containers with the checkout bound read-only, and CI runs the same npm
 commands natively. Releases are cut from `main` only after every
@@ -26,8 +26,8 @@ including from nested directories and type-only declarations. It rejects runtime
 in `src/`, `scripts/` and `tests/` with `import-x/no-cycle`. Imports
 of only types are written `import type`, so the cycle rule sees every runtime import.
 
-Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
-[Developing](../developing.md), [Compatibility and releases](../developing.md#compatibility-and-releases).
+Reference: [libraries](../reference/libraries.md), [upgrading](../guides/upgrading.md),
+[Developing](../guides/developing.md), [Compatibility and releases](../guides/developing.md#compatibility-and-releases).
 
 ## Work items
 

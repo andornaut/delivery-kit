@@ -26,12 +26,12 @@ event log and cursor formats with Coordination Kit.
   `runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
 
 An unmigrated `bus/events` outbox blocks startup and remains in place. Use the
-[6.1.2 migration bridge](upgrading.md#upgrading-to-80) to import and drain it.
+[6.1.2 migration bridge](../guides/upgrading.md#upgrading-to-80) to import and drain it.
 
 The gate's npm cache is the Docker volume `delivery-kit-npm-<id>`.
 
 Coordination Kit owns the external coordination state root. The legacy protocol used
-`<stateRoot>/accounting` and `<stateRoot>/transport/messages`. See the [Coordination Kit 3.0 migration](https://github.com/andornaut/coordination-kit/blob/main/docs/upgrading.md#from-21)
+`<stateRoot>/accounting` and `<stateRoot>/transport/messages`. See the [Coordination Kit 3.0 migration](https://github.com/andornaut/coordination-kit/blob/main/docs/guides/upgrading.md#from-21)
 for retirement and the current configuration pointer.
 
 Durable record replacement uses a temporary file, file fsync, rename and directory fsync. The

@@ -6,7 +6,7 @@ reads no work protocol state and imports nothing from coordination-kit's `build/
 observer adoption comes from the runner's own `runner.started` record. The work items below
 shipped in delivery-kit before the move.
 
-Reference: [work-protocol](../work-protocol.md),
+Reference: [work-protocol](../reference/work-protocol.md),
 [coordination-kit work protocol](https://github.com/andornaut/coordination-kit/blob/main/docs/design/work-protocol.md).
 
 ## Work items

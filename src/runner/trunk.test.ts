@@ -9,8 +9,8 @@ import { changedPaths, docsOnly } from "./trunk.ts";
 
 describe("docsOnly", () => {
   it("accepts only a known, non-empty range under docs/", () => {
-    expect(docsOnly(["docs/runner.md", "docs/guide/setup.md"])).toBe(true);
-    expect(docsOnly(["docs/runner.md", "README.md"])).toBe(false);
+    expect(docsOnly(["docs/reference/runner.md", "docs/guides/upgrading.md"])).toBe(true);
+    expect(docsOnly(["docs/reference/runner.md", "README.md"])).toBe(false);
     expect(docsOnly(["docsite/index.md"])).toBe(false);
     expect(docsOnly(["src/docs/notes.md"])).toBe(false);
     expect(docsOnly([])).toBe(false);

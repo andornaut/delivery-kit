@@ -4,7 +4,7 @@ Common role messages, their delivery guards, the Claude spool and reconciliation
 coordination-kit in 5.0 ([ck-0001](https://github.com/andornaut/coordination-kit/blob/main/docs/work/ck-0001.md)). The work items below shipped in
 delivery-kit before the move.
 
-Reference: [messages](../messages.md), [coordination-kit messages](https://github.com/andornaut/coordination-kit/blob/main/docs/design/messages.md).
+Reference: [messages](../reference/messages.md), [coordination-kit messages](https://github.com/andornaut/coordination-kit/blob/main/docs/design/messages.md).
 
 ## Work items
 

@@ -7,7 +7,7 @@ coordinator-installed `coordination-kit review deliver` ([dk-0022](https://githu
 6.1, appends its bus events to a per-game log that `coordination-kit events ingest` reads
 ([dk-0025](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0025.md)).
 
-Reference: [review](../review.md), [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/design/review.md).
+Reference: [review](../reference/review.md), [coordination-kit review](https://github.com/andornaut/coordination-kit/blob/main/docs/design/review.md).
 
 ## Work items
 
