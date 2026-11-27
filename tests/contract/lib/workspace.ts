@@ -282,6 +282,13 @@ export class Workspace {
 
   /** Install the coordination-kit release this checkout builds against, its real CLI included. */
   installReleasedCoordinatorCli(): void {
+    // File authority requires an actual primary Git checkout with ignored runtime paths.
+    if (!existsSync(join(this.coordinator, ".git"))) {
+      execFileSync("/usr/bin/git", ["-C", this.coordinator, "init", "-q", "-b", "main"], {
+        env: this.baseEnv(),
+      });
+      writeFileSync(join(this.coordinator, ".gitignore"), "/var/\n");
+    }
     const target = join(this.coordinator, "node_modules", "@andornaut", "coordination-kit");
     rmSync(target, { force: true, recursive: true });
     cpSync(join(KIT_ROOT, "node_modules", "@andornaut", "coordination-kit"), target, {

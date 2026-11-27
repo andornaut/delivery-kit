@@ -81,6 +81,8 @@ function git() {
         out(`${remoteHead()}\n`);
       else passthrough("/usr/bin/git", args);
       return 0;
+    case "check-ignore":
+    case "ls-files":
     case "ls-tree":
       passthrough("/usr/bin/git", args);
       break;
