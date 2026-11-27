@@ -53,3 +53,4 @@ Reference: [libraries](../reference/libraries.md), [upgrading](../guides/upgradi
 | dk-0057 | Adopt the shared documentation layout                                 | [dk-0057.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0057.md) |
 | dk-0058 | Separate documentation guides from reference pages                    | [dk-0058.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0058.md) |
 | dk-0059 | Qualify Delivery Kit with Coordination Kit 8                          | [dk-0059.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0059.md) |
+| dk-0060 | Use app selectors at the coordinator CLI seam                         | [dk-0060.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0060.md) |
