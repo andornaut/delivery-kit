@@ -302,6 +302,7 @@ describe("review deliver", () => {
     installCoordinator(root, {
       distSha256: SHA,
       review: { status: "delivered" },
+      selector: "--app",
       version: "8.0.0",
     });
     expect(await cli.review(SLOT + 60)).toMatchObject({
