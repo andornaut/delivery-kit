@@ -16,7 +16,7 @@ import { COORDINATOR_CLI, KIT_ROOT, type Workspace } from "../lib/workspace.ts";
 
 const RECIPIENT = "00000000-0000-4000-8000-000000000002";
 const RECIPIENT_ROLE = "game-coordinator";
-const RANGE = ">=3.0.0 <9.0.0";
+const RANGE = ">=3.0.0 <10.0.0";
 /** The released coordinator CLI installed from this checkout's locked bundle pin. */
 const RELEASED_MAJOR = (() => {
   try {
@@ -34,13 +34,13 @@ const RELEASED_MAJOR = (() => {
     return undefined;
   }
 })();
-const RELEASED_IN_RANGE = RELEASED_MAJOR !== undefined && RELEASED_MAJOR >= 3 && RELEASED_MAJOR < 9;
+const RELEASED_IN_RANGE =
+  RELEASED_MAJOR !== undefined && RELEASED_MAJOR >= 3 && RELEASED_MAJOR < 10;
 
 /** A game with the observer at minutes 20 and 50 and departures at 00 and 10. */
 function cadenceGame(
   ws: Workspace,
   review: Record<string, unknown> = { status: "delivered" },
-  version?: string,
 ): void {
   ws.writeRegistry({
     schema: 1,
@@ -52,7 +52,7 @@ function cadenceGame(
   ws.config.schedule = { departures: ["00", "10"], timezone: "America/Toronto" };
   ws.config.deploy = { mode: "none", skipPattern: "" };
   ws.config.reports = { project: "Fixture", recipient: RECIPIENT_ROLE, scheduledTicks: true };
-  ws.scriptCoordinator({ review, version });
+  ws.scriptCoordinator({ review });
 }
 
 function pushes(ws: Workspace): number {
@@ -183,25 +183,41 @@ suite("review cadence", () => {
     },
   );
 
-  contract.each(["3.0.0", "8.0.0"])(
-    "the runner spawns the coordinator root's %s CLI with its own Node binary and reports its identity",
-    async (version) => {
+  contract.each([
+    { selector: "--game", version: "3.0.0" },
+    { selector: "--game", version: "7.7.9" },
+    { gameAlias: true, selector: "--app", version: "7.8.0" },
+    { selector: "--app", version: "9.0.0" },
+  ])(
+    "the legacy runner probes the coordinator root's $version CLI before using $selector",
+    async ({ gameAlias, selector, version }) => {
       const ws = workspace();
-      cadenceGame(ws, { detail: "brief r-1 sent", status: "delivered" }, version);
+      cadenceGame(ws);
+      ws.scriptCoordinator({
+        gameAlias,
+        review: { detail: "brief r-1 sent", status: "delivered" },
+        selector,
+        version,
+      });
       const result = await tick(ws, at(20));
       expect(result.review).toEqual([{ slot: at(20), text: "brief r-1 sent" }]);
       const calls = ws.coordinatorCalls();
       expect(calls[0]!.args).toEqual(["--version", "--json"]);
       const review = calls.find((call) => call.args[0] === "review")!;
       expect(review).toEqual({
-        args: ["review", "deliver", "--game", ws.game, "--slot", iso(at(20))],
+        args: ["review", "deliver", selector, ws.game, "--slot", iso(at(20))],
         cwd: ws.coordinator,
         execPath: process.execPath,
         root: ws.coordinator,
       });
-      expect(calls.some((call) => call.args.join(" ") === `events ingest --game ${ws.game}`)).toBe(
-        true,
-      );
+      expect(calls.map((call) => call.args)).toContainEqual([
+        "events",
+        "ingest",
+        selector,
+        ws.game,
+      ]);
+      const otherSelector = selector === "--app" ? "--game" : "--app";
+      expect(calls.flatMap((call) => call.args)).not.toContain(otherSelector);
       const distSha256 = createHash("sha256")
         .update(readFileSync(join(ws.coordinator, COORDINATOR_CLI)))
         .digest("hex");
@@ -221,6 +237,75 @@ suite("review cadence", () => {
       expect(ws.readJson("runner.json").coordinationKitVersion).toBe(
         report.coordination_kit!.bundled,
       );
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  contract.each(["review", "events"])(
+    "the alias-free fake rejects --game for %s and responds to --app with appId",
+    async (command) => {
+      const ws = workspace();
+      cadenceGame(ws);
+      ws.scriptCoordinator({ selector: "--app", version: "9.0.0" });
+      const verb = command === "review" ? "deliver" : "ingest";
+      const tail = command === "review" ? ["--slot", iso(at(20))] : [];
+      const run = (selector: string) =>
+        execute({
+          argv: [
+            process.execPath,
+            join(ws.coordinator, COORDINATOR_CLI),
+            "--root",
+            ws.coordinator,
+            command,
+            verb,
+            selector,
+            ws.game,
+            ...tail,
+          ],
+          cwd: ws.coordinator,
+          env: ws.baseEnv(),
+        });
+      const refused = await run("--game");
+      expect(refused).toMatchObject({ code: 2, stdout: "" });
+      expect(refused.stderr).toContain(`${command} ${verb} --app`);
+      const accepted = await run("--app");
+      expect(accepted.code, accepted.stderr).toBe(0);
+      const result = JSON.parse(accepted.stdout) as Record<string, unknown>;
+      expect(result).toMatchObject({ appId: ws.game, kind: `${command}-${verb}`, schema: 1 });
+      expect(result).not.toHaveProperty("game");
+    },
+  );
+
+  contract.each(["nonzero exit", "game-only identity"])(
+    "the legacy runner gives up a modern seam invocation after %s without using --game",
+    async (failure) => {
+      const ws = workspace();
+      cadenceGame(ws);
+      const behaviour =
+        failure === "nonzero exit"
+          ? { exit: 2, stderr: "coordination-kit: fixture refusal\n" }
+          : { override: { appId: null, game: ws.game } };
+      ws.scriptCoordinator({
+        ingest: { ...behaviour, consume: false },
+        review: behaviour,
+        selector: "--app",
+        version: "9.0.0",
+      });
+      const result = await tick(ws, at(20), {
+        done: ({ stdout }) =>
+          stdout.includes(`bus: scheduled review ${at(20)} unavailable (`) &&
+          stdout.includes("bus: event ingest failed:"),
+      });
+      expect(result.stdout).toContain(`bus: scheduled review ${at(20)} unavailable (`);
+      expect(result.stdout).toContain("bus: event ingest failed:");
+      expect(result.review).toEqual([]);
+      const calls = ws.coordinatorCalls().map((call) => call.args);
+      expect(calls.filter((args) => args[0] === "review")).toEqual([
+        ["review", "deliver", "--app", ws.game, "--slot", iso(at(20))],
+      ]);
+      expect(calls).toContainEqual(["events", "ingest", "--app", ws.game]);
+      expect(calls.flat()).not.toContain("--game");
+      expect(ws.exists("events.cursor")).toBe(false);
     },
     CASE_TIMEOUT_MS,
   );
@@ -256,7 +341,7 @@ suite("review cadence", () => {
   );
 
   contract.skipIf(!RELEASED_IN_RANGE)(
-    "the released coordination-kit CLI answers review deliver and events ingest with typed results",
+    "the released coordination-kit CLI receives the negotiated selector in the legacy workspace",
     async () => {
       const ws = workspace();
       cadenceGame(ws);
@@ -266,6 +351,17 @@ suite("review cadence", () => {
         readFileSync(join(dirname(dirname(cliPath)), "package.json"), "utf8"),
       ) as { version: string };
       const distSha256 = createHash("sha256").update(readFileSync(cliPath)).digest("hex");
+      const [major = 0, minor = 0] = version.split(".").map(Number);
+      const modern = major >= 8 || (major === 7 && minor >= 8);
+      const field = modern ? "appId" : "game";
+      const selector = modern ? "--app" : "--game";
+      const review = ["review", "deliver", selector, ws.game, "--slot", iso(at(20))];
+      const ingest = ["events", "ingest", selector, ws.game];
+      const trace = new URL("../lib/trace-coordination-kit.mjs", import.meta.url);
+      ws.env.NODE_OPTIONS = [ws.baseEnv().NODE_OPTIONS, `--import=${trace.href}`]
+        .filter(Boolean)
+        .join(" ");
+      ws.env.DK_TRACE_COORDINATOR_CLI = cliPath;
       // The real ingest writes the cursor; the log is drained once it reaches the end.
       const drained = (): boolean =>
         ws.exists("events.cursor") &&
@@ -286,11 +382,14 @@ suite("review cadence", () => {
       expect(result.review).toEqual([
         { slot: at(20), text: expect.stringMatching(/^skipped nothing-due: /) },
       ]);
+      const calls = ws.coordinatorCalls().map((call) => call.args);
       // The real ingest consumed every line the runner appended and quarantined none.
       expect(drained()).toBe(true);
       expect(ws.exists("events.quarantine.jsonl") ? ws.read("events.quarantine.jsonl") : "").toBe(
         "",
       );
+      expect(ws.events().map((event) => event.game)).toEqual([ws.game]);
+      expect(ws.events()[0]).not.toHaveProperty("appId");
       const status = JSON.parse((await cli(ws, ["status"])).stdout) as Record<
         string,
         Record<string, unknown>
@@ -315,22 +414,22 @@ suite("review cadence", () => {
       };
       const identity = { distSha256, version };
       // A repeated slot prints the result recorded for the runner's call.
-      expect(await seam(["review", "deliver", "--game", ws.game, "--slot", iso(at(20))])).toEqual({
+      expect(await seam(review)).toEqual({
+        [field]: ws.game,
         cli: identity,
         detail: expect.any(String),
-        game: ws.game,
         kind: "review-deliver",
         reason: "nothing-due",
         schema: 1,
         slot: iso(at(20)),
         status: "skipped",
       });
-      expect(await seam(["events", "ingest", "--game", ws.game])).toEqual({
+      expect(await seam(ingest)).toEqual({
+        [field]: ws.game,
         cli: identity,
         completed: 0,
         delivered: 0,
         detail: expect.any(String),
-        game: ws.game,
         held: 0,
         ingested: 0,
         kind: "events-ingest",
@@ -339,6 +438,12 @@ suite("review cadence", () => {
         schema: 1,
         status: "skipped",
       });
+      expect(calls[0]).toEqual(["--version", "--json"]);
+      expect(calls.filter((args) => args[0] === "review")).toEqual([review]);
+      expect(calls).toContainEqual(ingest);
+      for (const args of calls.filter((args) => args[0] === "events")) {
+        expect(args).toEqual(ingest);
+      }
     },
     CASE_TIMEOUT_MS,
   );
@@ -524,7 +629,7 @@ suite("review cadence", () => {
     CASE_TIMEOUT_MS,
   );
 
-  contract.each(["2.0.1", "9.0.0"])(
+  contract.each(["2.0.1", "10.0.0"])(
     "out-of-range coordinator CLI %s defers with cli-version, and the runner still departs",
     async (version) => {
       const ws = workspace();

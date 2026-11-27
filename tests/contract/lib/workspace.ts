@@ -159,7 +159,7 @@ export const COORDINATOR_CLI = join(
   "cli.js",
 );
 
-/** One call the fake coordination-kit CLI received. */
+/** One call recorded by the fake CLI or the opt-in tracer for the installed CLI. */
 export interface CoordinatorCall {
   args: string[];
   cwd: string;

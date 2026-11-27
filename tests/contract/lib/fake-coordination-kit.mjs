@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A fake coordinator-installed coordination-kit CLI implementing the runner seam contract:
-// `--root ROOT review deliver --game G --slot S`, `--root ROOT events ingest --game G` and
+// `--root ROOT review deliver SELECTOR G --slot S`, `--root ROOT events ingest SELECTOR G` and
 // `--root ROOT --version --json`, each printing one JSON line. Installed as
 // ROOT/node_modules/@andornaut/coordination-kit/dist/cli.js. ROOT/fake-coordination-kit/control.json
 // scripts each command; every call is appended to ROOT/fake-coordination-kit/calls.jsonl.
@@ -18,7 +18,11 @@
 // bus/events.cursor atomically with the live log's identity. Ingested events, deduplicated by
 // ID, are appended to ROOT/fake-coordination-kit/ingested.jsonl.
 //
-// control.json: { version?, distSha256?, review?, reviews?: {S: behaviour}, ingest?, probe? }
+// control.json: { selector?, gameAlias?, version?, distSha256?, review?, reviews?: {S: behaviour},
+// ingest?, probe? }
+// selector defaults to "--game" (result field "game"). "--app" requires the app selector and
+// prints "appId", while still reading the fixture's legacy bus files. gameAlias permits the
+// older "--game" alias for an app-capable release.
 // A behaviour: { status?, reason?, detail?, override?, stdout?, stderr?, exit?, hang?, delayMs?,
 // consume? }. `stdout` replaces the result line, `override` is merged over it, `hang` starts a
 // grandchild in the same process group, records both PIDs in hang.json and never exits, and
@@ -69,6 +73,11 @@ function option(name) {
   return at === -1 ? undefined : rest[at + 1];
 }
 
+const gameAlias = control.gameAlias === true && rest.includes("--game") && !rest.includes("--app");
+const selector = control.selector === "--app" && !gameAlias ? "--app" : "--game";
+const otherSelector = selector === "--app" ? "--game" : "--app";
+const identityField = selector === "--app" ? "appId" : "game";
+
 appendFileSync(
   join(dir, "calls.jsonl"),
   `${JSON.stringify({ args: rest, cwd: process.cwd(), execPath: process.execPath, root })}\n`,
@@ -111,7 +120,7 @@ async function respond(behaviour, result) {
 
 /** The result's keys in the CLI's print order; the runner parses JSON and ignores the order. */
 function ordered(fields) {
-  const keys = ["schema", "kind", "game", "slot", "status", "reason", "detail"];
+  const keys = ["schema", "kind", identityField, "slot", "status", "reason", "detail"];
   const result = {};
   for (const key of keys) if (fields[key] !== undefined) result[key] = fields[key];
   return { ...result, cli };
@@ -247,12 +256,17 @@ function ingest(game) {
 if (rest[0] === "--version" && rest[1] === "--json") {
   await respond(control.probe ?? {}, { schema: 1, ...cli });
 } else if (rest[0] === "review" && rest[1] === "deliver") {
-  const game = option("--game");
+  const game = option(selector);
   const slot = option("--slot");
   const epoch = slot === undefined ? Number.NaN : Date.parse(slot) / 1000;
-  if (game === undefined || !/[+-]\d\d:\d\d$/.test(slot ?? "") || !Number.isInteger(epoch)) {
+  if (
+    game === undefined ||
+    rest.includes(otherSelector) ||
+    !/[+-]\d\d:\d\d$/.test(slot ?? "") ||
+    !Number.isInteger(epoch)
+  ) {
     process.stderr.write(
-      "usage: coordination-kit review deliver --game G --slot ISO-WITH-OFFSET\n",
+      `usage: coordination-kit review deliver ${selector} G --slot ISO-WITH-OFFSET\n`,
     );
     process.exit(2);
   }
@@ -267,7 +281,7 @@ if (rest[0] === "--version" && rest[1] === "--json") {
   const status = behaviour.status ?? "skipped";
   const result = ordered({
     detail: behaviour.detail ?? (status === "delivered" ? `review ${slot} delivered` : ""),
-    game,
+    [identityField]: game,
     kind: "review-deliver",
     reason: reason(behaviour, status, "nothing-due"),
     schema: 1,
@@ -282,9 +296,9 @@ if (rest[0] === "--version" && rest[1] === "--json") {
   }
   await respond(behaviour, result);
 } else if (rest[0] === "events" && rest[1] === "ingest") {
-  const game = option("--game");
-  if (game === undefined) {
-    process.stderr.write("usage: coordination-kit events ingest --game G\n");
+  const game = option(selector);
+  if (game === undefined || rest.includes(otherSelector)) {
+    process.stderr.write(`usage: coordination-kit events ingest ${selector} G\n`);
     process.exit(2);
   }
   const behaviour = control.ingest ?? {};
@@ -296,7 +310,7 @@ if (rest[0] === "--version" && rest[1] === "--json") {
   await respond(behaviour, {
     ...ordered({
       detail: behaviour.detail ?? `ingested ${counts.ingested}`,
-      game,
+      [identityField]: game,
       kind: "events-ingest",
       reason: reason(behaviour, status, "no-events"),
       schema: 1,
