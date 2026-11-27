@@ -51,3 +51,4 @@ Reference: [libraries](../libraries.md), [upgrading](../upgrading.md),
 | dk-0051 | Audit Delivery Kit 8.5 documentation                                  | [dk-0051.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0051.md) |
 | dk-0052 | Add Dependabot coverage for Actions and npm                           | [dk-0052.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0052.md) |
 | dk-0057 | Adopt the shared documentation layout                                 | [dk-0057.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0057.md) |
+| dk-0058 | Separate documentation guides from reference pages                    | [dk-0058.md](https://github.com/andornaut/delivery-kit/blob/main/docs/work/dk-0058.md) |
