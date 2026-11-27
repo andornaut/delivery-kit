@@ -455,6 +455,8 @@ suite("departure", () => {
     async () => {
       const ws = workspace();
       bus(ws);
+      // Keep the unrelated ingest cursor writer out of the stamp cleanup assertion.
+      ws.scriptCoordinator({ ingest: { consume: false, status: "skipped" } });
       const stamps = ["last-push", "last-push.sha", "last-deploy", "last-deploy.sha"];
       for (const name of stamps) ws.write(name, "old\n");
       const before = Object.fromEntries(stamps.map((name) => [name, ws.inode(name)]));
