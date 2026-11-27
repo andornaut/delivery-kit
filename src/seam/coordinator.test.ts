@@ -111,7 +111,7 @@ describe("review deliver", () => {
       },
     ]);
     expect(lines).toEqual([
-      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <10.0.0`,
     ]);
     expect(JSON.parse(readFileSync(seamFile, "utf8"))).toEqual({
       distSha256: SHA,
@@ -166,7 +166,7 @@ describe("review deliver", () => {
     expect(outcome.claimed).toBe(false);
     expect(outcome.claimed ? "" : outcome.why).toContain(why);
     expect(lines).toEqual([
-      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <10.0.0`,
     ]);
     expect(coordinatorCliReport(seamFile).distSha256).toBe(SHA);
   });
@@ -230,12 +230,12 @@ describe("review deliver", () => {
     });
     expect(await cli.review(SLOT)).toEqual({
       claimed: true,
-      detail: "coordinator CLI 2.0.1 is outside >=3.0.0 <9.0.0",
+      detail: "coordinator CLI 2.0.1 is outside >=3.0.0 <10.0.0",
       reason: "cli-version",
       status: "deferred",
     });
     expect(lines).toEqual([
-      `bus: coordinator CLI 2.0.1 (dist sha256 ${SHA}) is outside >=3.0.0 <9.0.0; reviews and event delivery defer`,
+      `bus: coordinator CLI 2.0.1 (dist sha256 ${SHA}) is outside >=3.0.0 <10.0.0; reviews and event delivery defer`,
     ]);
     expect(coordinatorCliReport(seamFile)).toEqual({
       distSha256: SHA,
@@ -253,7 +253,7 @@ describe("review deliver", () => {
     scriptCoordinator(root, { distSha256: SHA, review: { status: "delivered" }, version: "3.0.0" });
     expect(await cli.review(SLOT + 3600)).toMatchObject({ status: "delivered" });
     expect(lines.at(-1)).toBe(
-      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <10.0.0`,
     );
     expect(coordinatorCalls(root).map((call) => call.args.slice(0, 2))).toEqual([
       ["--version", "--json"],
@@ -285,8 +285,8 @@ describe("review deliver", () => {
     scriptCoordinator(root, { distSha256: other, review: { status: "delivered" } });
     await cli.review(SLOT + 180);
     expect(lines).toEqual([
-      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
-      `bus: coordinator CLI 3.0.0 (dist sha256 ${other}), inside >=3.0.0 <9.0.0`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <10.0.0`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${other}), inside >=3.0.0 <10.0.0`,
     ]);
     expect(coordinatorCliReport(seamFile)).toEqual({
       distSha256: other,
@@ -321,10 +321,10 @@ describe("review deliver", () => {
 });
 
 describe("app-mode calls", () => {
-  it.each(["7.7.9", "9.0.0"])("only probes an installed CLI at %s", async (version) => {
+  it.each(["7.7.9", "10.0.0"])("only probes an installed CLI at %s", async (version) => {
     const { cli, lines, root } = fixture({ version }, undefined, true);
     expect(await cli.review(SLOT)).toMatchObject({
-      detail: `coordinator CLI ${version} is outside >=7.8.0 <9.0.0`,
+      detail: `coordinator CLI ${version} is outside >=7.8.0 <10.0.0`,
       reason: "cli-version",
       status: "deferred",
     });
@@ -416,7 +416,7 @@ describe("probe", () => {
     const present = fixture({});
     expect(await present.cli.probe()).toEqual({ distSha256: SHA, version: "3.0.0" });
     expect(present.lines).toEqual([
-      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <9.0.0`,
+      `bus: coordinator CLI 3.0.0 (dist sha256 ${SHA}), inside >=3.0.0 <10.0.0`,
     ]);
     const missing = fixture();
     expect(await missing.cli.probe()).toBeUndefined();

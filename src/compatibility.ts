@@ -7,13 +7,13 @@
 export const PACKAGE = "@andornaut/delivery-kit";
 export const COORDINATION_KIT = "@andornaut/coordination-kit";
 /** Builds need the app layout and permission exports introduced in Coordination Kit 7.8. */
-export const COORDINATION_KIT_RANGE = ">=7.8.0 <9.0.0";
+export const COORDINATION_KIT_RANGE = ">=7.8.0 <10.0.0";
 /**
  * The coordinator-installed coordination-kit CLI releases whose review and event results this
  * runner accepts. A result from a CLI outside it defers reviews and event delivery.
  */
-export const COORDINATOR_CLI_RANGE = ">=3.0.0 <9.0.0";
-export const APP_COORDINATOR_CLI_RANGE = ">=7.8.0 <9.0.0";
+export const COORDINATOR_CLI_RANGE = ">=3.0.0 <10.0.0";
+export const APP_COORDINATOR_CLI_RANGE = ">=7.8.0 <10.0.0";
 
 declare const __DK_VERSION__: string;
 declare const __DK_COORDINATION_KIT_VERSION__: string;

@@ -54,7 +54,7 @@ describe("status report", () => {
     try {
       expect(statusReport(bus).coordination_kit).toEqual({
         bundled: "0.0.0-test",
-        supported: ">=7.8.0 <9.0.0",
+        supported: ">=7.8.0 <10.0.0",
       });
     } finally {
       lock.release();
@@ -81,7 +81,8 @@ describe("status report", () => {
         ["6.0.0", true],
         ["7.0.0", true],
         ["8.0.0", true],
-        ["9.0.0", false],
+        ["9.0.0", true],
+        ["10.0.0", false],
       ] as const) {
         writeFileSync(
           bus.seam,

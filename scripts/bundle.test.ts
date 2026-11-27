@@ -99,7 +99,7 @@ describe("bundles", () => {
 describe("bundled coordination-kit", () => {
   it("is inside the supported range, and the package check refuses one outside it", () => {
     expect(bundledCoordinationKit(root)).toBe("8.0.0");
-    expect(COORDINATION_KIT_RANGE).toBe(">=7.8.0 <9.0.0");
+    expect(COORDINATION_KIT_RANGE).toBe(">=7.8.0 <10.0.0");
     for (const [version, accepted] of [
       ["7.8.0", true],
       ["7.99.1", true],
@@ -107,7 +107,8 @@ describe("bundled coordination-kit", () => {
       ["7.7.9", false],
       ["7.8.0-rc.1", false],
       ["8.0.0", true],
-      ["9.0.0", false],
+      ["9.0.0", true],
+      ["10.0.0", false],
     ] as const) {
       const fixture = mkdtempSync(join(tmpdir(), "bundled-coordination-kit-"));
       const installed = join(fixture, "node_modules", "@andornaut", "coordination-kit");
