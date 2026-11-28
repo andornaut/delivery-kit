@@ -1,6 +1,6 @@
 {
   "name": "@andornaut/delivery-kit",
-  "version": "8.7.0",
+  "version": "8.8.0",
   "description": "Local scheduled Git delivery with an isolated gate, exact-commit CI watch and deployment.",
   "license": "MIT",
   "type": "module",
@@ -64,7 +64,7 @@
     "package:check": "node scripts/package-check.ts"
   },
   "devDependencies": {
-    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v8.0.0/coordination-kit-8.0.0.tgz",
+    "@andornaut/coordination-kit": "https://github.com/andornaut/coordination-kit/releases/download/v9.0.0/coordination-kit-9.0.0.tgz",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "eslint": "^10.14.0",

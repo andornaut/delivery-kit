@@ -98,7 +98,7 @@ describe("bundles", () => {
 
 describe("bundled coordination-kit", () => {
   it("is inside the supported range, and the package check refuses one outside it", () => {
-    expect(bundledCoordinationKit(root)).toBe("8.0.0");
+    expect(bundledCoordinationKit(root)).toBe("9.0.0");
     expect(COORDINATION_KIT_RANGE).toBe(">=7.8.0 <10.0.0");
     for (const [version, accepted] of [
       ["7.8.0", true],

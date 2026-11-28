@@ -47,6 +47,25 @@ qualifying it against every surviving record it can read, including unrotated an
 logs. Draining the cursor alone leaves those records in place. Check reader and resident
 startup on the rollback pins before the cutover.
 
+## Move the workspace reader to Coordination Kit 9
+
+Delivery Kit 8.8 bundles Coordination Kit 9.0.0 and uses its `--app` subprocess
+contract with installed Coordination Kit 7.8.0 or later within the supported
+range. It retains `--game` for older supported readers in legacy workspaces.
+
+1. Keep the current Coordination Kit reader installed while replacing each
+   Delivery Kit resident at its idle, drained singleton boundary. Verify the
+   exact pin, effective controls, event ingestion and scheduled review route.
+2. After all readers and writers qualify, follow the
+   [Coordination Kit 9 migration](https://github.com/andornaut/coordination-kit/blob/v9.0.0/docs/guides/upgrading.md).
+   Keep `appStateRoot: "var"` to retain existing per-app bus paths. Set
+   `appStateDir: "games"` if switching to an `apps` map while retaining
+   `var/games/<id>/bus/`. Preserve the original role bindings, owner grants,
+   route, schedules, controls, event history and cursors.
+3. Verify the first genuine scheduled review and the next ordinary departure
+   for each app. Check cursor continuity, deduplication and exact-SHA delivery
+   evidence where applicable.
+
 ## Move the workspace reader to Coordination Kit 8
 
 Delivery Kit 8.7 bundles Coordination Kit 8.0.0 and accepts the existing
