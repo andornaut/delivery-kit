@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 import { createRegistry, type Registry } from "@andornaut/coordination-kit/build/registry";
@@ -98,12 +98,23 @@ describe("check-config", () => {
     expect(await run(root, "check-config")).toMatchObject({ code: EXIT_OK, err: "" });
   });
 
-  it("rejects a mismatched reports.project and limits checks with either selector", async () => {
+  it.each(["config.json", "coordination-kit.json"])(
+    "names the selected workspace file %s for a mismatched reports.project",
+    async (configFile) => {
+      const { base, root } = makeFixture();
+      if (configFile !== "config.json") {
+        renameSync(join(root, "config.json"), join(root, configFile));
+      }
+      writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));
+      const result = await run(root, "check-config");
+      expect(result).toMatchObject({ code: EXIT_INVALID, out: "" });
+      expect(result.err).toContain(`/reports/project must be Chibi, the name in ${configFile}`);
+    },
+  );
+
+  it("limits checks with either selector", async () => {
     const { base, root } = makeFixture();
     writeFixtureJson(join(base, "chibis-way-home/delivery-kit.json"), projectConfig("Archie"));
-    const result = await run(root, "check-config");
-    expect(result.code).toBe(EXIT_INVALID);
-    expect(result.err).toContain("/reports/project must be Chibi");
     const legacy = await run(root, "check-config", "--game", "archies-dog-walks");
     expect(legacy).toMatchObject({ code: EXIT_OK, err: "" });
     expect(await run(root, "check-config", "--app=archies-dog-walks")).toEqual(legacy);
@@ -195,6 +206,13 @@ describe("app selection", () => {
 
 describe("dispatcher", () => {
   it("prints help for the named command without loading configuration", async () => {
+    expect(await invoke("check-config", "--help")).toMatchObject({
+      code: EXIT_OK,
+      err: "",
+      out: expect.stringContaining(
+        "validate the workspace configuration, optional registry and route",
+      ),
+    });
     expect(await invoke("runner", "stop", "--help")).toEqual({
       code: EXIT_OK,
       err: "",

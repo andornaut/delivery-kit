@@ -22,7 +22,8 @@ export const SPECS = {
   "check-config": {
     forms: [["app?"]],
     options: APP_OPTIONS,
-    summary: "validate config.json, var/registry.json, var/route.json and each delivery-kit.json",
+    summary:
+      "validate the workspace configuration, optional registry and route, and each delivery-kit.json",
   },
   control: {
     forms: [["app", "state", "reason", "requester"]],

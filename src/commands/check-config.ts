@@ -1,5 +1,6 @@
-// check-config: validate config.json, var/registry.json, var/route.json and each app's
-// delivery-kit.json, and report every problem found.
+// check-config: validate the selected workspace, registry, route and app configuration.
+import { basename } from "node:path";
+
 import {
   appLayout,
   type Layout,
@@ -41,7 +42,7 @@ function checkGame(
   const problems: string[] = [];
   if (config.reports.project !== undefined && config.reports.project !== entry.name) {
     problems.push(
-      `${entry.configFile}: /reports/project must be ${entry.name}, the name in config.json`,
+      `${entry.configFile}: /reports/project must be ${entry.name}, the name in ${basename(layout.configFile)}`,
     );
   }
   problems.push(...workerParentProblems(rawRegistry, entry.configFile, config));
@@ -56,7 +57,7 @@ function checkGame(
   }
   return problems;
 }
-/** var/route.json, when present, with its recipient resolved from the host game. */
+/** Validate the selected route and resolve its recipient from the host app. */
 function checkRoute(layout: Layout): string[] {
   try {
     const route = readRoleRoute(layout);
