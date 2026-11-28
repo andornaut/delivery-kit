@@ -5,14 +5,15 @@ and bus event ingestion. See the [wire contract](runner.md#coordinator-cli-seam)
 
 ## Scheduled reviews
 
-The review route `var/route.json`, the brief, the inbox inventory and the Claude and Codex
-adapters are coordination-kit's. The runner's observer decides when a `config.json`
-`wakeMinutes` slot is due and spawns the coordinator root's `coordination-kit review deliver` for
-it. Coordination Kit resolves the route, stores the brief for the recipient when due and
+Coordination Kit owns the review route, the brief, the inbox inventory and the Claude and Codex
+adapters. The route is `.coordination-kit/route.json` on the canonical layout and `var/route.json`
+on the legacy layout. The runner's observer decides when a workspace `wakeMinutes` slot is due
+and calls the workspace-installed `coordination-kit review deliver` for it.
+Coordination Kit resolves the route, stores the brief for the recipient when due and
 records the slot result. The schema-2 route's `host` is the app ID. The host's
 `reports.recipient` receives the review, and an active route's `targets` list contains
 additional exact role keys. A solo app-mode route can use an empty list. `check-config`
-validates `var/route.json` when present. See the [solo route](https://github.com/andornaut/delivery-kit/blob/main/examples/solo/route.json).
+validates the selected route when present. See the [solo route](https://github.com/andornaut/delivery-kit/blob/v8.8.0/examples/solo/route.json).
 
 The observer keeps the exact slot epoch in memory when the CLI returns a valid deferred
 `compaction-reserved` result. On each existing minute pass it attempts a fresh due slot first,

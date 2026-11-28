@@ -1,17 +1,22 @@
 # Configuration
 
-Commit `config.json` at the workspace root and `delivery-kit.json` at each app's repository root.
-Coordination Kit reads these files for the registry, review route and message routing.
+Commit `coordination-kit.json` at the workspace root and `delivery-kit.json` at each app's repository
+root. Delivery Kit resolves the workspace, registry and review route through its bundled
+Coordination Kit library.
 
 Configuration never holds secret values. Use the operator's existing authentication and
 credential references.
 
-## Workspace `config.json`
+## Workspace configuration
 
 Schema 1 requires `timezone` (an IANA zone), `wakeMinutes` (unique integers 0 to 59),
 `kits` (a map of kit IDs to `{path}`), `sharedRoles` (role keys) and exactly one of
 `apps` or `games`. Paths resolve relative to the workspace root. An empty `wakeMinutes`
 schedules no review.
+
+The canonical config selects ignored `.coordination-kit/` for registry and routing state.
+An existing workspace with only `config.json` still uses `var/`. To move an existing
+workspace, follow [the Coordination Kit 9 rollout](../guides/upgrading.md#move-the-workspace-reader-to-coordination-kit-9).
 
 ### App mode
 
@@ -25,30 +30,34 @@ to named apps. Set the app's `operations.<id>.busOwner` in the registry and gran
 `delivery:operate`, `review:deliver` and `events:ingest` for the app to run its resident.
 See [authorization](commands.md#app-mode-authorization) for command requirements.
 
-New workspaces default to `var/apps/<id>/bus/`. When upgrading a `games` workspace, set
-`"appStateDir": "games"` to keep its existing state paths. See the
-[solo configuration](https://github.com/andornaut/delivery-kit/blob/v8.6.0/examples/solo/config.json) and the [upgrade procedure](../guides/upgrading.md#opt-in-to-app-mode).
+Canonical app workspaces use `.coordination-kit/apps/<id>/bus/` by default. Set
+`"appStateRoot": "var"` to keep an existing bus under `var/` during a layout migration.
+Set `"appStateDir": "games"` when adopting app mode while keeping the `games/<id>/bus/`
+subdirectory. These fields select the bus path independently of the registry and route.
+See the [app-mode upgrade procedure](../guides/upgrading.md#opt-in-to-app-mode).
 
-To try the solo example, copy its two configuration files to the app root and its
-`route.json` to `var/route.json`. Keep `var/` out of Git. Set the GitHub repository, CI
-check names and gate commands for your project. Create the [registry binding](registry.md)
-and validate the configuration with `delivery-kit --root WORKSPACE check-config --app reports`.
+To try the [solo example](https://github.com/andornaut/delivery-kit/blob/v8.8.0/examples/solo/config.json),
+save its workspace config as `coordination-kit.json` and its `delivery-kit.json` alongside it.
+Place the example route at `.coordination-kit/route.json` and ignore `/.coordination-kit/`.
+Set the GitHub repository, CI check names and gate commands for your project. Create the
+[registry binding](registry.md) and run `delivery-kit --root WORKSPACE check-config --app reports`.
 
 ### Legacy game mode
 
-Keep the existing [`games` configuration](https://github.com/andornaut/delivery-kit/blob/main/examples/config.json) to retain legacy behaviour.
-Each `games.<id>` entry has `name`, `path` and unqualified `roles`. The corresponding registry
-role keys are `<id>/<role>`, plus the shared role names. `permissions` and `appStateDir` are
-app-mode fields.
+The [`games` configuration](https://github.com/andornaut/delivery-kit/blob/v8.8.0/examples/config.json)
+works in either layout. Each `games.<id>` entry has `name`, `path` and unqualified `roles`.
+The corresponding registry role keys are `<id>/<role>`, plus the shared role names.
+`permissions` and `appStateDir` are app-mode fields. A `games` config always uses the
+`games/<id>/bus/` subdirectory. It can set `"appStateRoot": "var"` as well.
 
 ## App `delivery-kit.json`
 
-Each app uses schema 1. See the [solo example](https://github.com/andornaut/delivery-kit/blob/v8.6.0/examples/solo/delivery-kit.json) or the
-[legacy example](https://github.com/andornaut/delivery-kit/blob/main/examples/delivery-kit.json).
+Each app uses schema 1. See the [solo example](https://github.com/andornaut/delivery-kit/blob/v8.8.0/examples/solo/delivery-kit.json)
+or the [game example](https://github.com/andornaut/delivery-kit/blob/v8.8.0/examples/delivery-kit.json).
 
 - `git`: `main`, `remote` and `github` (the GitHub `owner/name`).
 - `schedule`: `departures`, a non-empty list of unique two-digit minute strings such as `"00"`, and
-  `timezone`, which defaults to the `config.json` timezone.
+  `timezone`, which defaults to the workspace timezone.
 - `gate`: `image`, `install` and ordered `steps` (`name`, `run`). The image needs `sh`, `git`,
   `tar`, `ls` and `tail`. After a passing install, the optional-package check needs `node` if
   the supported npm lock lists optional packages. The install must leave every optional package
@@ -80,8 +89,8 @@ Each app uses schema 1. See the [solo example](https://github.com/andornaut/deli
 - `reports` requires a `scheduledTicks` boolean, a `recipient` role key and a `workerParents`
   array of unique role keys. The recipient receives delivery reports and the scheduled reviews
   when the app hosts the route. Enabling `scheduledTicks` adds one `scheduled-status` event
-  per departure slot. Reports use the app's `name` from `config.json`. The optional legacy
+  per departure slot. Reports use the app's `name` from the workspace configuration. The optional legacy
   `project` must match that name when supplied. Keep it while a current or rollback reader
-  requires it. When `var/registry.json` exists, `check-config` resolves the recipient and each
+  requires it. When the workspace registry exists, `check-config` resolves the recipient and each
   worker parent as registry roles. Every listed worker parent must have a canonical conversation
   UUID that no other listed parent shares.

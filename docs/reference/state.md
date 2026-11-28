@@ -2,28 +2,34 @@
 
 Where delivery-kit keeps mutable state, how it writes it durably, and the persistent delivery control record.
 
-The following paths live under the workspace's ignored `var/`. Coordination Kit owns the
-registry, route, review and message state. Delivery Kit owns each app's bus and shares the
-event log and cursor formats with Coordination Kit.
+Coordination Kit owns the registry, route, review and message state. These paths live under
+the workspace's ignored `.coordination-kit/` on the canonical layout or `var/` on the legacy
+layout.
 
 - `registry.json` and `registry.lock`.
 - `route.json`: the review route.
 - `handoffs/<scope>/`: checkpoints the registry references.
 - `reviews/`: review and inbox snapshots, health history, acknowledgements and retentions.
-  Legacy workspaces and app mode with `"appStateDir": "games"` use `game-dev/`.
-- `apps/<id>/bus/`: the bus for a new app workspace. Legacy workspaces and app mode with
-  `"appStateDir": "games"` use `games/<id>/bus/`. The bus holds `runner.lock`, `loop.lock`, `departure.lock`,
-  `active-departure` (the running departure's start epoch, empty when none), `gate-failed/`,
-  the detached `gate-<sha>` worktree kept for a pending deployment, `gate-logs/`, `ci/`, `deploy/`,
-  `deploy-pending`, `last-push*`, `last-deploy*`,
-  `events.jsonl` (the runner's event log), `events.cursor` (the ingest cursor, written only by
-  `coordination-kit events ingest`, naming its file by first line ID, inode and device), `events.quarantine.jsonl` (malformed lines ingest set aside),
-  `events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (a retained
-  6.0 outbox archive with its `<sha>.state` files), `last-complete.sha` (the last commit the
-  runner saw complete), `requests/` (receipts and `requests.lock`), `unblock/` (Coordination Kit delivery state),
-  `runner.json`, `runner.identity.json`,
-  `seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
-  `runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
+  A `games` config or an `apps` config with `"appStateDir": "games"` uses `game-dev/`.
+
+Delivery Kit owns each app's bus and shares the event log and cursor formats with
+Coordination Kit. The bus follows the workspace's coordination state directory by default. With
+`appStateRoot: "var"`, the bus stays under `var/`. A `games` config or an `apps` config
+with `appStateDir: "games"` uses `games/<id>/bus/` instead of `apps/<id>/bus/`.
+See [workspace configuration](configuration.md#workspace-configuration).
+
+The bus holds `runner.lock`, `loop.lock`, `departure.lock`,
+`active-departure` (the running departure's start epoch, empty when none), `gate-failed/`,
+the detached `gate-<sha>` worktree kept for a pending deployment, `gate-logs/`, `ci/`, `deploy/`,
+`deploy-pending`, `last-push*`, `last-deploy*`,
+`events.jsonl` (the runner's event log), `events.cursor` (the ingest cursor, written only by
+`coordination-kit events ingest`, naming its file by first line ID, inode and device), `events.quarantine.jsonl` (malformed lines ingest set aside),
+`events.<epoch>.jsonl` (rotated logs awaiting ingest), `events.imported-<epoch>/` (a retained
+6.0 outbox archive with its `<sha>.state` files), `last-complete.sha` (the last commit the
+runner saw complete), `requests/` (receipts and `requests.lock`), `unblock/` (Coordination Kit delivery state),
+`runner.json`, `runner.identity.json`,
+`seam.json` (the last coordinator CLI identity a seam result carried), `resources.log`,
+`runner.log`, `runner.out` (the output of a runner `runner start` spawned without a unit), `codex-bus.pid` (the runner's PID), `delivery-control.json` and `control.lock`.
 
 An unmigrated `bus/events` outbox blocks startup and remains in place. Use the
 [6.1.2 migration bridge](../guides/upgrading.md#upgrading-to-80) to import and drain it.

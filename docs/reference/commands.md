@@ -5,26 +5,29 @@ The `delivery-kit` CLI manages delivery runners, configuration checks, status an
 Delivery commands resolve the workspace root from `--root DIR` or `--root=DIR`, then
 `DELIVERY_KIT_ROOT`, then the working directory. Supply `--root` at most once, before the
 `--` option terminator. Select an app with
-`--app ID`. Compatibility alias `--game ID` selects the same app. Supply only one selector.
+`--app ID`. Delivery Kit also accepts `--game ID` as a compatibility alias. Supply only one
+selector. The separate Coordination Kit subprocess selector depends on the installed reader
+version ([wire contract](runner.md#coordinator-cli-seam)).
 The workspace configuration determines which [authorization rules](#app-mode-authorization)
 apply.
 `check-config` checks all configured apps when no ID is supplied.
 
-| Command                                                                   | Purpose                                                                                                                                          |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run --app ID`                                                            | The resident runner for one app.                                                                                                                 |
-| `runner unit --app ID`                                                    | Print the optional systemd user unit for the app's resident runner without installing it.                                                        |
-| `runner stop --app ID [--timeout SECONDS]`                                | Wait until the app's runner is idle and drained, then stop it through its unit or by signal.                                                     |
-| `runner start --app ID`                                                   | Start one runner through the app's systemd user unit, or detached without one.                                                                   |
-| `status --app ID [--resources]`                                           | Read-only runner identity, singleton, idle and drain report as one JSON line. `--resources` prints the resource report instead.                  |
-| `status --scope app:ID [--resources]`                                     | Select the app by scope for the same status report.                                                                                              |
-| `control --app ID --state enabled\|paused --reason TEXT --requester ROLE` | Persist desired delivery control with its reason and requesting role.                                                                            |
-| `check-config [--app ID]`                                                 | Validate `config.json`, `var/registry.json`, `var/route.json` and each `delivery-kit.json` together, with no Git, network or container activity. |
-| `request --app ID --id SAFE_ID`                                           | Record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                                        |
-| `help`, `--help`, `--version`                                             | Usage and version.                                                                                                                               |
-| `COMMAND --help`                                                          | Show the syntax and purpose of one command, including a runner verb.                                                                             |
+| Command                                                                   | Purpose                                                                                                                         |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `run --app ID`                                                            | The resident runner for one app.                                                                                                |
+| `runner unit --app ID`                                                    | Print the optional systemd user unit for the app's resident runner without installing it.                                       |
+| `runner stop --app ID [--timeout SECONDS]`                                | Wait until the app's runner is idle and drained, then stop it through its unit or by signal.                                    |
+| `runner start --app ID`                                                   | Start one runner through the app's systemd user unit, or detached without one.                                                  |
+| `status --app ID [--resources]`                                           | Read-only runner identity, singleton, idle and drain report as one JSON line. `--resources` prints the resource report instead. |
+| `status --scope app:ID [--resources]`                                     | Select the app by scope for the same status report.                                                                             |
+| `control --app ID --state enabled\|paused --reason TEXT --requester ROLE` | Persist desired delivery control with its reason and requesting role.                                                           |
+| `check-config [--app ID]`                                                 | Validate the workspace layout and each selected `delivery-kit.json` together, with no Git, network or container activity.       |
+| `request --app ID --id SAFE_ID`                                           | Record an operator-authorized one-off departure of the current local `main` HEAD. The runner performs it.                       |
+| `help`, `--help`, `--version`                                             | Usage and version.                                                                                                              |
+| `COMMAND --help`                                                          | Show the syntax and purpose of one command, including a runner verb.                                                            |
 
-`check-config` validates the registry and route when those files are present.
+`check-config` reads the selected [workspace configuration](configuration.md#workspace-configuration)
+and validates its registry and route when those files are present.
 
 Exit status is 0 on success, 1 for invalid configuration, a failed precondition or an unavailable
 read, 2 for a usage error or an unexpected failure, and 3 for a refused `run` (held singleton locks or an

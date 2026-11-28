@@ -85,7 +85,7 @@ chooses the subprocess selector. Workspace settings still choose the bus path an
 App mode probes before each call. Legacy mode reuses a supported version probe until the installed
 CLI file changes. A failed call leaves its outcome unconfirmed and never tries the other selector.
 
-`SLOT` is the slot's minute start in ISO 8601 with the `config.json` timezone's offset, such as
+`SLOT` is the slot's minute start in ISO 8601 with the workspace timezone's offset, such as
 `2026-11-18T16:30:00-05:00`, so the two daylight-saving fold slots at one wall minute differ. Each
 review or ingest call prints one JSON line on stdout with `schema` 1, its `kind`, the echoed
 app identifier (`appId` for the app call, `game` for the legacy call), `status` (`delivered`,
